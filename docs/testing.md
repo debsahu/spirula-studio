@@ -155,6 +155,7 @@ expectation, one executable. Neither exists yet.
 | training-loop logic | `TrainerCore.cpp` — `build_step_config()` is the only place it lives |
 | build system | every mode in [build.md](build.md) |
 | a comment you wrote | `python3 tools/check_comment_length.py` — the build runs it anyway ([lints](build.md#lints)) |
+| `SS_FILE` or `SS_SOURCE_ROOT` | `./build/source_path` on each toolchain — MSVC, GCC and nvcc spell `__FILE__` differently |
 | anything | one short training run per backend on a public scene |
 
 ## Profiling

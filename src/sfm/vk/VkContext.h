@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 #include "core/Env.h"
+#include "core/SourcePath.h"
 
 #include "sfm/core/Log.h"
 #include "i18n/catalog/Sfm.h"
@@ -77,7 +78,7 @@ inline void vkEnablePortability(VkInstanceCreateInfo& ici,
 
 #define VK_CHECK(x) do { VkResult _r = (x); if (_r != VK_SUCCESS) { \
     fprintf(stderr, "Vulkan error %d %s at %s:%d\n", (int)_r, vkResultName((int)_r), \
-            __FILE__, __LINE__); exit(1); } } while (0)
+            SS_FILE, __LINE__); exit(1); } } while (0)
 
 // Must match the push constant block in sfm/shaders/ba/ba.slang.
 struct Push {

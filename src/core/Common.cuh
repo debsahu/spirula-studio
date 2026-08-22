@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backend/api/BackendTypes.h"
+#include "core/SourcePath.h"
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
 #endif
@@ -197,7 +198,7 @@ do {                                                                \
     cudaError_t err = call;                                         \
     if (err != cudaSuccess) {                                       \
         fprintf(stderr, "\033[41mCUDA Error at %s:%d: %s\033[m\n",  \
-                __FILE__, __LINE__, cudaGetErrorString(err));       \
+                SS_FILE, __LINE__, cudaGetErrorString(err));        \
         exit(EXIT_FAILURE);                                         \
     }                                                               \
 } while (0)
@@ -214,7 +215,7 @@ do {                                                                \
         if ((x) != cudaSuccess) {                                              \
             printf(                                                            \
                 "Error at %s:%d - %s\n",                                       \
-                __FILE__,                                                      \
+                SS_FILE,                                                       \
                 __LINE__,                                                      \
                 cudaGetErrorString(cudaGetLastError())                         \
             );                                                                 \

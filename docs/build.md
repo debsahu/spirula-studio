@@ -100,7 +100,7 @@ shipping one built with it on.
 
 ## Lints
 
-Five checks guard the source. Each fails the build, and each skips itself when
+Six checks guard the source. Each fails the build, and each skips itself when
 its interpreter is missing — none of them is a dependency of a fresh checkout.
 
 | check | what it refuses |
@@ -109,9 +109,10 @@ its interpreter is missing — none of them is a dependency of a fresh checkout.
 | `tools/check_i18n.sh` | a text-bearing ImGui call that skipped the `ui::` wrappers |
 | `tools/check_font_coverage.py` | a translation that outgrew the embedded font subsets |
 | `tools/check_comments.sh` | a comment citing a file that is not in the tree |
+| `tools/check_file_macro.sh` | a bare `__FILE__` where [`SS_FILE`](../src/core/SourcePath.h) belongs |
 | `tools/check_comment_length.py` | a comment block over the [budget](../AGENTS.md#budget) |
 
-The first four run from `build_develop.bash` only. The comment-length check
+The first five run from `build_develop.bash` only. The comment-length check
 also runs from CMake (`cmake/SsChecks.cmake`) as the `ss_check_comment_length`
 target, which every other target is made to depend on — so a bare `ninja`, a
 `make`, or `cmake --build build --target spirula` fails on it just as the dev

@@ -409,6 +409,11 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   `tools/ss_reserved_names.txt`. Read environment variables through
   `spirula::env("SUFFIX")` (`src/core/Env.h`), never `getenv` directly — the
   deprecated `SSPLAT_` spelling is honoured in exactly that one function.
+- **An error message that cites a source line uses `SS_FILE`, never `__FILE__`**
+  (`src/core/SourcePath.h`). `__FILE__` is the absolute path on the machine that
+  built the binary; `SS_FILE` trims it to `src/...` at compile time, the same on
+  every toolchain. `tools/check_file_macro.sh` (run by `build_develop.bash`)
+  refuses the bare macro.
 - C++ code lives in `namespace spirula` where it is namespaced at all.
 - **The GUI never hands ImGui a string literal.** Every text-bearing call goes
   through `ui::` (`src/app/gui/Ui.h`): `ui::Button(msg)` for interface copy,

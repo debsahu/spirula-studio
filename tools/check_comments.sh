@@ -33,10 +33,12 @@ EXTERNAL_DIR='^(cub|vulkan|GLFW|glm|thrust|cooperative_groups|backends|misc|geog
 
 EXTS='py|cpp|cu|cuh|slang|md|bash|cmake'
 
-# Trees excluded: vendored, generated, hand-run references, and dated design
-# notes (which record what was true when they were written).
+# Excluded: vendored, generated, hand-run references, dated design notes (which
+# record what was true when written), and the SS_FILE trim test, whose "paths"
+# are synthetic inputs that name no file on purpose.
 paths=(':!src/external/' ':!src/generated/' ':!src/instantiations/'
-       ':!reference/' ':!docs/notes/' ':!tools/check_comments.sh')
+       ':!reference/' ':!docs/notes/' ':!tools/check_comments.sh'
+       ':!src/core/tests/source_path.cpp')
 
 tracked=$(git ls-files)
 fail=0

@@ -6,6 +6,7 @@
 // select_flagged.
 
 #include "backend/common/SortScan.h"
+#include "core/SourcePath.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -19,7 +20,7 @@ static int g_failures = 0;
 #define CHECK_MSG(cond, ...)                                              \
     do {                                                                  \
         if (!(cond)) {                                                    \
-            std::printf("FAIL %s:%d: ", __FILE__, __LINE__);              \
+            std::printf("FAIL %s:%d: ", SS_FILE, __LINE__);               \
             std::printf(__VA_ARGS__);                                     \
             std::printf("\n");                                            \
             g_failures++;                                                 \
@@ -30,7 +31,7 @@ static int g_failures = 0;
     do {                                                                  \
         const char* err_ = backend::last_error();                         \
         if (err_) {                                                       \
-            std::printf("FAIL %s:%d: backend error: %s\n", __FILE__,      \
+            std::printf("FAIL %s:%d: backend error: %s\n", SS_FILE,       \
                         __LINE__, err_);                                  \
             g_failures++;                                                 \
         }                                                                 \

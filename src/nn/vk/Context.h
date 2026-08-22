@@ -29,6 +29,8 @@
 #include <string>
 #include <vector>
 
+#include "core/SourcePath.h"
+
 namespace nn {
 namespace vk {
 
@@ -163,5 +165,5 @@ private:
         if (_r != VK_SUCCESS)                                                  \
             ::nn::fail("%s failed: %s (%d) at %s:%d", #expr,                 \
                          ::nn::vk::Context::resultName(_r), (int)_r,         \
-                         __FILE__, __LINE__);                                  \
+                         SS_FILE, __LINE__);                                   \
     } while (0)

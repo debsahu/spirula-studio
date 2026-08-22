@@ -63,6 +63,10 @@ set(SS_SRC     ${SS_ROOT}/src)
 set(SS_SHADERS ${SS_SRC}/shaders)                      # shared Slang device math
 set(SS_VK_SHADERS ${SS_SRC}/backend/vulkan/shaders)   # Vulkan-only entry points
 
+# What SS_FILE trims off __FILE__ (src/core/SourcePath.h), so an error message
+# from a shipped binary names src/... and not the build machine's directories.
+add_compile_definitions(SS_SOURCE_ROOT="${SS_ROOT}")
+
 # The version the apps report with --version. Declared here and nowhere else;
 # it used to be read out of pyproject.toml, back when there was a package.
 set(SS_VERSION "2026.8.20")
@@ -282,4 +286,17 @@ endif()
 
 if(WIN32)
     add_compile_definitions(_USE_MATH_DEFINES NOMINMAX _CRT_SECURE_NO_WARNINGS)
+endif()
+
+# The same trim for the __FILE__ this project does not write: assert() in
+# src/external/, GLFW, Dear ImGui. No replacement for SS_FILE -- MSVC has no
+# equivalent, and nvcc expands __FILE__ instead of forwarding the flag.
+if(NOT MSVC)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-fmacro-prefix-map=${SS_ROOT}/=" SS_HAS_PREFIX_MAP)
+    if(SS_HAS_PREFIX_MAP)
+        # Here, not in a backend module, so FetchContent subdirectories inherit it.
+        add_compile_options(
+            $<$<COMPILE_LANGUAGE:C,CXX>:-fmacro-prefix-map=${SS_ROOT}/=>)
+    endif()
 endif()

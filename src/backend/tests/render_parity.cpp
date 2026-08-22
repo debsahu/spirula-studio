@@ -71,9 +71,9 @@ int check_error() {
     return 0;
 }
 
-// Local copy of EngineCommon.h vec_to_2d_float4 (the [nnz, 1] AABB view the
-// engine hands the packed 3dgut rasterizer).
-DeviceTensor2D<float4> vec_to_2d_float4(const DeviceVector<float4>& vec) {
+// static: the engine library these tools link defines the same helper
+// inline (engine/EngineCommon.h), and MSVC refuses the duplicate.
+static DeviceTensor2D<float4> vec_to_2d_float4(const DeviceVector<float4>& vec) {
     TorchTensorView tv{(uint64_t)vec.data_ptr(), (uint32_t)sizeof(float),
                        {vec.size(), 1LL, 4LL}};
     return DeviceTensor2D<float4>(tv);
