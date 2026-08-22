@@ -133,73 +133,68 @@ Two paths, both gathering per destination pixel:
 ## The split
 
 A wide camera is rendered as pinhole faces, one per frame of a fixed table:
-five around the optical axis for a fisheye (front, +x, +y, -x, -y), the six
-cube faces for a panorama. Every face has the focal a 90-degree face of
-`ceil(sqrt(W*H/K))` pixels would have -- the density of an uncropped split --
-but is **cropped to the rays the lens holds**: the planner rasterizes each
-frame's visibility (a valid projection, by the GPU warp's own fold test, that
-lands inside the image), takes the bounding box, and covers every box with one
-common tile, chosen to minimize the pixel count plus a fixed cost per face. A
-frame that holds only a corner sliver (under 4% of its 90 degrees) is dropped.
+five around the optical axis for a fisheye (front, +x, +y, -x, -y; the back
+frame only when a quarter of it is seen, since corners past 135 degrees are
+usually outside the image circle), the six cube faces for a panorama. **Never
+more than one face per frame.** A frame is one 90-degree view, and a view is
+the unit the per-image appearance models are sized by -- bilagrid and PPISP
+hold one slot per post camera -- so cutting a frame into tiles would cost a
+slot per tile and hand each model a piece of a view.
 
-The fixed cost is what decides the outcome. A face pays a projection of every
-splat and a sort whatever its size: measured at 0.5 S^2 pixel-equivalents with
-115k splats and 1.2 S^2 with 219k on an RTX 5070 laptop (S the side of a
-90-degree face), and growing with the splat count; the planner charges 0.75
-S^2. So a 180-degree fisheye, or a cropped one like a 108 x 162 degree frame,
-trains on six half-height faces -- the front cut in two and four side bands --
-at 60-66% of the pixels five square faces took (measured 17% faster at 115k
-splats), while a 200-degree lens whose side bands keep 80% of each face stays
-at five square faces: cropping there would save 6% of the pixels for 20% more
-faces. Past that, the lever is skipping fully-masked raster tiles, not the
-layout. All faces of one camera share a size, so a batch stays one tensor and
-the fused projection path still applies.
+Every face has the focal a 90-degree face of `ceil(sqrt(W*H/K))` pixels would
+have -- the density of an uncropped split -- and is **cropped to the rays the
+lens holds**: the planner rasterizes each frame's visibility (a valid
+projection, by the GPU warp's own fold test, that lands inside the image),
+takes the bounding box, rounds it up to 32 px and to no less than half the
+frame -- a side band is at least the 45..90-degree ring, never a sliver --
+and seats the face over it inside the frame. A frame holding under 0.2% of
+the image's rays is dropped, the tolerance `spirula geometry --check` accepts
+as not a hole.
 
-Each post camera carries its own intrinsics (an off-centre principal point is
-what a crop is) and its frame's rotation, and the GT warp samples through
-exactly that table, so the face that is rendered is the face that was warped.
+What the crop does NOT buy is rendering time, which is why the faces of one
+camera share a size by default. Masked tiles are skipped (below), so a masked
+pixel costs almost nothing, while every render pass costs 1-2 ms a step --
+a projection of every splat, a sort, the loss -- and the fused
+projection-backward optimizer, which needs a single pass, is worth another
+10%. Measured on an RTX 5070 laptop: going from 2 to 5 passes added 21% to a
+step on a 200-degree capture, and from 3 to 4 added 15% on a cropped one.
 
 ### One face size, or one per lens
 
 `--warp-face-fit` decides whether the faces of one camera share a size.
 
-- **`uniform`** is the plan above: one tile covers every crop, so a batch
-  renders all of a camera's faces in one pass -- which is what the fused
-  projection-backward optimizer (`--use-fused-proj-bwd-optim`) needs.
-- **`per-face`** gives each frame's crop its own face, rounded up to a multiple
-  of 32 px so near-equal faces still share a size, and renders **one pass per
-  distinct size**, accumulating gradient across the passes. Every pass is
-  weighted by its face count, so a face carries exactly the weight it would in
-  one batch -- the loss, the gradient and the densification score are the
-  uniform plan's, only the pixels differ.
-- **`auto`** (default) picks `per-face` only when the run already renders in
-  several passes -- when the fused optimizer is off anyway, either because it
-  was turned off or because `--split-batch` is active on a step of more than
-  one image -- and the crops save at least 10% of the pixels. Otherwise, or
-  when the saving would have to pay for the fused optimizer itself, it stays
-  `uniform`.
+- **`uniform`** (default): one size for every face, the largest crop per axis,
+  so a batch stays one tensor, renders in one pass, and the fused optimizer
+  applies. A 180-degree or a cropped fisheye draws five full faces whose side
+  faces are about half masked; the rasterizer skips those tiles.
+- **`per-face`** gives each frame's crop its own face and renders **one pass
+  per distinct size**, accumulating gradient across the passes. Every pass is
+  weighted by its face count, so a face carries exactly the weight it would
+  in one batch -- the loss, the gradient and the densification score are the
+  uniform plan's, only the pixels differ. It draws 15-40% fewer pixels, which
+  is the lever for a GPU that cannot hold the uniform batch, at the cost
+  above. Without the fused optimizer the world-gradient buffers come back, so
+  on a lens whose side bands are nearly full it can even use MORE memory.
 
-Splitting is per input image, so a face pass renders that image's faces of one
-size; the passes of a step accumulate into the same gradient buffers and one
-optimizer step follows. A lens whose visible rays fit one face is not split at
-all.
-
-Measured, 3000 steps on an RTX 5070 laptop, gradient already accumulating
-across passes in both columns (`--use-fused-proj-bwd-optim 0 --split-batch 1`):
+Measured, 2000 steps on an RTX 5070 laptop, wall time with load and eval:
 
 | capture | fit | faces | passes | time | peak VRAM |
 |---|---|---|---|---|---|
-| 1000x1500 fisheye, 108x162 deg | uniform | 6 x 548x298 | 1 | 40.4 s | 804 MiB |
-| | per-face | 5, 548 wide | 3 | 41.1 s | 684 MiB |
-| 960x960 fisheye, ~200 deg | uniform | 5 x 430x430 | 1 | 60.1 s | 978 MiB |
-| | per-face | 5, 430 wide | 2 | 60.0 s | 942 MiB |
+| 1000x1500 fisheye, 108x162 deg | uniform | 5 x 548x548 | 1 | 27.6 s | 804 MiB |
+| | per-face | 548x548, 2 x 548x320, 2 x 548x274 | 3 | 31.1 s | 692 MiB |
+| 960x960 fisheye, ~200 deg | uniform | 5 x 430x430 | 1 | 32.3 s | 818 MiB |
+| | per-face | 430x430, 4 x 430x352 | 2 | 35.4 s | 858 MiB |
 
-So where the passes are already paid for, per-face costs nothing in time and
-returns 4-15% of the VRAM. Where they are not, it costs the fused optimizer:
-the same capture with it available runs 37.2 s / 722 MiB uniform against
-40.9 s / 690 MiB per-face -- 10% slower to save 4% of the memory, which is why
-`auto` leaves it alone there. What is left after either fit is the masked part
-of a face, which the next section takes without splitting anything.
+For the record, the tiled plan this replaced -- the front cut in two and four
+half-height bands, six tiles of 548x298 -- ran the first capture in 25.3 s at
+736 MiB: 9% faster and 9% smaller than five full faces, paid for with a sixth
+appearance slot per image and two slots on one view.
+
+With `--split-batch` active on a step of several images the engine renders
+one pass per input image anyway, and `per-face` adds its passes on top: the
+first capture at two images a step runs 54.8 s / 886 MiB uniform against
+57.6 s / 696 MiB per-face. A lens whose visible rays fit one face is not split
+at all.
 
 ### Skipping masked tiles
 
@@ -231,7 +226,7 @@ default:
 | capture | tiles skipped | raster tiles | + appearance |
 |---|---|---|---|
 | 960x960 fisheye, ~200 deg, 5 faces | 44% | 8.9 s -> 8.0 s | -> 7.7 s |
-| 1000x1500 fisheye, 108x162 deg, 6 faces | 25% | 7.8 s -> 7.5 s | -> 7.3 s |
+| 1000x1500 fisheye, 108x162 deg, 5 faces | 52% | 31.7 s -> 28.0 s (2000 steps) | |
 
 Skipping 44% of the tiles buys 10% of the step, not 44%: projection, the sort,
 the optimizer and the loss are all still paid in full, and the tiles that go

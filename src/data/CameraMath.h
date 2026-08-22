@@ -97,13 +97,13 @@ std::vector<double> visible_boundary(const Camera& cam, int samples);
 
 // The six cube frames a wide camera is split into, [6][3][3] rows (ax, ay,
 // az): front, +x, +y, -x, -y, back. The side frames of a table share one
-// roll, so one rectangle tiles every crop; a frame that sees nothing is dropped.
+// roll, so one size fits every crop; a frame that sees nothing is dropped.
 const double* fisheye_face_axes();
 const double* equirect_face_axes();
 
-// One rendered face: a pinhole inside frame `face` of the camera's table.
-// `crop_*` is the extent the lens actually fills there, which `width` and
-// `height` round up to (see FaceFit).
+// One rendered face: a pinhole inside frame `face` of the camera's table,
+// never more than one per frame. `crop_*` is the extent the lens actually
+// fills there, which `width` and `height` cover (see FaceFit).
 struct SplitFace {
     int    face = 0;
     int    width = 0, height = 0;
@@ -111,8 +111,8 @@ struct SplitFace {
     double fx = 0, fy = 0, cx = 0, cy = 0;
 };
 
-// How the crops become faces: one common tile so a batch renders them all, or
-// each its own crop -- no wasted pixels, one pass per distinct size.
+// How the crops become faces: one common size so a batch renders them all in
+// one pass, or each its own -- fewer pixels, one pass per distinct size.
 // docs/datasets.md, "The split".
 enum class FaceFit { Uniform, PerFace };
 

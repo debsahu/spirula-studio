@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace camhost {
 namespace {
@@ -358,15 +357,13 @@ const double kEquirectAxes[6][3][3] = {
     {{-1, 0, 0}, { 0, 1, 0}, { 0, 0,-1}},
 };
 
-constexpr int kMaxSplitFaces = 12;
-
-// PerFace rounds a face's sides up to this, so near-equal faces share a size.
+// Face sides round up to this, so near-equal crops share a size and a pass.
 constexpr int kSizeStep = 32;
 
-// A frame holding less than this of its 90 degrees is a sliver not worth a
-// face. A fisheye's back frame needs far more: past 135 degrees the image's
-// corners are usually outside the image circle, which the model cannot know.
-constexpr double kMinVisible     = 0.04;
+// A frame under this share of the image's rays is noise, not a face (what
+// --check calls a hole). A fisheye's back frame needs a quarter of its own 90
+// degrees: corners past 135 degrees are usually outside the image circle.
+constexpr double kMinShare       = 0.002;
 constexpr double kMinVisibleBack = 0.25;
 
 struct Crop {
@@ -374,21 +371,19 @@ struct Crop {
     int px0[2], px1[2];   // pixel bounds of the visible box, per axis
 };
 
-int tiles_along(const Crop& c, int axis, int t) {
-    const int ext = c.px1[axis] - c.px0[axis];
-    return std::max(1, (int)std::ceil((double)ext / t - 1e-9));
+// The side of a face over a crop of `ext` pixels: never under half the frame,
+// so a side band is at least the 45..90 degree ring and no face is a sliver.
+int face_side(int ext, int half) {
+    const int want = (ext + kSizeStep - 1) / kSizeStep * kSizeStep;
+    return std::min(2 * half, std::max(want, half));
 }
 
-// Pixel origin of tile i of n along `axis`: one tile is centred on the box
-// and kept inside the frame's own 90 degrees, several are spread so the
-// last ends where the box does.
-int tile_origin(const Crop& c, int axis, int i, int n, int t, int half_side) {
+// Pixel origin of a face of `side` along `axis`: centred on the crop and kept
+// inside the frame's own 90 degrees.
+int face_origin(const Crop& c, int axis, int side, int half) {
     const int ext = c.px1[axis] - c.px0[axis];
-    if (n == 1) {
-        int p = c.px0[axis] - (t - ext) / 2;
-        return std::clamp(p, -half_side, std::max(-half_side, half_side - t));
-    }
-    return (int)std::lround(c.px0[axis] + (double)i * (ext - t) / (n - 1));
+    const int p = c.px0[axis] - (side - ext) / 2;
+    return std::clamp(p, -half, std::max(-half, half - side));
 }
 
 }  // namespace
@@ -414,17 +409,24 @@ std::vector<SplitFace> plan_split_faces(const Camera& cam_in, FaceFit fit) {
     const int half = (S + 1) / 2;
     const double f = half;
 
-    std::vector<Crop> crops;
+    // Every frame's cell is the same solid angle, so a frame's share of the
+    // image is its visible fraction over the sum of them.
     const double cell[4] = {-1.0, 1.0, -1.0, 1.0};
+    double bbox[6][4], fraction[6] = {}, total = 0.0;
     for (int k = 0; k < 6; ++k) {
-        double b[4], fraction = 0.0;
-        if (!visible_bbox(cam, axes + 9 * k, cell, b, &fraction)) continue;
-        if (fraction < (k == 5 && !equi ? kMinVisibleBack : kMinVisible)) continue;
+        if (!visible_bbox(cam, axes + 9 * k, cell, bbox[k], &fraction[k]))
+            fraction[k] = 0.0;
+        total += fraction[k];
+    }
+    std::vector<Crop> crops;
+    for (int k = 0; k < 6; ++k) {
+        if (fraction[k] < kMinShare * total) continue;
+        if (k == 5 && !equi && fraction[k] < kMinVisibleBack) continue;
         Crop c;
         c.face = k;
         for (int a = 0; a < 2; ++a) {
-            c.px0[a] = std::max(-half, (int)std::floor(b[a * 2] * f));
-            c.px1[a] = std::min(half, (int)std::ceil(b[a * 2 + 1] * f));
+            c.px0[a] = std::max(-half, (int)std::floor(bbox[k][a * 2] * f));
+            c.px1[a] = std::min(half, (int)std::ceil(bbox[k][a * 2 + 1] * f));
         }
         crops.push_back(c);
     }
@@ -433,87 +435,39 @@ std::vector<SplitFace> plan_split_faces(const Camera& cam_in, FaceFit fit) {
         for (int k = 0; k < K; ++k)
             crops.push_back(Crop{k, {-half, -half}, {half, half}});
 
-    if (fit == FaceFit::PerFace) {
-        // One face per crop, at its own size rounded out to kSizeStep -- a
-        // coarse step so faces that differ by a few pixels land on one size
-        // and share a render pass, which is what a pass costs.
-        std::vector<SplitFace> out;
-        for (const Crop& cr : crops) {
-            SplitFace sf;
-            sf.face = cr.face;
-            sf.fx = sf.fy = f;
-            sf.crop_w = cr.px1[0] - cr.px0[0];
-            sf.crop_h = cr.px1[1] - cr.px0[1];
-            int px[2] = {cr.px0[0], cr.px0[1]};
-            int side[2] = {sf.crop_w, sf.crop_h};
-            for (int a = 0; a < 2; ++a) {
-                const int want = std::min(2 * half,
-                                          (side[a] + kSizeStep - 1) / kSizeStep * kSizeStep);
-                px[a] = std::clamp(px[a] - (want - side[a]) / 2, -half, half - want);
-                side[a] = want;
-            }
-            sf.width = side[0];
+    // One face per frame. Uniform takes the largest side per axis, so every
+    // face still lies inside its own frame and the batch renders in one pass.
+    std::vector<SplitFace> out;
+    int side[2] = {0, 0};
+    for (const Crop& cr : crops) {
+        SplitFace sf;
+        sf.face = cr.face;
+        sf.fx = sf.fy = f;
+        sf.crop_w = cr.px1[0] - cr.px0[0];
+        sf.crop_h = cr.px1[1] - cr.px0[1];
+        sf.width  = face_side(sf.crop_w, half);
+        sf.height = face_side(sf.crop_h, half);
+        side[0] = std::max(side[0], sf.width);
+        side[1] = std::max(side[1], sf.height);
+        out.push_back(sf);
+    }
+    for (size_t i = 0; i < out.size(); ++i) {
+        SplitFace& sf = out[i];
+        if (fit == FaceFit::Uniform) {
+            sf.width  = side[0];
             sf.height = side[1];
-            sf.cx = -px[0];
-            sf.cy = -px[1];
-            out.push_back(sf);
         }
-        // Equal sizes adjacent: a pass covers one run of the face axis, so the
-        // order is what decides how many passes a camera costs.
+        sf.cx = -face_origin(crops[i], 0, sf.width, half);
+        sf.cy = -face_origin(crops[i], 1, sf.height, half);
+    }
+    // Equal sizes adjacent: a pass covers one run of the face axis, so the
+    // order is what decides how many passes a camera costs.
+    if (fit == FaceFit::PerFace)
         std::stable_sort(out.begin(), out.end(),
                          [](const SplitFace& a, const SplitFace& b) {
                              if (a.height != b.height) return a.height > b.height;
                              return a.width > b.width;
                          });
-        return out;
-    }
-
-    // Candidate tile sides: every crop's extent and its halves and thirds.
-    auto candidates = [&](int axis) {
-        std::vector<int> c = {2 * half};
-        for (const Crop& cr : crops) {
-            const int ext = cr.px1[axis] - cr.px0[axis];
-            for (int n = 1; n <= 3; ++n) c.push_back(std::max(8, (ext + n - 1) / n));
-        }
-        std::sort(c.begin(), c.end());
-        c.erase(std::unique(c.begin(), c.end()), c.end());
-        return c;
-    };
-    // A face costs its pixels plus a projection of every splat and a sort:
-    // measured at 0.5 S^2 with 115k splats and 1.2 S^2 with 219k (RTX 5070
-    // laptop), and it grows with the splat count, so a split must save a lot.
-    const double face_cost = 0.75 * (double)S * S;
-    int best_w = 2 * half, best_h = 2 * half, best_n = 0;
-    double best = std::numeric_limits<double>::infinity();
-    for (int w : candidates(0))
-        for (int h : candidates(1)) {
-            int tiles = 0;
-            for (const Crop& cr : crops)
-                tiles += tiles_along(cr, 0, w) * tiles_along(cr, 1, h);
-            if (tiles > kMaxSplitFaces) continue;
-            const double cost = tiles * ((double)w * h + face_cost);
-            if (cost < best - 0.5 || (cost < best + 0.5 && tiles < best_n)) {
-                best = cost; best_w = w; best_h = h; best_n = tiles;
-            }
-        }
-
-    std::vector<SplitFace> out;
-    for (const Crop& cr : crops) {
-        const int nx = tiles_along(cr, 0, best_w), ny = tiles_along(cr, 1, best_h);
-        for (int iy = 0; iy < ny; ++iy)
-            for (int ix = 0; ix < nx; ++ix) {
-                SplitFace sf;
-                sf.face = cr.face;
-                sf.width = best_w;
-                sf.height = best_h;
-                sf.crop_w = cr.px1[0] - cr.px0[0];
-                sf.crop_h = cr.px1[1] - cr.px0[1];
-                sf.fx = sf.fy = f;
-                sf.cx = -tile_origin(cr, 0, ix, nx, best_w, half);
-                sf.cy = -tile_origin(cr, 1, iy, ny, best_h, half);
-                out.push_back(sf);
-            }
-    }
     return out;
 }
 

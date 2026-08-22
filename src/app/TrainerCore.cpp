@@ -98,28 +98,10 @@ ColorResolution resolve_color(const TrainConfig& c) {
     return r;
 }
 
-// Images a training step draws, which decides whether the run already
-// accumulates gradient across several passes (see resolve_face_fit).
-static int step_batch_size(const TrainConfig& c, int64_t num_train) {
-    const double n = std::max((double)num_train /
-                                  std::max(c.max_batch_per_epoch, 1), 1.0);
-    return std::max(1, (int)(n + 0.5));
-}
-
 static WarpFaceFit resolve_face_fit(const TrainConfig& c) {
     if (c.warp_face_fit == "uniform")  return WarpFaceFit::Uniform;
     if (c.warp_face_fit == "per-face") return WarpFaceFit::PerFace;
-    if (c.warp_face_fit == "auto")     return WarpFaceFit::Auto;
     throw std::runtime_error("unknown warp_face_fit: " + c.warp_face_fit);
-}
-
-// Whether the run already accumulates gradient across passes, which is what
-// makes one pass per face size nearly free: the fused optimizer it rules out
-// is worth about 10% (docs/datasets.md, "The split").
-static bool multi_pass_free(const TrainConfig& c, const ParsedDataset& ds) {
-    const int64_t num_train = ds.num_cameras - (int64_t)ds.val_indices.size();
-    return !c.use_fused_proj_bwd_optim ||
-           (c.split_batch && step_batch_size(c, num_train) > 1);
 }
 
 // What `depths/` measures when the flag does not say. `spirula geometry`
@@ -595,7 +577,7 @@ void TrainerSession::load_dataset() {
     // POST-split camera bake (identity when no warp flag applies).
     post = bake_post_split(
         ds, cfg.warp_to_pinhole, cfg.warp_spherical_to_pinhole,
-        resolve_face_fit(cfg), multi_pass_free(cfg, ds));
+        resolve_face_fit(cfg));
 
     // Warp-path guards, plus: a modality no weight reads is not loaded at all.
     has_mask   = !ds.mask_filenames.empty()   && cfg.load_masks;

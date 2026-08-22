@@ -84,12 +84,14 @@ foreach(test_src ${SS_VULKAN_TESTS})
 endforeach()
 
 # Cross-backend parity tools (the same sources build in the CUDA branch, where
-# they dump the reference outputs these compare against).
+# they dump the reference outputs these compare against). The portable engine
+# is what the host-only tests among them (split_faces_test) call into.
 file(GLOB SS_PARITY_TESTS CONFIGURE_DEPENDS ${SS_SRC}/backend/tests/*.cpp)
 foreach(test_src ${SS_PARITY_TESTS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} ${test_src})
-    target_link_libraries(${test_name} PRIVATE ss_backend_vulkan)
+    target_link_libraries(${test_name} PRIVATE csrc_portable ss_backend_vulkan
+        Threads::Threads)
     target_compile_options(${test_name} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
 endforeach()

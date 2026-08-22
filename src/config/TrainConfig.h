@@ -128,7 +128,7 @@ inline int train_tier_rank(const char* tier) {
     X(float, validation_fraction, 0.0f, "dataset", "expert", "")             \
     X(bool, warp_to_pinhole, false, "dataset", "advanced", "")               \
     X(bool, warp_spherical_to_pinhole, true, "dataset", "advanced", "")      \
-    X(std::string, warp_face_fit, "auto", "dataset", "advanced", "auto|uniform|per-face") \
+    X(std::string, warp_face_fit, "uniform", "dataset", "advanced", "uniform|per-face") \
     X(bool, deblur_training_images, false, "dataset", "stub", "")            \
                                                                              \
     /* ==== scene -- how the capture is placed, oriented and scaled ==== */  \

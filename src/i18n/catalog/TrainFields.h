@@ -1605,80 +1605,82 @@ SS_MSG(warp_face_fit,
     TR("Bölmede yüz boyutu"));
 SS_MSG(warp_face_fit_help,
     EN("Whether the pinhole faces a wide lens is split into all share one "
-       "size. `uniform` renders them in a single pass, which is what the "
-       "fused optimizer needs. `per-face` crops each face to the part its "
-       "lens fills, drawing about 15% fewer pixels, but costs one pass per "
-       "size and turns the fused optimizer off. `auto` crops only when the "
-       "run already renders in several passes, where that cost is paid."),
+       "size. `uniform` renders them in a single pass, which the fused "
+       "optimizer needs, and is the faster choice. `per-face` crops each face "
+       "to the part its lens fills (never under half a frame), drawing 15-40% "
+       "fewer pixels for less VRAM, but costs one pass per size and turns the "
+       "fused optimizer off."),
     JA("広角レンズを分割したピンホール面をすべて同じサイズにするかどうか。"
-       "`uniform` は 1 回のパスで描画でき、融合オプティマイザはこれを必要と"
-       "します。`per-face` は各面をレンズが写る範囲に切り詰め、画素数が約 15% "
-       "減りますが、サイズごとに 1 パスかかり融合オプティマイザは無効になり"
-       "ます。`auto` は、もともと複数パスで描画する場合にだけ切り詰めます。"),
+       "`uniform` は 1 回のパスで描画でき、融合オプティマイザはこれを必要とし、"
+       "速度も最も速くなります。`per-face` は各面をレンズが写る範囲（最小でも"
+       "面の半分）に切り詰め、画素数が 15〜40% 減って VRAM を節約しますが、"
+       "サイズごとに 1 パスかかり融合オプティマイザは無効になります。"),
     ZH_HANS("拆分广角镜头得到的针孔面是否统一为同一尺寸。`uniform` 只需一遍渲"
-            "染，融合优化器需要这样。`per-face` 把每个面裁到镜头实际覆盖的部"
-            "分，像素约少 15%，但每种尺寸要多一遍渲染，且会关闭融合优化器。"
-            "`auto` 只在本来就要多遍渲染时才裁剪。"),
+            "染，融合优化器需要这样，速度也最快。`per-face` 把每个面裁到镜头实"
+            "际覆盖的部分（不小于半个面），像素少 15-40%，更省显存，但每种尺寸"
+            "要多一遍渲染，且会关闭融合优化器。"),
     ZH_HANT("拆分廣角鏡頭得到的針孔面是否統一為同一尺寸。`uniform` 只需一遍算"
-            "圖，融合最佳化器需要如此。`per-face` 把每個面裁到鏡頭實際涵蓋的部"
-            "分，像素約少 15%，但每種尺寸要多一遍算圖，且會關閉融合最佳化器。"
-            "`auto` 只在本來就要多遍算圖時才裁剪。"),
+            "圖，融合最佳化器需要如此，速度也最快。`per-face` 把每個面裁到鏡頭實"
+            "際涵蓋的部分（不小於半個面），像素少 15-40%，更省顯示記憶體，但每種"
+            "尺寸要多一遍算圖，且會關閉融合最佳化器。"),
     KO("광각 렌즈를 분할한 핀홀 면을 모두 같은 크기로 둘지 여부입니다. "
-       "`uniform` 은 한 번의 패스로 그리며 통합 옵티마이저가 이를 필요로 합니다. "
-       "`per-face` 는 각 면을 렌즈가 담기는 부분까지 잘라 픽셀이 약 15% 줄지만 "
-       "크기마다 패스가 하나씩 늘고 통합 옵티마이저가 꺼집니다. `auto` 는 이미 "
-       "여러 패스로 그리는 실행에서만 잘라냅니다."),
+       "`uniform` 은 한 번의 패스로 그리며 통합 옵티마이저가 이를 필요로 하고 "
+       "속도도 가장 빠릅니다. `per-face` 는 각 면을 렌즈가 담기는 부분(최소 면의 "
+       "절반)까지 잘라 픽셀이 15-40% 줄고 VRAM 을 아끼지만, 크기마다 패스가 "
+       "하나씩 늘고 통합 옵티마이저가 꺼집니다."),
     DE("Ob die Lochkamera-Flächen, in die ein Weitwinkel zerlegt wird, alle "
        "dieselbe Größe haben. `uniform` rendert sie in einem Durchgang, was "
-       "der fusionierte Optimierer braucht. `per-face` beschneidet jede Fläche "
-       "auf den vom Objektiv gefüllten Teil und zeichnet rund 15% weniger "
-       "Pixel, kostet aber einen Durchgang je Größe und schaltet den "
-       "fusionierten Optimierer ab. `auto` beschneidet nur, wenn der Lauf "
-       "ohnehin mehrere Durchgänge rendert."),
+       "der fusionierte Optimierer braucht, und ist die schnellere Wahl. "
+       "`per-face` beschneidet jede Fläche auf den vom Objektiv gefüllten Teil "
+       "(nie unter eine halbe Fläche) und zeichnet 15-40% weniger Pixel bei "
+       "weniger VRAM, kostet aber einen Durchgang je Größe und schaltet den "
+       "fusionierten Optimierer ab."),
     FR("Si les faces sténopé issues du découpage d'un objectif large ont "
        "toutes la même taille. `uniform` les rend en une seule passe, ce dont "
-       "l'optimiseur fusionné a besoin. `per-face` recadre chaque face sur la "
-       "partie que remplit l'objectif, soit environ 15% de pixels en moins, "
-       "mais coûte une passe par taille et désactive l'optimiseur fusionné. "
-       "`auto` ne recadre que si le calcul se fait déjà en plusieurs passes."),
+       "l'optimiseur fusionné a besoin, et c'est le choix le plus rapide. "
+       "`per-face` recadre chaque face sur la partie que remplit l'objectif "
+       "(jamais moins d'une demi-face), soit 15 à 40% de pixels en moins et "
+       "moins de VRAM, mais coûte une passe par taille et désactive "
+       "l'optimiseur fusionné."),
     ES("Si las caras estenopeicas en que se divide un objetivo ancho comparten "
        "un mismo tamaño. `uniform` las renderiza en una sola pasada, que es lo "
-       "que necesita el optimizador fusionado. `per-face` recorta cada cara a "
-       "la parte que llena su objetivo y dibuja alrededor de un 15% menos de "
-       "píxeles, pero cuesta una pasada por tamaño y desactiva el optimizador "
-       "fusionado. `auto` recorta solo cuando la ejecución ya usa varias pasadas."),
+       "que necesita el optimizador fusionado, y es la opción más rápida. "
+       "`per-face` recorta cada cara a la parte que llena su objetivo (nunca "
+       "menos de media cara) y dibuja entre un 15% y un 40% menos de píxeles "
+       "con menos VRAM, pero cuesta una pasada por tamaño y desactiva el "
+       "optimizador fusionado."),
     PT("Se as faces estenopeicas em que uma lente larga é dividida têm todas o "
        "mesmo tamanho. `uniform` desenha-as numa única passagem, que é o que o "
-       "otimizador fundido precisa. `per-face` recorta cada face à parte que a "
-       "lente preenche e desenha cerca de 15% menos pixels, mas custa uma "
-       "passagem por tamanho e desliga o otimizador fundido. `auto` só recorta "
-       "quando a execução já usa várias passagens."),
+       "otimizador fundido precisa, e é a opção mais rápida. `per-face` recorta "
+       "cada face à parte que a lente preenche (nunca menos de meia face) e "
+       "desenha 15 a 40% menos pixels com menos VRAM, mas custa uma passagem "
+       "por tamanho e desliga o otimizador fundido."),
     IT("Se le facce stenopeiche in cui viene divisa un'ottica ampia hanno tutte "
        "la stessa dimensione. `uniform` le disegna in un solo passaggio, ciò "
-       "che serve all'ottimizzatore fuso. `per-face` ritaglia ogni faccia alla "
-       "parte coperta dall'obiettivo e disegna circa il 15% di pixel in meno, "
-       "ma costa un passaggio per dimensione e disattiva l'ottimizzatore fuso. "
-       "`auto` ritaglia solo quando l'esecuzione usa già più passaggi."),
-    NL("Of de gaatjescameravlakken waarin een groothoek wordt opgesplitst "
-       "allemaal even groot zijn. `uniform` tekent ze in één doorgang, wat de "
-       "gefuseerde optimalisator nodig heeft. `per-face` snijdt elk vlak bij "
-       "tot het deel dat de lens vult en tekent ongeveer 15% minder pixels, "
-       "maar kost een doorgang per formaat en zet de gefuseerde optimalisator "
-       "uit. `auto` snijdt alleen bij als de run toch al meerdere doorgangen "
-       "tekent."),
-    RU("Одинакового ли размера все грани-обскуры, на которые разбивается "
-       "широкий объектив. `uniform` рисует их за один проход, что и нужно "
-       "объединённому оптимизатору. `per-face` обрезает каждую грань по той "
-       "части, которую заполняет объектив: пикселей примерно на 15% меньше, но "
-       "на каждый размер уходит отдельный проход, а объединённый оптимизатор "
-       "отключается. `auto` обрезает только тогда, когда проходов и так "
-       "несколько."),
-    TR("Geniş bir objektifin bölündüğü iğne deliği yüzlerinin hepsi aynı "
-       "boyutta mı olsun. `uniform` hepsini tek geçişte çizer; birleşik "
-       "eniyileyici bunu ister. `per-face` her yüzü objektifin doldurduğu "
-       "kısma kırpar, yaklaşık %15 daha az piksel çizer; ama her boyut için "
-       "bir geçiş daha gerekir ve birleşik eniyileyici kapanır. `auto` yalnızca "
-       "çalışma zaten birden çok geçiş kullanıyorsa kırpar."));
+       "che serve all'ottimizzatore fuso, ed è la scelta più veloce. `per-face` "
+       "ritaglia ogni faccia alla parte coperta dall'obiettivo (mai meno di "
+       "mezza faccia) e disegna il 15-40% di pixel in meno con meno VRAM, ma "
+       "costa un passaggio per dimensione e disattiva l'ottimizzatore fuso."),
+    NL("Of de pinhole-vlakken waarin een groothoeklens wordt opgesplitst "
+       "allemaal dezelfde grootte hebben. `uniform` rendert ze in één doorgang, "
+       "wat de gefuseerde optimizer nodig heeft, en is de snelste keuze. "
+       "`per-face` snijdt elk vlak bij tot het deel dat de lens vult (nooit "
+       "minder dan een half vlak) en tekent 15-40% minder pixels met minder "
+       "VRAM, maar kost een doorgang per grootte en schakelt de gefuseerde "
+       "optimizer uit."),
+    RU("Должны ли все пинхол-грани, на которые разбивается широкоугольный "
+       "объектив, иметь один размер. `uniform` отрисовывает их за один проход, "
+       "что нужно объединённому оптимизатору, и работает быстрее всего. "
+       "`per-face` обрезает каждую грань до части, которую заполняет объектив "
+       "(не меньше половины грани), рисуя на 15-40% меньше пикселей и экономя "
+       "видеопамять, но требует прохода на каждый размер и отключает "
+       "объединённый оптимизатор."),
+    TR("Geniş bir merceğin bölündüğü iğne deliği yüzlerinin hepsinin aynı "
+       "boyutta olup olmayacağı. `uniform` hepsini tek geçişte çizer; birleşik "
+       "eniyileyici bunu gerektirir ve en hızlı seçenektir. `per-face` her yüzü "
+       "merceğin doldurduğu kısma (en az yarım yüz) kırpar, %15-40 daha az "
+       "piksel çizip VRAM'den tasarruf eder, ancak boyut başına bir geçişe mal "
+       "olur ve birleşik eniyileyiciyi kapatır."));
 
 SS_MSG(deblur_training_images,
     EN("Deblur training images"), JA("学習画像のぶれを補正"),
