@@ -139,6 +139,16 @@ bool has_extension(VkPhysicalDevice pd, const char* name) {
     return false;
 }
 
+bool has_instance_layer(const char* name) {
+    uint32_t n = 0;
+    vkEnumerateInstanceLayerProperties(&n, nullptr);
+    std::vector<VkLayerProperties> layers(n);
+    vkEnumerateInstanceLayerProperties(&n, layers.data());
+    for (const auto& l : layers)
+        if (std::strcmp(l.layerName, name) == 0) return true;
+    return false;
+}
+
 bool has_instance_extension(const char* name) {
     static const std::vector<VkExtensionProperties> exts = [] {
         uint32_t n = 0;
@@ -329,8 +339,14 @@ void Context::init() {
     const char* validation = "VK_LAYER_KHRONOS_validation";
     if (const char* env = spirula::env("VK_VALIDATION");
         env && env[0] == '1') {
-        ici.enabledLayerCount = 1;
-        ici.ppEnabledLayerNames = &validation;
+        if (has_instance_layer(validation)) {
+            ici.enabledLayerCount = 1;
+            ici.ppEnabledLayerNames = &validation;
+        } else {
+            std::fprintf(stderr,
+                "[spirula-vk] SS_VK_VALIDATION=1 ignored: %s is not installed "
+                "(it comes with the Vulkan SDK)\n", validation);
+        }
     }
 
     MvkSettings mvk;
