@@ -187,41 +187,46 @@ __global__ void ppisp_backward_kernel(
         v_params[i] = 0.0f;
 
     if (inside) {
-        float3 pixel = in_image.load3(bid, y, x);
         float3 v_out_pixel = v_out_image.load3(bid, y, x);
-        if (param_type == PPISPParamType::Original)
-            SlangPPISP::apply_ppisp_vjp(
-                pixel,
-                make_float2((float)x, (float)y),
-                make_float2(intrins[bid].z, intrins[bid].w),
-                make_float2(actual_image_width, actual_image_height),
-                *reinterpret_cast<FixedArray<float, kNumPPISPParams>*>(&params),
-                v_out_pixel,
-                &v_pixel,
-                reinterpret_cast<FixedArray<float, kNumPPISPParams>*>(&v_params)
-            );
-        else if (param_type == PPISPParamType::RQS)
-            SlangPPISP::apply_ppisp_rqs_vjp(
-                pixel,
-                make_float2((float)x, (float)y),
-                make_float2(intrins[bid].z, intrins[bid].w),
-                make_float2(actual_image_width, actual_image_height),
-                *reinterpret_cast<FixedArray<float, kNumPPISPParamsRQS>*>(&params),
-                v_out_pixel,
-                &v_pixel,
-                reinterpret_cast<FixedArray<float, kNumPPISPParamsRQS>*>(&v_params)
-            );
-        else
-            SlangPPISP::apply_ppisp_no_crf_vjp(
-                pixel,
-                make_float2((float)x, (float)y),
-                make_float2(intrins[bid].z, intrins[bid].w),
-                make_float2(actual_image_width, actual_image_height),
-                *reinterpret_cast<FixedArray<float, kNumPPISPParamsNoCRF>*>(&params),
-                v_out_pixel,
-                &v_pixel,
-                reinterpret_cast<FixedArray<float, kNumPPISPParamsNoCRF>*>(&v_params)
-            );
+        // Both gradients are linear in the incoming one, so a zero one -- a
+        // masked pixel, mostly -- has no transform to differentiate.
+        if (v_out_pixel.x != 0.0f || v_out_pixel.y != 0.0f ||
+            v_out_pixel.z != 0.0f) {
+            float3 pixel = in_image.load3(bid, y, x);
+            if (param_type == PPISPParamType::Original)
+                SlangPPISP::apply_ppisp_vjp(
+                    pixel,
+                    make_float2((float)x, (float)y),
+                    make_float2(intrins[bid].z, intrins[bid].w),
+                    make_float2(actual_image_width, actual_image_height),
+                    *reinterpret_cast<FixedArray<float, kNumPPISPParams>*>(&params),
+                    v_out_pixel,
+                    &v_pixel,
+                    reinterpret_cast<FixedArray<float, kNumPPISPParams>*>(&v_params)
+                );
+            else if (param_type == PPISPParamType::RQS)
+                SlangPPISP::apply_ppisp_rqs_vjp(
+                    pixel,
+                    make_float2((float)x, (float)y),
+                    make_float2(intrins[bid].z, intrins[bid].w),
+                    make_float2(actual_image_width, actual_image_height),
+                    *reinterpret_cast<FixedArray<float, kNumPPISPParamsRQS>*>(&params),
+                    v_out_pixel,
+                    &v_pixel,
+                    reinterpret_cast<FixedArray<float, kNumPPISPParamsRQS>*>(&v_params)
+                );
+            else
+                SlangPPISP::apply_ppisp_no_crf_vjp(
+                    pixel,
+                    make_float2((float)x, (float)y),
+                    make_float2(intrins[bid].z, intrins[bid].w),
+                    make_float2(actual_image_width, actual_image_height),
+                    *reinterpret_cast<FixedArray<float, kNumPPISPParamsNoCRF>*>(&params),
+                    v_out_pixel,
+                    &v_pixel,
+                    reinterpret_cast<FixedArray<float, kNumPPISPParamsNoCRF>*>(&v_params)
+                );
+        }
 
         v_in_image.store3(bid, y, x, v_pixel);
     }

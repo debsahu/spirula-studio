@@ -228,14 +228,29 @@ check that keeps this exact.
 Measured, 600 steps on an RTX 5070 laptop, `SS_NO_TILE_SKIP=1` against the
 default:
 
-| capture | tiles skipped | time |
-|---|---|---|
-| 960x960 fisheye, ~200 deg, 5 faces | 44% | 8.9 s -> 8.0 s |
-| 1000x1500 fisheye, 108x162 deg, 6 faces | 25% | 7.8 s -> 7.5 s |
+| capture | tiles skipped | raster tiles | + appearance |
+|---|---|---|---|
+| 960x960 fisheye, ~200 deg, 5 faces | 44% | 8.9 s -> 8.0 s | -> 7.7 s |
+| 1000x1500 fisheye, 108x162 deg, 6 faces | 25% | 7.8 s -> 7.5 s | -> 7.3 s |
 
 Skipping 44% of the tiles buys 10% of the step, not 44%: projection, the sort,
 the optimizer and the loss are all still paid in full, and the tiles that go
 are the cheap ones -- a masked corner holds few splats.
+
+The appearance backward takes the same pixels a second way. A masked pixel's
+incoming gradient is zero, and every gradient bilagrid and PPISP produce from a
+pixel -- grid, parameter and image alike -- is LINEAR in it, so those pixels are
+skipped outright: `bilagrid_parity`/`ppisp_parity` dumped before the skip and
+compared after are bit-identical (max_abs 0 tight, 9.5e-07 loose from atomic
+order). That is 16% off the bilagrid backward here, 2.63 -> 2.20 ms a step.
+
+It is not the 44% the mask would suggest, and the reason is worth recording:
+the v1 gather runs one thread per (grid cell, luminance slice), only ~10k
+threads in 160 blocks, all resident at once -- so the kernel takes as long as
+its slowest thread, and the slowest thread is a cell whose pixels are all live.
+Skipping frees threads that then idle. The lever there is not the mask but the
+scan itself (every thread re-reads each pixel's RGB to bin it by luminance); the
+per-pixel halves of the backward, which do parallelize, take the full saving.
 
 One statistic is NOT identical, and deliberately so: the densification error
 map is the one consumer that is not mask-gated, so without skipping a splat

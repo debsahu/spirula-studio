@@ -172,16 +172,21 @@ void ppisp_image_bwd(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 
     if (inside) {
         uint pix = (bid * uint(p.H) + y) * uint(p.W) + x;
-        float3 pixel = float3(p.in_image[3 * pix], p.in_image[3 * pix + 1],
-                              p.in_image[3 * pix + 2]);
         float3 v_out = float3(p.out_image[3 * pix], p.out_image[3 * pix + 1],
                               p.out_image[3 * pix + 2]);
-        float4 intr = p.intrins[bid];
-        float3 v_pixel;
-        _pp_apply_vjp(pixel, float2(float(x), float(y)),
-                      float2(intr.z, intr.w),
-                      float2(p.actual_image_width, p.actual_image_height),
-                      pbuf, v_out, v_pixel, vbuf);
+        // Both gradients are linear in the incoming one, so a zero one -- a
+        // masked pixel, mostly -- has no transform to differentiate. Not a
+        // return: the block reduction below needs every thread.
+        float3 v_pixel = float3(0.0f);
+        if (any(v_out != float3(0.0f))) {
+            float3 pixel = float3(p.in_image[3 * pix], p.in_image[3 * pix + 1],
+                                  p.in_image[3 * pix + 2]);
+            float4 intr = p.intrins[bid];
+            _pp_apply_vjp(pixel, float2(float(x), float(y)),
+                          float2(intr.z, intr.w),
+                          float2(p.actual_image_width, p.actual_image_height),
+                          pbuf, v_out, v_pixel, vbuf);
+        }
         p.v_in_image[3 * pix] = v_pixel.x;
         p.v_in_image[3 * pix + 1] = v_pixel.y;
         p.v_in_image[3 * pix + 2] = v_pixel.z;

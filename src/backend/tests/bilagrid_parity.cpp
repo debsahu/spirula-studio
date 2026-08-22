@@ -92,6 +92,15 @@ struct Rng {
         for (auto& x : v) x = uf(lo, hi);
         return v;
     }
+
+    // An upstream gradient with the first half of the pixels at EXACTLY zero,
+    // as a loss mask leaves them -- which is the only thing the backward's
+    // skip path keys on, and random values never are.
+    std::vector<float> vgrad(int64_t n_pix, int c, float lo, float hi) {
+        std::vector<float> v = vec(n_pix * c, lo, hi);
+        for (int64_t i = 0; i < n_pix / 2 * c; i++) v[i] = 0.0f;
+        return v;
+    }
 };
 
 // A grid + optional q16 encoding (built on-device via
@@ -147,7 +156,7 @@ void test_affine(Rng& r) {
                                         backend::kDefaultStream, gi);
         readback_f(g_tight, out, 3 * np);
 
-        float* v_out = upload(r.vec(3 * np, -0.5f, 0.5f));
+        float* v_out = upload(r.vgrad(np, 3, -0.5f, 0.5f));
         float* v_grid = alloc_zero<float>((int64_t)N_img * 12 * L * Hg * Wg);
         float* v_rgb = alloc_zero<float>(3 * np);
         bilagrid_uniform_sample_backward_v1(g.reader(vq != 0), rgb, v_out,
@@ -172,7 +181,7 @@ void test_affine(Rng& r) {
         Grid g = make_grid(r, N_img, 12, Ls, Hs, Ws, -0.6f, 1.0f, false);
         int64_t np = (int64_t)N_img * h * w;
         float* rgb = upload(r.vec(3 * np, 0.0f, 1.0f));
-        float* v_out = upload(r.vec(3 * np, -0.2f, 0.2f));
+        float* v_out = upload(r.vgrad(np, 3, -0.2f, 0.2f));
         float* v_grid = alloc_zero<float>((int64_t)N_img * 12 * Ls * Hs * Ws);
         float* v_rgb = alloc_zero<float>(3 * np);
         bilagrid_uniform_sample_backward_v1(g.reader(false), rgb, v_out,
@@ -202,7 +211,7 @@ void test_affine(Rng& r) {
                                         backend::kDefaultStream);
         readback_f(g_tight, out, 3 * np);
 
-        float* v_out = upload(r.vec(3 * np, -0.5f, 0.5f));
+        float* v_out = upload(r.vgrad(np, 3, -0.5f, 0.5f));
         float* v_grid = alloc_zero<float>((int64_t)N_img * 12 * L * Hg * Wg);
         float* v_rgb = alloc_zero<float>(3 * np);
         bilagrid_patched_sample_backward_v1(
@@ -232,7 +241,7 @@ void test_affine(Rng& r) {
                                 Hg, Wg, m, h, w, backend::kDefaultStream);
         readback_f(g_tight, out, 3 * np);
 
-        float* v_out = upload(r.vec(3 * np, -0.5f, 0.5f));
+        float* v_out = upload(r.vgrad(np, 3, -0.5f, 0.5f));
         for (int with_coords = 0; with_coords < 2; with_coords++) {
             float* v_grid =
                 alloc_zero<float>((int64_t)N_img * 12 * L * Hg * Wg);
@@ -268,7 +277,7 @@ void test_ppisp(Rng& r) {
                                               nullptr);
         readback_f(g_tight, out, 3 * np);
 
-        float* v_out = upload(r.vec(3 * np, -0.4f, 0.4f));
+        float* v_out = upload(r.vgrad(np, 3, -0.4f, 0.4f));
         float* v_grid = alloc_zero<float>((int64_t)N_img * 9 * L * Hg * Wg);
         float* v_rgb = alloc_zero<float>(3 * np);
         bilagrid_ppisp_uniform_sample_backward_v1(
@@ -297,7 +306,7 @@ void test_ppisp(Rng& r) {
                                               h0, w0, backend::kDefaultStream);
         readback_f(g_tight, out, 3 * np);
 
-        float* v_out = upload(r.vec(3 * np, -0.4f, 0.4f));
+        float* v_out = upload(r.vgrad(np, 3, -0.4f, 0.4f));
         float* v_grid = alloc_zero<float>((int64_t)N_img * 9 * L * Hg * Wg);
         float* v_rgb = alloc_zero<float>(3 * np);
         bilagrid_ppisp_patched_sample_backward_v1(
@@ -320,7 +329,7 @@ void test_ppisp(Rng& r) {
                                       backend::kDefaultStream);
         readback_f(g_tight, out, 3 * np);
 
-        float* v_out = upload(r.vec(3 * np, -0.4f, 0.4f));
+        float* v_out = upload(r.vgrad(np, 3, -0.4f, 0.4f));
         float* v_grid = alloc_zero<float>((int64_t)N_img * 9 * L * Hg * Wg);
         float* v_coords = alloc_zero<float>(2 * np);
         float* v_rgb = alloc_zero<float>(3 * np);
@@ -376,7 +385,7 @@ void test_loglinear(Rng& r) {
             backend::kDefaultStream, nullptr);
         readback_f(g_tight, out, 3 * np);
 
-        float* v_out = upload(r.vec(3 * np, -0.4f, 0.4f));
+        float* v_out = upload(r.vgrad(np, 3, -0.4f, 0.4f));
         float* v_grid = alloc_zero<float>((int64_t)N_img * 9 * L * Hg * Wg);
         float* v_rgb = alloc_zero<float>(3 * np);
         bilagrid_loglinear_uniform_sample_backward_v1(
@@ -404,7 +413,7 @@ void test_loglinear(Rng& r) {
             h0, w0, backend::kDefaultStream);
         readback_f(g_tight, out, 3 * np);
 
-        float* v_out = upload(r.vec(3 * np, -0.4f, 0.4f));
+        float* v_out = upload(r.vgrad(np, 3, -0.4f, 0.4f));
         float* v_grid = alloc_zero<float>((int64_t)N_img * 9 * L * Hg * Wg);
         float* v_rgb = alloc_zero<float>(3 * np);
         bilagrid_loglinear_patched_sample_backward_v1(
