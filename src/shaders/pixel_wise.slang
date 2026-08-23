@@ -29,23 +29,47 @@ void rendered_depth_to_expected_depth_bwd(
     v_transmittance = p_transmittance.d;
 }
 
+// Straight-through derivative of the clamp below. Hand-written rather than
+// autodiffed: clamp's own backward drops only the "too bright" half of the
+// correction, so a pixel once over 1 could never come back down.
+void blend_background_bwd_impl(
+    inout DifferentialPair<float3> dp_rgb,
+    inout DifferentialPair<float> dp_transmittance,
+    inout DifferentialPair<float3> dp_background,
+    float3 v_out
+) {
+    float t = dp_transmittance.p;
+    float3 bg = dp_background.p;
+    dp_rgb = diffPair(dp_rgb.p, v_out);
+    dp_transmittance = diffPair(t, dot(bg, v_out));
+    dp_background = diffPair(bg, t * v_out);
+}
+
+[BackwardDerivative(blend_background_bwd_impl)]
 [Differentiable]
 [CudaDeviceExport]
 float3 blend_background(float3 rgb, float transmittance, float3 background) {
-    // Explicit splat: slangc 2026.12 (SPIR-V) constant-folds the SCALAR's
-    // derivative of `scalar * vector` to zero under bwd_diff, silently
-    // zeroing v_transmittance. float3(t, t, t) * vector keeps the gradient
-    // on both compilers (identical primal math).
-    return clamp(rgb + float3(transmittance, transmittance, transmittance)
-                           * background, 0.0, 1.0);
+    return clamp(rgb + transmittance * background, 0.0, 1.0);
+}
+
+// dL/dc of L = weight * mean(max(-c, c-1, 0)^2); scale is 2 * weight / N.
+[CudaDeviceExport]
+float3 overexposure_grad(float3 c, float scale) {
+    return scale * (min(c, float3(0.0f)) + max(c - float3(1.0f), float3(0.0f)));
 }
 
 [CudaDeviceExport]
 void blend_background_bwd(
     float3 rgb, float transmittance, float3 background,
-    float3 v_out_rgb,
+    float3 v_out_rgb, float overexposure_scale,
     out float3 v_rgb, out float v_transmittance, out float3 v_background
 ) {
+    // `rgb` MUST be the pre-blend render: the overexposure term needs the
+    // unclamped composite, which no caller can recover from the blend output.
+    // Branch, not a multiply by zero: an infinite composite would make 0*inf.
+    if (overexposure_scale != 0.0f)
+        v_out_rgb += overexposure_grad(rgb + transmittance * background,
+                                       overexposure_scale);
     var p_rgb = diffPair(rgb);
     var p_transmittance = diffPair(transmittance);
     var p_background = diffPair(background);

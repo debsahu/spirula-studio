@@ -230,11 +230,11 @@ still compile + emit identical CUDA exports with 2026.2.1):
 - `pixel_wise.slang`: 2026.12 SPIR-V codegen constant-folds the SCALAR's
   derivative of `scalar * vector` to zero under bwd_diff — SILENT wrong
   code (v_transmittance in blend_background came back all-zero; caught by
-  pwtrain_parity). Worked around with an explicit
-  `float3(t, t, t) * vector` splat. RULE: when a differentiable function
-  needs the gradient of a scalar that multiplies a vector, write the splat
-  explicitly, and treat parity coverage of every scalar gradient as
-  mandatory.
+  pwtrain_parity). The workaround was an explicit `float3(t, t, t) * vector`
+  splat; blend_background now carries a hand-written `[BackwardDerivative]`
+  and no longer needs it. RULE: when a differentiable function needs the
+  gradient of a scalar that multiplies a vector, write the splat explicitly,
+  and treat parity coverage of every scalar gradient as mandatory.
 
 ### slangc `[unroll]` is a hint; `[ForceUnroll]` is the one that unrolls
 

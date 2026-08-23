@@ -788,19 +788,12 @@ static std::map<std::string, float> _engine_loss(
     }
 
     // --- Image-space overexposure regularization ---
-    // Adds dL/dx of L = w * mean(max(-x, x-1, 0)^2) into v_render_rgb in
-    // place, operating on the raw rendered RGB (pre-bilagrid / pre-PPISP /
-    // pre-color-space). At this point both buffers live in the splat
-    // working color space (color-space bwd has restored fwd.renders.rgb
-    // and rewritten v_render_rgb), so the gradient lands on the same space
-    // raster bwd will consume. No scalar loss is materialized; the kernel
-    // is skipped entirely when the weight is zero.
-    if (overexposure_reg_weight != 0.0f) {
-        // Source rgb in the pre-color-space (post-bg) working space:
-        // - color space enabled: the color-space bwd hook does not re-point
-        //   engine().fwd.renders.rgb, so render_rgb still aliases the sRGB
-        //   output; the pre-conversion buffer lives at cs.fwd_pre.
-        // - color space disabled: render_rgb already is the post-bg buffer.
+    // Skipped under a blend: that clamped this buffer to [0,1], so the penalty
+    // would be identically zero -- the blend backward applies it instead.
+    if (overexposure_reg_weight != 0.0f && !engine().background.enabled) {
+        // Both buffers are in the splat working color space here: cs.fwd_pre
+        // is the pre-conversion render when color space is on (its bwd hook
+        // does not re-point fwd.renders.rgb), render_rgb itself when off.
         DeviceTensor3D<float3> rgb_t = engine().color_space.splat_enabled
             ? engine().color_space.fwd_pre
             : DeviceTensor3D<float3>(render_rgb);
@@ -816,7 +809,8 @@ static std::map<std::string, float> _engine_loss(
     if (engine().background.enabled) {
         _engine_background_backward_hook(
             pixel_grads.v_render_rgb,
-            pixel_grads.v_render_Ts);
+            pixel_grads.v_render_Ts,
+            overexposure_reg_weight);
     }
 
     // Depth -> normal backward: propagate v_depth_normal grads into v_render_depth (in-place add)

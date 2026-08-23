@@ -130,9 +130,10 @@ void blend_background_forward(
 
 
 void blend_background_backward(
-    DeviceTensor3D<float3> rgb,              // [B, H, W, 3]
+    DeviceTensor3D<float3> rgb,              // [B, H, W, 3] PRE-blend
     DeviceTensor3D<float>  transmittance,    // [B, H, W, 1]
     DeviceTensor3D<float3> background,       // [B, H, W, 3]
+    float overexposure_weight,               // fused image-space reg, 0 = off
     DeviceTensor3D<float3> v_out_rgb,        // [B, H, W, 3]
     DeviceTensor3D<float3> v_rgb,            // [B, H, W, 3]
     DeviceTensor3D<float>  v_transmittance,  // [B, H, W, 1]
@@ -152,10 +153,11 @@ void blend_background_noise_forward(
 
 void blend_background_noise_backward(
     bool is_linear,
-    DeviceTensor3D<float3> rgb,              // [B, H, W, 3]
+    DeviceTensor3D<float3> rgb,              // [B, H, W, 3] PRE-blend
     DeviceTensor3D<float>  transmittance,    // [B, H, W, 1]
     float randomize_weight,
     uint32_t seed,
+    float overexposure_weight,               // fused image-space reg, 0 = off
     DeviceTensor3D<float3> v_out_rgb,        // [B, H, W, 3]
     DeviceTensor3D<float3> v_rgb,            // [B, H, W, 3]
     DeviceTensor3D<float>  v_transmittance   // [B, H, W, 1]

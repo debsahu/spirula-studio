@@ -145,14 +145,14 @@ void _engine_bilagrid_backward_hook(
 void _ensure_bilagrid_optim_state();
 void _engine_bilagrid_tv_into(float* tv_buf3_device);
 
-// Background blend: forward (in-place on fwd.renders.rgb; called by
-// forward_3dgs so both training and viewer renders include the blend),
-// backward hook (adds the blend's v_T contribution into v_render_Ts), and
-// per-iter (seed, randomize_weight) setter consumed by the next forward.
+// Background blend: forward runs inside forward_3dgs, out of place, so viewer
+// renders blend too. The backward hook adds v_T, rewrites v_render_rgb, and
+// folds in overexposure_reg -- which needs the pre-clamp composite.
 void _engine_background_forward();
 void _engine_background_backward_hook(
     TorchTensorView v_render_rgb,
-    TorchTensorView v_render_Ts);
+    TorchTensorView v_render_Ts,
+    float overexposure_reg_weight);
 
 // Color space (linear / wide-gamut): apply rgb_to_srgb_forward in-place on
 // the rendered RGB (called from forward_3dgs after the background blend);

@@ -1,23 +1,13 @@
 // Engine background blending (none / random noise / SH skybox).
 //
-// Forward order in the engine pipeline:
-//     forward_3dgs
-//  -> engine_background_forward     (THIS file: in-place on fwd.renders.rgb,
-//                                     saves pre-blend rgb + skybox when SH)
-//  -> engine_bilagrid_forward
-//  -> engine_ppisp_forward
-//  -> compute_loss + backward
-//
-// Backward (inside engine_compute_loss_backward) is the reverse:
-//     PPISP bwd  ->  bilagrid bwd  ->  background bwd  ->  raster bwd
-// The background bwd overwrites v_render_rgb (post-blend -> pre-blend) and
-// ADDS the blend's contribution into v_render_Ts. SH mode also accumulates
-// per-camera gradient into the SH coefficient table; the rotation gradient
-// is dropped here (cameras are fixed in the engine path).
-//
-// Scratch buffers (v_Ts, v_bg, v_sh) are pool-acquired rather than fused, so
-// the footprint is one extra [C, H, W, 1] (v_Ts) and, for SH mode, two more
-// [C, H, W, 3] (pre-blend rgb + skybox + v_bg).
+// Forward runs inside forward_3dgs (so viewer renders blend too), out of place
+// on fwd.renders.rgb: the pre-blend buffer is kept because the blend clamps to
+// [0,1] and nothing downstream can recover the composite from before it.
+// Backward order is PPISP -> bilagrid -> background -> raster; the hook here
+// rewrites v_render_rgb (post-blend -> pre-blend), ADDS into v_render_Ts, and
+// folds in overexposure_reg. The blend's own backward does NOT mask at the
+// clamp. SH mode also accumulates per-camera gradient into the SH coefficient
+// table; the rotation gradient is dropped (cameras are fixed here).
 
 #include "engine/Engine.h"
 #include "engine/EngineCommon.h"
@@ -130,7 +120,7 @@ void engine_set_background_step_params(uint32_t seed, float randomize_weight) {
 
 
 // ============================================================================
-// Forward: blend background into engine().fwd.renders.rgb (in place).
+// Forward: blend background into engine().fwd.renders.rgb.
 // Called from forward_3dgs so both training and viewer renders see the blend.
 // Reads (seed, randomize_weight) from state.
 // ============================================================================
@@ -148,28 +138,28 @@ void _engine_background_forward() {
     if (fwd_rgb_tensor.data_ptr() == nullptr || fwd_Ts_tensor.data_ptr() == nullptr)
         throw std::runtime_error("engine_background_forward: forward_3dgs must run first");
 
-    DeviceTensor3D<float3> rgb_io(fwd_rgb_tensor);          // [C, H, W]
-    DeviceTensor3D<float>  Ts_in (fwd_Ts_tensor);           // [C, H, W]
+    DeviceTensor3D<float>  Ts_in(fwd_Ts_tensor);            // [C, H, W]
+
+    // Both modes blend out-of-place: pre-blend rgb is a pointer alias of the
+    // current renders.rgb (no copy), post goes to a fresh buffer. Backward
+    // needs pre to rebuild the composite the blend clamped away.
+    bg.fwd_pre_blend_rgb = fwd_rgb_tensor;
+    DeviceTensor3D<float3> post_rgb;
+    post_rgb.resize(PoolSlot::EngBgSkyRgbPost, C_batch, H, W);
 
     if (bg.mode == EngineBackground::Mode::Noise) {
-        // Per-pixel local; in/out aliasing is safe.
         blend_background_noise_forward(
             bg.splat_color_is_linear,
-            rgb_io, Ts_in,
+            bg.fwd_pre_blend_rgb, Ts_in,
             bg.cur_randomize_weight, bg.cur_seed,
-            rgb_io);
+            post_rgb);
+        fwd_rgb_tensor = post_rgb;
         return;
     }
 
     // ---- SH mode ----
-    // 1. Pre-blend rgb = current renders.rgb buffer (pointer alias, no copy).
-    //    The blend reads from this and writes to a fresh "post" buffer below,
-    //    so we don't need to preserve `current` via a D2D copy.
-    bg.fwd_pre_blend_rgb = fwd_rgb_tensor;
-
-    // 2. Evaluate skybox SH into a per-batch image using engine state buffers
-    //    directly (no R_wc / dist_coeffs gather). render_background_sh_*
-    //    handles per-batch cam_indices indirection internally.
+    // Skybox SH into a per-batch image from engine state buffers directly (no
+    // R_wc / dist_coeffs gather); the kernel does the cam_indices indirection.
     bg.fwd_background.resize(PoolSlot::EngBgSkyImage, C_batch, H, W);
     TorchTensorView bg_image_tv = _dt3d_tv(bg.fwd_background);
     BgShViews vs = _engine_bg_sh_views(C_batch);
@@ -179,11 +169,6 @@ void _engine_background_forward() {
         vs.viewmats, vs.intrins, vs.dist_coeffs,
         vs.sh_coeffs, bg_image_tv);
 
-    // 3. Out-of-place blend: read pre, write to a fresh post buffer, then
-    //    re-point engine().fwd.renders.rgb at the post buffer. The old buffer
-    //    (now aliased by fwd_pre_blend_rgb) is preserved for backward.
-    DeviceTensor3D<float3> post_rgb;
-    post_rgb.resize(PoolSlot::EngBgSkyRgbPost, C_batch, H, W);
     DeviceTensor3D<float3> bg_image(bg_image_tv);
     blend_background_forward(bg.fwd_pre_blend_rgb, Ts_in, bg_image, post_rgb);
     fwd_rgb_tensor = post_rgb;
@@ -195,7 +180,8 @@ void _engine_background_forward() {
 // ============================================================================
 void _engine_background_backward_hook(
     TorchTensorView v_render_rgb,   // [C, H, W, 3] in/out (post-blend in; pre-blend out)
-    TorchTensorView v_render_Ts     // [C, H, W, 1] in/out (accumulate blend's v_T)
+    TorchTensorView v_render_Ts,    // [C, H, W, 1] in/out (accumulate blend's v_T)
+    float overexposure_reg_weight   // fused here: the blend output is clamped
 ) {
     auto& bg = engine().background;
     if (!bg.enabled || bg.mode == EngineBackground::Mode::None) return;
@@ -212,8 +198,7 @@ void _engine_background_backward_hook(
     // Defensive: the forward hook must have run earlier this step. Skip if the
     // expected per-iter buffers aren't populated (e.g. caller invoked
     // engine_compute_loss_backward directly without going through engine_train_step).
-    if (bg.mode == EngineBackground::Mode::Sh &&
-        bg.fwd_pre_blend_rgb.data_ptr() == nullptr) return;
+    if (bg.fwd_pre_blend_rgb.data_ptr() == nullptr) return;
     if (fwd_rgb_tensor.data_ptr() == nullptr || fwd_Ts_tensor.data_ptr() == nullptr) return;
 
     // Scratch v_Ts; blend backward writes here, then we accumulate into the
@@ -227,16 +212,13 @@ void _engine_background_backward_hook(
     DeviceTensor3D<float>  v_Ts_scratch_dt(v_Ts_scratch_tv);
 
     if (bg.mode == EngineBackground::Mode::Noise) {
-        // Forward overwrote rgb with post-blend; the noise blend formula is
-        // linear in rgb so v_rgb doesn't actually depend on rgb_pre, but the
-        // kernel API requires the buffer. Pass post-blend (harmless).
-        DeviceTensor3D<float3> rgb_post(fwd_rgb_tensor);
-        DeviceTensor3D<float>  Ts_in   (fwd_Ts_tensor);
-        DeviceTensor3D<float3> v_out   (v_render_rgb);
+        DeviceTensor3D<float>  Ts_in(fwd_Ts_tensor);
+        DeviceTensor3D<float3> v_out(v_render_rgb);
         blend_background_noise_backward(
             bg.splat_color_is_linear,
-            rgb_post, Ts_in,
+            bg.fwd_pre_blend_rgb, Ts_in,
             bg.cur_randomize_weight, bg.cur_seed,
+            overexposure_reg_weight,
             v_out, v_rgb, v_Ts_scratch_dt);
     } else {
         // SH mode: full blend backward gives v_background; propagate to v_sh.
@@ -253,7 +235,7 @@ void _engine_background_backward_hook(
         DeviceTensor3D<float3> v_bg(v_bg_tv);
 
         blend_background_backward(
-            rgb_pre, Ts_in, bg_image,
+            rgb_pre, Ts_in, bg_image, overexposure_reg_weight,
             v_out, v_rgb, v_Ts_scratch_dt, v_bg);
 
         // v_sh_coeffs: zero per-iter, persists past hook for the optim step.

@@ -103,7 +103,7 @@ void blend_background_noise_fwd(uint3 wg: SV_GroupID,
     background.x = float(hash_uint3(p.seed + 0, gid, bid)) * exp2(-32.0f);
     background.y = float(hash_uint3(p.seed + 1, gid, bid)) * exp2(-32.0f);
     background.z = float(hash_uint3(p.seed + 2, gid, bid)) * exp2(-32.0f);
-    background = 0.5f + 0.5f * p.randomize_weight * background;
+    background = 0.5f + 0.5f * p.randomize_weight * (2.0f * background - 1.0f);
     if (kFlagLinear != 0) {
         background.x = srgb_to_linear_rgb(background.x);
         background.y = srgb_to_linear_rgb(background.y);

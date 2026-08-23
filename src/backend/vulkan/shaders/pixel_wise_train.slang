@@ -29,14 +29,15 @@ bool _pwt_finitef(float v) {
 // blend_background_backward
 // ---------------------------------------------------------------------------
 
-struct BlendBgBwdParams {  // 64 bytes: pushed directly
-    float* rgb;            // [B,H,W,3]
+struct BlendBgBwdParams {  // 68 bytes: pushed directly
+    float* rgb;            // [B,H,W,3] PRE-blend
     float* transmittance;  // [B,H,W,1]
     float* background;     // [B,H,W,3]
     float* v_out_rgb;      // [B,H,W,3]
     float* v_rgb;          // [B,H,W,3]
     float* v_transmittance;// [B,H,W,1]
     float* v_background;   // [B,H,W,3]
+    float overexposure_scale;
     uint32_t total;        // B*H*W
     uint32_t wgs_per_row;
 };
@@ -57,7 +58,8 @@ void blend_bg_bwd(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     float3 v_rgb;
     float v_T;
     float3 v_bg;
-    blend_background_bwd(rgb, T, bg, v_out, v_rgb, v_T, v_bg);
+    blend_background_bwd(rgb, T, bg, v_out, p.overexposure_scale, v_rgb, v_T,
+                         v_bg);
     p.v_rgb[3 * idx] = v_rgb.x;
     p.v_rgb[3 * idx + 1] = v_rgb.y;
     p.v_rgb[3 * idx + 2] = v_rgb.z;
@@ -89,12 +91,13 @@ uint _pwt_hash_uint3(uint a, uint b, uint c) {
     return hash;
 }
 
-struct BlendBgNoiseBwdParams {  // 60 bytes: pushed directly
-    float* rgb;
+struct BlendBgNoiseBwdParams {  // 64 bytes: pushed directly
+    float* rgb;            // PRE-blend
     float* transmittance;
     float* v_out_rgb;
     float* v_rgb;
     float* v_transmittance;
+    float overexposure_scale;
     float randomize_weight;
     uint32_t seed;
     uint32_t HW;
@@ -119,7 +122,7 @@ void blend_bg_noise_bwd(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     background.x = float(_pwt_hash_uint3(p.seed + 0, gid, bid)) * exp2(-32.0f);
     background.y = float(_pwt_hash_uint3(p.seed + 1, gid, bid)) * exp2(-32.0f);
     background.z = float(_pwt_hash_uint3(p.seed + 2, gid, bid)) * exp2(-32.0f);
-    background = 0.5f + 0.5f * p.randomize_weight * background;
+    background = 0.5f + 0.5f * p.randomize_weight * (2.0f * background - 1.0f);
     if (kFlagLinear != 0) {
         background.x = srgb_to_linear_rgb(background.x);
         background.y = srgb_to_linear_rgb(background.y);
@@ -131,7 +134,8 @@ void blend_bg_noise_bwd(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     float3 v_rgb;
     float v_T;
     float3 v_bg;
-    blend_background_bwd(rgb, T, background, v_out, v_rgb, v_T, v_bg);
+    blend_background_bwd(rgb, T, background, v_out, p.overexposure_scale,
+                         v_rgb, v_T, v_bg);
     p.v_rgb[3 * idx] = v_rgb.x;
     p.v_rgb[3 * idx + 1] = v_rgb.y;
     p.v_rgb[3 * idx + 2] = v_rgb.z;
@@ -191,12 +195,11 @@ void overexposure_add(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
                       uniform OverexposureParams p) {
     uint idx = (wg.y * p.wgs_per_row + wg.x) * 128 + tid;
     if (idx >= p.total) return;
-    [ForceUnroll]
-    for (int c = 0; c < 3; c++) {
-        float x = p.rgb[3 * idx + c];
-        float g = (x < 0.0f) ? x : (x > 1.0f) ? (x - 1.0f) : 0.0f;
-        p.v_rgb[3 * idx + c] += p.scale * g;
-    }
+    float3 c = float3(p.rgb[3 * idx], p.rgb[3 * idx + 1], p.rgb[3 * idx + 2]);
+    float3 g = overexposure_grad(c, p.scale);
+    p.v_rgb[3 * idx] += g.x;
+    p.v_rgb[3 * idx + 1] += g.y;
+    p.v_rgb[3 * idx + 2] += g.z;
 }
 
 // ---------------------------------------------------------------------------

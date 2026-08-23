@@ -84,26 +84,26 @@ int main(int argc, char** argv) {
     auto fresh3 = [&]() { return upload(std::vector<float>(PIX * 3, 0.f)); };
     auto fresh1 = [&]() { return upload(std::vector<float>(PIX, 0.f)); };
 
-    // ---- blend_background_backward ----
-    {
+    // ---- blend_background_backward (reg off, then the fused overexposure) ----
+    for (float over : {0.0f, 3.0f}) {
         float* d_vr = fresh3();
         float* d_vt = fresh1();
         float* d_vb = fresh3();
-        blend_background_backward(t3(d_rgb), t1(d_T), t3(d_bg), t3(d_vout),
-                                  t3(d_vr), t1(d_vt), t3(d_vb));
+        blend_background_backward(t3(d_rgb), t1(d_T), t3(d_bg), over,
+                                  t3(d_vout), t3(d_vr), t1(d_vt), t3(d_vb));
         backend::device_synchronize();
         readback_f(acc, d_vr, PIX * 3);
         readback_f(acc, d_vt, PIX);
         readback_f(acc, d_vb, PIX * 3);
     }
 
-    // ---- blend_background_noise_backward (both linear modes) ----
-    for (int lin = 0; lin < 2; lin++) {
+    // ---- blend_background_noise_backward (both linear modes x reg off/on) ----
+    for (int lin = 0; lin < 2; lin++) for (float over : {0.0f, 3.0f}) {
         float* d_vr = fresh3();
         float* d_vt = fresh1();
         blend_background_noise_backward(lin != 0, t3(d_rgb), t1(d_T), 0.7f,
-                                        1234u + lin, t3(d_vout), t3(d_vr),
-                                        t1(d_vt));
+                                        1234u + lin, over, t3(d_vout),
+                                        t3(d_vr), t1(d_vt));
         backend::device_synchronize();
         readback_f(acc, d_vr, PIX * 3);
         readback_f(acc, d_vt, PIX);

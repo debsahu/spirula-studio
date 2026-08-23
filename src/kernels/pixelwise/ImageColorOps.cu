@@ -5,6 +5,13 @@
 
 #include "kernels/pixelwise/PixelWiseCommon.cuh"
 
+// 2 * weight / N for L = weight * mean(max(-x, x-1, 0)^2) over N = B*H*W*3.
+static inline float _overexposure_scale(long b, long h, long w, float weight) {
+    if (weight == 0.0f) return 0.0f;
+    double n = (double)b * (double)h * (double)w * 3.0;
+    return (float)(2.0 * (double)weight / n);
+}
+
 // ================
 // Blend Background
 // ================
@@ -36,6 +43,7 @@ __global__ void blend_background_backward_kernel(
     const TensorView<float, 4> in_rgb,
     const TensorView<float, 4> in_transmittance,
     const TensorView<float, 4> in_background,
+    const float overexposure_scale,
     const TensorView<float, 4> v_out_rgb,
     TensorView<float, 4> v_in_rgb,
     TensorView<float, 4> v_in_transmittance,
@@ -58,7 +66,7 @@ __global__ void blend_background_backward_kernel(
     float3 v_rgb; float v_transmittance; float3 v_background;
     SlangPixelWise::blend_background_bwd(
         rgb, transmittance, background,
-        v_out,
+        v_out, overexposure_scale,
         &v_rgb, &v_transmittance, &v_background
     );
 
@@ -86,9 +94,10 @@ void blend_background_forward(
 
 /*[AutoHeaderGeneratorExport]*/
 void blend_background_backward(
-    DeviceTensor3D<float3> rgb,              // [B, H, W, 3]
+    DeviceTensor3D<float3> rgb,              // [B, H, W, 3] PRE-blend
     DeviceTensor3D<float>  transmittance,    // [B, H, W, 1]
     DeviceTensor3D<float3> background,       // [B, H, W, 3]
+    float overexposure_weight,               // fused image-space reg, 0 = off
     DeviceTensor3D<float3> v_out_rgb,        // [B, H, W, 3]
     DeviceTensor3D<float3> v_rgb,            // [B, H, W, 3]
     DeviceTensor3D<float>  v_transmittance,  // [B, H, W, 1]
@@ -98,6 +107,7 @@ void blend_background_backward(
 
     blend_background_backward_kernel<<<_LAUNCH_ARGS_2D(h*w, b, 256, 1)>>>(
         _dt3d_to_tv4<float>(rgb), _dt3d_to_tv4<float>(transmittance), _dt3d_to_tv4<float>(background),
+        _overexposure_scale(b, h, w, overexposure_weight),
         _dt3d_to_tv4<float>(v_out_rgb),
         _dt3d_to_tv4<float>(v_rgb), _dt3d_to_tv4<float>(v_transmittance), _dt3d_to_tv4<float>(v_background)
     );
@@ -132,7 +142,7 @@ __global__ void blend_background_noise_forward_kernel(
     background.x = (float)hash_uint3(seed + 0, gid, bid) * exp2f(-32.0f);
     background.y = (float)hash_uint3(seed + 1, gid, bid) * exp2f(-32.0f);
     background.z = (float)hash_uint3(seed + 2, gid, bid) * exp2f(-32.0f);
-    background = 0.5 + 0.5*randomize_weight * background;
+    background = 0.5 + 0.5*randomize_weight * (2.0f * background - 1.0f);
     if (is_linear) {
         background.x = SlangPixelWise::srgb_to_linear_rgb(background.x);
         background.y = SlangPixelWise::srgb_to_linear_rgb(background.y);
@@ -150,6 +160,7 @@ __global__ void blend_background_noise_backward_kernel(
     const TensorView<float, 4> in_transmittance,
     const float randomize_weight,
     const uint32_t seed,
+    const float overexposure_scale,
     const TensorView<float, 4> v_out_rgb,
     TensorView<float, 4> v_in_rgb,
     TensorView<float, 4> v_in_transmittance
@@ -169,7 +180,7 @@ __global__ void blend_background_noise_backward_kernel(
     background.x = (float)hash_uint3(seed + 0, gid, bid) * exp2f(-32.0f);
     background.y = (float)hash_uint3(seed + 1, gid, bid) * exp2f(-32.0f);
     background.z = (float)hash_uint3(seed + 2, gid, bid) * exp2f(-32.0f);
-    background = 0.5 + 0.5*randomize_weight * background;
+    background = 0.5 + 0.5*randomize_weight * (2.0f * background - 1.0f);
     if (is_linear) {
         background.x = SlangPixelWise::srgb_to_linear_rgb(background.x);
         background.y = SlangPixelWise::srgb_to_linear_rgb(background.y);
@@ -181,7 +192,7 @@ __global__ void blend_background_noise_backward_kernel(
     float3 v_rgb; float v_transmittance; float3 v_background;
     SlangPixelWise::blend_background_bwd(
         rgb, transmittance, background,
-        v_out,
+        v_out, overexposure_scale,
         &v_rgb, &v_transmittance, &v_background
     );
 
@@ -212,10 +223,11 @@ void blend_background_noise_forward(
 /*[AutoHeaderGeneratorExport]*/
 void blend_background_noise_backward(
     bool is_linear,
-    DeviceTensor3D<float3> rgb,              // [B, H, W, 3]
+    DeviceTensor3D<float3> rgb,              // [B, H, W, 3] PRE-blend
     DeviceTensor3D<float>  transmittance,    // [B, H, W, 1]
     float randomize_weight,
     uint32_t seed,
+    float overexposure_weight,               // fused image-space reg, 0 = off
     DeviceTensor3D<float3> v_out_rgb,        // [B, H, W, 3]
     DeviceTensor3D<float3> v_rgb,            // [B, H, W, 3]
     DeviceTensor3D<float>  v_transmittance   // [B, H, W, 1]
@@ -226,6 +238,7 @@ void blend_background_noise_backward(
     <<<_LAUNCH_ARGS_2D(h*w, b, 256, 1)>>>(
         _dt3d_to_tv4<float>(rgb), _dt3d_to_tv4<float>(transmittance),
         randomize_weight, seed,
+        _overexposure_scale(b, h, w, overexposure_weight),
         _dt3d_to_tv4<float>(v_out_rgb),
         _dt3d_to_tv4<float>(v_rgb), _dt3d_to_tv4<float>(v_transmittance)
     );
@@ -354,17 +367,12 @@ void rgb_to_srgb_backward(
 // Overexposure Regularization
 // ================
 
-// Penalizes rgb values outside [0,1] with an L2 loss
-//   L = weight * mean_{b,y,x,c}( max(-x, x-1, 0)^2 )
-// The actual scalar loss is never materialized; this kernel only adds the
-// per-pixel gradient dL/dx into v_rgb in-place. With N = B*H*W*3 the
-// per-channel grad is
-//   x < 0  : 2 * weight * x / N
-//   x > 1  : 2 * weight * (x - 1) / N
-//   else   : 0
+// Gradient of L = weight * mean(max(-x, x-1, 0)^2), added into v_rgb in place;
+// the scalar loss is never materialized. Only for the no-background path: with
+// a blend enabled the same term is fused there, onto the UNCLAMPED composite.
 __global__ void overexposure_grad_add_kernel(
     const TensorView<float, 4> rgb,
-    const float scale,                // 2 * weight / (B * H * W * 3)
+    const float scale,
     TensorView<float, 4> v_rgb
 ) {
     unsigned gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -374,18 +382,12 @@ __global__ void overexposure_grad_add_kernel(
     unsigned y = gid / W;
     unsigned x = gid % W;
 
-    float3 c   = rgb.load3(bid, y, x);
-    float3 v   = v_rgb.load3(bid, y, x);
-
-    auto over = [scale](float v_in, float v_pix) -> float {
-        float g = (v_pix < 0.0f) ? v_pix
-                : (v_pix > 1.0f) ? (v_pix - 1.0f)
-                : 0.0f;
-        return v_in + scale * g;
-    };
-    v.x = over(v.x, c.x);
-    v.y = over(v.y, c.y);
-    v.z = over(v.z, c.z);
+    float3 c = rgb.load3(bid, y, x);
+    float3 v = v_rgb.load3(bid, y, x);
+    float3 g = SlangPixelWise::overexposure_grad(c, scale);
+    v.x += g.x;
+    v.y += g.y;
+    v.z += g.z;
 
     v_rgb.store3(bid, y, x, v);
 }
@@ -398,12 +400,10 @@ void overexposure_grad_add(
 ) {
     long b = rgb.size<0>(), h = rgb.size<1>(), w = rgb.size<2>();
     if (b <= 0 || h <= 0 || w <= 0 || weight == 0.0f) return;
-    double N = (double)b * (double)h * (double)w * 3.0;
-    float scale = (float)(2.0 * (double)weight / N);
 
     overexposure_grad_add_kernel<<<_LAUNCH_ARGS_2D(h * w, b, 256, 1)>>>(
         _dt3d_to_tv4<float>(rgb),
-        scale,
+        _overexposure_scale(b, h, w, weight),
         _dt3d_to_tv4<float>(v_rgb)
     );
     CHECK_DEVICE_ERROR(cudaGetLastError());
