@@ -265,6 +265,7 @@ private:
     double _paused_s = 0.0;
     mutable std::mutex _progress_mutex;    // guards the latency window
     std::deque<double> _step_latencies;    // last 100, seconds
+    bool _diverged_loss_reported = false;
 };
 
 }  // namespace spirula

@@ -5,6 +5,7 @@
 
 #include "backend/api/BackendTypes.h"
 #include "backend/api/BackendRuntime.h"
+#include "core/Env.h"
 
 #include <mutex>
 #include <tuple>
@@ -170,6 +171,14 @@ class DevicePool {
     DevicePool(const DevicePool&) = delete;
     DevicePool& operator=(const DevicePool&) = delete;
 
+    static bool _poison_pool() {
+        static const bool on = [] {
+            const char* e = spirula::env("POISON_POOL");
+            return e && e[0] && e[0] != '0';
+        }();
+        return on;
+    }
+
     // Grow-if-needed on a Slot already selected by the caller (mutex held).
     template<typename T>
     static T* _acquire_into(Slot& slot, size_t n) {
@@ -182,6 +191,10 @@ class DevicePool {
             slot.cap_bytes = 0;
             slot.ptr = backend::device_malloc_checked(bytes);
             slot.cap_bytes = bytes;
+            // SS_POISON_POOL=1: fresh device memory holds whatever the
+            // driver left, so a read-before-write is silent where that is
+            // zero and catastrophic where it is not. NaN makes it show.
+            if (_poison_pool()) backend::memset_sync(slot.ptr, 0xff, bytes);
         }
         slot.used_bytes = bytes;
         slot.dtype_tag  = (uint8_t)npy_scalar_tag<T>();
@@ -1057,6 +1070,11 @@ public:
             u_q = (float)(b & 0x0Fu);
             s_q = (float)((b >> 4) & 0x0Fu);
         }
+        // A non-finite bound would decode every one of the block's 256 cells
+        // to NaN, which no later step can undo. Decode 0 instead: the block's
+        // Adam state restarts rather than staying poisoned.
+        if (!std::isfinite(mm.x) || !std::isfinite(mm.y)) { mm.x = 0.0f; mm.y = 0.0f; }
+        if (!std::isfinite(mm.z) || !std::isfinite(mm.w)) { mm.z = 0.0f; mm.w = 0.0f; }
         return float2{
             mm.x + (mm.y - mm.x) * (u_q * kInvQMax),
             mm.z + (mm.w - mm.z) * (s_q * kInvQMax)

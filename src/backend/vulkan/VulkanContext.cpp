@@ -507,6 +507,16 @@ void Context::init() {
             f12.pNext = &fsgc;
         }
     }
+    // Several kernels index subgroups as tid / WaveGetLaneCount() against a
+    // 32-wide workgroup, so a wider unpinned subgroup makes the count 0 and
+    // the result silently wrong (rasterize_bwd's survivor compaction).
+    if (!_caps.required_subgroup_size && _caps.subgroup_size > 32) {
+        std::fprintf(stderr,
+            "[spirula-vk] warning: %s reports subgroup size %u and does not "
+            "support VK_EXT_subgroup_size_control, which this build needs to "
+            "pin it to 32. Training results on this device are not trusted.\n",
+            _device_name.c_str(), _caps.subgroup_size);
+    }
 
     VkPhysicalDeviceFeatures features{};
     features.shaderInt64 = probe.shader_int64 ? VK_TRUE : VK_FALSE;

@@ -941,9 +941,36 @@ void TrainerSession::save_checkpoint(int step) {
 std::map<std::string, float> TrainerSession::train_step(int step) {
     int sh_degree_to_use = step / std::max(cfg.sh_degree_warmup_every, 1);
     EngineStepConfig sc = build_step_config(cfg, st, step);
-    return engine_train_step_managed(
+    auto losses = engine_train_step_managed(
         step, cfg.num_iterations, cfg.primitive, sh_degree_to_use,
         cfg.packed || cfg.use_bvh, sc);
+
+    // Sticky and returns-and-clears, and nothing else on the training thread
+    // reads it: a failed dispatch or copy would otherwise leave a buffer
+    // unwritten and training would carry on over whatever was in it.
+    if (const char* err = backend::last_error())
+        throw std::runtime_error("GPU backend error at step " +
+                                 std::to_string(step) + ": " + err);
+
+    // Divergence never recovers, and the run otherwise continues in silence to
+    // a black render and a checkpoint with zero splats. Reported values sit
+    // well under 10, so 1e3 is clear of anything legitimate.
+    if (!_diverged_loss_reported) {
+        for (const auto& [name, value] : losses) {
+            if (name == "cur_num_splats" || name == "max_num_splats" ||
+                name == "num_added")
+                continue;
+            // Magnitude only for rgb_loss: the others carry scene-dependent
+            // units (depth, TV) with no comparable ceiling.
+            const bool huge = name == "rgb_loss" && std::fabs(value) > 1e3f;
+            if (std::isfinite(value) && !huge) continue;
+            _diverged_loss_reported = true;
+            log(lfmt(lmsg::warn_diverged_loss,
+                     {(long long)step, name, (double)value}));
+            break;
+        }
+    }
+    return losses;
 }
 
 void TrainerSession::pause_clock_start() {

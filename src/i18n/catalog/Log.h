@@ -1810,6 +1810,43 @@ SS_MSG(warn_fpbo_incompatible,
        "`use_fused_proj_bwd_optim` bunlar arasında gradyan biriktiremiyor. "
        "Kapatıldı, `split_batch` korunuyor."));
 
+SS_MSG(warn_diverged_loss,
+    EN("warning: training diverged at step {0} (`{1}` = {2}). It will not "
+       "recover, and the result will render black. Please report it with the "
+       "run's config.json."),
+    JA("警告: ステップ {0} で学習が発散しました（`{1}` = {2}）。これは元に戻らず、"
+       "結果は真っ黒に描画されます。実行の config.json を添えて報告してください。"),
+    ZH_HANS("警告：训练在第 {0} 步发散（`{1}` = {2}）。它无法恢复，结果会渲染成"
+            "全黑。请附上本次运行的 config.json 报告此问题。"),
+    ZH_HANT("警告：訓練在第 {0} 步發散（`{1}` = {2}）。它無法恢復，結果會算繪成"
+            "全黑。請附上本次執行的 config.json 回報此問題。"),
+    KO("경고: {0}단계에서 학습이 발산했습니다(`{1}` = {2}). 회복되지 않으며 "
+       "결과는 검게 렌더링됩니다. 실행의 config.json과 함께 보고해 주세요."),
+    DE("Warnung: Das Training ist in Schritt {0} divergiert (`{1}` = {2}). Es "
+       "erholt sich nicht, und das Ergebnis wird schwarz gerendert. Bitte mit "
+       "der config.json des Laufs melden."),
+    FR("Avertissement : l'entraînement a divergé à l'étape {0} (`{1}` = {2}). "
+       "Il ne s'en remettra pas et le résultat s'affichera en noir. Merci de "
+       "le signaler avec le config.json de l'exécution."),
+    ES("Aviso: el entrenamiento divergió en el paso {0} (`{1}` = {2}). No se "
+       "recuperará y el resultado se verá negro. Comunícalo junto con el "
+       "config.json de la ejecución."),
+    PT("Aviso: o treino divergiu no passo {0} (`{1}` = {2}). Não se recupera "
+       "e o resultado será renderizado preto. Relate o caso junto com o "
+       "config.json da execução."),
+    IT("Avviso: l'addestramento è divergito al passo {0} (`{1}` = {2}). Non "
+       "si riprende e il risultato verrà reso nero. Segnalalo insieme al "
+       "config.json dell'esecuzione."),
+    NL("Waarschuwing: de training is bij stap {0} gedivergeerd (`{1}` = {2}). "
+       "Het herstelt niet en het resultaat wordt zwart weergegeven. Meld het "
+       "met de config.json van de run."),
+    RU("Предупреждение: на шаге {0} обучение разошлось (`{1}` = {2}). Оно не "
+       "восстановится, а результат отрисуется чёрным. Сообщите об этом, "
+       "приложив config.json запуска."),
+    TR("Uyarı: eğitim {0}. adımda ıraksadı (`{1}` = {2}). Toparlanmaz ve "
+       "sonuç siyah görüntülenir. Lütfen çalışmanın config.json dosyasıyla "
+       "birlikte bildirin."));
+
 
 // ===========================================================================
 // Progress while a long pass runs

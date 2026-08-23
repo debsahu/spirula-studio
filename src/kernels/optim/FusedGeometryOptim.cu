@@ -55,6 +55,13 @@ struct _OptimNonShQ {
 // Block reduction over a float4 (paired min/max for u and sqrt_g2).
 template<int BLOCK_SIZE>
 __device__ inline float4 _optim_block_reduce_minmax_f4(float4 mm) {
+    // cg::reduce's comparators keep or drop a NaN depending on which side it
+    // lands; one in a block bound decodes all 256 cells to NaN. Vulkan's
+    // _oq_min/_oq_max (optim_quant.slang) drops it the same way.
+    if (!isfinite(mm.x)) mm.x =  1e30f;
+    if (!isfinite(mm.y)) mm.y = -1e30f;
+    if (!isfinite(mm.z)) mm.z =  1e30f;
+    if (!isfinite(mm.w)) mm.w = -1e30f;
     cg::thread_block       block = cg::this_thread_block();
     cg::thread_block_tile<WARP_SIZE> warp = cg::tiled_partition<WARP_SIZE>(block);
     mm.x = cg::reduce(warp, mm.x, cg::less<float>());

@@ -101,6 +101,10 @@ struct Codec {
 // with __syncthreads() so it is re-callable in sequence within a kernel.
 template<int BLOCK_SIZE>
 __device__ inline float2 block_reduce_minmax_f2(float2 mm) {
+    // See _block_reduce_minmax_f4: a NaN must not reach a block bound, or all
+    // 256 of the block's cells decode to NaN.
+    if (!isfinite(mm.x)) mm.x =  1e30f;
+    if (!isfinite(mm.y)) mm.y = -1e30f;
     static_assert(BLOCK_SIZE > 0 && BLOCK_SIZE % WARP_SIZE == 0,
                   "block_reduce_minmax_f2: BLOCK_SIZE must be a multiple of WARP_SIZE");
     namespace cg = cooperative_groups;

@@ -21,9 +21,40 @@
 static const float kAdamEps = 1e-15f;
 
 [ForceInline]
+bool _oq_finite(float v) {
+    return (asuint(v) & 0x7f800000u) != 0x7f800000u;
+}
+
+// SPIR-V leaves FMin/FMax undefined on a NaN operand, so a driver may let one
+// through where CUDA's fminf/fmaxf drop it -- and one NaN in a block bound
+// decodes all 256 of its cells to NaN. Pick the finite side explicitly.
+[ForceInline]
+float _oq_min(float a, float b) {
+    if (!_oq_finite(a)) return b;
+    if (!_oq_finite(b)) return a;
+    return min(a, b);
+}
+[ForceInline]
+float _oq_max(float a, float b) {
+    if (!_oq_finite(a)) return b;
+    if (!_oq_finite(b)) return a;
+    return max(a, b);
+}
+
+// CUDA's fminf(fmaxf(x, 0), qmax) provably sends NaN to 0; SPIR-V's FClamp
+// does not, and OpConvertFToU of a NaN or out-of-range float is undefined --
+// a garbage code corrupts the neighbouring cells sharing its word.
+[ForceInline]
+uint _oq_code(float x, float qmax) {
+    if (!_oq_finite(x)) return 0u;
+    return uint(clamp(x, 0.0f, qmax));
+}
+
+[ForceInline]
 float _oq_log1p(float x) {
     float u = 1.0f + x;
     if (u == 1.0f) return x;
+    if (!_oq_finite(u)) return u;   // log1pf(+inf) = +inf, not inf*(inf/inf)
     return log(u) * (x / (u - 1.0f));
 }
 
@@ -31,6 +62,8 @@ float _oq_log1p(float x) {
 float _oq_expm1(float x) {
     float u = exp(x);
     if (u == 1.0f) return x;
+    if (u == 0.0f) return -1.0f;    // expm1f(-inf) = -1
+    if (!_oq_finite(u)) return u;   // expm1f(+inf) = +inf
     return (u - 1.0f) * (x / log(u));
 }
 
@@ -61,8 +94,8 @@ float4 oq_block_reduce_mm4(float4 v, uint tid) {
         if (tid < st) {
             float4 a = _oq_red4[tid];
             float4 b = _oq_red4[tid + st];
-            _oq_red4[tid] = float4(min(a.x, b.x), max(a.y, b.y),
-                                   min(a.z, b.z), max(a.w, b.w));
+            _oq_red4[tid] = float4(_oq_min(a.x, b.x), _oq_max(a.y, b.y),
+                                   _oq_min(a.z, b.z), _oq_max(a.w, b.w));
         }
         GroupMemoryBarrierWithGroupSync();
     }
@@ -104,6 +137,10 @@ uint2 qadam_read_q<let BITS : int>(uint* packed, uint idx) {
 float2 qadam_decode_us<let BITS : int>(uint* packed, uint idx, float4 mm) {
     uint2 q = qadam_read_q<BITS>(packed, idx);
     float inv = 1.0f / qadam_qmax<BITS>();
+    // See core/Tensor.h decode_us: a non-finite bound would decode all 256 of
+    // the block's cells to NaN, and nothing later undoes that.
+    if (!_oq_finite(mm.x) || !_oq_finite(mm.y)) { mm.x = 0.0f; mm.y = 0.0f; }
+    if (!_oq_finite(mm.z) || !_oq_finite(mm.w)) { mm.z = 0.0f; mm.w = 0.0f; }
     return float2(mm.x + (mm.y - mm.x) * (float(q.x) * inv),
                   mm.z + (mm.w - mm.z) * (float(q.y) * inv));
 }
@@ -130,10 +167,9 @@ uint2 qadam_quantize_us<let BITS : int>(float u_val, float log_s_val,
     float qmax = qadam_qmax<BITS>();
     float u_range = max(mm.y - mm.x, kAdamEps);
     float s_range = max(mm.w - mm.z, kAdamEps);
-    float u_qf = clamp(_oq_round(qmax * (u_val - mm.x) / u_range), 0.0f, qmax);
-    float s_qf = clamp(_oq_round(qmax * (log_s_val - mm.z) / s_range), 0.0f,
-                       qmax);
-    return uint2(uint(u_qf), uint(s_qf));
+    return uint2(_oq_code(_oq_round(qmax * (u_val - mm.x) / u_range), qmax),
+                 _oq_code(_oq_round(qmax * (log_s_val - mm.z) / s_range),
+                          qmax));
 }
 
 // Cooperative packed store of one cell's (u_q, s_q). Call from ALL 256
@@ -184,7 +220,7 @@ float qtensor_decode_v<let BITS : int>(uint* packed, uint idx, float2 mm) {
 uint qtensor_quantize_v<let BITS : int>(float v, float2 mm) {
     float qmax = float((1 << BITS) - 1);
     float range = max(mm.y - mm.x, 1e-30f);
-    return uint(clamp(_oq_round(qmax * (v - mm.x) / range), 0.0f, qmax));
+    return _oq_code(_oq_round(qmax * (v - mm.x) / range), qmax);
 }
 
 // Cooperative packed store of one cell's value code. Call from ALL 256
@@ -246,7 +282,7 @@ float qtlog_decode_v<let BITS : int>(uint* packed, uint idx, float2 mm) {
 uint qtlog_quantize_log<let BITS : int>(float log_v, float2 mm) {
     float qmax = float((1 << BITS) - 1);
     float range = max(mm.y - mm.x, kAdamEps);
-    return uint(clamp(_oq_round(qmax * (log_v - mm.x) / range), 0.0f, qmax));
+    return _oq_code(_oq_round(qmax * (log_v - mm.x) / range), qmax);
 }
 
 // Cooperative packed store of one cell's log-code. Call from ALL 256 threads
