@@ -1610,6 +1610,15 @@ bool generate_mesh(
         return true;
     }
 
+    // Refused here rather than inside the solver, which can only report the
+    // empty result as "no tetrahedra".
+    if ((long long)ev.num_kept() * 7 > delaunay3d::kMaxPoints) {
+        mlog::fail(mlog::Stage::PointCloud, mmsg::too_many_gaussians,
+                   {(long long)ev.num_kept(), (long long)delaunay3d::kMaxPoints,
+                    (long long)(delaunay3d::kMaxPoints / 7)});
+        return false;
+    }
+
     // Each long phase announces itself BEFORE it runs, not only when it
     // finishes. A phase that takes minutes and prints only on completion is
     // indistinguishable from a hang, and it leaves any progress display with

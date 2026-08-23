@@ -1892,10 +1892,7 @@ namespace delaunay3d {
     ) {
         Delaunay3DResult result;
         result.nb_vertices = nb_points;
-        // 7 tetrahedra per point are preallocated and addressed as 4*t+lv in
-        // 32 bits, so beyond this the cell arrays silently wrap.
-        constexpr int MAX_POINTS = 150000000;
-        if(nb_points < 4 || nb_points > MAX_POINTS) {
+        if(nb_points < 4 || nb_points > kMaxPoints) {
             result.num_threads = 0;
             return result;
         }

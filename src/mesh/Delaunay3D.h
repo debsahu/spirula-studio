@@ -24,6 +24,13 @@
 namespace delaunay3d {
 
     /**
+     * \brief Largest point count compute_delaunay_3d() accepts. 7 tetrahedra
+     *  per point are preallocated and addressed as 4*t+lv in 32 bits, so beyond
+     *  this the cell arrays silently wrap.
+     */
+    constexpr int kMaxPoints = 150000000;
+
+    /**
      * \brief Result of a 3D Delaunay triangulation.
      */
     struct Delaunay3DResult {
