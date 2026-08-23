@@ -31,8 +31,9 @@ namespace delaunay3d {
         int nb_vertices = 0;
         /** number of (finite) tetrahedra */
         int nb_cells = 0;
-        /** 4*nb_cells vertex indices (into the input point array) */
-        std::vector<int> cell_vertices;
+        /** 4*nb_cells vertex indices (into the input point array). Unsigned so
+         *  the solver's own store can be moved out instead of copied. */
+        std::vector<uint32_t> cell_vertices;
         /** 4*nb_cells neighbor tet indices, or -1 on the convex hull.
          *  Only filled when compute_adjacency is true. */
         std::vector<int> cell_adjacents;
