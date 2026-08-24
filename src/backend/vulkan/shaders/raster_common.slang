@@ -34,3 +34,39 @@ bool ellipse_box_overlap_test(float3 inv_cov, float x0, float x1, float y0,
     float mc = max(max(x0, -x1), max(y0, -y1));
     return min(mc, min(mx, my) - 1.0f) < 0.f;
 }
+
+// Superset of the 8x8 micro-tile pixels with alpha > ALPHA_THRESHOLD (one byte
+// per row, lo = rows 0-3). k = log(opacity / ALPHA_THRESHOLD); pixel (i, j) has
+// delta = (ex - i, ey - j). Mirrors ellipse_pixel_mask8 in core/Common.cuh.
+void ellipse_pixel_mask8(float3 conic, float k, float ex, float ey,
+                         out uint m_lo, out uint m_hi) {
+    float a = conic.x, b = conic.y, c = conic.z;
+    if (!(a > 0.0f) || !(abs(ex) < 1e9f) || !(abs(ey) < 1e9f)) {
+        m_lo = 0xffffffffu;  // degenerate: keep every pixel, alpha still decides
+        m_hi = 0xffffffffu;
+        return;
+    }
+    m_lo = 0u;
+    m_hi = 0u;
+    float inv_a = 1.0f / a;
+    float qd = b * b - a * c;
+    float two_ak = 2.0f * a * k;
+    for (int j = 0; j < int(TILE_SIZE_Y); j++) {
+        float dy = ey - float(j);
+        float disc = qd * dy * dy + two_ak;
+        if (!(disc > 0.0f))
+            continue;
+        float half_w = sqrt(disc) * inv_a;
+        float ci = ex + b * dy * inv_a;
+        int i0 = int(max(ceil(ci - half_w), 0.0f));
+        int i1 = int(min(floor(ci + half_w), float(TILE_SIZE_X - 1)));
+        if (i0 > i1)
+            continue;
+        uint bits = (0xffu >> uint(int(TILE_SIZE_X) - 1 - i1)) &
+                    (0xffu << uint(i0));
+        if (j < 4)
+            m_lo |= bits << uint(8 * j);
+        else
+            m_hi |= bits << uint(8 * (j - 4));
+    }
+}

@@ -77,6 +77,45 @@ static __device__ __forceinline__ bool ellipse_box_overlap_test(
     return fminf(mc, fminf(mx, my) - 1.0f) < 0.f;
 }
 
+// Superset of the TX x TY pixels with alpha > ALPHA_THRESHOLD (lo = rows 0-3).
+// k = log(opacity / ALPHA_THRESHOLD); pixel (i, j) has delta = (ex - i, ey - j).
+// Mirrors ellipse_pixel_mask8 in backend/vulkan/shaders/raster_common.slang.
+template <int TX, int TY>
+static __device__ __forceinline__ void ellipse_pixel_mask8(
+    float3 conic, float k, float ex, float ey, uint32_t &m_lo, uint32_t &m_hi
+) {
+    static_assert(TX == 8 && TY == 8, "one byte per row, two words per tile");
+    float a = conic.x, b = conic.y, c = conic.z;
+    if (!(a > 0.0f) || !(fabsf(ex) < 1e9f) || !(fabsf(ey) < 1e9f)) {
+        m_lo = 0xffffffffu;  // degenerate: keep every pixel, alpha still decides
+        m_hi = 0xffffffffu;
+        return;
+    }
+    m_lo = 0u;
+    m_hi = 0u;
+    float inv_a = 1.0f / a;
+    float qd = b * b - a * c;
+    float two_ak = 2.0f * a * k;
+    #pragma unroll
+    for (int j = 0; j < TY; j++) {
+        float dy = ey - (float)j;
+        float disc = qd * dy * dy + two_ak;
+        if (!(disc > 0.0f))
+            continue;
+        float half_w = sqrtf(disc) * inv_a;
+        float ci = ex + b * dy * inv_a;
+        int i0 = (int)fmaxf(ceilf(ci - half_w), 0.0f);
+        int i1 = (int)fminf(floorf(ci + half_w), (float)(TX - 1));
+        if (i0 > i1)
+            continue;
+        uint32_t bits = (0xffu >> (uint32_t)(TX - 1 - i1)) & (0xffu << (uint32_t)i0);
+        if (j < 4)
+            m_lo |= bits << (uint32_t)(8 * j);
+        else
+            m_hi |= bits << (uint32_t)(8 * (j - 4));
+    }
+}
+
 #else  // #ifdef __CUDACC__
 
 template<typename T, size_t SIZE>

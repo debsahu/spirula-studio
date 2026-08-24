@@ -179,6 +179,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     constexpr uint SPLAT_BATCH_SIZE_CONST = dist_any(dist_type) ?
         SPLAT_BATCH_SIZE_WITH_DISTORTION : SPLAT_BATCH_SIZE_NO_DISTORTION;
 
+    int32_t bin_max = -1;
     #pragma unroll
     for (uint pix_id0 = 0; pix_id0 < BLOCK_SIZE; pix_id0 += SPLAT_BATCH_SIZE_CONST) {
         static_assert(BLOCK_SIZE % SPLAT_BATCH_SIZE_CONST == 0);
@@ -277,7 +278,9 @@ __global__ void rasterize_to_pixels_bwd_kernel(
             median_pending_zfar[pix_id_local] = 0.0f;
             median_pending_Tfar[pix_id_local] = 0.0f;
         }
+        bin_max = max(bin_max, bin_final);
     }
+    bin_max = cg::reduce(warp, bin_max, cg::greater<int32_t>());
     block.sync();
 
     // threads fist load splats, then swept through pixels
@@ -295,20 +298,16 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         SPLAT_BATCH_SIZE = min(SPLAT_BATCH_SIZE_CONST, max(SPLAT_BATCH_SIZE, 1u));
     }
     // ---- microtile survivor compaction ------------------------------------
-    // The block owns one TILE_SIZE_DX x TILE_SIZE_DY sub-tile, but the macro-tile
-    // range it reads is >80% gaussians that never touch this sub-tile. The
-    // diagonal sweep length is fixed by the number of gaussians processed, so
-    // per-thread culling alone gives no speedup (culled lanes just idle while the
-    // warp still iterates). Instead we scan the range back-to-front, compact the
-    // survivors (same ellipse-vs-box test as the forward sub-tile mask) into
-    // shared, and only sweep those. surv[] is kept strictly back-to-front so the
-    // per-pixel undo stays a continuous back-to-front walk across batches.
+    // >80% of the macro-tile range never touches this sub-tile, and culled lanes
+    // only idle: compact back-to-front so each pixel's undo stays one walk.
+
     constexpr int SURV_CAP = 8 * (int)WARP_SIZE;
     __shared__ int32_t surv[SURV_CAP];
     const float cull_bx0 = (float)(blockIdx.z * TILE_SIZE_DX);
     const float cull_by0 = (float)(blockIdx.y * TILE_SIZE_DY);
 
-  for (int32_t scan_end = range_end - 1; scan_end >= range_start; ) {
+  // Nothing past the tile's deepest surviving fragment can contribute.
+  for (int32_t scan_end = min(range_end - 1, bin_max); scan_end >= range_start; ) {
 
     // fill surv[] with up to SURV_CAP survivors (back-to-front). The loop bounds
     // (s, count) are warp-uniform, so __ballot_sync stays convergent.
@@ -363,10 +362,22 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         // load splats
         typename SplatPrimitive::FragmentBwd splat;
         uint32_t splat_wid, splat_sid;
+    #if !IS_EVAL3D
+        // Superset of the sub-tile pixels this splat can reach: three register
+        // ops per sweep step instead of a shared read and an exp().
+        uint32_t cover_lo = 0u, cover_hi = 0u;
+    #endif
         if (active) {
             splat_sid = flatten_ids[splat_idx]; // flatten index in [I * N] or [nnz]
             splat_wid = gaussian_ids ? gaussian_ids[splat_sid] : splat_sid % N;
             splat.load(splat_wbuffer, splat_sbuffer, splat_wid, splat_sid);
+        #if !IS_EVAL3D
+            if (splat.opac > ALPHA_THRESHOLD)
+                ellipse_pixel_mask8<TILE_SIZE_DX, TILE_SIZE_DY>(
+                    splat.conic, __logf(splat.opac / ALPHA_THRESHOLD),
+                    splat.xy.x - (cull_bx0 + 0.5f),
+                    splat.xy.y - (cull_by0 + 0.5f), cover_lo, cover_hi);
+        #endif
         }
 
         // accumulate gradient
@@ -383,6 +394,12 @@ __global__ void rasterize_to_pixels_bwd_kernel(
             int pix_id = t - thread_id;
             if (pix_id < 0 || pix_id >= BLOCK_SIZE || !active)
                 continue;
+        #if !IS_EVAL3D
+            uint32_t cw = pix_id < 32 ? (cover_lo >> pix_id)
+                                      : (cover_hi >> (pix_id - 32));
+            if ((cw & 1u) == 0u)
+                continue;
+        #endif
         #if IS_EVAL3D
             float4 ray_d_pix_bin_final = shared_ray_d_pix_bin_final[pix_id];
             if (splat_idx > __float_as_int(ray_d_pix_bin_final.w))
