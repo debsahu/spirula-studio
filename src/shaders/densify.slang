@@ -10,6 +10,16 @@
 #undef _DENSIFY_LOCAL_CDE
 #endif
 
+// A splat whose largest exp(scale) is not a positive normal float is
+// invisible, and scale_reg only walks it further down -- so densification
+// recycles it, the way it recycles a transparent one. NaN counts as dead.
+static const float kDeadLogScale = -87.336548;  // log(2^-126)
+
+[CudaDeviceExport]
+bool splat_scale_is_dead(float3 log_scale) {
+    return !(max(max(log_scale.x, log_scale.y), log_scale.z) >= kDeadLogScale);
+}
+
 [CudaDeviceExport]
 void mcmc_add_noise_3dgs(
     float scaler,  // unit: L^-1, same as mean_lr

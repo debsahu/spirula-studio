@@ -1,14 +1,27 @@
 // All per-Gaussian losses in one kernel
+//
+// Every ratio of scales below is taken AFTER subtracting the largest log
+// scale, and every log is floored. Raw exp(scales) flushes to zero for a
+// splat under exp(-22.4) -- and these ratios' backward then divides by that
+// zero, so the optimizer writes a NaN into a splat that is merely small.
+// The shift cancels out of the ratios; it does not change what is computed.
+
+// Smallest eigenvalue share fed to a log. Below this the share is zero or
+// (through rounding) negative, and x*log(x) is meant to vanish there anyway.
+static const float kMinEigenRatio = 1e-30;
+// Largest anisotropy fed to exp, so an absurd splat saturates instead of
+// returning inf (which the zero default weight turns into a NaN).
+static const float kMaxLogGaussRatio = 80.0;
 
 [ForceInline]
 [Differentiable]
 float erank_reg_3dgs(float3 scales, float erank_reg, float erank_reg_s3) {
-    scales = exp(2.0*scales);
+    scales = exp(2.0*(scales - max(max(scales.x, scales.y), scales.z)));
     float x = scales.x, y = scales.y, z = scales.z;
     float s = x + y + z;
     float s1 = max(max(x, y), z) / s;
-    float s3 = min(min(x, y), z) / s;
-    float s2 = 1.0 - s1 - s3;
+    float s3 = max(min(min(x, y), z) / s, kMinEigenRatio);
+    float s2 = max(1.0 - s1 - s3, kMinEigenRatio);
     float r = exp(-s1*log(s1) - s2*log(s2) - s3*log(s3));
     float reg = max(-log(r-0.99999), 0.0);
     return erank_reg * reg + erank_reg_s3 * s3;
@@ -17,11 +30,11 @@ float erank_reg_3dgs(float3 scales, float erank_reg, float erank_reg_s3) {
 [ForceInline]
 [Differentiable]
 float erank_reg_2dgs(float2 scales, float erank_reg) {
-    scales = exp(2.0*scales);
+    scales = exp(2.0*(scales - max(scales.x, scales.y)));
     float x = scales.x, y = scales.y;
     float s = x + y;
     float s1 = max(x, y) / s;
-    float s2 = min(x, y) / s;
+    float s2 = max(min(x, y) / s, kMinEigenRatio);
     float r = exp(-s1*log(s1) - s2*log(s2));
     float reg = max(-log(r-0.99999), 0.0);
     return erank_reg * reg;
@@ -31,18 +44,19 @@ float erank_reg_2dgs(float2 scales, float erank_reg) {
 [ForceInline]
 [Differentiable]
 float scale_reg_3dgs(float3 scales, float max_gauss_ratio, float scale_regularization_weight) {
-    scales = exp(scales);
-    float x = scales.x, y = scales.y, z = scales.z;
-    float scale_reg = max(max(max(x, y), z) / min(min(x, y), z), max_gauss_ratio) - max_gauss_ratio;
+    float hi = max(max(scales.x, scales.y), scales.z);
+    float lo = min(min(scales.x, scales.y), scales.z);
+    float ratio = exp(min(hi - lo, kMaxLogGaussRatio));
+    float scale_reg = max(ratio, max_gauss_ratio) - max_gauss_ratio;
     return scale_regularization_weight * scale_reg;
 }
 
 [ForceInline]
 [Differentiable]
 float scale_reg_2dgs(float2 scales, float max_gauss_ratio, float scale_regularization_weight) {
-    scales = exp(scales);
-    float x = scales.x, y = scales.y;
-    float scale_reg = max(max(x, y) / min(x, y), max_gauss_ratio) - max_gauss_ratio;
+    float ratio = exp(min(max(scales.x, scales.y) - min(scales.x, scales.y),
+                         kMaxLogGaussRatio));
+    float scale_reg = max(ratio, max_gauss_ratio) - max_gauss_ratio;
     return scale_regularization_weight * scale_reg;
 }
 

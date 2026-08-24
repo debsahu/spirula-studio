@@ -5,11 +5,14 @@ describe is gone -- see §3 for what it covered and what now does not.
 
 ## 1. Native cross-backend parity tests (the important ones)
 
-`src/backend/tests/*.cpp` — currently 18 tools covering projection (fwd, bwd,
+`src/backend/tests/*.cpp` — currently 19 tools covering projection (fwd, bwd,
 quant-grad), rasterization bwd, tile intersect, warp, FPBO, optimizer (general
 + geometry), densify, per-pixel train, PPISP, bilagrid, multi-scale loss
-(`mask_loss_semantics` is self-checking rather than dump-then-compare: it pins
-what an image mask means in the loss, in both mask modes and with none),
+(`mask_loss_semantics` and `reg_loss_underflow` are self-checking rather than
+dump-then-compare: the first pins what an image mask means in the loss, in
+both mask modes and with none; the second sweeps log scales past every
+exp(scales) underflow threshold and fails if the per-splat regularizers hand
+the optimizer a NaN),
 meshing (activation, LBVH, occupancy/bisection/color, moment raster, the
 per-camera samplers and the visibility cull), plus
 `backend/tests/engine/` which drives the *real* engine end to end

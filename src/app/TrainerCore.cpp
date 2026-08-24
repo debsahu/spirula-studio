@@ -173,12 +173,13 @@ SeedSplats seed_splats(const ColmapPoints3D& pts, const TrainConfig& cfg,
         std::shuffle(pick.begin(), pick.end(), rng);
         pick.resize(cfg.cap_max);
     } else {
-        // Repeat modulo when under min_init. TODO: jitter the repeats toward
-        // a nearest neighbor instead of duplicating exactly.
+        // Repeat modulo when under min_init; the repeats are jittered apart
+        // below, and pick[0 .. n_src) stay one per source point.
         int64_t n = std::max(n_src, min_init);
         pick.resize(n);
         for (int64_t i = 0; i < n; i++) pick[i] = i % n_src;
     }
+    const int64_t n_distinct = std::min<int64_t>((int64_t)pick.size(), n_src);
     const int64_t num = (int64_t)pick.size();
     const int64_t cap = cfg.preallocate_splat_tensors
         ? std::max<int64_t>(num, cfg.cap_max) : num;
@@ -199,11 +200,17 @@ SeedSplats seed_splats(const ColmapPoints3D& pts, const TrainConfig& cfg,
         for (int d = 0; d < 3; d++)
             s.means[i*3 + d] = pts.xyz[pick[i]*3 + d] * rescale;
 
-    // log(scale_init * sqrt(mean d^2 of 4-NN)) over xyz.
-    // TODO: suppress_initial_scales.
-    std::vector<float> nn = knn::mean_knn_dist(s.means, num, 4);
+    // log(scale_init * sqrt(mean d^2 of 4-NN)) over xyz, over the DISTINCT
+    // points: a repeat is its own zero-distance neighbor, and would seed
+    // every splat at log(1e-8). TODO: suppress_initial_scales.
+    std::vector<float> nn = knn::mean_knn_dist(s.means, n_distinct, 4);
     for (int64_t i = 0; i < num; i++) {
-        float v = std::log(scale_init * nn[i] + 1e-8f);
+        float d = nn[i % n_distinct];
+        // Scatter the repeats through the neighborhood they copy.
+        if (i >= n_distinct)
+            for (int k = 0; k < 3; k++)
+                s.means[i*3 + k] += 0.25f * d * gauss(rng);
+        float v = std::log(scale_init * d + 1e-8f);
         s.scales[i*3+0] = s.scales[i*3+1] = s.scales[i*3+2] = v;
     }
 

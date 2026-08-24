@@ -61,6 +61,7 @@ __global__ void mcmc_compute_relocation_probabilities_kernel(
     uint32_t num_splats,
     float min_opacity,
     const float* __restrict__ opacs,
+    const float3* __restrict__ scales,
     float* __restrict__ probs
 ) {
     uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -69,7 +70,8 @@ __global__ void mcmc_compute_relocation_probabilities_kernel(
 
     float opac = sigmoid(opacs[tid]);
 
-    if (opac <= min_opacity || !isfinite(opac))
+    if (opac <= min_opacity || !isfinite(opac) ||
+        SlangDensify::splat_scale_is_dead(scales[tid]))
         opac = 0.0f;
 
     probs[tid] = opac;
@@ -242,6 +244,7 @@ void relocate_splats_mcmc_tensor(
         cur_num_splats,
         min_opacity,
         opacs.data_ptr(),
+        scales.data_ptr(),
         sample_probs
     );
     CHECK_DEVICE_ERROR(cudaGetLastError());
@@ -476,6 +479,7 @@ void add_splats_mcmc_tensor(
         cur_num_splats,
         min_opacity,
         opacs.data_ptr(),
+        scales.data_ptr(),
         sample_probs
     );
     CHECK_DEVICE_ERROR(cudaGetLastError());

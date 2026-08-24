@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -267,14 +268,17 @@ void engine_save_checkpoint(
         }
     };
 
-    // --- Filter mask: NaN/Inf + low-opacity (logit < logit(1/255) ~= -5.5373) ---
+    // --- Filter mask: NaN/Inf + low-opacity (logit < logit(1/255) ~= -5.5373)
+    // + dead scale (exp() no longer a positive normal float -- densify
+    // recycles those, but it stops before the run ends: shaders/densify.slang)
     const float OPA_MIN = -5.5373f;
+    const float SCALE_MIN = std::log(std::numeric_limits<float>::min());
     auto fin1 = [](float v) { return std::isfinite(v); };
     auto fin3 = [&](const float3& v) { return fin1(v.x) && fin1(v.y) && fin1(v.z); };
     auto fin4 = [&](const float4& v) { return fin1(v.x) && fin1(v.y) && fin1(v.z) && fin1(v.w); };
 
     std::vector<char> keep((size_t)N, 1);
-    int64_t kept = 0, nan_dropped = 0, lowopa_dropped = 0;
+    int64_t kept = 0, nan_dropped = 0, lowopa_dropped = 0, deadscale_dropped = 0;
     for (int64_t i = 0; i < N; i++) {
         bool ok = fin3(h_means[i]) && fin4(h_quats[i]) && fin3(h_scales[i])
                   && fin1(h_opacities[i]) && fin3(h_features_dc[i]);
@@ -288,6 +292,10 @@ void engine_save_checkpoint(
         }
         if (!ok) { keep[i] = 0; nan_dropped++; continue; }
         if (h_opacities[i] < OPA_MIN) { keep[i] = 0; lowopa_dropped++; continue; }
+        const float3& sc = h_scales[i];
+        if (std::max(std::max(sc.x, sc.y), sc.z) < SCALE_MIN) {
+            keep[i] = 0; deadscale_dropped++; continue;
+        }
         kept++;
     }
 

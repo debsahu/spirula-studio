@@ -144,12 +144,12 @@ static_assert(sizeof(CopyQshMapParams) == 3 * 8 + 6 * 4,
 
 // Mirrors McmcProbsParams.
 struct McmcProbsParams {
-    uint64_t opacs, probs;
+    uint64_t opacs, scales, probs;
     float min_opacity;
     uint32_t num_splats, wgs_per_row;
     uint32_t _pad0;
 };
-static_assert(sizeof(McmcProbsParams) == 2 * 8 + 4 * 4,
+static_assert(sizeof(McmcProbsParams) == 3 * 8 + 4 * 4,
               "params layout must match the slang struct");
 
 // Mirrors McmcRelocIndexMapParams.
@@ -405,13 +405,15 @@ void launch_copy_qsh_map(int64_t num_splats, const int32_t* index_map,
 
 // MCMC sampling-probability + cumsum stage shared by relocate/add.
 void mcmc_probs_cumsum(int64_t cur_num_splats, float min_opacity,
-                       const DeviceVector<float>& opacs, PoolSlot probs_slot,
+                       const DeviceVector<float>& opacs,
+                       const DeviceVector<float3>& scales, PoolSlot probs_slot,
                        PoolSlot cumsum_slot, DeviceVector<float>& probs,
                        DeviceVector<float>& cumsum) {
     probs.resize(probs_slot, cur_num_splats);
     cumsum.resize(cumsum_slot, cur_num_splats);
     McmcProbsParams p{};
     p.opacs = (uint64_t)opacs.data_ptr();
+    p.scales = (uint64_t)scales.data_ptr();
     p.probs = (uint64_t)probs.data_ptr();
     p.min_opacity = min_opacity;
     p.num_splats = (uint32_t)cur_num_splats;
@@ -720,7 +722,7 @@ void relocate_splats_mcmc_tensor(
     check_sh_cells(cur_num_splats, num_sh_buffer, "relocate_splats_mcmc");
 
     DeviceVector<float> probs, cumsum;
-    mcmc_probs_cumsum(cur_num_splats, min_opacity, opacs,
+    mcmc_probs_cumsum(cur_num_splats, min_opacity, opacs, scales,
                       PoolSlot::DensifyMcmcSampleProbs,
                       PoolSlot::DensifyMcmcSampleProbsCumsum, probs, cumsum);
 
@@ -809,7 +811,7 @@ void add_splats_mcmc_tensor(
                    "add_splats_mcmc");
 
     DeviceVector<float> probs, cumsum;
-    mcmc_probs_cumsum(cur_num_splats, min_opacity, opacs,
+    mcmc_probs_cumsum(cur_num_splats, min_opacity, opacs, scales,
                       PoolSlot::DensifyMcmcAddSampleProbs,
                       PoolSlot::DensifyMcmcAddSampleProbsCumsum, probs,
                       cumsum);

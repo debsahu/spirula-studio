@@ -440,7 +440,7 @@ void densify_reloc_mask(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     bool is_low_opac = _dn_sigmoid(opac) <= p.min_opacity;
     bool is_finite = _dn_finitef(dot(mean, mean) / dot(quat, quat) +
                                  dot(scale, dc) * opac);
-    bool relocate = is_low_opac || !is_finite;
+    bool relocate = is_low_opac || !is_finite || splat_scale_is_dead(scale);
 
     p.mask[idx] = relocate ? 0 : 1;
 
@@ -691,9 +691,10 @@ void densify_copy_qsh_map(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 // MCMC relocation / add
 // ---------------------------------------------------------------------------
 
-struct McmcProbsParams {  // 32 bytes: pushed directly
-    float* opacs;  // [N] logit-space
-    float* probs;  // [N] out
+struct McmcProbsParams {  // 40 bytes: pushed directly
+    float* opacs;   // [N] logit-space
+    float* scales;  // [N, 3] log-space
+    float* probs;   // [N] out
     float min_opacity;
     uint num_splats;
     uint wgs_per_row;
@@ -707,7 +708,11 @@ void densify_mcmc_probs(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     uint idx = (wg.y * p.wgs_per_row + wg.x) * 256 + tid;
     if (idx >= p.num_splats) return;
     float opac = _dn_sigmoid(p.opacs[idx]);
-    if (opac <= p.min_opacity || !_dn_finitef(opac)) opac = 0.0f;
+    float3 scale = float3(p.scales[3 * idx], p.scales[3 * idx + 1],
+                          p.scales[3 * idx + 2]);
+    if (opac <= p.min_opacity || !_dn_finitef(opac) ||
+        splat_scale_is_dead(scale))
+        opac = 0.0f;
     p.probs[idx] = opac;
 }
 
