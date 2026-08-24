@@ -125,6 +125,7 @@ static std::map<std::string, float> step_n(Scene& s, int from, int to) {
             step, 100, "3dgs", 1, /*packed=*/true, W, H, "PINHOLE", "NONE",
             ttv(s.vm.data(), 4, {C, 4, 4}), ttv(s.intr.data(), 4, {C, 4}),
             ttv(s.dist.data(), 4, {C, kCameraDistortionParams}),
+            TorchTensorView{0, 0, {}},
             ttv(s.gt_rgb.data(), 1, {C, H, W, 3}),
             ttv(s.gt_depth.data(), 2, {C, H, W, 1}),
             ttv(s.gt_normal.data(), 1, {C, H, W, 3}),

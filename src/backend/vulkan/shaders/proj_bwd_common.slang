@@ -114,6 +114,20 @@ struct PbProj<let cam : CameraModelType, D : ICameraDistortion,
     }
 };
 
+// Only reached when kRollingShutter says so, so no null test on `twists`.
+void pb_apply_shutter<let cam : CameraModelType, D : ICameraDistortion>(
+    float* twists, uint cid, float3 mean, inout PbCamera<D> c
+) {
+    float* q = twists + cid * 8;
+    float3x3 sR;
+    float3 st;
+    shutter_camera<cam, D>(mean, c.R, c.t, float3(q[0], q[1], q[2]),
+                           float3(q[3], q[4], q[5]), float2(q[6], q[7]),
+                           c.intrin.x, c.intrin.y, c.intrin.z, c.intrin.w, c.dist, sR, st);
+    c.R = sR;
+    c.t = st;
+}
+
 // One intersection's projection VJP, 2D (3DGS / Mip) screen layout
 // {xy, depth, conic, opac}. kAntialiased selects Mip.
 [ForceInline]

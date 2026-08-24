@@ -45,6 +45,7 @@ struct ProjectionBwd3dgsParams {
     float* viewmats;     // [C,16] row-major
     float4* intrins;     // [C]
     float* dist_coeffs;  // [C,8] or fallback zeros
+    float* twists;       // [C,8] rolling shutter
     // packed intersection ids (kPacked; fallback otherwise)
     int* camera_ids;    // [nnz]
     int* gaussian_ids;  // [nnz]
@@ -95,6 +96,7 @@ void _pb_run_3dgs<let cam : CameraModelType, D : ICameraDistortion>(
                                       cid);
     PbSplat s = pb_load_splat(p.means, p.quats, p.scales, p.opacities,
                               p.features_dc, gid);
+    if (kRollingShutter != 0) pb_apply_shutter<cam, D>(p.twists, cid, s.mean, c);
 
     float2 v_xy = float2(p.vs_xy[2 * idx], p.vs_xy[2 * idx + 1]);
     float v_depth = p.vs_depth[idx];
@@ -150,6 +152,7 @@ struct ProjectionBwd3dgutParams {
     float* viewmats;
     float4* intrins;
     float* dist_coeffs;
+    float* twists;
     int* camera_ids;
     int* gaussian_ids;
     float4* aabb;
@@ -196,6 +199,7 @@ void _pb_run_3dgut<let cam : CameraModelType, D : ICameraDistortion>(
                                       cid);
     PbSplat s = pb_load_splat(p.means, p.quats, p.scales, p.opacities,
                               p.features_dc, gid);
+    if (kRollingShutter != 0) pb_apply_shutter<cam, D>(p.twists, cid, s.mean, c);
 
     float3 v_sscale = float3(p.vs_scale[3 * idx], p.vs_scale[3 * idx + 1],
                              p.vs_scale[3 * idx + 2]);
@@ -237,3 +241,9 @@ void projection_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 // Declared last: spec IDs follow declaration order (see dist_spec.slang).
 [SpecializationConstant]
 const int kDistortion = 0;
+
+// Declared LAST so a host SpecList that stops at kDistortion leaves this 0 and
+// the shutter folds out of the pipeline: projection is icache- and
+// register-bound and almost no capture has a rolling shutter.
+[SpecializationConstant]
+const int kRollingShutter = 0;

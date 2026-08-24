@@ -207,6 +207,8 @@ public:
         bCgScal_ = mkReal(8);
         bCgPart_ = mkReal(cgAllocated_ ? 2 * (uint64_t)npart : 1);
         bPrecBlocks_ = mkUint(cgAllocated_ ? P_.prec_blocks.size() : 4);
+        rsOn_ = P_.twists.size() == 8 * (size_t)P_.num_images;
+        bRs_ = mkReal(rsOn_ ? P_.twists.size() : 1);
 
         // binding order must match sfm/shaders/ba/ba.slang + cg.slang; atomic views
         // alias the same VkBuffer at the odd bindings
@@ -221,6 +223,7 @@ public:
             bCamRanges_.buf, bCamObs_.buf, bCgR_.buf, bCgZ_.buf, bCgP_.buf, bCgSp_.buf,
             bCgV_.buf, bCgB_.buf, bCgM_.buf, bCgScal_.buf, bCgPart_.buf,
             bCgSp_.buf, bCgB_.buf, bCgM_.buf, bCamChunks_.buf, bPrecBlocks_.buf,
+            bRs_.buf,
         };
         ownBufs_ = {&bObs_, &bObsImage_, &bObsPoint_, &bImageGroup_, &bGroupInfo_,
                     &bPoses_, &bIntr_, &bPoints_, &bObsRanges_, &bModelObs_, &bJcOff_,
@@ -229,7 +232,7 @@ public:
                     &bBp0_, &bJc_, &bRes_,
                     &bPairEntries_, &bPairChunks_, &bW_, &bYp_, &bY_,
                     &bCamRanges_, &bCamObs_, &bCamChunks_, &bCgR_, &bCgZ_, &bCgP_, &bCgSp_,
-                    &bCgV_, &bCgB_, &bCgM_, &bCgScal_, &bCgPart_, &bPrecBlocks_};
+                    &bCgV_, &bCgB_, &bCgM_, &bCgScal_, &bCgPart_, &bPrecBlocks_, &bRs_};
         double t_buf = prof_lap();
         ctx_.createDescriptors(binds);
         // Fresh-from-the-driver allocations happen to arrive zeroed; memory
@@ -335,6 +338,11 @@ public:
             {&bIntr_, intr.data(), intr.size()},
             {&bPoints_, points.data(), points.size()},
         };
+        std::vector<uint8_t> twists;
+        if (rsOn_) {
+            packReals(twists, P_.twists.data(), P_.twists.size(), opt_.real);
+            up.push_back({&bRs_, twists.data(), twists.size()});
+        }
         if (P_.use_pair_schur) {
             up.push_back({&bPairEntries_, P_.pair_entries.data(), P_.pair_entries.size() * 4});
             up.push_back({&bPairChunks_, P_.pair_chunks.data(), P_.pair_chunks.size() * 4});
@@ -715,6 +723,7 @@ private:
             Push p;
             p.u0 = mr.count;
             p.u1 = mr.offset;
+            p.u2 = rsOn_ ? 1u : 0u;
             p.f0 = opt_.loss_param;
             ctx_.dispatch(cb, kModels[mr.model].cost_entry, (mr.count + 255) / 256, p);
         }
@@ -753,6 +762,7 @@ private:
                 Push p;
                 p.u0 = mr.count;
                 p.u1 = mr.offset;
+                p.u2 = rsOn_ ? 1u : 0u;
                 p.f0 = opt_.loss_param;
                 ctx_.dispatch(cb, kModels[mr.model].jac_entry, (mr.count + 127) / 128, p);
             }
@@ -997,5 +1007,6 @@ private:
     GpuBuffer bBp0_, bJc_, bRes_;
     GpuBuffer bPairEntries_, bPairChunks_, bW_, bYp_, bY_;
     GpuBuffer bCamRanges_, bCamObs_, bCamChunks_, bCgR_, bCgZ_, bCgP_, bCgSp_;
-    GpuBuffer bCgV_, bCgB_, bCgM_, bCgScal_, bCgPart_, bPrecBlocks_;
+    GpuBuffer bCgV_, bCgB_, bCgM_, bCgScal_, bCgPart_, bPrecBlocks_, bRs_;
+    bool rsOn_ = false;
 };

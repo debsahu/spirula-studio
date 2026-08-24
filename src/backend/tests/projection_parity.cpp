@@ -136,7 +136,7 @@ int main(int argc, char** argv) {
                         ttv(d_intr, {C, 4}), W, H, cams[ci],
                         dist_fixture::kTierNames[tier],
                         shd ? dist_tv(tier)
-                            : ttv(nullptr, {C, kCameraDistortionParams}),
+                            : ttv(nullptr, {C, kCameraDistortionParams}), std::nullopt,
                         radii, std::nullopt, std::nullopt, 0, 32, 0);
                     backend::device_synchronize();
                     if (const char* err = backend::last_error()) {
@@ -212,7 +212,7 @@ int main(int argc, char** argv) {
                 auto out = fn(
                     N, 3, in_splats_q, ttv(d_vm, {C, 16}),
                     ttv(d_intr, {C, 4}), W, H, cams[prim],
-                    dist_fixture::kTierNames[tier], dist_tv(tier), radii,
+                    dist_fixture::kTierNames[tier], dist_tv(tier), std::nullopt, radii,
                     packed_tv, bounds_tv,
                     (uint32_t)NUM_SH, bits, fpbo ? 0 : 256);
                 backend::device_synchronize();
@@ -245,7 +245,7 @@ int main(int argc, char** argv) {
                                   : projection_3dgut_packed_forward;
             auto out = fn(N, 3, in_splats, ttv(d_vm, {C, 16}),
                           ttv(d_intr, {C, 4}), W, H, cams[ci],
-                          dist_fixture::kTierNames[tier], dist_tv(tier),
+                          dist_fixture::kTierNames[tier], dist_tv(tier), std::nullopt,
                           radii, std::nullopt, std::nullopt, 0, 32, 0);
             backend::device_synchronize();
             if (const char* err = backend::last_error()) {
@@ -288,7 +288,7 @@ int main(int argc, char** argv) {
         auto [packed_tv, bounds_tv] = quant_args(bits, fpbo);
         auto out = fn(N, 3, in_splats_q, ttv(d_vm, {C, 16}),
                       ttv(d_intr, {C, 4}), W, H, cams[k],
-                      dist_fixture::kTierNames[tier], dist_tv(tier), radii,
+                      dist_fixture::kTierNames[tier], dist_tv(tier), std::nullopt, radii,
                       packed_tv, bounds_tv,
                       (uint32_t)NUM_SH, bits, fpbo ? 0 : 256);
         backend::device_synchronize();

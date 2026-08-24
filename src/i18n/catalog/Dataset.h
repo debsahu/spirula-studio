@@ -5910,6 +5910,16 @@ SS_MSG(sfm_distortion_refinement_help,
        "kararlıdır. \"Asla\" ise hâlihazırda güvendiğiniz bir kalibrasyonu "
        "korur."));
 
+SS_MSG_EN(sfm_rolling_shutter,
+    "Correct rolling shutter");
+
+SS_MSG_EN(sfm_rolling_shutter_help,
+    "Most phone and webcam sensors expose one row at a time, so a camera that "
+    "moves during the readout bends the scene. This fits how long that readout "
+    "takes and which way it runs, then corrects for it. A capture with no "
+    "shutter to find -- a global-shutter sensor, or footage a phone already "
+    "stabilized -- is left exactly as it was, so it is safe to leave on.");
+
 SS_MSG(sfm_per_image_intrinsics,
     EN("Per-image intrinsics at the end"),
     JA("最後に画像ごとの内部パラメータ"),

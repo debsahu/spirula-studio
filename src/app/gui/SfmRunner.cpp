@@ -194,6 +194,7 @@ void SfmRunner::take_reconstruction(SfmJob& job) {
     job.init_distortion = _live.init_distortion;
     job.distortion_refine = _live.distortion_refine;
     job.final_per_image_intrinsics = _live.final_per_image_intrinsics;
+    job.rolling_shutter = _live.rolling_shutter;
     job.max_features = _live.max_features;
     job.max_image_size = _live.max_image_size;
     job.mapper = _live.mapper;
@@ -544,6 +545,10 @@ void SfmRunner::run(SfmJob job) {
             if (job.distortion_refine >= 2) argv.push_back("--no-final-extra-params");
             if (job.final_per_image_intrinsics)
                 argv.push_back("--final-per-image-intrinsics");
+            if (!job.rolling_shutter) {
+                argv.push_back("--rolling-shutter");
+                argv.push_back("off");
+            }
             append_camera_overrides(job, prep, argv);
             if (job.max_features > 0) {
                 // Each frontend has its own count flag, because their budgets

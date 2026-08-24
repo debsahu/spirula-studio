@@ -113,6 +113,10 @@ struct SfmJob {
     // One more bundle adjustment at the very end with every image on its own
     // intrinsics, whatever the camera sharing above says.
     bool final_per_image_intrinsics = false;
+    // Fit a rolling shutter on the finished model and correct for it. On by
+    // default, as `spirula sfm --rolling-shutter auto` is: a capture with no
+    // shutter to find is left exactly as it was.
+    bool rolling_shutter = true;
     int max_features = 0;             // 0 = the quality preset's
     int max_image_size = 0;           // 0 = the quality preset's
     // 0 flat, 1 bottom-up. Flat for every capture, whatever its size: there is

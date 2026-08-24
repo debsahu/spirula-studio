@@ -242,7 +242,7 @@ int main(int argc, char** argv) {
             auto out = fn(N, cfg.max_deg, splats_fwd, ttv(d_vm, {C, 16}),
                           ttv(d_intr, {C, 4}), W, H, cams[cfg.cam],
                           dist_fixture::kTierNames[cfg.dist],
-                          dist_tv(cfg.dist), radii, q_val_packed,
+                          dist_tv(cfg.dist), std::nullopt, radii, q_val_packed,
                           q_val_bounds, (uint32_t)NUM_SH, level1 ? 16 : 32,
                           level1 ? 0 : 256);
             cam_ids = std::get<0>(out);
@@ -256,7 +256,7 @@ int main(int argc, char** argv) {
             auto out = fn(N, cfg.max_deg, splats_fwd, ttv(d_vm, {C, 16}),
                           ttv(d_intr, {C, 4}), W, H, cams[cfg.cam],
                           dist_fixture::kTierNames[cfg.dist],
-                          dist_tv(cfg.dist), radii, q_val_packed,
+                          dist_tv(cfg.dist), std::nullopt, radii, q_val_packed,
                           q_val_bounds, (uint32_t)NUM_SH, level1 ? 16 : 32,
                           level1 ? 0 : 256);
             aabb_nd = DeviceTensorFloatND(std::get<0>(out));
@@ -385,7 +385,7 @@ int main(int argc, char** argv) {
             fn(N, cfg.max_deg, splats, ttv(d_vm, {C, 16}),
                ttv(d_intr, {C, 4}), W, H, cams[cfg.cam],
                dist_fixture::kTierNames[cfg.dist], dist_tv(cfg.dist),
-               cam_ids, gauss_ids, aabb_nd, v_world,
+               std::nullopt, cam_ids, gauss_ids, aabb_nd, v_world,
                v_screen, g1_world, g2_world, shq_tv, shq_b_tv, shv_tv,
                shv_b_tv, non_sh, radii, densify_score,
                /*lr_means=*/1.6e-4f, /*lr_quats=*/1e-3f, /*lr_scales=*/5e-3f,

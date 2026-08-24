@@ -1332,6 +1332,18 @@ SS_MSG(final_extra_params_help,
     TR("Bitmiş modeldeki genel demet dengelemesinde bozulma katsayılarını serbest "
        "bırak; kapalıyken ana nokta da onlarla birlikte sabit tutulur"));
 
+SS_MSG_EN(rs_per_image_twist_help,
+    "Give every image its own readout twist in the rolling-shutter finishing "
+    "rounds instead of the one its trajectory implies");
+
+SS_MSG_EN(rs_twist_prior_help,
+    "How hard --rs-per-image-twist is held toward the trajectory's twist, "
+    "relative to the data: 0 is a free twist, large keeps the trajectory's");
+
+SS_MSG_EN(rolling_shutter_help,
+    "Rolling-shutter compensation on the finished model: auto fits the readout "
+    "direction and time per camera, off leaves the model global-shutter");
+
 SS_MSG(final_per_image_intrinsics_help,
     EN("One more global BA at the very end with every image on its own "
        "intrinsics, and nothing clamped back to the group (D73)"),

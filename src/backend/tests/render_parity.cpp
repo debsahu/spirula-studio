@@ -218,7 +218,7 @@ int main(int argc, char** argv) {
             auto out = fn(N, 3, in_splats, ttv(d_vm, {(int64_t)C, 16}),
                           ttv(d_intr, {(int64_t)C, 4}), W, H, cams[cfg.cam],
                           dist_fixture::kTierNames[cfg.dist],
-                          dist_tv(cfg.dist), radii, std::nullopt,
+                          dist_tv(cfg.dist), std::nullopt, radii, std::nullopt,
                           std::nullopt, 0, 32, 0);
             cam_ids = std::get<0>(out);
             gauss_ids = std::get<1>(out);
@@ -236,7 +236,7 @@ int main(int argc, char** argv) {
             auto out = fn(N, 3, in_splats, ttv(d_vm, {(int64_t)C, 16}),
                           ttv(d_intr, {(int64_t)C, 4}), W, H, cams[cfg.cam],
                           dist_fixture::kTierNames[cfg.dist],
-                          dist_tv(cfg.dist), radii, std::nullopt,
+                          dist_tv(cfg.dist), std::nullopt, radii, std::nullopt,
                           std::nullopt, 0, 32, 0);
             aabb_2d = std::get<0>(out);
             auto depths_2d = std::get<1>(out);

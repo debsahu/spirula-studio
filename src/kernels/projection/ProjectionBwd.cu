@@ -23,6 +23,7 @@ void projection_fused_bwd_kernel_wrapper(
     const float * viewmats, // [C, 4, 4]
     const float4 * intrins,  // [C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     // fwd outputs
@@ -56,6 +57,7 @@ inline void launch_projection_projection_fused_bwd_kernel(
     const CameraModelType camera_model,
     const CameraDistortionType distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     // fwd outputs
     const DeviceVector<int32_t> camera_ids,  // [nnz] or null
     const DeviceVector<int32_t> gaussian_ids,  // [nnz] or null
@@ -98,7 +100,7 @@ inline void launch_projection_projection_fused_bwd_kernel(
 
     #define _LAUNCH_ARGS ( \
             (cudaStream_t)0, C, N, \
-            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, \
+            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, _rs_ptr(twists), \
             image_width, image_height, \
             camera_ids.data_ptr(), \
             gaussian_ids.data_ptr(), \
@@ -143,6 +145,7 @@ void projection_3dgs_backward(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     // fwd outputs
     const DeviceVector<int32_t> camera_ids,  // [nnz] or null
     const DeviceVector<int32_t> gaussian_ids,  // [nnz] or null
@@ -168,7 +171,7 @@ void projection_3dgs_backward(
         ? (const float2*)std::get<0>(sh_value_bounds.value()) : nullptr;
     #define LAUNCH(n) if (sh_degree == (n)) \
         return launch_projection_projection_fused_bwd_kernel<Vanilla3DGS<n>>( \
-            num_splats, splats_world, viewmats, intrins, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, \
+            num_splats, splats_world, viewmats, intrins, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, twists, \
             camera_ids, gaussian_ids, aabb, v_splats_screen, \
             v_splats_world, v_viewmats, \
             vp, vb, num_sh_buffer, sh_value_bits, sh_bounds_stride);
@@ -194,6 +197,7 @@ void projection_mip_backward(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     // fwd outputs
     const DeviceVector<int32_t> camera_ids,  // [nnz] or null
     const DeviceVector<int32_t> gaussian_ids,  // [nnz] or null
@@ -219,7 +223,7 @@ void projection_mip_backward(
         ? (const float2*)std::get<0>(sh_value_bounds.value()) : nullptr;
     #define LAUNCH(n) if (sh_degree == (n)) \
         return launch_projection_projection_fused_bwd_kernel<MipSplatting<n>>( \
-            num_splats, splats_world, viewmats, intrins, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, \
+            num_splats, splats_world, viewmats, intrins, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, twists, \
             camera_ids, gaussian_ids, aabb, v_splats_screen, \
             v_splats_world, v_viewmats, \
             vp, vb, num_sh_buffer, sh_value_bits, sh_bounds_stride);
@@ -246,6 +250,7 @@ void projection_3dgut_backward(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     // fwd outputs
     const DeviceVector<int32_t> camera_ids,  // [nnz] or null
     const DeviceVector<int32_t> gaussian_ids,  // [nnz] or null
@@ -271,7 +276,7 @@ void projection_3dgut_backward(
         ? (const float2*)std::get<0>(sh_value_bounds.value()) : nullptr;
     #define LAUNCH(n) if (sh_degree == (n)) \
         return launch_projection_projection_fused_bwd_kernel<Vanilla3DGUT<n>>( \
-            num_splats, splats_world, viewmats, intrins, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, \
+            num_splats, splats_world, viewmats, intrins, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, twists, \
             camera_ids, gaussian_ids, aabb, v_splats_screen, \
             v_splats_world, v_viewmats, \
             vp, vb, num_sh_buffer, sh_value_bits, sh_bounds_stride);

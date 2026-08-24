@@ -422,6 +422,81 @@ which now exists on both commands. And `auto` accepts every advanced flag
 tuned without decomposing it into three commands, and the GUI's editor has one
 command's worth of fields to show.
 
+### Rolling shutter
+
+`--rolling-shutter auto` (the default) adds one more finishing pass: fit a
+shutter to the finished model, bundle-adjust with it, and write
+`rolling_shutter.bin` / `.txt` beside `images.bin`. The full model is in
+`docs/notes/rolling-shutter.md`; what matters at this level:
+
+- Each image gets a **twist** over the readout interval, derived from its
+  temporal neighbours. The only unknown is the **readout time**, one scalar per
+  camera group, found by a 1-D search on the robust cost. Nothing gains a column
+  of the reduced system, so the dof tiers and the Schur kernels are untouched
+  (D74) and a global-shutter run pays one comparison per residual.
+- The pose in `images.bin` stays standard COLMAP and is the **mid-row** pose, so
+  a reader that ignores the sidecar gets the best global-shutter approximation
+  rather than an endpoint. Nothing in `cameras.bin` changes — new camera-model
+  ids would make the file unreadable by COLMAP rather than degrade gracefully.
+- Reversed readout is a negative readout time, so the direction search is two
+  hypotheses (vertical, horizontal) and recovers the sign. **This is what makes
+  the ffmpeg trap survivable**: a display-matrix rotation turns a sensor's
+  top-to-bottom readout into a left-to-right one in the extracted frames, and
+  nothing has to know that it happened.
+- Timestamps come from the last digit run of the file stem. Without them the
+  interval is assumed uniform and a subsampled capture is under-corrected.
+
+`--rs-per-image-twist` replaces the trajectory twist with a per-image one for
+captures the trajectory cannot describe -- bursty motion, or registered frames
+too far apart to difference. It is a 6x6 solve per image with the geometry held,
+not six more columns of the reduced system (D75), and `--rs-twist-prior` (0.5)
+damps it toward the trajectory's. That prior is load-bearing: at 0 the free twist
+absorbs pose error instead of the shutter and one round leaves the twist worse
+than no twist at all. Measured numbers are in `docs/notes/rolling-shutter.md`.
+
+The GUI carries it as **Correct rolling shutter** under *Create Dataset* ->
+Advanced, on by default; unchecking it passes `--rolling-shutter off`. The
+direction and the per-image twist stay CLI-only.
+
+The trainer reads the sidecar back: `ColmapParser` picks up
+`rolling_shutter.bin`, `NerfstudioParser` the per-frame `rolling_shutter_twist`
+keys, and the twist rides through the DataManager into every projection kernel.
+3DGUT, `split_batch` and the fisheye/equirect warp path refuse rather than render
+a half-corrected image (`docs/notes/rolling-shutter.md`).
+
+A fit that does not beat global shutter by 1% of the robust cost is discarded.
+Every real capture tested so far is rejected by that guard:
+
+| capture | shutter found | best gain |
+|---|---|---|
+| 243-frame phone video, gaps of 13-17 | none | 0.04% |
+| KITTI `2011_09_26_drive_0001`, 114 frames | none | 0.00% |
+| Insta360 office, 3 groups incl. two fisheye | none | 0.26% |
+| 300 consecutive frames of a rotated phone video | none | 0.91% |
+| 498 frames of a 1280x720 USB camera | 0.045 frame (~1.5 ms) | 0.25% |
+
+The rotated phone video prefers the horizontal axis, which is what its
+`rotation=-90` display matrix implies. Phone video is stabilized by default and
+stabilization rectifies the shutter; capture with it off.
+
+The USB camera is the interesting one: it *does* have a rolling shutter, and the
+pass measures it at 0.045 of a frame interval by an injection null test — but at
+~1.5 ms that is 22x faster than a frame period and worth a quarter of a percent
+of the cost, so the guard leaves the model alone and says what it found.
+Sensitivity is not the limit; detection holds down to 0.05 of a frame
+(`docs/notes/rolling-shutter.md`).
+
+Injecting a known shutter into those same four models recovers it to within
+1.6%, including both fisheye groups, so the rejections are a property of the
+footage. On a 300-frame capture with a 0.7-interval horizontal shutter injected,
+against the model the observations were injected into and after a Sim3
+alignment:
+
+| | camera centre | rotation |
+|---|---|---|
+| global-shutter BA | 5.79% of the camera spread | 2.71 deg |
+| rolling-shutter pass | 1.04% | 0.37 deg |
+
 ## Tests
 
 Each `tests/*.cpp` builds to an executable of the same name that prints

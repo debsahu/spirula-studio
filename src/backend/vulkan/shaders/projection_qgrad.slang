@@ -50,6 +50,7 @@ struct ProjectionQgradParams {
     float* viewmats;
     float4* intrins;
     float* dist_coeffs;
+    float* twists;
     // packed intersection ranges (kPacked; fallback otherwise)
     int* camera_id_bounds;  // [N+1]
     int* camera_ids;        // [nnz] ORIGINAL order
@@ -154,6 +155,8 @@ void _qg_camera_loop<let cam : CameraModelType, D : ICameraDistortion>(
             continue;
         PbCamera<D> c = pb_load_camera<D>(p.viewmats, p.intrins,
                                           p.dist_coeffs, uint(cid));
+        if (kRollingShutter != 0)
+            pb_apply_shutter<cam, D>(p.twists, uint(cid), s.mean, c);
         if (kEval3d != 0) {
             float3 v_ss = float3(p.vs0[3 * idx], p.vs0[3 * idx + 1],
                                  p.vs0[3 * idx + 2]);
@@ -323,3 +326,9 @@ void qgrad_camera_id_bounds(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 // Declared last: spec IDs follow declaration order (see dist_spec.slang).
 [SpecializationConstant]
 const int kDistortion = 0;
+
+// Declared LAST so a host SpecList that stops at kDistortion leaves this 0 and
+// the shutter folds out of the pipeline: projection is icache- and
+// register-bound and almost no capture has a rolling shutter.
+[SpecializationConstant]
+const int kRollingShutter = 0;

@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
             auto out = fn(N, cfg.max_deg, splats_in, ttv(d_vm, {C, 16}),
                           ttv(d_intr, {C, 4}), W, H, cams[cfg.cam],
                           dist_fixture::kTierNames[cfg.dist],
-                          dist_tv(cfg.dist), radii, q_packed, q_bounds,
+                          dist_tv(cfg.dist), std::nullopt, radii, q_packed, q_bounds,
                           (uint32_t)NUM_SH, quant_src ? 8 : 32, 256);
             cam_ids = std::get<0>(out);
             gauss_ids = std::get<1>(out);
@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
             auto out = fn(N, cfg.max_deg, splats_in, ttv(d_vm, {C, 16}),
                           ttv(d_intr, {C, 4}), W, H, cams[cfg.cam],
                           dist_fixture::kTierNames[cfg.dist],
-                          dist_tv(cfg.dist), radii, q_packed, q_bounds,
+                          dist_tv(cfg.dist), std::nullopt, radii, q_packed, q_bounds,
                           (uint32_t)NUM_SH, quant_src ? 8 : 32, 256);
             aabb_2d = std::get<0>(out);
         }
@@ -340,7 +340,7 @@ int main(int argc, char** argv) {
                                      n_isect * 4, MemcpyKind::HostToDevice);
             bwd(N, cfg.max_deg, splats_in, ttv(d_vm, {C, 16}),
                 ttv(d_intr, {C, 4}), W, H, cams[cfg.cam],
-                dist_fixture::kTierNames[cfg.dist], dist_tv(cfg.dist),
+                dist_fixture::kTierNames[cfg.dist], dist_tv(cfg.dist), std::nullopt,
                 cam_ids, gauss_ids, aabb_2d, v_screen,
                 v_world, gq, q_packed, q_bounds, (uint32_t)NUM_SH,
                 quant_src ? 8 : 32, 256);

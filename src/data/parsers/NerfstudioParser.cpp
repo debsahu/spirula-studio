@@ -8,6 +8,7 @@
 #include "data/Json.h"
 
 #include "core/CameraModel.h"   // camera_model_from_name (CUDA-free)
+#include "sfm/core/RollingShutter.h"
 #include "data/DistortionFit.h"
 #include "data/SourceCamera.h"
 
@@ -618,6 +619,30 @@ ParsedDataset parse_nerfstudio_meta(const JsonValue& meta,
         ds.intrins[j*4 + 2] = (float)cx;
         ds.intrins[j*4 + 3] = (float)cy;
         std::copy(&c2w_all[subset[j]*12], &c2w_all[subset[j]*12] + 12, &ds.c2w[j*12]);
+
+        // A per-frame twist plus the direction, which may sit on the frame or
+        // on the file. Absent keys leave the frame global-shutter, so a plain
+        // transforms.json is unaffected (docs/notes/rolling-shutter.md).
+        {
+            std::string dir_name;
+            if (const JsonValue* v = fr.find("rolling_shutter")) dir_name = v->as_string();
+            else if (const JsonValue* v2 = meta.find("rolling_shutter")) dir_name = v2->as_string();
+            const JsonValue* tw = fr.find("rolling_shutter_twist");
+            if (!dir_name.empty() && dir_name != "global" && tw && tw->is_array() &&
+                tw->arr.size() >= 6) {
+                sfm::ShutterDir d = sfm::ShutterDir::Global;
+                if (dir_name == "vertical") d = sfm::ShutterDir::Vertical;
+                else if (dir_name == "horizontal") d = sfm::ShutterDir::Horizontal;
+                if (d != sfm::ShutterDir::Global) {
+                    if (ds.rs_twists.empty()) ds.rs_twists.assign((size_t)N * 8, 0.0f);
+                    const sfm::ShutterAxis ax = sfm::ShutterAxis::of(d, (int)W, (int)H);
+                    float* q = &ds.rs_twists[(size_t)j * 8];
+                    for (int k = 0; k < 6; k++) q[k] = (float)tw->arr[k].as_double();
+                    q[6] = (float)ax.ax;
+                    q[7] = (float)ax.ay;
+                }
+            }
+        }
 
         // Auxiliary buffers: explicit frame paths win; directory-convention
         // probing as fallback (_add_auxiliary_buffers). Unlike the Python

@@ -446,6 +446,7 @@ void engine_fused_proj_bwd_optim_step(int step, const OptimConfig& cfg) {
             engine().camera.model_str,
         engine().camera.distortion_str,
             _dt2d_tv(engine().camera.dist_coeffs),
+            _rs_tv(engine().camera.twists),
             engine().fwd.camera_ids,
             engine().fwd.gaussian_ids,
             aabb_nd,

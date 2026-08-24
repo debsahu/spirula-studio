@@ -13,6 +13,7 @@ namespace {
 struct ProjectionFwdParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [C,8] rolling shutter; 0 until the plumbing lands
     uint64_t out_aabb, out_depths, out_radii;
     uint64_t s_xy, s_depth, s_conic, s_opac, s_rgb;
     uint64_t sh_packed, sh_bounds;
@@ -24,13 +25,14 @@ struct ProjectionFwdParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(ProjectionFwdParams) == 20 * 8 + 8 * 4,
+static_assert(sizeof(ProjectionFwdParams) == 21 * 8 + 8 * 4,
               "params layout must match the slang struct");
 
 // Mirrors Projection3dgutParams in shaders/projection_fwd.slang.
 struct Projection3dgutParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [C,8] rolling shutter; 0 until the plumbing lands
     uint64_t out_aabb, out_depths, out_radii;
     uint64_t s_scale, s_opac, s_rgb;
     uint64_t sh_packed, sh_bounds;
@@ -42,7 +44,7 @@ struct Projection3dgutParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(Projection3dgutParams) == 18 * 8 + 8 * 4,
+static_assert(sizeof(Projection3dgutParams) == 19 * 8 + 8 * 4,
               "params layout must match the slang struct");
 
 using vkk::resolve_sh_quant;
@@ -58,6 +60,7 @@ launch_projection_fwd_vk(
     const uint32_t image_width, const uint32_t image_height,
     const std::string& camera_model, const std::string& distortion,
     const TorchTensorView& dist_coeffs,
+    const std::optional<TorchTensorView>& twists,
     DeviceVector<float>& radii,
     const std::optional<TorchTensorView>& sh_value_packed,
     const std::optional<TorchTensorView>& sh_value_bounds,
@@ -104,6 +107,7 @@ launch_projection_fwd_vk(
     p.viewmats = std::get<0>(viewmats);
     p.intrins = std::get<0>(intrins);
     p.dist_coeffs = vkk::or_fallback(std::get<0>(dist_coeffs));
+    p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
     p.out_aabb = (uint64_t)aabb.data_ptr();
     p.out_depths = (uint64_t)sorting_depths.data_ptr();
     p.out_radii = (uint64_t)radii.data_ptr();
@@ -123,7 +127,8 @@ launch_projection_fwd_vk(
     p.wgs_per_row = per_row;
 
     backend::vk::SpecList spec{cd.cam, (uint32_t)sh_degree,
-                               antialiased ? 1u : 0u, spec_bits, 0u, cd.dist};
+                               antialiased ? 1u : 0u, spec_bits, 0u, cd.dist,
+                               twists.has_value() ? 1u : 0u};
     vkk::dispatch_ring("projection_fwd.projection_fwd_3dgs", spec, per_row,
                        rows, 1, &p, sizeof(p));
 
@@ -143,6 +148,7 @@ std::tuple<
     const uint32_t image_width, const uint32_t image_height,
     const std::string camera_model, const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceVector<float> radii,
     const std::optional<TorchTensorView> sh_value_packed,
     const std::optional<TorchTensorView> sh_value_bounds,
@@ -153,7 +159,7 @@ std::tuple<
     return launch_projection_fwd_vk(
         /*antialiased=*/false, num_splats, in_splats, max_sh_degree,
         viewmats, intrins, image_width, image_height, camera_model,
-        distortion, dist_coeffs, radii, sh_value_packed, sh_value_bounds,
+        distortion, dist_coeffs, twists, radii, sh_value_packed, sh_value_bounds,
         num_sh_buffer, sh_value_bits, sh_bounds_stride);
 }
 
@@ -166,6 +172,7 @@ std::tuple<
     const uint32_t image_width, const uint32_t image_height,
     const std::string camera_model, const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceVector<float> radii,
     const std::optional<TorchTensorView> sh_value_packed,
     const std::optional<TorchTensorView> sh_value_bounds,
@@ -176,7 +183,7 @@ std::tuple<
     return launch_projection_fwd_vk(
         /*antialiased=*/true, num_splats, in_splats, max_sh_degree,
         viewmats, intrins, image_width, image_height, camera_model,
-        distortion, dist_coeffs, radii, sh_value_packed, sh_value_bounds,
+        distortion, dist_coeffs, twists, radii, sh_value_packed, sh_value_bounds,
         num_sh_buffer, sh_value_bits, sh_bounds_stride);
 }
 
@@ -189,6 +196,7 @@ std::tuple<
     const uint32_t image_width, const uint32_t image_height,
     const std::string camera_model, const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceVector<float> radii,
     const std::optional<TorchTensorView> sh_value_packed,
     const std::optional<TorchTensorView> sh_value_bounds,
@@ -237,6 +245,7 @@ std::tuple<
     p.viewmats = std::get<0>(viewmats);
     p.intrins = std::get<0>(intrins);
     p.dist_coeffs = vkk::or_fallback(std::get<0>(dist_coeffs));
+    p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
     p.out_aabb = (uint64_t)aabb.data_ptr();
     p.out_depths = (uint64_t)sorting_depths.data_ptr();
     p.out_radii = (uint64_t)radii.data_ptr();
@@ -254,7 +263,7 @@ std::tuple<
     p.wgs_per_row = per_row;
 
     backend::vk::SpecList spec{cd.cam, (uint32_t)sh_degree, 0u, spec_bits, 0u,
-                               cd.dist};
+                               cd.dist, twists.has_value() ? 1u : 0u};
     vkk::dispatch_ring("projection_fwd.projection_fwd_3dgut", spec, per_row,
                        rows, 1, &p, sizeof(p));
 

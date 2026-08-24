@@ -213,6 +213,10 @@ struct DecodedBatch {
     TorchTensorView        viewmats_view{0, 0, {}};
     TorchTensorView        intrins_view{0, 0, {}};
     TorchTensorView        dist_coeffs_view{0, 0, {}};
+    // [num, 8] rolling shutter, or empty. Filled only when K == 1: a split
+    // face is a different camera orientation and the twist must turn with it.
+    std::vector<float>     rs_twists;
+    TorchTensorView        rs_twists_view{0, 0, {}};
     TorchTensorView        rgb_view{0, 0, {}};
     TorchTensorView        mask_view{0, 0, {}};
     TorchTensorView        depth_view{0, 0, {}};
@@ -301,6 +305,8 @@ public:
         // empty when the dataset has none. See PostSplitCameras.
         std::vector<int32_t>       redistort_models,    // [N]
         std::vector<float>         redistort_params,    // [N, 16]
+        // Per-INPUT rolling shutter; empty when no camera has one.
+        std::vector<float>         rs_twists,           // [N, 8]
         std::vector<int32_t>       train_indices,
         std::vector<int32_t>       val_indices);
 

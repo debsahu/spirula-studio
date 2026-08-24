@@ -122,7 +122,7 @@ void run_mode(bool packed, DensifyAccumMode accum_mode) {
         auto out = projection_3dgs_packed_forward(
             N, 3, in_splats, ttv(d_vm, {(int64_t)C, 16}),
             ttv(d_intr, {(int64_t)C, 4}), W, H, "PINHOLE",
-            dist_fixture::kTierNames[0], dist_tv, radii, std::nullopt,
+            dist_fixture::kTierNames[0], dist_tv, std::nullopt, radii, std::nullopt,
             std::nullopt, 0, 32, 0);
         cam_ids = std::get<0>(out);
         gauss_ids = std::get<1>(out);
@@ -134,7 +134,7 @@ void run_mode(bool packed, DensifyAccumMode accum_mode) {
         auto out = projection_3dgs_forward(
             N, 3, in_splats, ttv(d_vm, {(int64_t)C, 16}),
             ttv(d_intr, {(int64_t)C, 4}), W, H, "PINHOLE",
-            dist_fixture::kTierNames[0], dist_tv, radii, std::nullopt,
+            dist_fixture::kTierNames[0], dist_tv, std::nullopt, radii, std::nullopt,
             std::nullopt, 0, 32, 0);
         aabb_2d = std::get<0>(out);
         splats_s = std::get<2>(out);

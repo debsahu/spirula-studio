@@ -3322,6 +3322,9 @@ void GuiApp::draw_sfm_advanced() {
     ImGui::EndDisabled();
     ui::help_on_hover(dmsg::sfm_per_image_intrinsics_help);
 
+    ui::Checkbox(dmsg::sfm_rolling_shutter, &_sfm_job.rolling_shutter);
+    ui::help_on_hover(dmsg::sfm_rolling_shutter_help);
+
     ImGui::SetNextItemWidth(px(260.0f));
     ui::InputInt(dmsg::max_features_auto, &_sfm_job.max_features);
     ui::help_on_hover(dmsg::max_features_auto_help);

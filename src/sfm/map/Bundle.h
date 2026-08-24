@@ -20,6 +20,7 @@
 #include "sfm/ba/Problem.h"
 #include "sfm/ba/Solver.h"
 #include "sfm/core/Model.h"
+#include "sfm/core/RollingShutter.h"
 #include "sfm/map/Profile.h"
 
 namespace sfm {
@@ -86,6 +87,10 @@ struct BundleOptions {
     VkContext* shared_ctx = nullptr;
     // Host worker threads, for the `cpu` scalar; 0 = hardware_concurrency.
     int threads = 0;
+    // Rolling shutter, frozen for the duration of the solve: the residual uses
+    // each image's twist but no column of the system belongs to it, so the dof
+    // tiers and the Schur structure are the global-shutter ones (D74).
+    const RollingShutterData* rs = nullptr;
 };
 
 // The problem built from a reconstruction, plus what writing the solution back
@@ -183,6 +188,23 @@ inline BundleLayout buildBundle(Reconstruction& rec, const BundleOptions& bopt) 
         P.poses[6 * i + 0] = aa.x; P.poses[6 * i + 1] = aa.y; P.poses[6 * i + 2] = aa.z;
         P.poses[6 * i + 3] = im.pose.t.x; P.poses[6 * i + 4] = im.pose.t.y;
         P.poses[6 * i + 5] = im.pose.t.z;
+    }
+
+    if (bopt.rs && bopt.rs->active()) {
+        P.twists.assign(8 * (size_t)P.num_images, 0.0);
+        for (uint32_t i = 0; i < P.num_images; i++) {
+            const Image& im = *imgOf[i];
+            auto ci = bopt.rs->cameras.find(im.camera_id);
+            auto ii = bopt.rs->images.find(im.id);
+            if (ci == bopt.rs->cameras.end() || ii == bopt.rs->images.end()) continue;
+            const Camera& cam = rec.cameras.at(im.camera_id);
+            ShutterAxis ax = ShutterAxis::of(ci->second.dir, cam.width, cam.height);
+            const Twist& x = ii->second.twist;
+            double* d = &P.twists[8 * (size_t)i];
+            d[0] = x.omega.x; d[1] = x.omega.y; d[2] = x.omega.z;
+            d[3] = x.v.x;     d[4] = x.v.y;     d[5] = x.v.z;
+            d[6] = ax.ax;     d[7] = ax.ay;
+        }
     }
 
     // Intrinsics groups. Model + parameter count are per group (each camera may

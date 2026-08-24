@@ -22,6 +22,7 @@ void projection_packed_mask_kernel_wrapper(
     const float *__restrict__ viewmats, // [C, 4, 4]
     const float4 *__restrict__ intrins,  // [C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     // outputs
@@ -43,6 +44,7 @@ void projection_packed_fwd_kernel_wrapper(
     const float *__restrict__ viewmats, // [C, 4, 4]
     const float4 *__restrict__ intrins,  // [C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     const int64_t* __restrict__ intersection_mask_scan,  // [C, N], inclusive scan
@@ -79,6 +81,7 @@ inline std::tuple<
     const CameraModelType camera_model,
     const CameraDistortionType distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceVector<float> radii,
     const uint8_t* sh_value_packed,
     const float2* sh_value_bounds,
@@ -95,7 +98,7 @@ inline std::tuple<
 
     #define _LAUNCH_ARGS ( \
             (cudaStream_t)0, C, N, \
-            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, \
+            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, _rs_ptr(twists), \
             image_width, image_height, \
             intersection_mask.data_ptr(), \
             sh_value_packed, sh_value_bounds, num_sh_buffer, sh_value_bits, \
@@ -133,7 +136,7 @@ inline std::tuple<
 
     #define _LAUNCH_ARGS ( \
             (cudaStream_t)0, C, N, \
-            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, \
+            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, _rs_ptr(twists), \
             image_width, image_height, \
             intersection_mask_scan.data_ptr(), \
             camera_ids.data_ptr(), gaussian_ids.data_ptr(), \
@@ -177,6 +180,7 @@ std::tuple<
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceVector<float> radii,
     const std::optional<TorchTensorView> sh_value_packed,
     const std::optional<TorchTensorView> sh_value_bounds,
@@ -195,7 +199,7 @@ std::tuple<
         ? (const float2*)std::get<0>(sh_value_bounds.value()) : nullptr;
     #define LAUNCH(n) if (sh_degree == (n)) \
         return launch_projection_packed_fwd_kernel<Vanilla3DGS<n>>( \
-            num_splats, in_splats, vm, intr, C, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, radii, \
+            num_splats, in_splats, vm, intr, C, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, twists, radii, \
             vp, vb, num_sh_buffer, sh_value_bits, sh_bounds_stride);
     LAUNCH(3) LAUNCH(2) LAUNCH(1) LAUNCH(0) LAUNCH(4)
     #undef LAUNCH
@@ -222,6 +226,7 @@ std::tuple<
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceVector<float> radii,
     const std::optional<TorchTensorView> sh_value_packed,
     const std::optional<TorchTensorView> sh_value_bounds,
@@ -240,7 +245,7 @@ std::tuple<
         ? (const float2*)std::get<0>(sh_value_bounds.value()) : nullptr;
     #define LAUNCH(n) if (sh_degree == (n)) \
         return launch_projection_packed_fwd_kernel<MipSplatting<n>>( \
-            num_splats, in_splats, vm, intr, C, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, radii, \
+            num_splats, in_splats, vm, intr, C, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, twists, radii, \
             vp, vb, num_sh_buffer, sh_value_bits, sh_bounds_stride);
     LAUNCH(3) LAUNCH(2) LAUNCH(1) LAUNCH(0) LAUNCH(4)
     #undef LAUNCH
@@ -268,6 +273,7 @@ std::tuple<
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceVector<float> radii,
     const std::optional<TorchTensorView> sh_value_packed,
     const std::optional<TorchTensorView> sh_value_bounds,
@@ -286,7 +292,7 @@ std::tuple<
         ? (const float2*)std::get<0>(sh_value_bounds.value()) : nullptr;
     #define LAUNCH(n) if (sh_degree == (n)) \
         return launch_projection_packed_fwd_kernel<Vanilla3DGUT<n>>( \
-            num_splats, in_splats, vm, intr, C, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, radii, \
+            num_splats, in_splats, vm, intr, C, image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, twists, radii, \
             vp, vb, num_sh_buffer, sh_value_bits, sh_bounds_stride);
     LAUNCH(3) LAUNCH(2) LAUNCH(1) LAUNCH(0) LAUNCH(4)
     #undef LAUNCH

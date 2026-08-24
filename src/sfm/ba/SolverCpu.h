@@ -69,7 +69,8 @@ public:
                     withModel(model_[img], [&](auto M) {
                         double r[2];
                         residual<decltype(M)>(&P_.poses[6 * (size_t)img], &P_.intr[ioff_[img]],
-                                              &P_.points[3 * (size_t)pt], &P_.obs_xy[2 * o], r);
+                                              &P_.points[3 * (size_t)pt], &P_.obs_xy[2 * o], r,
+                                              rsOf(img));
                         c += 0.5 * LT::cost(r[0] * r[0] + r[1] * r[1], lossParam_);
                     });
                 }
@@ -201,6 +202,7 @@ private:
     // ================
 
     void buildImageTables() {
+        rsOn_ = P_.twists.size() == 8 * (size_t)nImg_;
         dof_.resize(nImg_);
         gz_.resize(nImg_);
         icol_.resize(nImg_);
@@ -467,7 +469,7 @@ private:
                             constexpr int DOF = 6 + MT::kNumIntr;
                             jacobian<MT>(&P_.poses[6 * (size_t)img], &P_.intr[ioff_[img]],
                                          &P_.points[3 * (size_t)p], &P_.obs_xy[2 * (size_t)o], r,
-                                         jcf, jpf);
+                                         jcf, jpf, rsOf(img));
                             const double sw =
                                 std::sqrt(LT::weight(r[0] * r[0] + r[1] * r[1], lossParam_));
                             for (int row = 0; row < 2; row++) {
@@ -1040,6 +1042,11 @@ private:
     double lossParam_ = 1.0;
 
     uint32_t n_ = 0, poseDim_ = 0, nImg_ = 0, nPts_ = 0, nObs_ = 0;
+    const double* rsOf(uint32_t img) const {
+        return rsOn_ ? &P_.twists[8 * (size_t)img] : nullptr;
+    }
+
+    bool rsOn_ = false;
     std::vector<uint8_t> dof_, gz_, model_;
     std::vector<uint32_t> icol_, ioff_;
     bool exclusive_ = true;

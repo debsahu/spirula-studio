@@ -54,7 +54,8 @@ void set_camera_params(
     std::string distortion,
     TorchTensorView viewmats,
     TorchTensorView intrins,
-    TorchTensorView dist_coeffs
+    TorchTensorView dist_coeffs,
+    TorchTensorView twists
 ) {
     engine().camera.width = width;
     engine().camera.height = height;
@@ -84,6 +85,7 @@ void set_camera_params(
     }
     engine().camera.intrins     = _hv_to_dv<float4>(PoolSlot::CamIntrins, intrins);
     engine().camera.dist_coeffs = _hv_to_dt2d<float>(PoolSlot::CamDistCoeffs, dist_coeffs);
+    engine().camera.twists      = _hv_to_dt2d<float>(PoolSlot::CamTwists, twists);
 }
 
 

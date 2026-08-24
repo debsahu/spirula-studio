@@ -17,6 +17,7 @@ template void projection_bwd_quantgrad_kernel_wrapper<
     const float * viewmats,
     const float4 * intrins,
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     const int32_t * camera_id_bounds,
@@ -45,6 +46,7 @@ template void projection_bwd_quantgrad_kernel_wrapper<
     const float * viewmats,
     const float4 * intrins,
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     const int32_t * camera_id_bounds,

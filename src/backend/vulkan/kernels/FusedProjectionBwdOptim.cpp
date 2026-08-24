@@ -15,6 +15,7 @@ namespace {
 struct FpboParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [C,8] rolling shutter; 0 until the plumbing lands
     uint64_t camera_id_bounds, camera_ids, perm, aabb;
     uint64_t vs0, vs1, vs2, vs3, vs4;
     uint64_t vw_means, vw_quats, vw_scales, vw_opacities, vw_dc;
@@ -41,7 +42,7 @@ struct FpboParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(FpboParams) == 52 * 8 + 16 * 4 + 10 * 4,
+static_assert(sizeof(FpboParams) == 53 * 8 + 16 * 4 + 10 * 4,
               "params layout must match the slang struct");
 
 using vkk::or_fallback;
@@ -55,6 +56,7 @@ void launch_fpbo_vk(
     const uint32_t image_width, const uint32_t image_height,
     const std::string& camera_model, const std::string& distortion,
     const TorchTensorView& dist_coeffs,
+    const std::optional<TorchTensorView>& twists,
     const DeviceVector<int32_t>& camera_ids,
     const DeviceVector<int32_t>& gaussian_ids,
     DeviceTensorFloatND& aabb,
@@ -141,6 +143,7 @@ void launch_fpbo_vk(
     p.viewmats = std::get<0>(viewmats);
     p.intrins = std::get<0>(intrins);
     p.dist_coeffs = or_fallback(std::get<0>(dist_coeffs));
+    p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
     p.camera_id_bounds = or_fallback(
         (uint64_t)(packed ? ranges.camera_id_bounds.data_ptr() : nullptr));
     p.camera_ids = or_fallback((uint64_t)(packed ? camera_ids.data_ptr()
@@ -244,7 +247,8 @@ void launch_fpbo_vk(
         level1 ? 1u : 0u,
         (level1 && non_sh.enabled) ? 1u : 0u,
         vw_mask,
-        cd.dist};
+        cd.dist,
+        twists.has_value() ? 1u : 0u};
     vkk::dispatch_ring("fpbo.fpbo", spec, f.per_row, f.rows, 1, &p,
                        sizeof(p));
 }
@@ -256,7 +260,7 @@ void launch_fpbo_vk(
 #define _FPBO_ARGS                                                          \
     num_splats, max_sh_degree, splats_world, viewmats, intrins,             \
         image_width, image_height, camera_model, distortion, dist_coeffs,   \
-        camera_ids,                                                         \
+        twists, camera_ids,                                                 \
         gaussian_ids, aabb, v_splats_world, v_splats_screen,                \
         g1_splats_world, g2_splats_world, sh_packed, sh_quant_bounds,       \
         sh_value_packed, sh_value_bounds, non_sh, radii, densify_score,     \
@@ -274,6 +278,7 @@ void launch_fpbo_vk(
         const uint32_t image_width, const uint32_t image_height,            \
         const std::string camera_model, const std::string distortion,       \
         const TorchTensorView dist_coeffs,                                  \
+        const std::optional<TorchTensorView> twists,                        \
         const DeviceVector<int32_t> camera_ids,                             \
         const DeviceVector<int32_t> gaussian_ids, DeviceTensorFloatND aabb, \
         const std::vector<DeviceTensorFloatND> v_splats_world,              \
@@ -300,7 +305,7 @@ void launch_fpbo_vk(
 static void _fpbo_call(bool eval3d, bool antialiased, _FPBO_PARAMS) {
     launch_fpbo_vk(eval3d, antialiased, num_splats, max_sh_degree,
                    splats_world, viewmats, intrins, image_width, image_height,
-                   camera_model, distortion, dist_coeffs, camera_ids,
+                   camera_model, distortion, dist_coeffs, twists, camera_ids,
                    gaussian_ids, aabb,
                    v_splats_world, v_splats_screen, g1_splats_world,
                    g2_splats_world, sh_packed, sh_quant_bounds,

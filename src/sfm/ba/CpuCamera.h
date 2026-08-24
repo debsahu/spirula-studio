@@ -381,13 +381,30 @@ template <class T> inline void angleAxisRotate(const T axis[3], const T p[3], T 
     for (int i = 0; i < 3; i++) out[i] = p[i] * ct + cr[i] * st + a[i] * w;
 }
 
+// The camera.slang applyShutter, in the same 8-element layout: omega(3), v(3),
+// shutter axis(2). Null or all-zero rs is the global-shutter identity.
+template <class T>
+inline void applyShutter(const double* rs, const double obs[2], const T p[3], T out[3]) {
+    for (int i = 0; i < 3; i++) out[i] = p[i];
+    if (!rs) return;
+    double w2 = 0;
+    for (int i = 0; i < 6; i++) w2 += rs[i] * rs[i];
+    if (w2 == 0.0) return;
+    const double s = rs[6] * obs[0] + rs[7] * obs[1] - 0.5;
+    const T ax[3] = {T(rs[0] * s), T(rs[1] * s), T(rs[2] * s)};
+    T rot[3];
+    angleAxisRotate<T>(ax, p, rot);
+    for (int i = 0; i < 3; i++) out[i] = rot[i] + T(rs[3 + i] * s);
+}
+
 template <class M>
 inline void residual(const double pose[6], const double* intr, const double X[3],
-                     const double obs[2], double r[2]) {
-    double p[3], px[2];
+                     const double obs[2], double r[2], const double* rs = nullptr) {
+    double p[3], ps[3], px[2];
     angleAxisRotate<double>(pose, X, p);
     for (int i = 0; i < 3; i++) p[i] += pose[3 + i];
-    M::template project<double>(intr, p, px);
+    applyShutter<double>(rs, obs, p, ps);
+    M::template project<double>(intr, ps, px);
     r[0] = px[0] - obs[0];
     r[1] = px[1] - obs[1];
 }
@@ -417,7 +434,8 @@ inline void angleAxisMatrix(const double axis[3], double R[9]) {
 // of the axis columns the assembly's isfinite guards drop it in.
 template <class M>
 inline void jacobian(const double pose[6], const double* intr, const double X[3],
-                     const double obs[2], double r[2], double* Jc, double* Jp) {
+                     const double obs[2], double r[2], double* Jc, double* Jp,
+                     const double* rs = nullptr) {
     constexpr int NI = M::kNumIntr;
     constexpr int NP = 3 + NI;
     constexpr int DOF = 6 + NI;
@@ -429,10 +447,11 @@ inline void jacobian(const double pose[6], const double* intr, const double X[3]
     double R[9];
     angleAxisMatrix(pose, R);
 
-    Jet<NP> pc[3], ic[NI], px[2];
+    Jet<NP> pc[3], ps[3], ic[NI], px[2];
     for (int i = 0; i < 3; i++) pc[i] = Jet<NP>::var(pj[i].a + pose[3 + i], i);
     for (int i = 0; i < NI; i++) ic[i] = Jet<NP>::var(intr[i], 3 + i);
-    M::template project<Jet<NP>>(ic, pc, px);
+    applyShutter<Jet<NP>>(rs, obs, pc, ps);
+    M::template project<Jet<NP>>(ic, ps, px);
 
     for (int row = 0; row < 2; row++) {
         r[row] = px[row].a - obs[row];

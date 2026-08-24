@@ -58,10 +58,16 @@ struct Vanilla3DGUT : public _BasePrimitive3DGUT<sh_degree> {
         ) {
             float2 xy;
             float depth;
+            float3x3 rs_R = cam.R;
+            float3 rs_t = cam.t;
+            if (cam.rs_axis.x != 0.0f || cam.rs_axis.y != 0.0f)
+                Slang3DGSProj<camera_model, distortion>::shutter(
+                    this->mean, cam.R, cam.t, cam.rs_omega, cam.rs_v, cam.rs_axis,
+                    cam.fx, cam.fy, cam.cx, cam.cy, cam.dist_coeffs.v, &rs_R, &rs_t);
             Slang3DGSProj<camera_model, distortion>::fwd_3d(
                 false,
                 this->mean, this->quat, this->scale, this->opacity,
-                cam.R, cam.t, cam.fx, cam.fy, cam.cx, cam.cy,
+                rs_R, rs_t, cam.fx, cam.fy, cam.cx, cam.cy,
                 cam.dist_coeffs.v,
                 cam.width, cam.height,
                 &aabb, &sorting_depth, &radius, &xy, &depth, &proj.scale, &proj.opacity
@@ -115,10 +121,16 @@ struct Vanilla3DGUT : public _BasePrimitive3DGUT<sh_degree> {
             int64_t  sh_base   = 0,
             int64_t  sh_bounds_stride = 256
         ) {
+            float3x3 rs_R = cam.R;
+            float3 rs_t = cam.t;
+            if (cam.rs_axis.x != 0.0f || cam.rs_axis.y != 0.0f)
+                Slang3DGSProj<camera_model, distortion>::shutter(
+                    this->mean, cam.R, cam.t, cam.rs_omega, cam.rs_v, cam.rs_axis,
+                    cam.fx, cam.fy, cam.cx, cam.cy, cam.dist_coeffs.v, &rs_R, &rs_t);
             Slang3DGSProj<camera_model, distortion>::vjp_3d(
                 false,
                 this->mean, this->quat, this->scale, this->opacity,
-                cam.R, cam.t, cam.fx, cam.fy, cam.cx, cam.cy,
+                rs_R, rs_t, cam.fx, cam.fy, cam.cx, cam.cy,
                 cam.dist_coeffs.v,
                 cam.width, cam.height,
                 make_float2(0), 0.0f, v_proj.scale, v_proj.opacity,

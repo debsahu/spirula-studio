@@ -791,7 +791,7 @@ void TrainerSession::setup_engine() {
         post.any_warp ? post.post_heights : std::vector<int32_t>{},
         post.any_warp ? post.face_axes : std::vector<float>{},
         post.input_intrins, post.input_dist_coeffs,
-        post.redistort_models, post.redistort_params,
+        post.redistort_models, post.redistort_params, ds.rs_twists,
         ds.train_indices, ds.val_indices);
 
     // ---- Bilagrid / PPISP init -----------------------------------------
@@ -1258,7 +1258,7 @@ void TrainerSession::eval() {
             epost.any_warp ? epost.post_heights : std::vector<int32_t>{},
             epost.any_warp ? epost.face_axes : std::vector<float>{},
             epost.input_intrins, epost.input_dist_coeffs,
-            epost.redistort_models, epost.redistort_params,
+            epost.redistort_models, epost.redistort_params, eds.rs_twists,
             all_idx, {});
     }
 

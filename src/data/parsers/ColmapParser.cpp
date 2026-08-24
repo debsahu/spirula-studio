@@ -3,6 +3,7 @@
 // DatasetCommon.cpp.
 
 #include "data/DatasetParser.h"
+#include "sfm/core/RollingShutter.h"
 #include "i18n/catalog/Data.h"
 #include "data/FastFloat.h"
 
@@ -731,6 +732,11 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
     }
 
     // ---- Assemble frames sorted by image filename ----------------------
+    // `rolling_shutter.bin` sits beside images.bin and is optional; COLMAP
+    // itself ignores it (docs/notes/rolling-shutter.md).
+    sfm::RollingShutterData rs;
+    const bool have_rs = sfm::readRollingShutter(recon_dir, rs) && rs.active();
+
     std::vector<const ColmapImage*> frames;
     frames.reserve(images.size());
     for (const auto& [id, im] : images) frames.push_back(&im);
@@ -791,6 +797,7 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
     ds.c2w.resize(N * 12);
     ds.intrins.resize(N * 4);
     ds.dist_coeffs.resize(N * kCameraDistortionParams);
+    if (have_rs) ds.rs_twists.assign(N * 8, 0.0f);
 
     // One bake per COLMAP camera record, not per frame: a record is one
     // physical camera, and a fitted one costs a least-squares solve.
@@ -856,6 +863,22 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
         if (any_redistort) ds.redistort[j] = bi.source;
 
         std::copy(&c2w_all[i*12], &c2w_all[i*12] + 12, &ds.c2w[j*12]);
+
+        if (have_rs) {
+            auto ci = rs.cameras.find((uint32_t)im.camera_id);
+            auto ii = rs.images.find((uint32_t)im.image_id);
+            if (ci != rs.cameras.end() && ii != rs.images.end()) {
+                const sfm::Twist& x = ii->second.twist;
+                // The axis is per RENDERED pixel, so it comes from W/H above
+                // rather than from the camera the reconstruction stored.
+                const sfm::ShutterAxis ax =
+                    sfm::ShutterAxis::of(ci->second.dir, (int)W, (int)H);
+                float* d = &ds.rs_twists[j * 8];
+                d[0] = (float)x.omega.x; d[1] = (float)x.omega.y; d[2] = (float)x.omega.z;
+                d[3] = (float)x.v.x;     d[4] = (float)x.v.y;     d[5] = (float)x.v.z;
+                d[6] = (float)ax.ax;     d[7] = (float)ax.ay;
+            }
+        }
 
         // Auxiliary supervision buffers, discovered by filename convention.
         mask_files[j]   = dsparse::find_aux_file(

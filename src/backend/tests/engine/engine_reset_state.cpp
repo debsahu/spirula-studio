@@ -99,6 +99,7 @@ static std::vector<float> run_once() {
             step, 100, "3dgs", 1, /*packed=*/false, W, H, "PINHOLE", "NONE",
             ttv(vm.data(), 4, {C, 4, 4}), ttv(intr.data(), 4, {C, 4}),
             ttv(dist.data(), 4, {C, kCameraDistortionParams}),
+            TorchTensorView{0, 0, {}},
             ttv(gt_rgb.data(), 1, {C, H, W, 3}),
             ttv(gt_depth.data(), 2, {C, H, W, 1}),
             ttv(gt_normal.data(), 1, {C, H, W, 3}),

@@ -591,6 +591,9 @@ void DecodedBatch::build_views() {
     intrins_view     = mk(intrins.data(),     4, {B_post, 4LL});
     dist_coeffs_view = mk(dist_coeffs.data(), 4,
                           {B_post, (long long)kCameraDistortionParams});
+    rs_twists_view = none;
+    if (!rs_twists.empty())
+        rs_twists_view = mk(rs_twists.data(), 4, {B_post, 8LL});
 
     // Per-INPUT intrins / dist_coeffs views (size B_in). Empty when the
     // warp kernel doesn't need them.
@@ -659,6 +662,7 @@ public:
         std::vector<float>       input_dist_coeffs,
         std::vector<int32_t>     redistort_models,
         std::vector<float>       redistort_params, // per-input
+        std::vector<float>       rs_twists,        // per-input
         std::vector<int32_t>     train_indices,
         std::vector<int32_t>     val_indices);
 
@@ -740,6 +744,7 @@ private:
     // fisheye-warp camera is present.
     std::vector<float>        _input_intrins;
     std::vector<float>        _input_dist_coeffs;
+    std::vector<float>        _rs_twists;    // [N,8] per INPUT camera; empty = none
     std::vector<int32_t>      _train_indices;
     std::vector<int32_t>      _val_indices;
 
@@ -918,6 +923,7 @@ DataManagerImpl::DataManagerImpl(
     std::vector<float>         input_dist_coeffs,
     std::vector<int32_t>       redistort_models,
     std::vector<float>         redistort_params,
+    std::vector<float>         rs_twists,
     std::vector<int32_t>       train_indices,
     std::vector<int32_t>       val_indices)
     : _cfg(config),
@@ -925,6 +931,7 @@ DataManagerImpl::DataManagerImpl(
       _camera_distortions(std::move(camera_distortions)),
       _redistort_models(std::move(redistort_models)),
       _redistort_params(std::move(redistort_params)),
+      _rs_twists(std::move(rs_twists)),
       _K_per_camera(std::move(K_per_camera)),
       _post_offsets(std::move(post_offsets)),
       _image_filenames(std::move(image_filenames)),
@@ -1410,6 +1417,10 @@ void DataManagerImpl::allocate_batch(
     else       b.face_axes.clear();
     b.intrins.assign((size_t)B_post * 4, 0.0f);
     b.dist_coeffs.assign((size_t)B_post * kCameraDistortionParams, 0.0f);
+    // K > 1 splits one input into faces that point different ways; the twist
+    // would have to turn with each, so the split path stays global-shutter.
+    if (K == 1 && !_rs_twists.empty()) b.rs_twists.assign((size_t)B_post * 8, 0.0f);
+    else                               b.rs_twists.clear();
 
     // Per-INPUT intrins / dist_coeffs (needed by the wide warp kernel for
     // fisheye / equisolid). Allocate only when K > 1 and the source arrays
@@ -1496,6 +1507,9 @@ void DataManagerImpl::fill_camera_params(DecodedBatch& b) {
             std::memcpy(&b.face_axes[(size_t)j * K * 9],
                         &_face_axes[(size_t)off * 9],
                         (size_t)K * 9 * sizeof(float));
+        if (!b.rs_twists.empty())
+            std::memcpy(&b.rs_twists[(size_t)j * 8],
+                        &_rs_twists[(size_t)i_in * 8], 8 * sizeof(float));
         if (have_in) {
             std::memcpy(&b.input_intrins[(size_t)j * 4],
                         &_input_intrins[(size_t)i_in * 4],
@@ -2209,6 +2223,7 @@ DataManager::DataManager(
     std::vector<float>         input_dist_coeffs,
     std::vector<int32_t>       redistort_models,
     std::vector<float>         redistort_params,
+    std::vector<float>         rs_twists,
     std::vector<int32_t>       train_indices,
     std::vector<int32_t>       val_indices)
 {
@@ -2223,6 +2238,7 @@ DataManager::DataManager(
         std::move(post_widths), std::move(post_heights), std::move(face_axes),
         std::move(input_intrins), std::move(input_dist_coeffs),
         std::move(redistort_models), std::move(redistort_params),
+        std::move(rs_twists),
         std::move(train_indices), std::move(val_indices));
 }
 

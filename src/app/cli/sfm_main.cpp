@@ -57,6 +57,7 @@
 #include "sfm/map/Assemble.h"
 #include "sfm/map/Mapper.h"
 #include "sfm/map/Orient.h"
+#include "sfm/map/RollingShutterFit.h"
 #include "sfm/map/Merge.h"
 
 #include "i18n/catalog/Sfm.h"
@@ -451,15 +452,38 @@ static void finishFeatures(FeatureSet& fs, const GrayImage& img) {
 }
 
 // Put every finished model in the upright, centred, unit-sized frame before it
-// is written (sfm/map/Orient.h explains why here rather than downstream).
-// Each model is its own gauge, so each gets its own transform.
-static void orientModels(std::vector<Reconstruction>& models, bool enabled, bool verbose) {
+// is written (sfm/map/Orient.h). Each model is its own gauge, so each gets its
+// own transform; `rs` belongs to model 0, and its camera-frame twists rescale.
+static void orientModels(std::vector<Reconstruction>& models, bool enabled, bool verbose,
+                         RollingShutterData* rs = nullptr) {
     if (!enabled) return;
     for (size_t i = 0; i < models.size(); i++) {
         const Sim3 T = orientModel(models[i]);
+        if (i == 0 && rs)
+            for (auto& kv : rs->images) kv.second.twist = transformTwist(T, kv.second.twist);
         if (verbose)
             L::err(Tag::Orient, M::orient_done, {(long long)i, L::num(T.scale, 4)});
     }
+}
+
+// The rolling-shutter finishing pass, on the primary model only: a capture
+// fragmented into several models has no one sequence to difference.
+static RollingShutterData shutterPass(std::vector<Reconstruction>& models, const SfmConfig& cfg,
+                                      int device, bool verbose) {
+    RollingShutterData rs;
+    if (models.empty() || cfg.rolling_shutter == "off") return rs;
+    RollingShutterOptions ropt;
+    ropt.mode = cfg.rolling_shutter;
+    ropt.per_image_twist = cfg.rs_per_image_twist;
+    ropt.twist_prior = cfg.rs_twist_prior;
+    ropt.verbose = verbose;
+    BundleOptions bo;
+    bo.device = device;
+    bo.verbose = false;
+    bo.refine_principal_point = cfg.final_principal_point;
+    bo.refine_extra_params = cfg.final_extra_params;
+    if (!runRollingShutterPass(models.front(), ropt, bo, rs)) rs = RollingShutterData{};
+    return rs;
 }
 
 // An EXR carries its own colour space. Reading it needs no declaration -- the
@@ -519,11 +543,12 @@ static void recolorPoints(std::vector<Reconstruction>& models, const SfmConfig& 
 // are the components a later merge step can align onto it. A single-model
 // dataset therefore still writes exactly `sparse/0`, as before.
 static void writeModels(const std::vector<Reconstruction>& models, const fs::path& dir,
-                        bool verbose) {
+                        bool verbose, const RollingShutterData* rs = nullptr) {
     for (size_t i = 0; i < models.size(); i++) {
         fs::path p = dir / std::to_string(i);
         fs::create_directories(p);
         models[i].writeBinary(p.string());
+        if (i == 0 && rs && rs->active()) writeRollingShutter(p.string(), *rs);
         if (verbose)
             L::err(Tag::Map, M::map_wrote_model,
                    {(long long)i, (long long)models[i].numRegistered(),
@@ -1791,9 +1816,10 @@ static int cmdMap(int argc, char** argv) {
                 (long long)db.images.size()});
         printExtraModels(models, feats);
     }
-    orientModels(models, cfg.orient, opt.verbose);
+    RollingShutterData rs = shutterPass(models, cfg, cfg.device, opt.verbose);
+    orientModels(models, cfg.orient, opt.verbose, &rs);
     recolorPoints(models, cfg);
-    if (!output.empty()) writeModels(models, output, opt.verbose);
+    if (!output.empty()) writeModels(models, output, opt.verbose, &rs);
     return 0;
 }
 
@@ -2099,9 +2125,10 @@ static int cmdAuto(int argc, char** argv) {
     }
 
     resolveImageNames(models, imagedir);
-    orientModels(models, cfg.orient, verbose);
+    RollingShutterData rs = shutterPass(models, cfg, cfg.device, verbose);
+    orientModels(models, cfg.orient, verbose, &rs);
     recolorPoints(models, cfg);
-    writeModels(models, sparsedir, verbose);
+    writeModels(models, sparsedir, verbose, &rs);
 
     // The mapper reports its own breakdown when `run()` returns; the passes
     // that assemble its models accumulate into the same counters.

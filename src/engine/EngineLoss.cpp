@@ -347,7 +347,7 @@ static void _engine_raster_proj_backward(
                    _dt2d_tv(engine().camera.viewmats), _dv_tv(engine().camera.intrins),
                    (uint32_t)engine().camera.width, (uint32_t)engine().camera.height,
                    engine().camera.model_str,
-        engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs),
+        engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs), _rs_tv(engine().camera.twists),
                    engine().fwd.camera_ids, engine().fwd.gaussian_ids, engine().fwd.aabb,
                    v_splats_s_out, v_splats_w_out, gq,
                    vp_opt, vb_opt, num_sh_buffer, sh_value_bits, sh_bounds_stride);
@@ -362,7 +362,7 @@ static void _engine_raster_proj_backward(
                 _dt2d_tv(engine().camera.viewmats), _dv_tv(engine().camera.intrins),
                 (uint32_t)engine().camera.width, (uint32_t)engine().camera.height,
                 engine().camera.model_str,
-        engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs),
+        engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs), _rs_tv(engine().camera.twists),
                 engine().fwd.camera_ids, engine().fwd.gaussian_ids,
                 engine().fwd.aabb, v_splats_s_out, v_splats_w_out, nullptr,
                 vp_opt, vb_opt, num_sh_buffer, sh_value_bits, sh_bounds_stride);
@@ -372,7 +372,7 @@ static void _engine_raster_proj_backward(
                 _dt2d_tv(engine().camera.viewmats), _dv_tv(engine().camera.intrins),
                 (uint32_t)engine().camera.width, (uint32_t)engine().camera.height,
                 engine().camera.model_str,
-        engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs),
+        engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs), _rs_tv(engine().camera.twists),
                 engine().fwd.camera_ids, engine().fwd.gaussian_ids,
                 engine().fwd.aabb, v_splats_s_out, v_splats_w_out, nullptr,
                 vp_opt, vb_opt, num_sh_buffer, sh_value_bits, sh_bounds_stride);
@@ -382,7 +382,7 @@ static void _engine_raster_proj_backward(
                 _dt2d_tv(engine().camera.viewmats), _dv_tv(engine().camera.intrins),
                 (uint32_t)engine().camera.width, (uint32_t)engine().camera.height,
                 engine().camera.model_str,
-        engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs),
+        engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs), _rs_tv(engine().camera.twists),
                 engine().fwd.camera_ids, engine().fwd.gaussian_ids,
                 engine().fwd.aabb, v_splats_s_out, v_splats_w_out, nullptr,
                 vp_opt, vb_opt, num_sh_buffer, sh_value_bits, sh_bounds_stride);

@@ -359,6 +359,14 @@ template<> struct DistortionStore<DistortionType::RGB_DN> {
 
 #ifdef __CUDACC__
 
+// The [C,8] rolling-shutter row as a pointer, or null, so every projection
+// launcher spells the optional the same way.
+inline const float* _rs_ptr(const std::optional<TorchTensorView>& t) {
+    return t.has_value() ? (const float*)std::get<0>(t.value()) : nullptr;
+}
+
+// rs_* is the camera-frame twist over the readout interval and the axis of
+// s = ax*u + ay*v - 0.5. A zero axis means global shutter.
 template<CameraDistortionType D>
 struct ProjCameraT {
     float3x3 R;
@@ -366,6 +374,9 @@ struct ProjCameraT {
     float fx, fy, cx, cy;
     uint width, height;
     CameraDistortionCoeffsT<D> dist_coeffs;
+    float3 rs_omega = {0.f, 0.f, 0.f};
+    float3 rs_v = {0.f, 0.f, 0.f};
+    float2 rs_axis = {0.f, 0.f};
 };
 
 #endif

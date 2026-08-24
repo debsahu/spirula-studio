@@ -31,6 +31,7 @@ void projection_bwd_quantgrad_kernel_wrapper(
     const float * viewmats,
     const float4 * intrins,
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     const int32_t * camera_id_bounds,
@@ -80,6 +81,7 @@ static inline void launch_projection_bwd_quantgrad(
     const CameraModelType camera_model,
     const CameraDistortionType distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     const DeviceTensor2D<float4> aabb,
@@ -137,7 +139,7 @@ static inline void launch_projection_bwd_quantgrad(
 
     #define _LAUNCH_ARGS ( \
             (cudaStream_t)0, C, (uint32_t)N, num_sh_buffer, \
-            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, \
+            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, _rs_ptr(twists), \
             image_width, image_height, \
             is_packed ? camera_id_bounds.data_ptr() : nullptr, \
             is_packed ? camera_ids.data_ptr() : nullptr, \
@@ -172,6 +174,7 @@ static inline void _projection_bwd_quantgrad_dispatch(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     const DeviceTensor2D<float4> aabb,
@@ -191,7 +194,7 @@ static inline void _projection_bwd_quantgrad_dispatch(
     #define LAUNCH(n) if (sh_degree == (n)) \
         return launch_projection_bwd_quantgrad<PrimT<n>>( \
             num_splats, num_sh_buffer, splats_world, viewmats, intrins, \
-            image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, \
+            image_width, image_height, cmt(camera_model), cdt(distortion), dist_coeffs, twists, \
             camera_ids, gaussian_ids, aabb, v_splats_screen, v_splats_world, \
             gq, vp, vb, sh_value_bounds_stride, sh_value_bits);
     LAUNCH(3) LAUNCH(2) LAUNCH(1) LAUNCH(0) LAUNCH(4)
@@ -211,6 +214,7 @@ void projection_3dgs_backward_quantgrad(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     const DeviceTensor2D<float4> aabb,
@@ -225,7 +229,7 @@ void projection_3dgs_backward_quantgrad(
 ) {
     _projection_bwd_quantgrad_dispatch<Vanilla3DGS>(
         num_splats, max_sh_degree, splats_world, viewmats, intrins,
-        image_width, image_height, camera_model, distortion, dist_coeffs,
+        image_width, image_height, camera_model, distortion, dist_coeffs, twists,
         camera_ids, gaussian_ids, aabb, v_splats_screen, v_splats_world,
         gq, sh_value_packed, sh_value_bounds, num_sh_buffer, sh_value_bits, sh_value_bounds_stride);
 }
@@ -243,6 +247,7 @@ void projection_mip_backward_quantgrad(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     const DeviceTensor2D<float4> aabb,
@@ -257,7 +262,7 @@ void projection_mip_backward_quantgrad(
 ) {
     _projection_bwd_quantgrad_dispatch<MipSplatting>(
         num_splats, max_sh_degree, splats_world, viewmats, intrins,
-        image_width, image_height, camera_model, distortion, dist_coeffs,
+        image_width, image_height, camera_model, distortion, dist_coeffs, twists,
         camera_ids, gaussian_ids, aabb, v_splats_screen, v_splats_world,
         gq, sh_value_packed, sh_value_bounds, num_sh_buffer, sh_value_bits, sh_value_bounds_stride);
 }
@@ -275,6 +280,7 @@ void projection_3dgut_backward_quantgrad(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     const DeviceTensor2D<float4> aabb,
@@ -289,7 +295,7 @@ void projection_3dgut_backward_quantgrad(
 ) {
     _projection_bwd_quantgrad_dispatch<Vanilla3DGUT>(
         num_splats, max_sh_degree, splats_world, viewmats, intrins,
-        image_width, image_height, camera_model, distortion, dist_coeffs,
+        image_width, image_height, camera_model, distortion, dist_coeffs, twists,
         camera_ids, gaussian_ids, aabb, v_splats_screen, v_splats_world,
         gq, sh_value_packed, sh_value_bounds, num_sh_buffer, sh_value_bits, sh_value_bounds_stride);
 }

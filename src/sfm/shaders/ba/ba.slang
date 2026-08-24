@@ -88,9 +88,18 @@ static const int kMaxCamDof = kDofWide;
 [[vk::binding(27)]] RWStructuredBuffer<Real> u_Jc;          // camera Jacobian rows per obs,
                                                             // [2*a+row], offset u_jc_off
 [[vk::binding(28)]] RWStructuredBuffer<Real> u_res;         // weighted residual (2 per obs)
+[[vk::binding(45)]] StructuredBuffer<Real> u_rs;           // (8 per image) omega(3), v(3),
+                                                           // shutter axis(2)
 
 // packed lower-triangular index, row >= col
 uint pidx(uint r, uint c) { return r * (r + 1) / 2 + c; }
+
+// u2 != 0 on the cost and Jacobian dispatches when the problem carries a
+// rolling-shutter twist; zeros are applyShutter's global-shutter identity.
+void loadShutter(uint img, out Real rs[8]) {
+    [ForceUnroll]
+    for (int i = 0; i < 8; i++) rs[i] = (u2 != 0) ? u_rs[8 * img + i] : Real(0.0);
+}
 
 // =====================================================================
 // cost
@@ -134,7 +143,9 @@ void cost_impl<M : ICameraModel>(uint tid, uint lid) {
         RVec3 X = rvec3(u_points[3 * pt + 0], u_points[3 * pt + 1], u_points[3 * pt + 2]);
         RVec2 obs = rvec2(u_obs[2 * o + 0], u_obs[2 * o + 1]);
 
-        RVec2 r = reproject<M>(pose, intr, X, obs);
+        Real rs[8];
+        loadShutter(img, rs);
+        RVec2 r = reproject<M>(pose, intr, X, obs, rs);
         Real s = r.x * r.x + r.y * r.y;
         c = Real(0.5) * Loss.cost(s, f0);
     }
@@ -185,7 +196,9 @@ void jac_impl<M : ICameraModel>(uint tid) {
     // DOF and predicate on this, so the all-free case costs nothing.
     const uint dofw = 6 + gi.z;
 
-    RVec2 r = reproject<M>(pose, intr, X, obs);
+    Real rs[8];
+    loadShutter(img, rs);
+    RVec2 r = reproject<M>(pose, intr, X, obs, rs);
     Real s = r.x * r.x + r.y * r.y;
     Real sw = sqrt(Loss.weight(s, f0));
 
@@ -200,7 +213,7 @@ void jac_impl<M : ICameraModel>(uint tid) {
         for (int row = 0; row < 2; row++) {
             RVec2 seed = rvec2(row == 0 ? Real(1.0) : Real(0.0),
                                row == 0 ? Real(0.0) : Real(1.0));
-            bwd_diff(reproject<M>)(dp_pose, dp_intr, dp_X, obs, seed);
+            bwd_diff(reproject<M>)(dp_pose, dp_intr, dp_X, obs, rs, seed);
             for (int i = 0; i < 6; i++) Jc[row][i] = dp_pose.d[i] * sw;
             for (int i = 0; i < M.kNumIntr; i++) Jc[row][6 + i] = dp_intr.d[i] * sw;
             Jp[row][0] = dp_X.d.x * sw; Jp[row][1] = dp_X.d.y * sw; Jp[row][2] = dp_X.d.z * sw;

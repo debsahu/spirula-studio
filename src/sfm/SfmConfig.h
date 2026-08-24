@@ -127,6 +127,13 @@ struct SfmConfig {
     bool final_extra_params = true;     // ... releasing the distortion too (D72)
     // One more, after those, with every image on its own intrinsics (D73).
     bool final_per_image_intrinsics = false;
+    // Rolling-shutter compensation on the finished model: off, auto (fit the
+    // readout direction as well), or a named direction (map/RollingShutterFit.h).
+    std::string rolling_shutter = "auto";
+    // Free per-image twists in the rolling-shutter finishing rounds, damped
+    // toward the trajectory's by rs_twist_prior (D75).
+    bool rs_per_image_twist = false;
+    double rs_twist_prior = 0.5;
     // Write the finished model in an upright, centred, unit-sized frame rather
     // than in whatever gauge the seed pair left it in (map/Orient.h).
     bool orient = true;
@@ -323,6 +330,12 @@ struct SfmConfig {
       0, "", final_extra_params)                                                                   \
     F(final_per_image_intrinsics, "final-per-image-intrinsics", CMD_AUTO | CMD_MAP,                \
       Tier::Advanced, "mapper", 0, 0, "", final_per_image_intrinsics)                              \
+    F(rolling_shutter, "rolling-shutter", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 0,     \
+      "off|auto|vertical|horizontal", rolling_shutter)                                             \
+    F(rs_per_image_twist, "rs-per-image-twist", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, \
+      0, "", rs_per_image_twist)                                                                   \
+    F(rs_twist_prior, "rs-twist-prior", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 1000,     \
+      "", rs_twist_prior)                                                                          \
     F(orient, "orient", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced, "mapper", 0, 0, "",        \
       orient)                                                                                      \
     F(mapper.min_tri_angle_deg, "min-tri-angle", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0,  \

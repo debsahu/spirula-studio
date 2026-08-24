@@ -16,16 +16,18 @@ namespace {
 struct PackedMaskParams {
     uint64_t means, quats, scales, opacities;
     uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [C,8] rolling shutter; 0 until the plumbing lands
     uint64_t out_mask;
     uint32_t C, N, width, height, wgs_per_row;
 };
-static_assert(sizeof(PackedMaskParams) == 8 * 8 + 5 * 4 + 4 /*pad*/,
+static_assert(sizeof(PackedMaskParams) == 9 * 8 + 5 * 4 + 4 /*pad*/,
               "params layout must match the slang struct");
 
 // Mirrors PackedFwdParams in shaders/projection_fwd.slang.
 struct PackedFwdParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [C,8] rolling shutter; 0 until the plumbing lands
     uint64_t mask_scan;
     uint64_t out_camera_ids, out_gaussian_ids, out_aabb, out_depths,
         out_radii;
@@ -37,7 +39,7 @@ struct PackedFwdParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(PackedFwdParams) == 23 * 8 + 8 * 4,
+static_assert(sizeof(PackedFwdParams) == 24 * 8 + 8 * 4,
               "params layout must match the slang struct");
 
 using vkk::resolve_sh_quant;
@@ -53,6 +55,7 @@ launch_projection_packed_vk(
     const uint32_t image_width, const uint32_t image_height,
     const std::string& camera_model, const std::string& distortion,
     const TorchTensorView& dist_coeffs,
+    const std::optional<TorchTensorView>& twists,
     DeviceVector<float>& radii,
     const std::optional<TorchTensorView>& sh_value_packed,
     const std::optional<TorchTensorView>& sh_value_bounds,
@@ -92,6 +95,7 @@ launch_projection_packed_vk(
     mp.viewmats = std::get<0>(viewmats);
     mp.intrins = std::get<0>(intrins);
     mp.dist_coeffs = vkk::or_fallback(std::get<0>(dist_coeffs));
+    mp.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
     mp.out_mask = (uint64_t)mask.data_ptr();
     mp.C = C;
     mp.N = (uint32_t)N;
@@ -104,7 +108,8 @@ launch_projection_packed_vk(
     // 5 = distortion tier.
     backend::vk::SpecList spec{cd.cam, (uint32_t)sh_degree,
                                antialiased ? 1u : 0u, spec_bits,
-                               eval3d ? 1u : 0u, cd.dist};
+                               eval3d ? 1u : 0u, cd.dist,
+                               twists.has_value() ? 1u : 0u};
     vkk::dispatch("projection_fwd.projection_packed_mask", spec, per_row,
                   rows, 1, &mp, sizeof(mp));
 
@@ -143,6 +148,7 @@ launch_projection_packed_vk(
         p.viewmats = mp.viewmats;
         p.intrins = mp.intrins;
         p.dist_coeffs = mp.dist_coeffs;
+        p.twists = mp.twists;
         p.mask_scan = (uint64_t)mask_scan.data_ptr();
         p.out_camera_ids = (uint64_t)camera_ids.data_ptr();
         p.out_gaussian_ids = (uint64_t)gaussian_ids.data_ptr();
@@ -199,6 +205,7 @@ std::tuple<                                                                  \
     const std::string camera_model,                                          \
     const std::string distortion,                                            \
     const TorchTensorView dist_coeffs,                                       \
+    const std::optional<TorchTensorView> twists,                             \
     DeviceVector<float> radii,                                               \
     const std::optional<TorchTensorView> sh_value_packed,                    \
     const std::optional<TorchTensorView> sh_value_bounds,                    \
@@ -209,7 +216,7 @@ std::tuple<                                                                  \
     return launch_projection_packed_vk(                                      \
         eval3d, antialiased, num_splats, in_splats, max_sh_degree,           \
         viewmats, intrins, image_width, image_height, camera_model,          \
-        distortion, dist_coeffs, radii, sh_value_packed, sh_value_bounds,    \
+        distortion, dist_coeffs, twists, radii, sh_value_packed, sh_value_bounds,    \
         num_sh_buffer, sh_value_bits, sh_bounds_stride);                     \
 }
 

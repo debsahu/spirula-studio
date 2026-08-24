@@ -190,6 +190,11 @@ struct ParsedDataset {
     // [N, 8]; slot meaning is per-tier, see core/CameraModel.h
     std::vector<float>       dist_coeffs;
 
+    // [N, 8]: omega(3), v(3) over the readout interval in the camera frame,
+    // then the axis (ax, ay) of s = ax*u + ay*v - 0.5. The axis is built from
+    // the RENDERED size, so a downscaled dataset needs no adjustment.
+    std::vector<float>       rs_twists;
+
     // Cameras whose source model no tier represents exactly (COLMAP FOV /
     // DIVISION / EUCM / RAD_TAN_THIN_PRISM_FISHEYE, Metashape affinity-skew).
     // Empty when every camera mapped exactly. Indexed like the arrays above;

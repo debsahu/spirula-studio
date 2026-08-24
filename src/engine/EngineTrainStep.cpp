@@ -571,6 +571,7 @@ std::map<std::string, float> engine_train_step(
     TorchTensorView viewmats,
     TorchTensorView intrins,
     TorchTensorView dist_coeffs,
+    TorchTensorView twists,
     TorchTensorView gt_rgb,
     TorchTensorView gt_depth,
     TorchTensorView gt_normal,
@@ -579,6 +580,11 @@ std::map<std::string, float> engine_train_step(
     const EngineStepConfig& cfg
 ) {
     if (cfg.optim.split_batch) {
+        // The split path re-installs one camera at a time; the twist would have
+        // to be sliced with it, which is not wired (docs/notes/rolling-shutter.md).
+        if (std::get<0>(twists) != 0)
+            throw std::runtime_error(
+                "rolling shutter is not supported with split_batch yet");
         return _engine_train_step_split_one_per_camera(
             step, max_steps, std::move(primitive), sh_degree, packed,
             width, height, std::move(camera_model), std::move(distortion),
@@ -586,7 +592,8 @@ std::map<std::string, float> engine_train_step(
             gt_rgb, gt_depth, gt_normal, gt_alpha,
             bilagrid_cam_indices, cfg);
     }
-    set_camera_params(width, height, camera_model, distortion, viewmats, intrins, dist_coeffs);
+    set_camera_params(width, height, camera_model, distortion, viewmats, intrins,
+                      dist_coeffs, twists);
     set_training_data(gt_rgb, gt_depth, gt_normal, gt_alpha,
                       cfg.loss.input_depth_is_ray_depth);
     return _engine_train_step_after_setup(

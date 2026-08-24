@@ -66,6 +66,13 @@ inline TorchTensorView _dt2d_tv(const DeviceTensor2D<T>& dt) {
     }
 }
 
+// The camera table's rolling shutter as the projection kernels' optional. A
+// null table is a global shutter, which is what every kernel's guard tests.
+inline std::optional<TorchTensorView> _rs_tv(const DeviceTensor2D<float>& dt) {
+    if (dt.data_ptr() == nullptr) return std::nullopt;
+    return _dt2d_tv(dt);
+}
+
 template<typename T>
 inline TorchTensorView _dt3d_tv(const DeviceTensor3D<T>& dt) {
     if constexpr (sizeof(T) % 4 == 0) {

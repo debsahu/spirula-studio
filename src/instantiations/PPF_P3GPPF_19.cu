@@ -16,6 +16,7 @@ template void projection_packed_fwd_kernel_wrapper<
     const float *__restrict__ viewmats, // [C, 4, 4]
     const float4 *__restrict__ intrins,  // [C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     const int64_t* __restrict__ intersection_mask_scan,  // [C, N], inclusive scan

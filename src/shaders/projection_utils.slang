@@ -357,6 +357,20 @@ bool persp_proj<D : ICameraDistortion, let assume_valid : bool>(
     return true;
 }
 
+// Rodrigues, for the small rotations one shutter interval covers.
+[ForceInline]
+float3x3 rotate_axis_angle(float3 aa) {
+    float th2 = dot(aa, aa);
+    if (th2 < 1e-24f) return float3x3(1,0,0, 0,1,0, 0,0,1);
+    float th = sqrt(th2);
+    float3 a = aa / th;
+    float c = cos(th), sn = sin(th), v = 1.0f - c;
+    return float3x3(
+        c + a.x*a.x*v,      a.x*a.y*v - a.z*sn, a.x*a.z*v + a.y*sn,
+        a.y*a.x*v + a.z*sn, c + a.y*a.y*v,      a.y*a.z*v - a.x*sn,
+        a.z*a.x*v - a.y*sn, a.z*a.y*v + a.x*sn, c + a.z*a.z*v);
+}
+
 [ForceInline]
 [Differentiable]
 float2x3 persp_proj_jac<D : ICameraDistortion>(

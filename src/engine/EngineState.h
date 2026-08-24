@@ -121,6 +121,9 @@ struct CameraTable {
     DeviceTensor2D<float4> viewmats;      // [C, 4]
     DeviceVector<float4>   intrins;       // [C]
     DeviceTensor2D<float>  dist_coeffs;   // [C, 8]
+    // [C, 8] rolling shutter: omega(3), v(3), axis(2). Null data_ptr = global
+    // shutter, which is what every kernel's guard tests.
+    DeviceTensor2D<float>  twists;
 };
 
 // Forward-pass intermediates retained for backward.

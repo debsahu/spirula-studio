@@ -58,6 +58,7 @@ __global__ void __launch_bounds__(BLOCK_SIZE) projection_bwd_quantgrad_kernel(
     const float *__restrict__ viewmats,   // [C, 4, 4]
     const float4 *__restrict__ intrins,    // [C, 4]
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     // fwd outputs (packed intersection ordering; nulls => non-packed C*N)
@@ -123,6 +124,12 @@ __global__ void __launch_bounds__(BLOCK_SIZE) projection_bwd_quantgrad_kernel(
             image_width, image_height,
         };
         cam.dist_coeffs = dist_coeffs_buffer.load<distortion>(cid);
+        if (twists != nullptr) {
+            const float* q = twists + cid * 8;
+            cam.rs_omega = {q[0], q[1], q[2]};
+            cam.rs_v     = {q[3], q[4], q[5]};
+            cam.rs_axis  = {q[6], q[7]};
+        }
 
         typename SplatPrimitive::Screen v_screen;
         v_screen.load(v_splats_screen, idx);
@@ -227,6 +234,7 @@ void projection_bwd_quantgrad_kernel_wrapper(
     const float * viewmats,
     const float4 * intrins,
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     const int32_t * camera_id_bounds,

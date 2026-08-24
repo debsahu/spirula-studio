@@ -405,6 +405,68 @@ float add_blur(const float eps2d, inout float2x2 covar, out float compensation) 
 }
 
 
+/* Rolling shutter */
+
+// Deliberately OUTSIDE projection_3dgs: that function is icache- and
+// register-bound, and a branch inside it cost ~1% of a training step even when
+// the branch was compiled out (docs/notes/rolling-shutter.md).
+
+float2 _project_point<let camera_model: CameraModelType, D : ICameraDistortion>(
+    float3 p, float4 intrins, float dist_coeffs[D.kNumParams]
+) {
+    if (camera_model == CameraModelType::PINHOLE)
+        return persp_proj_uv<D>(p, intrins, dist_coeffs);
+    else if (camera_model == CameraModelType::FISHEYE)
+        return fisheye_proj_uv<D>(p, intrins, dist_coeffs);
+    else if (camera_model == CameraModelType::EQUISOLID)
+        return equisolid_proj_uv<D>(p, intrins, dist_coeffs);
+    return equirect_proj_uv(p, intrins);
+}
+
+// s = dot(axis, p(s)) - 0.5 is implicit, but p is near-linear in s over one
+// readout, so one linear solve replaces a renderer's fixed-point iteration.
+// The denominator guard catches a feature outrunning the scan.
+#define _shutter_camera_ARGS(NC) \
+    const float3 mean, const float3x3 R, const float3 t, \
+    const float3 rs_omega, const float3 rs_v, const float2 rs_axis, \
+    const float fx, const float fy, const float cx, const float cy, \
+    const float dist_coeffs[NC], out float3x3 out_R, out float3 out_t
+
+void shutter_camera<let camera_model: CameraModelType, D : ICameraDistortion>(
+    _shutter_camera_ARGS(D.kNumParams)
+) {
+    float4 intrins = { fx, fy, cx, cy };
+    float3 mean_c = mul(R, mean) + t;
+    float2 p0 = _project_point<camera_model, D>(mean_c, intrins, dist_coeffs);
+    float3 pa = mul(rotate_axis_angle(0.5f * rs_omega), mean_c) + 0.5f * rs_v;
+    float2 g = 2.0f * (_project_point<camera_model, D>(pa, intrins, dist_coeffs) - p0);
+    float den = 1.0f - dot(rs_axis, g);
+    float s = (den > 0.25f && den < 4.0f)
+        ? clamp((dot(rs_axis, p0) - 0.5f) / den, -0.75f, 0.75f) : 0.0f;
+    float3x3 Rw = rotate_axis_angle(s * rs_omega);
+    out_R = mul(Rw, R);
+    out_t = mul(Rw, t) + s * rs_v;
+}
+
+#define _DEF_shutter_camera(funname, MODEL, D, NC) \
+    [CudaDeviceExport] \
+    void funname(_shutter_camera_ARGS(NC)) { \
+        return shutter_camera<MODEL, D>( \
+            mean, R, t, rs_omega, rs_v, rs_axis, fx, fy, cx, cy, dist_coeffs, \
+            out_R, out_t); \
+    }
+
+#define _DEF_shutter_camera_tiers(base, MODEL) \
+    _DEF_shutter_camera(base##_none, MODEL, DistNone, 1) \
+    _DEF_shutter_camera(base##_opencv, MODEL, DistOpenCV, 4) \
+    _DEF_shutter_camera(base##_prism, MODEL, DistThinPrism, 8)
+
+_DEF_shutter_camera_tiers(shutter_camera_persp, CameraModelType::PINHOLE)
+_DEF_shutter_camera(shutter_camera_persp_rational, CameraModelType::PINHOLE, DistRational, 8)
+_DEF_shutter_camera_tiers(shutter_camera_fisheye, CameraModelType::FISHEYE)
+_DEF_shutter_camera_tiers(shutter_camera_equisolid, CameraModelType::EQUISOLID)
+_DEF_shutter_camera(shutter_camera_equirect_none, CameraModelType::EQUIRECTANGULAR, DistNone, 1)
+
 #define _projection_3dgs_ARGS(NC) \
     const bool antialiased, \
     const float3 mean, const float4 quat, const float3 scale, const float in_opacity, \

@@ -20,6 +20,7 @@ namespace {
 struct ProjectionBwd3dgsParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [C,8] rolling shutter; 0 until the plumbing lands
     uint64_t camera_ids, gaussian_ids, aabb;
     uint64_t vs_xy, vs_depth, vs_conic, vs_opac, vs_rgb;
     uint64_t vw_means, vw_quats, vw_scales, vw_opacities, vw_dc, vw_sh;
@@ -32,13 +33,14 @@ struct ProjectionBwd3dgsParams {
     uint32_t wgs_per_row;
     uint32_t num_sh_buffer;
 };
-static_assert(sizeof(ProjectionBwd3dgsParams) == 26 * 8 + 8 + 8 * 4,
+static_assert(sizeof(ProjectionBwd3dgsParams) == 27 * 8 + 8 + 8 * 4,
               "params layout must match the slang struct");
 
 // Mirrors ProjectionBwd3dgutParams in shaders/projection_bwd.slang.
 struct ProjectionBwd3dgutParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [C,8] rolling shutter; 0 until the plumbing lands
     uint64_t camera_ids, gaussian_ids, aabb;
     uint64_t vs_scale, vs_opac, vs_rgb;
     uint64_t vw_means, vw_quats, vw_scales, vw_opacities, vw_dc, vw_sh;
@@ -51,7 +53,7 @@ struct ProjectionBwd3dgutParams {
     uint32_t wgs_per_row;
     uint32_t num_sh_buffer;
 };
-static_assert(sizeof(ProjectionBwd3dgutParams) == 24 * 8 + 8 + 8 * 4,
+static_assert(sizeof(ProjectionBwd3dgutParams) == 25 * 8 + 8 + 8 * 4,
               "params layout must match the slang struct");
 
 using vkk::resolve_sh_quant;
@@ -66,6 +68,7 @@ void launch_projection_bwd_vk(
     const uint32_t image_width, const uint32_t image_height,
     const std::string& camera_model, const std::string& distortion,
     const TorchTensorView& dist_coeffs,
+    const std::optional<TorchTensorView>& twists,
     const DeviceVector<int32_t>& camera_ids,
     const DeviceVector<int32_t>& gaussian_ids,
     const DeviceTensor2D<float4>& aabb,
@@ -115,7 +118,7 @@ void launch_projection_bwd_vk(
     backend::vk::SpecList spec{cd.cam,           (uint32_t)sh_degree,
                                antialiased ? 1u : 0u, spec_bits,
                                packed ? 1u : 0u, viewmat_grad ? 1u : 0u,
-                               cd.dist};
+                               cd.dist, twists.has_value() ? 1u : 0u};
 
     if (!eval3d) {
         Vanilla3DGS<0>::ScreenBuffer vsb(
@@ -131,6 +134,8 @@ void launch_projection_bwd_vk(
         p.viewmats = std::get<0>(viewmats);
         p.intrins = std::get<0>(intrins);
         p.dist_coeffs = vkk::or_fallback(std::get<0>(dist_coeffs));
+        p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
+    p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
         p.camera_ids = vkk::or_fallback((uint64_t)camera_ids.data_ptr());
         p.gaussian_ids = vkk::or_fallback((uint64_t)gaussian_ids.data_ptr());
         p.aabb = vkk::or_fallback((uint64_t)aabb.data_ptr());
@@ -173,6 +178,8 @@ void launch_projection_bwd_vk(
         p.viewmats = std::get<0>(viewmats);
         p.intrins = std::get<0>(intrins);
         p.dist_coeffs = vkk::or_fallback(std::get<0>(dist_coeffs));
+        p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
+    p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
         p.camera_ids = vkk::or_fallback((uint64_t)camera_ids.data_ptr());
         p.gaussian_ids = vkk::or_fallback((uint64_t)gaussian_ids.data_ptr());
         p.aabb = vkk::or_fallback((uint64_t)aabb.data_ptr());
@@ -217,6 +224,7 @@ void projection_3dgs_backward(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     const DeviceTensor2D<float4> aabb,
@@ -232,7 +240,7 @@ void projection_3dgs_backward(
     launch_projection_bwd_vk(
         /*eval3d=*/false, /*antialiased=*/false, num_splats, splats_world,
         max_sh_degree, viewmats, intrins, image_width, image_height,
-        camera_model, distortion, dist_coeffs, camera_ids, gaussian_ids, aabb,
+        camera_model, distortion, dist_coeffs, twists, camera_ids, gaussian_ids, aabb,
         v_splats_screen, v_splats_world, v_viewmats, sh_value_packed,
         sh_value_bounds, num_sh_buffer, sh_value_bits, sh_bounds_stride);
 }
@@ -248,6 +256,7 @@ void projection_mip_backward(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     const DeviceTensor2D<float4> aabb,
@@ -263,7 +272,7 @@ void projection_mip_backward(
     launch_projection_bwd_vk(
         /*eval3d=*/false, /*antialiased=*/true, num_splats, splats_world,
         max_sh_degree, viewmats, intrins, image_width, image_height,
-        camera_model, distortion, dist_coeffs, camera_ids, gaussian_ids, aabb,
+        camera_model, distortion, dist_coeffs, twists, camera_ids, gaussian_ids, aabb,
         v_splats_screen, v_splats_world, v_viewmats, sh_value_packed,
         sh_value_bounds, num_sh_buffer, sh_value_bits, sh_bounds_stride);
 }
@@ -279,6 +288,7 @@ void projection_3dgut_backward(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     const DeviceTensor2D<float4> aabb,
@@ -294,7 +304,7 @@ void projection_3dgut_backward(
     launch_projection_bwd_vk(
         /*eval3d=*/true, /*antialiased=*/false, num_splats, splats_world,
         max_sh_degree, viewmats, intrins, image_width, image_height,
-        camera_model, distortion, dist_coeffs, camera_ids, gaussian_ids, aabb,
+        camera_model, distortion, dist_coeffs, twists, camera_ids, gaussian_ids, aabb,
         v_splats_screen, v_splats_world, v_viewmats, sh_value_packed,
         sh_value_bounds, num_sh_buffer, sh_value_bits, sh_bounds_stride);
 }

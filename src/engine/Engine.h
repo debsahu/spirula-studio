@@ -63,7 +63,9 @@ void set_camera_params(
     std::string distortion,
     TorchTensorView viewmats,
     TorchTensorView intrins,
-    TorchTensorView dist_coeffs
+    TorchTensorView dist_coeffs,
+    // [C, 8] rolling shutter; a null view is a global shutter.
+    TorchTensorView twists = TorchTensorView{0, 0, {}}
 );
 
 void set_training_data(
@@ -295,6 +297,7 @@ std::map<std::string, float> engine_train_step(
     TorchTensorView viewmats,
     TorchTensorView intrins,
     TorchTensorView dist_coeffs,
+    TorchTensorView twists,
     TorchTensorView gt_rgb,
     TorchTensorView gt_depth,
     TorchTensorView gt_normal,
@@ -421,6 +424,7 @@ void engine_setup_data_manager(
     std::vector<float>        input_dist_coeffs,
     std::vector<int32_t>      redistort_models,
     std::vector<float>        redistort_params,
+    std::vector<float>        rs_twists,
     std::vector<int32_t>      train_indices,
     std::vector<int32_t>      val_indices);
 

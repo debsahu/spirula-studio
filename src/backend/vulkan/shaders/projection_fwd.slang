@@ -35,6 +35,22 @@ const int kShValueBits = 0;
 // q8/q16 codec path (base = gid * 3 * num_sh_buffer, matching the encode
 // side; bounds_stride is resolved by the host launcher).
 [ForceInline]
+// Only reached when kRollingShutter says so, so no null test on `twists` -- one
+// would drag Int64 into the noint64 variants.
+void apply_shutter<let cam: CameraModelType, D : ICameraDistortion>(
+    float* twists, uint cid, float3 mean, float4 intrin, float dist[D.kNumParams],
+    inout float3x3 R, inout float3 t
+) {
+    float* q = twists + cid * 8;
+    float3x3 sR;
+    float3 st;
+    shutter_camera<cam, D>(mean, R, t, float3(q[0], q[1], q[2]), float3(q[3], q[4], q[5]),
+                           float2(q[6], q[7]), intrin.x, intrin.y, intrin.z, intrin.w, dist,
+                           sR, st);
+    R = sR;
+    t = st;
+}
+
 float3 eval_splat_color(float3 mean, float3x3 R, float3 t, float3 dc,
                         float* features_sh, uint sh_stride, uint gid,
                         uint* sh_packed, float2* sh_bounds,
@@ -71,6 +87,7 @@ struct ProjectionFwdParams {
     float* viewmats;      // [C,16] row-major
     float4* intrins;      // [C]
     float* dist_coeffs;   // [C,8] or null
+    float* twists;        // [C,8] rolling shutter
     // outputs
     float4* out_aabb;     // [C,N]
     float* out_depths;    // [C,N]
@@ -130,6 +147,8 @@ void run_projection<let cam: CameraModelType, D : ICameraDistortion>(
     float s_depth;
     float3 s_conic;
     float s_opac;
+    if (kRollingShutter != 0)
+        apply_shutter<cam, D>(p.twists, cid, mean, intrin, dist, R, t);
     projection_3dgs<cam, D, false, false>(
         kAntialiased != 0,
         mean, quat, scale, in_opacity, R, t,
@@ -206,6 +225,7 @@ struct Projection3dgutParams {
     float* viewmats;
     float4* intrins;
     float* dist_coeffs;
+    float* twists;
     float4* out_aabb;
     float* out_depths;
     uint32_t* out_radii;
@@ -258,6 +278,8 @@ void run_projection_3dgut<let cam: CameraModelType, D : ICameraDistortion>(
     float depth;
     float3 s_scale;
     float s_opac;
+    if (kRollingShutter != 0)
+        apply_shutter<cam, D>(p.twists, cid, mean, intrin, dist, R, t);
     projection_3dgs<cam, D, false, true>(
         false,  // antialiased: always false for 3DGUT
         mean, quat, scale, in_opacity, R, t,
@@ -328,6 +350,7 @@ struct PackedMaskParams {  // fits in the 128-byte push floor: pushed direct
     float* viewmats;
     float4* intrins;
     float* dist_coeffs;
+    float* twists;
     int* out_mask;  // [C*N] 0/1
     uint32_t C;
     uint32_t N;
@@ -369,6 +392,8 @@ void run_packed_mask<let cam: CameraModelType, D : ICameraDistortion,
     float opac;
     // The mask only consumes the AABB; SH evaluation is skipped (the CUDA
     // mask kernel computes and discards it).
+    if (kRollingShutter != 0)
+        apply_shutter<cam, D>(p.twists, cid, mean, intrin, dist, R, t);
     projection_3dgs<cam, D, false, eval3d>(
         !eval3d && kAntialiased != 0,
         mean, quat, scale, in_opacity, R, t,
@@ -412,6 +437,7 @@ struct PackedFwdParams {
     float* viewmats;
     float4* intrins;
     float* dist_coeffs;
+    float* twists;
     int* mask_scan;         // [C*N] inclusive scan of the mask
     int* out_camera_ids;    // [nnz]
     int* out_gaussian_ids;  // [nnz]
@@ -472,6 +498,8 @@ void run_packed_fwd<let cam: CameraModelType, D : ICameraDistortion,
     float depth;
     float3 conic;  // eval3d: carries the culling scale (see 3DGUT notes)
     float opac;
+    if (kRollingShutter != 0)
+        apply_shutter<cam, D>(p.twists, cid, mean, intrin, dist, R, t);
     projection_3dgs<cam, D, false, eval3d>(
         !eval3d && kAntialiased != 0,
         mean, quat, scale, in_opacity, R, t,
@@ -548,3 +576,9 @@ void projection_packed_fwd(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 // Declared last: spec IDs follow declaration order (see dist_spec.slang).
 [SpecializationConstant]
 const int kDistortion = 0;
+
+// Declared LAST so a host SpecList that stops at kDistortion leaves this 0 and
+// the shutter folds out of the pipeline: projection is icache- and
+// register-bound and almost no capture has a rolling shutter.
+[SpecializationConstant]
+const int kRollingShutter = 0;

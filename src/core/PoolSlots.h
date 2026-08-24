@@ -287,6 +287,7 @@ enum class SaveClass : uint8_t {
   X(CamViewmats                    , "cam.viewmats",                      Other    , Never) \
   X(CamIntrins                     , "cam.intrins",                       Other    , Never) \
   X(CamDistCoeffs                  , "cam.dist_coeffs",                   Other    , Never) \
+  X(CamTwists                      , "cam.twists",                        Other    , Never) \
   /* ---- warped-setup staging ---- */ \
   X(WarpInputIntrins               , "warp.input_intrins",                Other    , Never) \
   X(WarpInputDistCoeffs            , "warp.input_dist_coeffs",            Other    , Never) \

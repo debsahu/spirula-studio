@@ -45,6 +45,7 @@ void engine_setup_data_manager(
     std::vector<float>        input_dist_coeffs,
     std::vector<int32_t>      redistort_models,
     std::vector<float>        redistort_params,
+    std::vector<float>        rs_twists,
     std::vector<int32_t>      train_indices,
     std::vector<int32_t>      val_indices)
 {
@@ -64,6 +65,7 @@ void engine_setup_data_manager(
         std::move(face_axes),
         std::move(input_intrins),    std::move(input_dist_coeffs),
         std::move(redistort_models), std::move(redistort_params),
+        std::move(rs_twists),
         std::move(train_indices),    std::move(val_indices));
 }
 
@@ -175,6 +177,7 @@ std::map<std::string, float> engine_train_step_managed(
                 camera_model_to_string(b.model),
                 camera_distortion_to_string(b.distortion),
                 b.viewmats_view, b.intrins_view, b.dist_coeffs_view,
+                b.rs_twists_view,
                 b.rgb_view, b.depth_view, b.normal_view, b.mask_view,
                 bilagrid_cam_indices,
                 cfg);
@@ -183,6 +186,10 @@ std::map<std::string, float> engine_train_step_managed(
         // ---- Warp path: fisheye / equisolid + warp_to_pinhole OR equirect --
         // Depth is warped to per-face ray depth, normal is rotated into each
         // face's camera frame (see set_training_data_warped).
+        if (std::get<0>(b.rs_twists_view) != 0)
+            throw std::runtime_error(
+                "rolling shutter is not supported with the fisheye/equirect "
+                "warp path yet");
         return engine_train_step_warped(
             step, max_steps,
             std::move(primitive), sh_degree, packed,
@@ -284,7 +291,8 @@ static int _install_and_forward(const DecodedBatch& b, std::string primitive,
         set_camera_params((int)b.width, (int)b.height,
                           camera_model_to_string(b.model),
                           camera_distortion_to_string(b.distortion),
-                          b.viewmats_view, b.intrins_view, b.dist_coeffs_view);
+                          b.viewmats_view, b.intrins_view, b.dist_coeffs_view,
+                          b.rs_twists_view);
         set_training_data(b.rgb_view,
                           geom ? b.depth_view : _tv_null(),
                           geom ? b.normal_view : _tv_null(),
@@ -308,7 +316,8 @@ static int _install_and_forward(const DecodedBatch& b, std::string primitive,
                           camera_distortion_to_string(b.distortion),
                           _slice_rows(b.viewmats_view, k0, Kc),
                           _slice_rows(b.intrins_view, k0, Kc),
-                          _slice_rows(b.dist_coeffs_view, k0, Kc));
+                          _slice_rows(b.dist_coeffs_view, k0, Kc),
+                          _slice_rows(b.rs_twists_view, k0, Kc));
         set_training_data_warped(
             camera_model_to_string(b.input_model),
             camera_distortion_to_string(b.input_distortion),

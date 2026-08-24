@@ -260,12 +260,27 @@ struct EquirectModel : ICameraModel {
     }
 };
 
+// rs is omega(3), v(3) over the readout interval, then the shutter axis (ax, ay);
+// the shutter time comes from the MEASURED row, so this is explicit. All-zero rs
+// is the global-shutter identity, and the guard keeps that at one comparison.
+[Differentiable]
+RVec3 applyShutter(no_diff Real rs[8], no_diff RVec2 obs, RVec3 p) {
+    RVec3 w = rvec3(rs[0], rs[1], rs[2]);
+    RVec3 v = rvec3(rs[3], rs[4], rs[5]);
+    RVec3 out = p;
+    if (dot3(w, w) + dot3(v, v) > Real(0.0)) {
+        Real s = rs[6] * obs.x + rs[7] * obs.y - Real(0.5);
+        out = angleAxisRotate(w * s, p) + v * s;
+    }
+    return out;
+}
+
 // Reprojection residual, generic in the camera model.
 [Differentiable]
 RVec2 reproject<M : ICameraModel>(
-    Real pose[6], Real intr[M.kNumIntr], RVec3 X, no_diff RVec2 obs
+    Real pose[6], Real intr[M.kNumIntr], RVec3 X, no_diff RVec2 obs, no_diff Real rs[8]
 ) {
     M cam = M.fromArray(intr);
-    RVec3 p = applyPose(pose, X);
+    RVec3 p = applyShutter(rs, obs, applyPose(pose, X));
     return cam.project(p) - obs;
 }

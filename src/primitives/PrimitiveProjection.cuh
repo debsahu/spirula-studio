@@ -31,6 +31,14 @@ struct Slang3DGSProj<CameraModelType::MODEL, CameraDistortionType::TIER> {      
     using Coeffs = CameraDistortionCoeffsT<CameraDistortionType::TIER>;            \
                                                                                    \
     template<typename... Args>                                                     \
+    static __device__ __forceinline__ void shutter(Args... args) {                 \
+        Slang3DGS::shutter_camera_##MODEL_SUFFIX##TIER_SUFFIX(args...);            \
+    }                                                                              \
+    template<typename... Args>                                                     \
+    static __device__ __forceinline__ void shutter(Args... args) {                 \
+        Slang3DGS::shutter_camera_##MODEL_SUFFIX##TIER_SUFFIX(args...);            \
+    }                                                                              \
+    template<typename... Args>                                                     \
     static __device__ __forceinline__ void fwd_2d(                                 \
         bool antialiased, Args... args                                             \
     ) {                                                                            \

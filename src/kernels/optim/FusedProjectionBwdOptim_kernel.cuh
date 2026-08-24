@@ -186,6 +186,7 @@ __global__ void fused_projection_bwd_optimizer_3dgs_kernel
     const float *__restrict__ viewmats, // [C, 4, 4]
     const float4 *__restrict__ intrins,  // [C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     // fwd outputs
@@ -290,6 +291,12 @@ __global__ void fused_projection_bwd_optimizer_3dgs_kernel
             image_width, image_height,
         };
         cam.dist_coeffs = dist_coeffs_buffer.load<distortion>(cid);
+        if (twists != nullptr) {
+            const float* q = twists + cid * 8;
+            cam.rs_omega = {q[0], q[1], q[2]};
+            cam.rs_v     = {q[3], q[4], q[5]};
+            cam.rs_axis  = {q[6], q[7]};
+        }
 
         // Load splat gradient
         typename SplatPrimitive::Screen v_splat_screen;
@@ -1060,6 +1067,7 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     const float *__restrict__ viewmats, // [C, 4, 4]
     const float4 *__restrict__ intrins,  // [C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     // fwd outputs

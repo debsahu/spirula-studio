@@ -28,6 +28,7 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     const float *__restrict__ viewmats, // [C, 4, 4]
     const float4 *__restrict__ intrins,  // [C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const uint32_t image_width,
     const uint32_t image_height,
     // fwd outputs
@@ -115,6 +116,7 @@ inline void launch_fused_projection_bwd_optimizer_3dgs_kernel(
     const CameraModelType camera_model,
     const CameraDistortionType distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     // fwd outputs
     DeviceVector<int32_t> camera_ids,
     DeviceVector<int32_t> gaussian_ids,
@@ -218,7 +220,7 @@ inline void launch_fused_projection_bwd_optimizer_3dgs_kernel(
 
     #define _LAUNCH_ARGS ( \
             (cudaStream_t)0, C, N, num_sh_buffer, \
-            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, \
+            splats_world, viewmats_ptr, intrins_ptr, dist_coeffs, _rs_ptr(twists), \
             image_width, image_height, \
             packed ? camera_id_bounds.data_ptr() : nullptr, \
             packed ? camera_ids.data_ptr() : nullptr, \
@@ -281,6 +283,7 @@ static inline void _fused_projection_bwd_optimizer_dispatch(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     // fwd outputs
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
@@ -339,7 +342,7 @@ static inline void _fused_projection_bwd_optimizer_dispatch(
         image_height, \
         cmt(camera_model), \
         cdt(distortion), \
-        dist_coeffs, \
+        dist_coeffs, twists, \
         camera_ids, \
         gaussian_ids, \
         aabb, \
@@ -430,6 +433,7 @@ void fused_projection_bwd_optimizer_3dgs(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     DeviceTensorFloatND aabb,
@@ -492,6 +496,7 @@ void fused_projection_bwd_optimizer_mip(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     DeviceTensorFloatND aabb,
@@ -554,6 +559,7 @@ void fused_projection_bwd_optimizer_3dgut(
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     const DeviceVector<int32_t> camera_ids,
     const DeviceVector<int32_t> gaussian_ids,
     DeviceTensorFloatND aabb,

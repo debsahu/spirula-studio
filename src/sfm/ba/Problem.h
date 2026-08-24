@@ -68,6 +68,11 @@ struct BAProblem {
     std::vector<double> intr;    // flat
     std::vector<double> points;  // 3 per point
 
+    // Rolling shutter, 8 per image: omega(3), v(3) over the readout interval
+    // and the shutter axis (ax, ay). Frozen within a solve (sfm/core/RollingShutter.h);
+    // empty means global shutter and the kernels never read the buffer.
+    std::vector<double> twists;
+
     // per-model observation lists (concatenated) for specialized dispatches
     struct ModelRange { uint32_t model, offset, count; };
     std::vector<uint32_t> model_obs;

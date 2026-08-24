@@ -441,7 +441,7 @@ int main(int argc, char** argv) {
             (int64_t)N, 0, in_splats, ttv(d_vm + 16 * cam, {1, 4, 4}),
             ttv(d_intr + 4 * cam, {1, 4}), W, H, "PINHOLE", "THIN_PRISM",
             ttv(d_dist + dist_fixture::row_offset(2, NCAM, cam),
-                {1, kCameraDistortionParams}),
+                {1, kCameraDistortionParams}), std::nullopt,
             radii, std::nullopt, std::nullopt, 0, 32, 0);
         DeviceTensorFloatND aabb_nd(aabb_2d), depths_nd(depths_2d);
         DeviceTensorFloatND proj_conic = splats_s[0];
