@@ -103,9 +103,11 @@ void _pb_run_3dgs<let cam : CameraModelType, D : ICameraDistortion>(
     PbGrads g = pb_grads_zero();
     pb_vjp_2d<cam, D>(s, c, p.width, p.height, v_xy, v_depth, v_conic, v_opac,
                       g);
-    gindex_t qbase = (gindex_t)3 * (gindex_t)p.num_sh_buffer * (gindex_t)gid;
+    ShAddrW a = sh_quant_addr_w(p.num_sh_buffer,
+                                i64mem_get(p.sh_bounds_stride));
     pb_sh_vjp<D>(s, c, p.features_sh + gid * p.sh_stride_src, p.sh_packed,
-                 p.sh_bounds, qbase, i64mem_get(p.sh_bounds_stride), v_rgb, g);
+                 p.sh_bounds, sh_addr_base(a, gid), a.bounds_stride,
+                 a.pair_pitch, v_rgb, g);
 
     pb_add3(p.vw_means + 3 * gid, g.v_mean);
     pb_add4(p.vw_quats + 4 * gid, g.v_quat);
@@ -198,9 +200,11 @@ void _pb_run_3dgut<let cam : CameraModelType, D : ICameraDistortion>(
 
     PbGrads g = pb_grads_zero();
     pb_vjp_3dgut<cam, D>(s, c, p.width, p.height, v_sscale, v_sopac, g);
-    gindex_t qbase = (gindex_t)3 * (gindex_t)p.num_sh_buffer * (gindex_t)gid;
+    ShAddrW a = sh_quant_addr_w(p.num_sh_buffer,
+                                i64mem_get(p.sh_bounds_stride));
     pb_sh_vjp<D>(s, c, p.features_sh + gid * p.sh_stride_src, p.sh_packed,
-                 p.sh_bounds, qbase, i64mem_get(p.sh_bounds_stride), v_rgb, g);
+                 p.sh_bounds, sh_addr_base(a, gid), a.bounds_stride,
+                 a.pair_pitch, v_rgb, g);
 
     pb_add3(p.vw_means + 3 * gid, g.v_mean);
     pb_add4(p.vw_quats + 4 * gid, g.v_quat);

@@ -83,15 +83,13 @@ __global__ void projection_fused_fwd_kernel(
         splat_world.template project<camera_model, distortion, 32>(
             cam, splat_screen, aabb, sorting_depth, radius);
     } else {
-        const int64_t sh_base = (int64_t)3 * (int64_t)num_sh_buffer * gid;
-        const int64_t stride = (sh_bounds_stride > 0)
-            ? sh_bounds_stride
-            : (int64_t)256 * 3 * (int64_t)num_sh_buffer;
+        const ShQuantAddr sha = sh_quant_addr(num_sh_buffer, sh_bounds_stride);
+        const int64_t sh_base = sha.base(gid);
         splat_world.template project<camera_model, distortion, VALUE_BITS>(
             cam, splat_screen, aabb, sorting_depth, radius,
             const_cast<uint8_t*>(sh_value_packed),
             const_cast<float2*>(sh_value_bounds),
-            sh_base, stride);
+            sh_base, sha.bounds_stride, sha.pair_pitch);
     }
 
     // Save results

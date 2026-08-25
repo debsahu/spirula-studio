@@ -31,22 +31,24 @@ const int kAntialiased = 0;
 [SpecializationConstant]
 const int kShValueBits = 0;
 
-// SH -> rgb for one splat, gated exactly like _Base3DGS::project /
-// Primitive3DGUT::project: fp32 features_sh when kShValueBits == 0, else the
-// q8/q16 codec path (base = gid * 3 * num_sh_buffer, matching the encode
-// side; bounds_stride is resolved by the host launcher).
+// SH -> rgb for one splat, gated exactly like _Base3DGS::project: fp32
+// features_sh when kShValueBits == 0, else the q8/q16 codec path
+// (docs/notes/sh-quant-layout.md).
 [ForceInline]
 float3 eval_splat_color(float3 mean, float3x3 R, float3 t, float3 dc,
                         float* features_sh, uint sh_stride, uint gid,
                         uint* sh_packed, float2* sh_bounds,
                         uint num_sh_buffer, gindex_t sh_bounds_stride) {
     if (kShValueBits == 8 || kShValueBits == 16) {
-        gindex_t base = (gindex_t)3 * (gindex_t)num_sh_buffer * (gindex_t)gid;
+        ShAddrW a = sh_quant_addr_w(num_sh_buffer, sh_bounds_stride);
+        gindex_t base = sh_addr_base(a, gid);
         if (kShValueBits == 8)
             return sh_to_color_qw<8>(kShDegree, mean, R, t, dc, sh_packed,
-                                     sh_bounds, base, sh_bounds_stride);
+                                     sh_bounds, base, a.bounds_stride,
+                                     a.pair_pitch);
         return sh_to_color_qw<16>(kShDegree, mean, R, t, dc, sh_packed,
-                                  sh_bounds, base, sh_bounds_stride);
+                                  sh_bounds, base, a.bounds_stride,
+                                  a.pair_pitch);
     }
     float* sh = features_sh + gid * sh_stride;
     switch (kShDegree) {

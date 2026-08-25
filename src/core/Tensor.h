@@ -988,6 +988,41 @@ public:
 // straight-line arithmetic plus log1pf / expm1f (single CUDA math-lib calls).
 // ============================================================================
 
+// Packed-SH cell addressing, shared by every reader of the two SH quant
+// buffers and by the host decoders. Layouts: docs/notes/sh-quant-layout.md.
+struct ShQuantAddr {
+    int64_t bounds_stride;    // cells per bound
+    int64_t pair_pitch;       // 0 = per-cell-block AoS
+    int64_t cells_per_splat;
+
+    __device__ int64_t base(int64_t gid) const {
+        return pair_pitch > 0
+            ? (gid >> 8) * ((cells_per_splat + 1) >> 1) * 512 + (gid & 255) * 2
+            : gid * cells_per_splat;
+    }
+    __device__ int64_t cell(int64_t base_cell, int c) const {
+        return pair_pitch > 0
+            ? base_cell + (int64_t)(c >> 1) * pair_pitch + (int64_t)(c & 1)
+            : base_cell + (int64_t)c;
+    }
+};
+
+// `arg_stride` is the kernels' sh_bounds_stride argument: > 0 picks the
+// per-cell-block AoS layout with that stride, 0 the FPBO transposed one.
+__device__ inline ShQuantAddr sh_quant_addr(uint32_t num_sh_buffer,
+                                            int64_t arg_stride) {
+    const int64_t R = 3 * (int64_t)num_sh_buffer;
+    if (arg_stride > 0) return ShQuantAddr{arg_stride, 0, R};
+    return ShQuantAddr{((R + 1) >> 1) * 512, 512, R};
+}
+
+// Cells an FPBO-layout buffer needs for `n` splats: whole 256-splat blocks of
+// whole words, so an odd cell count per splat leaves one cell unused.
+inline int64_t sh_fpbo_cells(int64_t n, uint32_t num_sh_buffer) {
+    const int64_t R = 3 * (int64_t)num_sh_buffer;
+    return ((n + 255) / 256) * 256 * (((R + 1) >> 1) * 2);
+}
+
 template<int BITS, int BLOCK_SIZE = 256>
 class QuantizedAdamState {
 public:
@@ -1131,16 +1166,22 @@ public:
     // BITS == 8 only: one cell's packed byte pair (u_q | s_q << 8) as a
     // value, for callers that assemble whole words themselves (the FPBO
     // kernel's staged coalesced writeback). Same rounding as encode_us.
+    __device__ static inline uint32_t encode_us_code(
+        float u_val, float log_s_val, float4 mm
+    ) {
+        static_assert(BITS == 8, "cell-code encode is the 2-byte/cell AoS");
+        float u_range = fmaxf(mm.y - mm.x, kEps);
+        float s_range = fmaxf(mm.w - mm.z, kEps);
+        float u_qf = fminf(fmaxf(roundf(kQMax * (u_val - mm.x) / u_range), 0.0f), kQMax);
+        float s_qf = fminf(fmaxf(roundf(kQMax * (log_s_val - mm.z) / s_range), 0.0f), kQMax);
+        return (uint32_t)(uint8_t)u_qf | ((uint32_t)(uint8_t)s_qf << 8);
+    }
+
     __device__ static inline uint32_t encode_g1g2_code(
         float g1, float g2, float4 mm
     ) {
-        static_assert(BITS == 8, "cell-code encode is the 2-byte/cell AoS");
         float2 prim = g1g2_to_us(g1, g2);
-        float u_range = fmaxf(mm.y - mm.x, kEps);
-        float s_range = fmaxf(mm.w - mm.z, kEps);
-        float u_qf = fminf(fmaxf(roundf(kQMax * (prim.x - mm.x) / u_range), 0.0f), kQMax);
-        float s_qf = fminf(fmaxf(roundf(kQMax * (prim.y - mm.z) / s_range), 0.0f), kQMax);
-        return (uint32_t)(uint8_t)u_qf | ((uint32_t)(uint8_t)s_qf << 8);
+        return encode_us_code(prim.x, prim.y, mm);
     }
 
     // (g1, g2) -> linearly-quantized primitives (u, log_s). Block reduction

@@ -25,6 +25,7 @@
 #include "shaders/densify.slang"
 #undef CudaDeviceExport
 #include "optim_quant.slang"
+#include "sh_addr.slang"
 
 [ForceInline]
 float _dn_hash14(float4 p4) {
@@ -262,7 +263,8 @@ uint _dn_qzero<let QMAX : int>(float lo, float hi) {
 void _dn_zero_qsh_splat(uint* packed, uint splat, uint num_sh,
                         float4* bounds, bool bounds_per_splat) {
     uint cells = 3u * num_sh;
-    uint base = splat * cells;
+    ShAddrW a = sh_quant_addr_w(num_sh, bounds_per_splat ? 0 : 256);
+    gindex_t base = sh_addr_base(a, splat);
     if (bounds_per_splat) {
         float4 mm = bounds[splat / 256u];
         uint u_q, s_q;
@@ -270,17 +272,20 @@ void _dn_zero_qsh_splat(uint* packed, uint splat, uint num_sh,
             u_q = _dn_qzero<255>(mm.x, mm.y);
             s_q = _dn_qzero<255>(mm.z, mm.w);
             for (uint c = 0; c < cells; c++)
-                vkq_store_u16(packed, base + c, u_q | (s_q << 8));
+                vkq_store_u16(packed,
+                              uint(sh_cell_at_w(base, int(c), a.pair_pitch)),
+                              u_q | (s_q << 8));
         } else {
             u_q = _dn_qzero<15>(mm.x, mm.y);
             s_q = _dn_qzero<15>(mm.z, mm.w);
             for (uint c = 0; c < cells; c++)
-                vkq_store_u8(packed, base + c,
+                vkq_store_u8(packed,
+                             uint(sh_cell_at_w(base, int(c), a.pair_pitch)),
                              (u_q & 0xfu) | ((s_q & 0xfu) << 4));
         }
     } else {
         for (uint c = 0; c < cells; c++) {
-            uint cell = base + c;
+            uint cell = uint(base) + c;
             float4 mm = bounds[cell / 256u];
             if (kShOptimBits == 8) {
                 uint u_q = _dn_qzero<255>(mm.x, mm.y);
@@ -608,8 +613,11 @@ void densify_relocate_las(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 void _dn_copy_qsh_value(uint* packed, float2* bounds, uint src_splat,
                         uint dst_splat, uint num_sh, uint num_sh_buffer,
                         bool bounds_per_splat) {
-    uint src_base = src_splat * 3u * num_sh_buffer;
-    uint dst_base = dst_splat * 3u * num_sh_buffer;
+    // bounds_per_splat is the FPBO layout, whose cells are word-paired and
+    // block-transposed (docs/notes/sh-quant-layout.md).
+    ShAddrW a = sh_quant_addr_w(num_sh_buffer, bounds_per_splat ? 0 : 256);
+    gindex_t src_base = sh_addr_base(a, src_splat);
+    gindex_t dst_base = sh_addr_base(a, dst_splat);
     float2 src_mm = float2(0.0f, 0.0f), dst_mm = float2(0.0f, 0.0f);
     if (bounds_per_splat) {
         src_mm = bounds[src_splat / 256u];
@@ -617,8 +625,8 @@ void _dn_copy_qsh_value(uint* packed, float2* bounds, uint src_splat,
     }
     uint cells = 3u * num_sh;
     for (uint c = 0; c < cells; c++) {
-        uint src_cell = src_base + c;
-        uint dst_cell = dst_base + c;
+        uint src_cell = uint(sh_cell_at_w(src_base, int(c), a.pair_pitch));
+        uint dst_cell = uint(sh_cell_at_w(dst_base, int(c), a.pair_pitch));
         if (!bounds_per_splat) {
             src_mm = bounds[src_cell / 256u];
             dst_mm = bounds[dst_cell / 256u];

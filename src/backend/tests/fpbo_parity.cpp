@@ -200,7 +200,8 @@ int main(int argc, char** argv) {
         uint8_t *d_shq = nullptr, *d_shv = nullptr;
         float *d_shq_b = nullptr, *d_shv_b = nullptr;
         std::optional<TorchTensorView> shq_tv, shq_b_tv, shv_tv, shv_b_tv;
-        const int64_t cells = N * 3 * NUM_SH;
+        // FPBO layout: whole 256-splat blocks of whole u32 words.
+        const int64_t cells = sh_fpbo_cells(N, NUM_SH);
         if (level1) {
             // Zero packed + zero bounds is the codec's documented valid
             // initial state (decodes to exactly (0, 0) on both backends).

@@ -131,15 +131,13 @@ __global__ void __launch_bounds__(BLOCK_SIZE) projection_bwd_quantgrad_kernel(
             splat_world.template project_vjp<camera_model, distortion, false, 32>(
                 cam, v_screen, v, v_R, v_t);
         } else {
-            const int64_t sh_base_vjp   = (int64_t)3 * (int64_t)num_sh_buffer * (int64_t)gid;
-            const int64_t sh_stride_vjp = (sh_value_bounds_stride > 0)
-                ? sh_value_bounds_stride
-                : (int64_t)256 * 3 * (int64_t)num_sh_buffer;
+            const ShQuantAddr sha =
+                sh_quant_addr(num_sh_buffer, sh_value_bounds_stride);
             splat_world.template project_vjp<camera_model, distortion, false, VALUE_BITS>(
                 cam, v_screen, v, v_R, v_t,
                 const_cast<uint8_t*>(sh_value_packed),
                 const_cast<float2*>(sh_value_bounds),
-                sh_base_vjp, sh_stride_vjp);
+                sha.base(gid), sha.bounds_stride, sha.pair_pitch);
         }
     }
 

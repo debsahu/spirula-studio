@@ -160,6 +160,9 @@ static void _ensure_optim_state(int sh_optim_bits, int sh_value_bits,
     //   per block, and the kernel writes one bounds slot per block. So same
     //   packed-cell count, but 3*K x fewer bounds slots.
     int64_t sh_cells = (int64_t)N * K * 3;
+    // The FPBO layout addresses whole 256-splat blocks of whole u32 words, so
+    // it needs the rounded-up cell count (docs/notes/sh-quant-layout.md).
+    int64_t sh_cells_fpbo = sh_fpbo_cells(N, (uint32_t)K);
     if (quantize_sh && !fused) {
         constexpr int64_t BLOCK_SIZE = QuantizedAdamState<8, 256>::kBlockSize;
         int64_t sh_bounds = (sh_cells + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -167,7 +170,7 @@ static void _ensure_optim_state(int sh_optim_bits, int sh_value_bits,
         engine().optim.sh_quant_state_fpbo = QuantizedAdamState<8, 256>();
     } else if (quantize_sh && fused) {
         int64_t sh_bounds = (N + kFpboBlock - 1) / kFpboBlock;
-        engine().optim.sh_quant_state_fpbo.resize(PoolSlot::EngShQuantFpbo, sh_cells, sh_bounds);
+        engine().optim.sh_quant_state_fpbo.resize(PoolSlot::EngShQuantFpbo, sh_cells_fpbo, sh_bounds);
         engine().optim.sh_quant_state = QuantizedAdamState<8, 256>();
     } else {
         engine().optim.sh_quant_state      = QuantizedAdamState<8, 256>();
@@ -193,7 +196,7 @@ static void _ensure_optim_state(int sh_optim_bits, int sh_value_bits,
             engine().world.features_sh_quant8_fpbo  = QuantizedTensor<8,  256>();
             engine().world.features_sh_quant16_fpbo = QuantizedTensor<16, 256>();
         } else if (quantize_sh_value && sh_value_bits == 8 && fused) {
-            engine().world.features_sh_quant8_fpbo.resize(PoolSlot::EngWorldShVq8Fpbo, sh_cells, v_bounds_fpbo);
+            engine().world.features_sh_quant8_fpbo.resize(PoolSlot::EngWorldShVq8Fpbo, sh_cells_fpbo, v_bounds_fpbo);
             engine().world.features_sh_quant16 = QuantizedTensor<16, 256>();
             engine().world.features_sh_quant8  = QuantizedTensor<8,  256>();
             engine().world.features_sh_quant16_fpbo = QuantizedTensor<16, 256>();
@@ -203,7 +206,7 @@ static void _ensure_optim_state(int sh_optim_bits, int sh_value_bits,
             engine().world.features_sh_quant8_fpbo  = QuantizedTensor<8,  256>();
             engine().world.features_sh_quant16_fpbo = QuantizedTensor<16, 256>();
         } else if (quantize_sh_value && sh_value_bits == 16 && fused) {
-            engine().world.features_sh_quant16_fpbo.resize(PoolSlot::EngWorldShVq16Fpbo, sh_cells, v_bounds_fpbo);
+            engine().world.features_sh_quant16_fpbo.resize(PoolSlot::EngWorldShVq16Fpbo, sh_cells_fpbo, v_bounds_fpbo);
             engine().world.features_sh_quant8  = QuantizedTensor<8,  256>();
             engine().world.features_sh_quant16 = QuantizedTensor<16, 256>();
             engine().world.features_sh_quant8_fpbo  = QuantizedTensor<8,  256>();

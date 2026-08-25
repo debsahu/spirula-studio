@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
 
     // SH value-quant buffers (same recipe as projection_parity): random
     // packed cells + per-block (min, max) bounds in both layouts.
-    const int64_t cells = N * 3 * NUM_SH;
+    const int64_t cells = sh_fpbo_cells(N, NUM_SH);
     std::vector<uint8_t> q8(cells);
     std::vector<uint16_t> q16(cells);
     for (auto& v : q8) v = (uint8_t)(rng() & 0xff);
@@ -142,7 +142,8 @@ int main(int argc, char** argv) {
         return b;
     };
     std::vector<float> bounds_cell = gen_bounds(256);
-    std::vector<float> bounds_fpbo = gen_bounds((int64_t)256 * 3 * NUM_SH);
+    std::vector<float> bounds_fpbo =
+        gen_bounds(sh_quant_addr(NUM_SH, 0).bounds_stride);
     uint8_t* d_q8 = upload(q8);
     uint16_t* d_q16 = upload(q16);
     float* d_bcell = upload(bounds_cell);

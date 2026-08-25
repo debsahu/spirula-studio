@@ -230,7 +230,11 @@ int main(int argc, char** argv) {
             for (auto& v : sh) v = uf(-0.5f, 0.5f);
             m.sh = upload(sh);
         } else {
-            int64_t cells = 3 * num_sh_buffer * CAP;
+            // The FPBO layout (bounds_per_splat) addresses whole 256-splat
+            // blocks of whole words -- see docs/notes/sh-quant-layout.md.
+            int64_t cells = bounds_per_splat
+                ? sh_fpbo_cells(CAP, (uint32_t)num_sh_buffer)
+                : 3 * num_sh_buffer * CAP;
             m.sh_value_bytes = cells * (sh_value_bits == 16 ? 2 : 1);
             std::vector<uint8_t> pk(m.sh_value_bytes);
             for (auto& v : pk) v = (uint8_t)(rng() & 0xff);
@@ -254,7 +258,9 @@ int main(int argc, char** argv) {
             m.g2_sh = upload(g);
         } else {
             // state stride is 3 * num_sh cells per splat (see FusedAppearanceOptim.cu)
-            int64_t cells = 3 * num_sh * CAP;
+            int64_t cells = bounds_per_splat
+                ? sh_fpbo_cells(CAP, (uint32_t)num_sh)
+                : 3 * num_sh * CAP;
             m.sh_state_bytes = cells * (sh_optim_bits == 8 ? 2 : 1);
             std::vector<uint8_t> pk(m.sh_state_bytes);
             for (auto& v : pk) v = (uint8_t)(rng() & 0xff);

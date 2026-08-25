@@ -77,11 +77,8 @@ void forward_3dgs(
     std::optional<TorchTensorView> sh_value_bounds_opt = std::nullopt;
     const int sh_value_bits = engine().world.sh_value_bits;
     const uint32_t num_sh_buffer = (uint32_t)engine().num_sh;
-    // sh_bounds_stride: cells per value-quant bound. FPBO layout packs 256
-    // splats per block × 3*num_sh_buffer cells per splat; non-FPBO (cell-
-    // block) packs 256 consecutive cells per block. The projection kernel
-    // reads bounds[cell_idx / stride], so the stride must match the layout
-    // used at allocation time.
+    // sh_bounds_stride selects the packed-SH layout the kernels address with:
+    // 256 = per-cell-block AoS, 0 = FPBO (docs/notes/sh-quant-layout.md).
     int64_t sh_bounds_stride = 0;
     if (sh_value_bits == 8) {
         auto pick = [&](auto& vq) {
@@ -93,7 +90,7 @@ void forward_3dgs(
         };
         if (engine().world.features_sh_quant8_fpbo.initialized()) {
             pick(engine().world.features_sh_quant8_fpbo);
-            sh_bounds_stride = (int64_t)256 * 3 * (int64_t)num_sh_buffer;
+            sh_bounds_stride = 0;  // FPBO layout
         } else {
             pick(engine().world.features_sh_quant8);
             sh_bounds_stride = 256;
@@ -108,7 +105,7 @@ void forward_3dgs(
         };
         if (engine().world.features_sh_quant16_fpbo.initialized()) {
             pick(engine().world.features_sh_quant16_fpbo);
-            sh_bounds_stride = (int64_t)256 * 3 * (int64_t)num_sh_buffer;
+            sh_bounds_stride = 0;  // FPBO layout
         } else {
             pick(engine().world.features_sh_quant16);
             sh_bounds_stride = 256;

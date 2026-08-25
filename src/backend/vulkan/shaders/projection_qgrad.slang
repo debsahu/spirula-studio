@@ -140,7 +140,9 @@ void _qg_camera_loop<let cam : CameraModelType, D : ICameraDistortion>(
         return;
     PbSplat s = pb_load_splat(p.means, p.quats, p.scales, p.opacities,
                               p.features_dc, gid);
-    gindex_t qbase = (gindex_t)3 * (gindex_t)p.num_sh_buffer * (gindex_t)gid;
+    ShAddrW sha = sh_quant_addr_w(p.num_sh_buffer,
+                                 i64mem_get(p.sh_value_bounds_stride));
+    gindex_t qbase = sh_addr_base(sha, gid);
     for (int cid_t = cid_0; cid_t < cid_1; ++cid_t) {
         int idx = (kPacked != 0) ? p.perm[cid_t]
                                  : cid_t * int(p.N) + int(gid);
@@ -158,7 +160,7 @@ void _qg_camera_loop<let cam : CameraModelType, D : ICameraDistortion>(
             pb_vjp_3dgut<cam, D>(s, c, p.width, p.height, v_ss, v_so, g);
             pb_sh_vjp<D>(s, c, p.features_sh + gid * p.sh_stride_src,
                          p.sh_value_packed, p.sh_value_bounds, qbase,
-                         i64mem_get(p.sh_value_bounds_stride), v_rgb, g);
+                         sha.bounds_stride, sha.pair_pitch, v_rgb, g);
         } else {
             float* v_row = scr2_row(p.vs_screen, idx);
             float2 v_xy = scr2_xy(v_row);
@@ -170,7 +172,7 @@ void _qg_camera_loop<let cam : CameraModelType, D : ICameraDistortion>(
                               v_opac, g);
             pb_sh_vjp<D>(s, c, p.features_sh + gid * p.sh_stride_src,
                          p.sh_value_packed, p.sh_value_bounds, qbase,
-                         i64mem_get(p.sh_value_bounds_stride), v_rgb, g);
+                         sha.bounds_stride, sha.pair_pitch, v_rgb, g);
         }
     }
 }

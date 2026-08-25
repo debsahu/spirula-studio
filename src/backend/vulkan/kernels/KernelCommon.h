@@ -197,9 +197,9 @@ inline uint32_t resolve_sh_quant(
         *out_packed = std::get<0>(sh_value_packed.value());
         *out_bounds = std::get<0>(sh_value_bounds.value());
     }
-    *out_stride = sh_bounds_stride > 0
-                      ? sh_bounds_stride
-                      : (int64_t)256 * 3 * (int64_t)num_sh_buffer;
+    // Passed through raw: 0 means the FPBO layout, which the shaders resolve
+    // with sh_quant_addr_w (docs/notes/sh-quant-layout.md).
+    *out_stride = sh_bounds_stride;
     return (uint32_t)sh_value_bits;
 }
 

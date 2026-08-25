@@ -310,7 +310,7 @@ static void _engine_raster_proj_backward(
             };
             if (engine().world.features_sh_quant8_fpbo.initialized()) {
                 pick(engine().world.features_sh_quant8_fpbo);
-                sh_bounds_stride = (int64_t)256 * 3 * (int64_t)num_sh_buffer;
+                sh_bounds_stride = 0;  // FPBO layout
             } else {
                 pick(engine().world.features_sh_quant8);
                 sh_bounds_stride = 256;
@@ -323,7 +323,7 @@ static void _engine_raster_proj_backward(
             };
             if (engine().world.features_sh_quant16_fpbo.initialized()) {
                 pick(engine().world.features_sh_quant16_fpbo);
-                sh_bounds_stride = (int64_t)256 * 3 * (int64_t)num_sh_buffer;
+                sh_bounds_stride = 0;  // FPBO layout
             } else {
                 pick(engine().world.features_sh_quant16);
                 sh_bounds_stride = 256;
