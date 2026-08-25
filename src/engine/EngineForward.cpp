@@ -216,27 +216,13 @@ void forward_3dgs(
     if (packed && engine().fwd.camera_ids.data_ptr() != nullptr)
         image_ids_ptr = &engine().fwd.camera_ids;
 
-    // Hand the projected 2D conic / opacity (and center, when stored) to the
-    // intersector so it does the tighter ellipse-vs-tile test instead of a
-    // conservative AABB test. Screen-buffer layout differs per primitive:
-    //   3dgs / mip : [xy, depth, conic, opac, rgb]
-    //   3dgut      : [conic (aka "scale"), opacity, colors]; center := AABB
-    //                center, so proj_xy is left null.
-    DeviceTensorFloatND* proj_xy = nullptr;
-    DeviceTensorFloatND* proj_conic = nullptr;
-    DeviceTensorFloatND* proj_opac = nullptr;
-    if (primitive == "3dgut") {
-        proj_conic = &engine().fwd.splats_s[0];
-        proj_opac  = &engine().fwd.splats_s[1];
-    } else {  // 3dgs / mip
-        proj_xy    = &engine().fwd.splats_s[0];
-        proj_conic = &engine().fwd.splats_s[2];
-        proj_opac  = &engine().fwd.splats_s[3];
-    }
+    // Handing the projected conic to the intersector buys the tighter
+    // ellipse-vs-tile test instead of the conservative AABB one.
+    ProjEllipseView ellipse = proj_ellipse_view(
+        engine().fwd.splats_s[0].data_ptr(), primitive == "3dgut");
 
     auto [isect_ids, flatten_ids, tile_offsets] = do_intersect_tile_generic(
-        aabb_nd, depths_nd,
-        proj_xy, proj_conic, proj_opac,
+        aabb_nd, depths_nd, ellipse,
         (uint32_t)engine().camera.num,
         _dv_tv(engine().camera.intrins),
         (uint32_t)engine().camera.width,

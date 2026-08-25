@@ -46,6 +46,7 @@
 #include <fstream>
 #include <random>
 #include <vector>
+#include "backend/tests/ScreenRows.h"
 
 using backend::MemcpyKind;
 
@@ -444,10 +445,8 @@ int main(int argc, char** argv) {
                 {1, kCameraDistortionParams}),
             radii, std::nullopt, std::nullopt, 0, 32, 0);
         DeviceTensorFloatND aabb_nd(aabb_2d), depths_nd(depths_2d);
-        DeviceTensorFloatND proj_conic = splats_s[0];
-        DeviceTensorFloatND proj_opac = splats_s[1];
         auto [isect_ids, flatten_ids, tile_offsets] = do_intersect_tile_generic(
-            aabb_nd, depths_nd, nullptr, &proj_conic, &proj_opac, 1,
+            aabb_nd, depths_nd, ellipse_view(splats_s, true), 1,
             ttv(d_intr + 4 * cam, {1, 4}), W, H, nullptr, /*tile_active=*/nullptr);
         backend::device_synchronize();
         if (check_error()) return 1;

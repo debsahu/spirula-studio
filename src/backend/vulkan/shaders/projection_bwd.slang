@@ -18,6 +18,7 @@
 
 #define CudaDeviceExport ForceInline
 #include "int64_compat.slang"
+#include "screen.slang"
 #include "shaders/primitive_3dgs.slang"
 #include "shaders/harmonics.slang"
 #undef CudaDeviceExport
@@ -50,11 +51,7 @@ struct ProjectionBwd3dgsParams {
     int* gaussian_ids;  // [nnz]
     float4* aabb;       // [C,N] (non-packed cull; unused when kPacked)
     // screen-space gradients (inputs)
-    float* vs_xy;
-    float* vs_depth;
-    float* vs_conic;
-    float* vs_opac;
-    float* vs_rgb;
+    float* vs_screen;  // [.., SCR2_STRIDE]
     // world-space gradients (outputs, CAS accumulate)
     float* vw_means;
     float* vw_quats;
@@ -96,13 +93,12 @@ void _pb_run_3dgs<let cam : CameraModelType, D : ICameraDistortion>(
     PbSplat s = pb_load_splat(p.means, p.quats, p.scales, p.opacities,
                               p.features_dc, gid);
 
-    float2 v_xy = float2(p.vs_xy[2 * idx], p.vs_xy[2 * idx + 1]);
-    float v_depth = p.vs_depth[idx];
-    float3 v_conic = float3(p.vs_conic[3 * idx], p.vs_conic[3 * idx + 1],
-                            p.vs_conic[3 * idx + 2]);
-    float v_opac = p.vs_opac[idx];
-    float3 v_rgb = float3(p.vs_rgb[3 * idx], p.vs_rgb[3 * idx + 1],
-                          p.vs_rgb[3 * idx + 2]);
+    float* v_row = scr2_row(p.vs_screen, idx);
+    float2 v_xy = scr2_xy(v_row);
+    float v_depth = scr2_depth(v_row);
+    float3 v_conic = scr2_conic(v_row);
+    float v_opac = scr2_opac(v_row);
+    float3 v_rgb = scr2_rgb(v_row);
 
     PbGrads g = pb_grads_zero();
     pb_vjp_2d<cam, D>(s, c, p.width, p.height, v_xy, v_depth, v_conic, v_opac,
@@ -154,9 +150,7 @@ struct ProjectionBwd3dgutParams {
     int* gaussian_ids;
     float4* aabb;
     // screen grads {scale, opac, rgb}
-    float* vs_scale;
-    float* vs_opac;
-    float* vs_rgb;
+    float* vs_screen;  // [.., SCRG_STRIDE]
     // world grads (outputs)
     float* vw_means;
     float* vw_quats;
@@ -197,11 +191,10 @@ void _pb_run_3dgut<let cam : CameraModelType, D : ICameraDistortion>(
     PbSplat s = pb_load_splat(p.means, p.quats, p.scales, p.opacities,
                               p.features_dc, gid);
 
-    float3 v_sscale = float3(p.vs_scale[3 * idx], p.vs_scale[3 * idx + 1],
-                             p.vs_scale[3 * idx + 2]);
-    float v_sopac = p.vs_opac[idx];
-    float3 v_rgb = float3(p.vs_rgb[3 * idx], p.vs_rgb[3 * idx + 1],
-                          p.vs_rgb[3 * idx + 2]);
+    float* v_row = scrg_row(p.vs_screen, idx);
+    float3 v_sscale = scrg_scale(v_row);
+    float v_sopac = scrg_opac(v_row);
+    float3 v_rgb = scrg_rgb(v_row);
 
     PbGrads g = pb_grads_zero();
     pb_vjp_3dgut<cam, D>(s, c, p.width, p.height, v_sscale, v_sopac, g);

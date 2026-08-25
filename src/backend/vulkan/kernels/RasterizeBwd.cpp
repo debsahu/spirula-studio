@@ -18,32 +18,32 @@ namespace {
 
 // Mirrors Raster2dBwdParams in shaders/rasterize_bwd.slang.
 struct Raster2dBwdParams {
-    uint64_t s_xy, s_depth, s_conic, s_opac, s_rgb;
+    uint64_t s_screen;
     uint64_t gaussian_ids, tile_offsets, flatten_ids;
     uint64_t render_Ts, last_ids;
     uint64_t out_rgb, out_depth, dist_rgb, dist_depth, awmap;
     uint64_t v_out_rgb, v_out_depth, v_render_Ts, v_median, v_dist_rgb,
         v_dist_depth;
-    uint64_t v_s_xy, v_s_depth, v_s_conic, v_s_opac, v_s_rgb;
+    uint64_t v_s_screen;
     uint64_t o_accum_weight, o_accum_weight_den;
     uint32_t I, N, n_isects, width, height, tile_width, tile_height, _pad0;
 };
-static_assert(sizeof(Raster2dBwdParams) == 28 * 8 + 8 * 4,
+static_assert(sizeof(Raster2dBwdParams) == 20 * 8 + 8 * 4,
               "params layout must match the slang struct");
 
 // Mirrors Raster3dgutBwdParams.
 struct Raster3dgutBwdParams {
-    uint64_t means, quats, scales, s_scale, s_opac, s_rgb, gaussian_ids;
+    uint64_t means, quats, scales, s_screen, gaussian_ids;
     uint64_t viewmats, intrins, dist_coeffs, aabb;
     uint64_t tile_offsets, flatten_ids, render_Ts, last_ids;
     uint64_t out_rgb, out_depth, dist_rgb, dist_depth, awmap;
     uint64_t v_out_rgb, v_out_depth, v_render_Ts, v_median, v_dist_rgb,
         v_dist_depth;
-    uint64_t v_means, v_quats, v_scales, v_s_opac, v_s_rgb;
+    uint64_t v_means, v_quats, v_scales, v_s_screen;
     uint64_t o_accum_weight, o_accum_weight_den, v_viewmats;
     uint32_t I, N, n_isects, width, height, tile_width, tile_height, _pad0;
 };
-static_assert(sizeof(Raster3dgutBwdParams) == 34 * 8 + 8 * 4,
+static_assert(sizeof(Raster3dgutBwdParams) == 31 * 8 + 8 * 4,
               "params layout must match the slang struct");
 
 uint32_t dist_spec_bwd(DistortionType dist_type) {
@@ -118,11 +118,7 @@ std::tuple<
         Vanilla3DGS<0>::ScreenBuffer vsb(v_splats_s.value());
 
         Raster2dBwdParams p{};
-        p.s_xy = (uint64_t)sb.raw_data(0);
-        p.s_depth = (uint64_t)sb.raw_data(1);
-        p.s_conic = (uint64_t)sb.raw_data(2);
-        p.s_opac = (uint64_t)sb.raw_data(3);
-        p.s_rgb = (uint64_t)sb.raw_data(4);
+        p.s_screen = (uint64_t)sb.raw_data();
         p.gaussian_ids = vkk::or_fallback(gaussian_ids.data_ptr());
         p.tile_offsets = (uint64_t)tile_offsets.data_ptr();
         p.flatten_ids = (uint64_t)flatten_ids.data_ptr();
@@ -153,11 +149,7 @@ std::tuple<
             p.v_dist_rgb = vkk::null_fallback();
             p.v_dist_depth = vkk::null_fallback();
         }
-        p.v_s_xy = (uint64_t)vsb.raw_data(0);
-        p.v_s_depth = (uint64_t)vsb.raw_data(1);
-        p.v_s_conic = (uint64_t)vsb.raw_data(2);
-        p.v_s_opac = (uint64_t)vsb.raw_data(3);
-        p.v_s_rgb = (uint64_t)vsb.raw_data(4);
+        p.v_s_screen = (uint64_t)vsb.raw_data();
         p.o_accum_weight = vkk::or_fallback(o_accum_weight.data_ptr());
         p.o_accum_weight_den = vkk::or_fallback(
             accum_mode == DensifyAccumMode::Avg
@@ -265,9 +257,7 @@ std::tuple<
         p.means = (uint64_t)wb.raw_data(0);
         p.quats = (uint64_t)wb.raw_data(1);
         p.scales = (uint64_t)wb.raw_data(2);
-        p.s_scale = (uint64_t)sb.raw_data(0);
-        p.s_opac = (uint64_t)sb.raw_data(1);
-        p.s_rgb = (uint64_t)sb.raw_data(2);
+        p.s_screen = (uint64_t)sb.raw_data();
         p.gaussian_ids = vkk::or_fallback(gaussian_ids.data_ptr());
         p.viewmats = std::get<0>(viewmats);
         p.intrins = std::get<0>(intrins);
@@ -305,8 +295,7 @@ std::tuple<
         p.v_means = (uint64_t)vwb.raw_data(0);
         p.v_quats = (uint64_t)vwb.raw_data(1);
         p.v_scales = (uint64_t)vwb.raw_data(2);
-        p.v_s_opac = (uint64_t)vsb.raw_data(1);
-        p.v_s_rgb = (uint64_t)vsb.raw_data(2);
+        p.v_s_screen = (uint64_t)vsb.raw_data();
         p.o_accum_weight = vkk::or_fallback(o_accum_weight.data_ptr());
         p.o_accum_weight_den = vkk::or_fallback(
             accum_mode == DensifyAccumMode::Avg

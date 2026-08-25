@@ -16,7 +16,7 @@ struct FpboParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
     uint64_t camera_id_bounds, camera_ids, perm, aabb;
-    uint64_t vs0, vs1, vs2, vs3, vs4;
+    uint64_t vs_screen;
     uint64_t vw_means, vw_quats, vw_scales, vw_opacities, vw_dc;
     uint64_t g1_means, g1_quats, g1_scales, g1_opacities, g1_dc, g1_sh;
     uint64_t g2_means, g2_quats, g2_scales, g2_opacities, g2_dc, g2_sh;
@@ -41,7 +41,7 @@ struct FpboParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(FpboParams) == 52 * 8 + 16 * 4 + 10 * 4,
+static_assert(sizeof(FpboParams) == 48 * 8 + 16 * 4 + 10 * 4,
               "params layout must match the slang struct");
 
 using vkk::or_fallback;
@@ -150,19 +150,11 @@ void launch_fpbo_vk(
     if (eval3d) {
         Vanilla3DGUT<0>::ScreenBuffer vsb(
             const_cast<std::vector<DeviceTensorFloatND>&>(v_splats_screen));
-        p.vs0 = (uint64_t)vsb.raw_data(0);
-        p.vs1 = (uint64_t)vsb.raw_data(1);
-        p.vs2 = (uint64_t)vsb.raw_data(2);
-        p.vs3 = vkk::null_fallback();
-        p.vs4 = vkk::null_fallback();
+        p.vs_screen = (uint64_t)vsb.raw_data();
     } else {
         Vanilla3DGS<0>::ScreenBuffer vsb(
             const_cast<std::vector<DeviceTensorFloatND>&>(v_splats_screen));
-        p.vs0 = (uint64_t)vsb.raw_data(0);
-        p.vs1 = (uint64_t)vsb.raw_data(1);
-        p.vs2 = (uint64_t)vsb.raw_data(2);
-        p.vs3 = (uint64_t)vsb.raw_data(3);
-        p.vs4 = (uint64_t)vsb.raw_data(4);
+        p.vs_screen = (uint64_t)vsb.raw_data();
     }
     p.vw_means = or_fallback((uint64_t)vwb.raw_data(0));
     p.vw_quats = or_fallback((uint64_t)vwb.raw_data(1));

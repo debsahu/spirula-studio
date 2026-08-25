@@ -24,6 +24,7 @@
 #include <fstream>
 #include <random>
 #include <vector>
+#include "backend/tests/ScreenRows.h"
 
 using backend::MemcpyKind;
 
@@ -247,11 +248,10 @@ int main(int argc, char** argv) {
             for (auto& v : vs) v = uf(-0.1f, 0.1f);
             for (auto& v : vo) v = uf(-0.5f, 0.5f);
             for (auto& v : vr) v = uf(-1.f, 1.f);
-            v_screen = {
-                DeviceTensorFloatND(ttv(upload(vs), {n_isect, 3, 1})),
-                DeviceTensorFloatND(ttv(upload(vo), {n_isect, 1, 1})),
-                DeviceTensorFloatND(ttv(upload(vr), {n_isect, 3, 1})),
-            };
+            auto rows = interleave_screen(n_isect, SCRG_STRIDE,
+                {{SCRG_SCALE, &vs}, {SCRG_OPAC, &vo}, {SCRG_RGB, &vr}});
+            v_screen = {DeviceTensorFloatND(
+                ttv(upload(rows), {n_isect, SCRG_STRIDE, 1}))};
         } else {
             std::vector<float> vxy(n_isect * 2), vd(n_isect),
                 vc(n_isect * 3), vo(n_isect), vr(n_isect * 3);
@@ -260,13 +260,11 @@ int main(int argc, char** argv) {
             for (auto& v : vc) v = uf(-0.02f, 0.02f);
             for (auto& v : vo) v = uf(-0.5f, 0.5f);
             for (auto& v : vr) v = uf(-1.f, 1.f);
-            v_screen = {
-                DeviceTensorFloatND(ttv(upload(vxy), {n_isect, 2, 1})),
-                DeviceTensorFloatND(ttv(upload(vd), {n_isect, 1, 1})),
-                DeviceTensorFloatND(ttv(upload(vc), {n_isect, 3, 1})),
-                DeviceTensorFloatND(ttv(upload(vo), {n_isect, 1, 1})),
-                DeviceTensorFloatND(ttv(upload(vr), {n_isect, 3, 1})),
-            };
+            auto rows = interleave_screen(n_isect, SCR2_STRIDE,
+                {{SCR2_XY, &vxy}, {SCR2_DEPTH, &vd}, {SCR2_CONIC, &vc},
+                 {SCR2_OPAC, &vo}, {SCR2_RGB, &vr}});
+            v_screen = {DeviceTensorFloatND(
+                ttv(upload(rows), {n_isect, SCR2_STRIDE, 1}))};
         }
 
         // --- quantized grad accumulators, zero-initialized ---

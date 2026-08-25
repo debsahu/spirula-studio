@@ -16,6 +16,7 @@
 #undef CudaDeviceExport
 
 #include "raster_common.slang"
+#include "screen.slang"
 #include "dist_spec.slang"
 
 [SpecializationConstant]
@@ -46,10 +47,7 @@ struct RasterMomentsParams {
     float* quats;   // [N, 4]
     float* scales;  // [N, 3]
     int* gaussian_ids;  // [nnz] packed mode or null (world idx = g % N)
-    // ScreenBuffer (TensorArray<3>) flattened
-    float* s_scale;  // [.., 3] projected 2D conic (culling)
-    float* s_opac;   // [.., 1]
-    float* s_rgb;    // [.., 3]
+    float* s_screen;  // packed ScreenBuffer rows; "scale" slot = 2D conic
     // cameras
     float* viewmats;     // [I, 16] row-major
     float4* intrins;     // [I]
@@ -152,10 +150,10 @@ void rasterize_moments_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
             int g = p.flatten_ids[idx];
             uint wi = kRasterPacked != 0 ? uint(p.gaussian_ids[g])
                                          : uint(g) % p.N;
-            float opac = p.s_opac[g];
+            float* r = scrg_row(p.s_screen, g);
+            float opac = scrg_opac(r);
             if (opac > ALPHA_THRESHOLD) {
-                float3 conic = float3(p.s_scale[3 * g], p.s_scale[3 * g + 1],
-                                      p.s_scale[3 * g + 2]);
+                float3 conic = scrg_scale(r);
                 float4 bb = p.aabb[g];
                 float ecx = 0.5f * (bb.x + bb.z);
                 float ecy = 0.5f * (bb.y + bb.w);
@@ -175,8 +173,7 @@ void rasterize_moments_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
                     float3(p.scales[3 * wi], p.scales[3 * wi + 1],
                            p.scales[3 * wi + 2]));
                 f.opacity = opac;
-                f.rgb = float3(p.s_rgb[3 * g], p.s_rgb[3 * g + 1],
-                               p.s_rgb[3 * g + 2]);
+                f.rgb = scrg_rgb(r);
                 _batch_mom[tid] = f;
             }
         }

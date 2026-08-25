@@ -6,6 +6,26 @@
 
 #include "primitives/Primitive3DGS.cuh"
 #include "primitives/Primitive3DGUT.cuh"
+#include "shaders/screen_layout.h"
+
+
+// Ellipse-mode inputs, read out of a packed screen row. data == nullptr
+// selects the conservative AABB test instead.
+struct ProjEllipseView {
+    const float* data = nullptr;
+    int32_t stride = 0;
+    int32_t xy = -1;     // -1: ellipse center is the AABB center (3DGUT)
+    int32_t conic = 0;
+    int32_t opac = 0;
+};
+
+// The two screen layouts as ellipse views. 3DGUT keeps its projected conic in
+// the row's "scale" slot and stores no center.
+inline ProjEllipseView proj_ellipse_view(const float* rows, bool eval3d) {
+    if (eval3d)
+        return {rows, SCRG_STRIDE, -1, SCRG_SCALE, SCRG_OPAC};
+    return {rows, SCR2_STRIDE, SCR2_XY, SCR2_CONIC, SCR2_OPAC};
+}
 
 
 /* == AUTO HEADER GENERATOR - DO NOT EDIT THIS LINE OR ANYTHING BELOW THIS LINE == */
@@ -29,9 +49,7 @@ std::tuple<
 > do_intersect_tile_generic(
     DeviceTensorFloatND aabb,     // [*N, 4] float32
     DeviceTensorFloatND depths,   // [*N] float32
-    DeviceTensorFloatND* proj_xy,    // null for AABB mode
-    DeviceTensorFloatND* proj_conic, // non-null enables ellipse mode
-    DeviceTensorFloatND* proj_opac,  // null for AABB mode
+    ProjEllipseView ellipse,      // .data null for AABB mode
     const uint32_t I,
     TorchTensorView intrins,      // [I, 4]
     const uint32_t image_width,

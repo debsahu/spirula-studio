@@ -15,6 +15,7 @@
 #undef CudaDeviceExport
 
 #include "raster_common.slang"
+#include "screen.slang"
 #include "atomic_float.slang"
 #include "dist_spec.slang"
 
@@ -213,11 +214,7 @@ bool _rb_pixel_grad(int pix_id, float alpha, float4 color,
 // ---------------------------------------------------------------------------
 
 struct Raster2dBwdParams {  // via params ring
-    float2* s_xy;
-    float* s_depth;
-    float* s_conic;
-    float* s_opac;
-    float* s_rgb;
+    float* s_screen;    // [.., SCR2_STRIDE]
     int* gaussian_ids;   // kPacked only (fallback-backed otherwise)
     int* tile_offsets;
     int* flatten_ids;
@@ -234,11 +231,7 @@ struct Raster2dBwdParams {  // via params ring
     float* v_median;     // kOutputMedian
     float* v_dist_rgb;
     float* v_dist_depth;
-    float* v_s_xy;
-    float* v_s_depth;
-    float* v_s_conic;
-    float* v_s_opac;
-    float* v_s_rgb;
+    float* v_s_screen;  // [.., SCR2_STRIDE]
     uint* o_accum_weight;   // kAccumWeight; Max writes float bits, else float
     float* o_accum_weight_den;  // kAccumAvg lane 2
     uint32_t I;
@@ -393,11 +386,10 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
             float2 c_xy = float2(0.0f);
             if (gi >= range_start) {
                 c_sid = p.flatten_ids[gi];
-                c_opac = p.s_opac[c_sid];
-                c_conic = float3(p.s_conic[3 * c_sid],
-                                 p.s_conic[3 * c_sid + 1],
-                                 p.s_conic[3 * c_sid + 2]);
-                c_xy = p.s_xy[c_sid];
+                float* c_row = scr2_row(p.s_screen, c_sid);
+                c_opac = scr2_opac(c_row);
+                c_conic = scr2_conic(c_row);
+                c_xy = scr2_xy(c_row);
                 if (c_opac > ALPHA_THRESHOLD) {
                     float kk = 0.5f / log(c_opac / ALPHA_THRESHOLD);
                     ok = ellipse_box_overlap_test(
@@ -454,10 +446,9 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
                 splat.xy = _rb_sxy[surv_pos];
                 splat.conic = _rb_sconic[surv_pos];
                 splat.opac = _rb_sopac[surv_pos];
-                splat.depth = p.s_depth[splat_sid];
-                splat.rgb = float3(p.s_rgb[3 * splat_sid],
-                                   p.s_rgb[3 * splat_sid + 1],
-                                   p.s_rgb[3 * splat_sid + 2]);
+                float* s_row = scr2_row(p.s_screen, int(splat_sid));
+                splat.depth = scr2_depth(s_row);
+                splat.rgb = scr2_rgb(s_row);
             }
             Frag2d_ v_splat = {float2(0.0f), 0.0f, float3(0.0f), 0.0f,
                                float3(0.0f)};
@@ -474,18 +465,17 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
             if (active && touched) {
                 uint wid = kPacked != 0 ? uint(p.gaussian_ids[splat_sid])
                                         : splat_sid % p.N;
-                _rb_atomic_add(p.v_s_xy + 2 * splat_sid, v_splat.xy.x);
-                _rb_atomic_add(p.v_s_xy + 2 * splat_sid + 1, v_splat.xy.y);
-                _rb_atomic_add(p.v_s_depth + splat_sid, v_splat.depth);
-                _rb_atomic_add(p.v_s_conic + 3 * splat_sid, v_splat.conic.x);
-                _rb_atomic_add(p.v_s_conic + 3 * splat_sid + 1,
-                               v_splat.conic.y);
-                _rb_atomic_add(p.v_s_conic + 3 * splat_sid + 2,
-                               v_splat.conic.z);
-                _rb_atomic_add(p.v_s_opac + splat_sid, v_splat.opac);
-                _rb_atomic_add(p.v_s_rgb + 3 * splat_sid, v_splat.rgb.x);
-                _rb_atomic_add(p.v_s_rgb + 3 * splat_sid + 1, v_splat.rgb.y);
-                _rb_atomic_add(p.v_s_rgb + 3 * splat_sid + 2, v_splat.rgb.z);
+                float* v_row = scr2_row(p.v_s_screen, int(splat_sid));
+                _rb_atomic_add(v_row + SCR2_XY, v_splat.xy.x);
+                _rb_atomic_add(v_row + SCR2_XY + 1, v_splat.xy.y);
+                _rb_atomic_add(v_row + SCR2_CONIC, v_splat.conic.x);
+                _rb_atomic_add(v_row + SCR2_CONIC + 1, v_splat.conic.y);
+                _rb_atomic_add(v_row + SCR2_CONIC + 2, v_splat.conic.z);
+                _rb_atomic_add(v_row + SCR2_OPAC, v_splat.opac);
+                _rb_atomic_add(v_row + SCR2_DEPTH, v_splat.depth);
+                _rb_atomic_add(v_row + SCR2_RGB, v_splat.rgb.x);
+                _rb_atomic_add(v_row + SCR2_RGB + 1, v_splat.rgb.y);
+                _rb_atomic_add(v_row + SCR2_RGB + 2, v_splat.rgb.z);
                 if (kAccumWeight == kAccumMax)
                     atomic_max_f32_nonneg(p.o_accum_weight + wid, accum_weight);
                 else if (kAccumWeight != 0) {
@@ -531,9 +521,7 @@ struct Raster3dgutBwdParams {  // via params ring
     float* means;
     float* quats;
     float* scales;    // WORLD scales (fragment load)
-    float* s_scale;   // SCREEN "scale" slot = projected 2D conic (culling)
-    float* s_opac;
-    float* s_rgb;
+    float* s_screen;    // [.., SCRG_STRIDE]; "scale" slot = 2D conic
     int* gaussian_ids;
     float* viewmats;     // [I,16]
     float4* intrins;     // [I]
@@ -557,8 +545,7 @@ struct Raster3dgutBwdParams {  // via params ring
     float* v_means;
     float* v_quats;
     float* v_scales;
-    float* v_s_opac;
-    float* v_s_rgb;
+    float* v_s_screen;  // [.., SCRG_STRIDE]
     uint* o_accum_weight;  // kAccumWeight; Max writes float bits, else float
     float* o_accum_weight_den;  // kAccumAvg lane 2
     float* v_viewmats;   // [I,16], kViewmatGrad
@@ -747,12 +734,11 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
             if (gi >= range_start) {
                 int sid = p.flatten_ids[gi];
                 c_sid = sid;
-                float c_opac = p.s_opac[sid];
+                float* c_row = scrg_row(p.s_screen, sid);
+                float c_opac = scrg_opac(c_row);
                 // 3dgut keeps the projected 2D conic in the screen "scale"
                 // slot; ellipse center is the AABB center.
-                float3 c_conic = float3(p.s_scale[3 * sid],
-                                        p.s_scale[3 * sid + 1],
-                                        p.s_scale[3 * sid + 2]);
+                float3 c_conic = scrg_scale(c_row);
                 float4 c_bb = p.aabb[sid];
                 float c_ex = 0.5f * (c_bb.x + c_bb.z);
                 float c_ey = 0.5f * (c_bb.y + c_bb.w);
@@ -824,10 +810,9 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
                                 p.scales[3 * splat_wid + 1],
                                 p.scales[3 * splat_wid + 2]);
                 splat.iscl_rot = compute_3dgut_iscl_rot(quat, wscale);
-                splat.opacity = p.s_opac[splat_sid];
-                splat.rgb = float3(p.s_rgb[3 * splat_sid],
-                                   p.s_rgb[3 * splat_sid + 1],
-                                   p.s_rgb[3 * splat_sid + 2]);
+                float* s_row = scrg_row(p.s_screen, int(splat_sid));
+                splat.opacity = scrg_opac(s_row);
+                splat.rgb = scrg_rgb(s_row);
             }
             VFrag3dgut_ v_splat;
             v_splat.mean = float3(0.0f);
@@ -860,10 +845,11 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
                 _rb_atomic_add(p.v_scales + 3 * splat_wid, v_scale.x);
                 _rb_atomic_add(p.v_scales + 3 * splat_wid + 1, v_scale.y);
                 _rb_atomic_add(p.v_scales + 3 * splat_wid + 2, v_scale.z);
-                _rb_atomic_add(p.v_s_opac + splat_sid, v_splat.opacity);
-                _rb_atomic_add(p.v_s_rgb + 3 * splat_sid, v_splat.rgb.x);
-                _rb_atomic_add(p.v_s_rgb + 3 * splat_sid + 1, v_splat.rgb.y);
-                _rb_atomic_add(p.v_s_rgb + 3 * splat_sid + 2, v_splat.rgb.z);
+                float* v_row = scrg_row(p.v_s_screen, int(splat_sid));
+                _rb_atomic_add(v_row + SCRG_OPAC, v_splat.opacity);
+                _rb_atomic_add(v_row + SCRG_RGB, v_splat.rgb.x);
+                _rb_atomic_add(v_row + SCRG_RGB + 1, v_splat.rgb.y);
+                _rb_atomic_add(v_row + SCRG_RGB + 2, v_splat.rgb.z);
                 if (kAccumWeight == kAccumMax)
                     atomic_max_f32_nonneg(p.o_accum_weight + splat_wid,
                                           accum_weight);

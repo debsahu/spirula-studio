@@ -17,19 +17,21 @@ inline constexpr int TILE_SIZE_IY = TILE_SIZE_Y * MACRO_TILE_SIZE_Y;
 
 // Mirror the params structs in shaders/intersect_tile.slang.
 struct IsectCountParams {
-    uint64_t aabb, proj_xy, proj_conic, proj_opac, tiles_per_splat;
+    uint64_t aabb, proj_screen, tiles_per_splat;
     uint64_t image_ids, tile_active;
     uint32_t N, tile_width, tile_height, total, wgs_per_row;
+    int32_t row_stride, xy_off, conic_off, opac_off;
 };
-static_assert(sizeof(IsectCountParams) == 7 * 8 + 5 * 4 + 4 /*pad*/,
+static_assert(sizeof(IsectCountParams) == 5 * 8 + 9 * 4 + 4 /*pad*/,
               "params layout must match the slang struct");
 
 struct IsectWriteParams {
-    uint64_t image_ids, aabb, depths, proj_xy, proj_conic, proj_opac;
+    uint64_t image_ids, aabb, depths, proj_screen;
     uint64_t cum_tiles, isect_ids, flatten_ids, tile_active;
     uint32_t N, tile_width, tile_height, total, wgs_per_row;
+    int32_t row_stride, xy_off, conic_off, opac_off;
 };
-static_assert(sizeof(IsectWriteParams) == 10 * 8 + 5 * 4 + 4 /*pad*/,
+static_assert(sizeof(IsectWriteParams) == 8 * 8 + 9 * 4 + 4 /*pad*/,
               "params layout must match the slang struct");
 
 struct TileActiveParams {
@@ -81,9 +83,7 @@ std::tuple<
 > do_intersect_tile_generic(
     DeviceTensorFloatND aabb,     // [*N, 4] float32
     DeviceTensorFloatND depths,   // [*N] float32
-    DeviceTensorFloatND* proj_xy,    // null for AABB mode
-    DeviceTensorFloatND* proj_conic, // non-null enables ellipse mode
-    DeviceTensorFloatND* proj_opac,  // null for AABB mode
+    ProjEllipseView ellipse,      // .data null for AABB mode
     const uint32_t I,
     TorchTensorView intrins,      // [I, 4] (unused by the kernels, as in CUDA)
     const uint32_t image_width,
@@ -101,13 +101,12 @@ std::tuple<
     uint32_t tile_height = _CEIL_DIV(image_height, TILE_SIZE_IY);
     uint32_t n_tiles = tile_width * tile_height * I;
 
-    const uint64_t p_xy = proj_xy ? (uint64_t)proj_xy->data_ptr() : 0;
-    const uint64_t p_conic = proj_conic ? (uint64_t)proj_conic->data_ptr() : 0;
-    const uint64_t p_opac = proj_opac ? (uint64_t)proj_opac->data_ptr() : 0;
+    const uint64_t p_screen = (uint64_t)ellipse.data;
 
     // Spec IDs: 0 = kEllipse, 1 = kHasXy, 2 = kPacked, 3 = kSkipTiles
     // (see intersect_tile.slang).
-    const backend::vk::SpecList mode_spec{p_conic ? 1u : 0u, p_xy ? 1u : 0u,
+    const backend::vk::SpecList mode_spec{p_screen ? 1u : 0u,
+                                          ellipse.xy >= 0 ? 1u : 0u,
                                           packed ? 1u : 0u,
                                           tile_active ? 1u : 0u};
 
@@ -118,9 +117,7 @@ std::tuple<
         vkk::Fold g = vkk::fold_1d(total_count, 256);
         IsectCountParams cp{};
         cp.aabb = (uint64_t)aabb.data_ptr();
-        cp.proj_xy = p_xy;
-        cp.proj_conic = p_conic;
-        cp.proj_opac = p_opac;
+        cp.proj_screen = p_screen;
         cp.tiles_per_splat = (uint64_t)tiles_per_splat.data_ptr();
         cp.image_ids = packed ? (uint64_t)image_ids->data_ptr() : 0;
         cp.tile_active = vkk::or_fallback(tile_active);
@@ -129,6 +126,10 @@ std::tuple<
         cp.tile_height = tile_height;
         cp.total = total_count;
         cp.wgs_per_row = g.per_row;
+        cp.row_stride = ellipse.stride;
+        cp.xy_off = ellipse.xy;
+        cp.conic_off = ellipse.conic;
+        cp.opac_off = ellipse.opac;
         vkk::dispatch("intersect_tile.intersect_tile_count", mode_spec, g.per_row,
                       g.rows, 1, &cp, sizeof(cp));
     }
@@ -171,9 +172,7 @@ std::tuple<
         wp.image_ids = packed ? (uint64_t)image_ids->data_ptr() : 0;
         wp.aabb = (uint64_t)aabb.data_ptr();
         wp.depths = (uint64_t)depths.data_ptr();
-        wp.proj_xy = p_xy;
-        wp.proj_conic = p_conic;
-        wp.proj_opac = p_opac;
+        wp.proj_screen = p_screen;
         wp.cum_tiles = (uint64_t)cum_tiles_per_splat.data_ptr();
         wp.isect_ids = (uint64_t)isect_ids_a.data_ptr();
         wp.flatten_ids = (uint64_t)flatten_ids_a.data_ptr();
@@ -183,6 +182,10 @@ std::tuple<
         wp.tile_height = tile_height;
         wp.total = total_count;
         wp.wgs_per_row = g.per_row;
+        wp.row_stride = ellipse.stride;
+        wp.xy_off = ellipse.xy;
+        wp.conic_off = ellipse.conic;
+        wp.opac_off = ellipse.opac;
         vkk::dispatch("intersect_tile.intersect_tile_write", mode_spec, g.per_row,
                       g.rows, 1, &wp, sizeof(wp));
     }

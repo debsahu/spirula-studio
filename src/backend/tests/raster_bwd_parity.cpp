@@ -26,6 +26,7 @@
 #include <fstream>
 #include <random>
 #include <vector>
+#include "backend/tests/ScreenRows.h"
 
 using backend::MemcpyKind;
 
@@ -232,21 +233,11 @@ int main(int argc, char** argv) {
         if (check_error()) return 1;
 
         // --- tile intersection ---
-        DeviceTensorFloatND *proj_xy = nullptr, *proj_conic = nullptr,
-                            *proj_opac = nullptr;
-        if (cfg.prim == 2) {
-            proj_conic = &splats_s[0];
-            proj_opac = &splats_s[1];
-        } else {
-            proj_xy = &splats_s[0];
-            proj_conic = &splats_s[2];
-            proj_opac = &splats_s[3];
-        }
         DeviceVector<int32_t>* image_ids_ptr =
             cfg.packed && cam_ids.data_ptr() ? &cam_ids : nullptr;
         auto [isect_ids, flatten_ids, tile_offsets] =
-            do_intersect_tile_generic(aabb_nd, depths_nd, proj_xy, proj_conic,
-                                      proj_opac, C,
+            do_intersect_tile_generic(aabb_nd, depths_nd,
+                                      ellipse_view(splats_s, cfg.prim == 2), C,
                                       ttv(d_intr, {(int64_t)C, 4}), W, H,
                                       image_ids_ptr, /*tile_active=*/nullptr);
         backend::device_synchronize();
@@ -305,8 +296,8 @@ int main(int argc, char** argv) {
             if (check_error()) return 1;
             for (int c = 0; c < 3; c++)  // v means/quats/scales
                 readback(acc, v_w[c].data_ptr(), v_w[c].numel());
-            for (int c = 1; c < 3; c++)  // v screen opac/rgb
-                readback(acc, v_s[c].data_ptr(), v_s[c].numel());
+            readback_screen(acc, v_s[0], SCRG_STRIDE,  // opac, rgb
+                            {{SCRG_OPAC, 1}, {SCRG_RGB, 3}});
             if (cfg.vmg)
                 readback(acc, v_viewmats.data_ptr(), (int64_t)C * 16);
             if (accum_any(cfg.aw))
@@ -320,8 +311,9 @@ int main(int argc, char** argv) {
                 std::nullopt, std::nullopt);
             backend::device_synchronize();
             if (check_error()) return 1;
-            for (int c = 0; c < 5; c++)  // v screen xy/depth/conic/opac/rgb
-                readback(acc, v_s[c].data_ptr(), v_s[c].numel());
+            readback_screen(acc, v_s[0], SCR2_STRIDE,
+                            {{SCR2_XY, 2}, {SCR2_DEPTH, 1}, {SCR2_CONIC, 3},
+                             {SCR2_OPAC, 1}, {SCR2_RGB, 3}});
             if (accum_any(cfg.aw))
                 readback(acc, aw_out.data_ptr(), N * accum_lanes(cfg.aw));
         }

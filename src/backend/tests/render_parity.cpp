@@ -27,6 +27,7 @@
 #include <fstream>
 #include <random>
 #include <vector>
+#include "backend/tests/ScreenRows.h"
 
 using backend::MemcpyKind;
 
@@ -247,23 +248,12 @@ int main(int argc, char** argv) {
         backend::device_synchronize();
         if (check_error()) return 1;
 
-        // --- tile intersection (ellipse mode; screen layout per primitive,
-        //     see EngineForward.cpp) ---
-        DeviceTensorFloatND *proj_xy = nullptr, *proj_conic = nullptr,
-                            *proj_opac = nullptr;
-        if (cfg.prim == 2) {
-            proj_conic = &splats_s[0];
-            proj_opac = &splats_s[1];
-        } else {
-            proj_xy = &splats_s[0];
-            proj_conic = &splats_s[2];
-            proj_opac = &splats_s[3];
-        }
+        // --- tile intersection (ellipse mode) ---
         DeviceVector<int32_t>* image_ids_ptr =
             cfg.packed && cam_ids.data_ptr() ? &cam_ids : nullptr;
 
         auto [isect_ids, flatten_ids, tile_offsets] = do_intersect_tile_generic(
-            aabb_nd, depths_nd, proj_xy, proj_conic, proj_opac, C,
+            aabb_nd, depths_nd, ellipse_view(splats_s, cfg.prim == 2), C,
             ttv(d_intr, {(int64_t)C, 4}), W, H, image_ids_ptr, /*tile_active=*/nullptr);
         backend::device_synchronize();
         if (check_error()) return 1;

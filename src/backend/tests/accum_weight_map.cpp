@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <random>
 #include <vector>
+#include "backend/tests/ScreenRows.h"
 
 using backend::MemcpyKind;
 
@@ -144,7 +145,7 @@ void run_mode(bool packed, DensifyAccumMode accum_mode) {
     DeviceVector<int32_t>* img_ids =
         (packed && cam_ids.data_ptr()) ? &cam_ids : nullptr;
     auto [isect_ids, flatten_ids, tile_offsets] = do_intersect_tile_generic(
-        aabb_nd, depths_nd, &splats_s[0], &splats_s[2], &splats_s[3], C,
+        aabb_nd, depths_nd, ellipse_view(splats_s, false), C,
         ttv(d_intr, {(int64_t)C, 4}), W, H, img_ids, /*tile_active=*/nullptr);
     auto rout = rasterize_to_pixels_3dgs_fwd(N, in_splats, splats_s, gauss_ids,
                                              W, H, tile_offsets, flatten_ids,
@@ -159,9 +160,8 @@ void run_mode(bool packed, DensifyAccumMode accum_mode) {
     std::vector<float> xy((size_t)C * N * 2, -1e9f);
     {
         int64_t rows = packed ? (int64_t)gauss_ids.size() : (int64_t)C * N;
-        std::vector<float> raw((size_t)rows * 2);
-        backend::memcpy_sync(raw.data(), splats_s[0].data_ptr(),
-                             raw.size() * 4, MemcpyKind::DeviceToHost);
+        std::vector<float> raw;
+        readback_screen(raw, splats_s[0], SCR2_STRIDE, {{SCR2_XY, 2}});
         if (!packed) {
             xy = raw;
         } else {

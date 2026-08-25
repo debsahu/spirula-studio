@@ -22,7 +22,7 @@ struct ProjectionQgradParams {
     uint64_t viewmats, intrins, dist_coeffs;
     uint64_t camera_id_bounds, camera_ids, perm;
     uint64_t aabb;
-    uint64_t vs0, vs1, vs2, vs3, vs4;
+    uint64_t vs_screen;
     uint64_t vw_means, vw_quats, vw_scales;
     uint64_t gq_means_packed, gq_means_bounds;
     uint64_t gq_quats_packed, gq_quats_bounds;
@@ -39,7 +39,7 @@ struct ProjectionQgradParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(ProjectionQgradParams) == 35 * 8 + 8 + 8 * 4,
+static_assert(sizeof(ProjectionQgradParams) == 31 * 8 + 8 + 8 * 4,
               "params layout must match the slang struct");
 
 using vkk::or_fallback;
@@ -127,19 +127,11 @@ void launch_projection_qgrad_vk(
     if (eval3d) {
         Vanilla3DGUT<0>::ScreenBuffer vsb(
             const_cast<std::vector<DeviceTensorFloatND>&>(v_splats_screen));
-        p.vs0 = (uint64_t)vsb.raw_data(0);
-        p.vs1 = (uint64_t)vsb.raw_data(1);
-        p.vs2 = (uint64_t)vsb.raw_data(2);
-        p.vs3 = vkk::null_fallback();
-        p.vs4 = vkk::null_fallback();
+        p.vs_screen = (uint64_t)vsb.raw_data();
     } else {
         Vanilla3DGS<0>::ScreenBuffer vsb(
             const_cast<std::vector<DeviceTensorFloatND>&>(v_splats_screen));
-        p.vs0 = (uint64_t)vsb.raw_data(0);
-        p.vs1 = (uint64_t)vsb.raw_data(1);
-        p.vs2 = (uint64_t)vsb.raw_data(2);
-        p.vs3 = (uint64_t)vsb.raw_data(3);
-        p.vs4 = (uint64_t)vsb.raw_data(4);
+        p.vs_screen = (uint64_t)vsb.raw_data();
     }
     p.vw_means = or_fallback((uint64_t)vwb.raw_data(0));
     p.vw_quats = or_fallback((uint64_t)vwb.raw_data(1));

@@ -195,13 +195,13 @@ static void render_one(RenderContext* ctx, int cam_idx,
         std::nullopt, std::nullopt, /*num_sh_buffer=*/0, /*sh_value_bits=*/32,
         /*sh_bounds_stride=*/0);
 
-    // --- tile intersection (ellipse mode: conic = splats_s[0], opac = [1]) ---
+    // --- tile intersection (ellipse mode; center falls back to the AABB) ---
     DeviceTensorFloatND aabb_nd(aabb_2d);
     DeviceTensorFloatND depths_nd(depths_2d);
-    DeviceTensorFloatND proj_conic = splats_s[0];
-    DeviceTensorFloatND proj_opac  = splats_s[1];
+    ProjEllipseView ellipse =
+        proj_ellipse_view(splats_s[0].data_ptr(), /*eval3d=*/true);
     auto [isect_ids, flatten_ids, tile_offsets] = do_intersect_tile_generic(
-        aabb_nd, depths_nd, nullptr, &proj_conic, &proj_opac,
+        aabb_nd, depths_nd, ellipse,
         /*I=*/1, intrins, W, H, nullptr, /*tile_active=*/nullptr);
 
     // --- moment (+ rgb) rasterization ---

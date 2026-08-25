@@ -15,6 +15,7 @@
 
 #define CudaDeviceExport ForceInline
 #include "int64_compat.slang"
+#include "screen.slang"
 #include "shaders/primitive_3dgs.slang"
 #include "shaders/harmonics.slang"
 #undef CudaDeviceExport
@@ -75,12 +76,7 @@ struct ProjectionFwdParams {
     float4* out_aabb;     // [C,N]
     float* out_depths;    // [C,N]
     uint32_t* out_radii;  // [N] float bits; atomic max (radius >= 0)
-    // ScreenBuffer (TensorArray<5>) flattened; null members are skipped.
-    float* s_xy;
-    float* s_depth;
-    float* s_conic;
-    float* s_opac;
-    float* s_rgb;
+    float* s_screen;      // packed ScreenBuffer rows [.., SCR2_STRIDE]
     // SH value-quant (kShValueBits 8/16); null / 0 in the fp32 path.
     uint* sh_packed;
     float2* sh_bounds;
@@ -150,22 +146,9 @@ void run_projection<let cam: CameraModelType, D : ICameraDistortion>(
     aabb.z = clamp(aabb.z, 0.0f, float(p.width) - 1.0f);
     aabb.w = clamp(aabb.w, 0.0f, float(p.height) - 1.0f);
     if (aabb.z - aabb.x > 1e-3f && aabb.w - aabb.y > 1e-3f) {
-        if (!is_null(p.s_xy)) {
-            p.s_xy[2 * idx] = s_xy.x;
-            p.s_xy[2 * idx + 1] = s_xy.y;
-        }
-        if (!is_null(p.s_depth)) p.s_depth[idx] = s_depth;
-        if (!is_null(p.s_conic)) {
-            p.s_conic[3 * idx] = s_conic.x;
-            p.s_conic[3 * idx + 1] = s_conic.y;
-            p.s_conic[3 * idx + 2] = s_conic.z;
-        }
-        if (!is_null(p.s_opac)) p.s_opac[idx] = s_opac;
-        if (!is_null(p.s_rgb)) {
-            p.s_rgb[3 * idx] = rgb.x;
-            p.s_rgb[3 * idx + 1] = rgb.y;
-            p.s_rgb[3 * idx + 2] = rgb.z;
-        }
+        if (!is_null(p.s_screen))
+            scr2_store(scr2_row(p.s_screen, idx), s_xy, s_depth, s_conic,
+                       s_opac, rgb);
         p.out_aabb[idx] = aabb;
         p.out_depths[idx] = sorting_depth;
         // float atomicMax on non-negative floats == uint max on bits.
@@ -191,9 +174,8 @@ void projection_fwd_3dgs(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 
 // ---------------------------------------------------------------------------
 // 3DGUT (eval3d): projection_3dgs<cam, D, false, true>, antialiased always
-// false; the ScreenBuffer is TensorArray<3> {scale, opacity, rgb} where the
-// "conic" output lands in the scale slot (the eval3d rasterizer culls with
-// the projected 2D conic). Mirrors Primitive3DGUT.cuh project().
+// false; the projected 2D conic lands in the screen row's "scale" slot, which
+// is what the eval3d rasterizer culls with. Mirrors Primitive3DGUT::project().
 // ---------------------------------------------------------------------------
 
 struct Projection3dgutParams {
@@ -209,9 +191,7 @@ struct Projection3dgutParams {
     float4* out_aabb;
     float* out_depths;
     uint32_t* out_radii;
-    float* s_scale;  // [C*N,3]
-    float* s_opac;   // [C*N,1]
-    float* s_rgb;    // [C*N,3]
+    float* s_screen;  // [C*N, SCRG_STRIDE]
     uint* sh_packed;
     float2* sh_bounds;
     i64mem_t sh_bounds_stride;
@@ -276,17 +256,8 @@ void run_projection_3dgut<let cam: CameraModelType, D : ICameraDistortion>(
     aabb.z = clamp(aabb.z, 0.0f, float(p.width) - 1.0f);
     aabb.w = clamp(aabb.w, 0.0f, float(p.height) - 1.0f);
     if (aabb.z - aabb.x > 1e-3f && aabb.w - aabb.y > 1e-3f) {
-        if (!is_null(p.s_scale)) {
-            p.s_scale[3 * idx] = s_scale.x;
-            p.s_scale[3 * idx + 1] = s_scale.y;
-            p.s_scale[3 * idx + 2] = s_scale.z;
-        }
-        if (!is_null(p.s_opac)) p.s_opac[idx] = s_opac;
-        if (!is_null(p.s_rgb)) {
-            p.s_rgb[3 * idx] = rgb.x;
-            p.s_rgb[3 * idx + 1] = rgb.y;
-            p.s_rgb[3 * idx + 2] = rgb.z;
-        }
+        if (!is_null(p.s_screen))
+            scrg_store(scrg_row(p.s_screen, idx), s_scale, s_opac, rgb);
         p.out_aabb[idx] = aabb;
         p.out_depths[idx] = sorting_depth;
         InterlockedMax(p.out_radii[gid], asuint(radius));
@@ -418,11 +389,7 @@ struct PackedFwdParams {
     float4* out_aabb;       // [nnz]
     float* out_depths;      // [nnz]
     uint32_t* out_radii;    // [N] float bits, atomic max
-    float* s0;              // screen tensors: 3DGS xy/depth/conic/opac/rgb,
-    float* s1;              // 3DGUT scale/opac/rgb (s3, s4 null)
-    float* s2;
-    float* s3;
-    float* s4;
+    float* s_screen;        // packed rows: SCR2_* for 2D, SCRG_* for 3DGUT
     uint* sh_packed;
     float2* sh_bounds;
     i64mem_t sh_bounds_stride;
@@ -493,35 +460,12 @@ void run_packed_fwd<let cam: CameraModelType, D : ICameraDistortion,
     aabb.w = clamp(aabb.w, 0.0f, float(p.height) - 1.0f);
     p.out_aabb[out_idx] = aabb;
     p.out_depths[out_idx] = sorting_depth;
-    if (eval3d) {  // Screen = {scale, opacity, rgb}
-        if (!is_null(p.s0)) {
-            p.s0[3 * out_idx] = conic.x;
-            p.s0[3 * out_idx + 1] = conic.y;
-            p.s0[3 * out_idx + 2] = conic.z;
-        }
-        if (!is_null(p.s1)) p.s1[out_idx] = opac;
-        if (!is_null(p.s2)) {
-            p.s2[3 * out_idx] = rgb.x;
-            p.s2[3 * out_idx + 1] = rgb.y;
-            p.s2[3 * out_idx + 2] = rgb.z;
-        }
-    } else {  // Screen = {xy, depth, conic, opac, rgb}
-        if (!is_null(p.s0)) {
-            p.s0[2 * out_idx] = xy.x;
-            p.s0[2 * out_idx + 1] = xy.y;
-        }
-        if (!is_null(p.s1)) p.s1[out_idx] = depth;
-        if (!is_null(p.s2)) {
-            p.s2[3 * out_idx] = conic.x;
-            p.s2[3 * out_idx + 1] = conic.y;
-            p.s2[3 * out_idx + 2] = conic.z;
-        }
-        if (!is_null(p.s3)) p.s3[out_idx] = opac;
-        if (!is_null(p.s4)) {
-            p.s4[3 * out_idx] = rgb.x;
-            p.s4[3 * out_idx + 1] = rgb.y;
-            p.s4[3 * out_idx + 2] = rgb.z;
-        }
+    if (!is_null(p.s_screen)) {
+        if (eval3d)  // Screen = {scale, opacity, rgb}
+            scrg_store(scrg_row(p.s_screen, out_idx), conic, opac, rgb);
+        else         // Screen = {xy, conic, opac, depth, rgb}
+            scr2_store(scr2_row(p.s_screen, out_idx), xy, depth, conic, opac,
+                       rgb);
     }
     InterlockedMax(p.out_radii[gid], asuint(radius));
 }

@@ -21,6 +21,7 @@
 #include <fstream>
 #include <random>
 #include <vector>
+#include "backend/tests/ScreenRows.h"
 
 using backend::MemcpyKind;
 
@@ -149,12 +150,12 @@ int main(int argc, char** argv) {
                     readback(acc, (const float*)aabb.data_ptr(), C * N * 4);
                     readback(acc, depths.data_ptr(), C * N);
                     readback(acc, d_radii, N);
-                    const int chans_2d[5] = {2, 1, 3, 1, 3};  // xy/d/conic/o/rgb
-                    const int chans_ut[3] = {3, 1, 3};        // scale/o/rgb
-                    const int* chans = prim == 2 ? chans_ut : chans_2d;
-                    for (size_t s = 0; s < screen.size(); s++)
-                        readback(acc, screen[s].data_ptr(),
-                                 C * N * chans[s]);
+                    if (prim == 2)
+                        readback_screen(acc, screen[0], SCRG_STRIDE,
+                                        SCREEN_ROWS_GUT_COMPS);
+                    else
+                        readback_screen(acc, screen[0], SCR2_STRIDE,
+                                        SCREEN_ROWS_2D_COMPS);
                 }
 
     // --- SH value-quant (q8/q16) fused configs ---
@@ -226,11 +227,12 @@ int main(int argc, char** argv) {
                 readback(acc, (const float*)aabb.data_ptr(), C * N * 4);
                 readback(acc, depths.data_ptr(), C * N);
                 readback(acc, d_radii, N);
-                const int chans_2d[5] = {2, 1, 3, 1, 3};
-                const int chans_ut[3] = {3, 1, 3};
-                const int* chans = prim == 2 ? chans_ut : chans_2d;
-                for (size_t s = 0; s < screen.size(); s++)
-                    readback(acc, screen[s].data_ptr(), C * N * chans[s]);
+                if (prim == 2)
+                    readback_screen(acc, screen[0], SCRG_STRIDE,
+                                    SCREEN_ROWS_GUT_COMPS);
+                else
+                    readback_screen(acc, screen[0], SCR2_STRIDE,
+                                    SCREEN_ROWS_2D_COMPS);
             }
 
     // --- packed projection: nnz-compacted outputs (ids exact via float) ---
@@ -268,11 +270,12 @@ int main(int argc, char** argv) {
             readback(acc, (const float*)aabb.data_ptr(), nnz * 4);
             readback(acc, depths.data_ptr(), nnz);
             readback(acc, d_radii, N);
-            const int chans_2d[5] = {2, 1, 3, 1, 3};
-            const int chans_ut[3] = {3, 1, 3};
-            const int* chans = prim == 2 ? chans_ut : chans_2d;
-            for (size_t s = 0; s < screen.size(); s++)
-                readback(acc, screen[s].data_ptr(), nnz * chans[s]);
+            if (prim == 2)
+                readback_screen(acc, screen[0], SCRG_STRIDE,
+                                SCREEN_ROWS_GUT_COMPS);
+            else
+                readback_screen(acc, screen[0], SCR2_STRIDE,
+                                SCREEN_ROWS_2D_COMPS);
         }
 
     // --- packed + quant: one q8 cell-block and one q16 FPBO config ---
@@ -312,11 +315,12 @@ int main(int argc, char** argv) {
         readback(acc, (const float*)aabb.data_ptr(), nnz * 4);
         readback(acc, depths.data_ptr(), nnz);
         readback(acc, d_radii, N);
-        const int chans_2d[5] = {2, 1, 3, 1, 3};
-        const int chans_ut[3] = {3, 1, 3};
-        const int* chans = prim == 2 ? chans_ut : chans_2d;
-        for (size_t s = 0; s < screen.size(); s++)
-            readback(acc, screen[s].data_ptr(), nnz * chans[s]);
+        if (prim == 2)
+            readback_screen(acc, screen[0], SCRG_STRIDE,
+                            SCREEN_ROWS_GUT_COMPS);
+        else
+            readback_screen(acc, screen[0], SCR2_STRIDE,
+                            SCREEN_ROWS_2D_COMPS);
     }
 
     if (dumping) {

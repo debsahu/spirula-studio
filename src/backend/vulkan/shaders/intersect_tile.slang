@@ -3,7 +3,7 @@
 // (tile_id << 32) | ordered-float depth, sorted by the host over
 // backend::sort_pairs<int64,int32>), and the per-tile offset kernel.
 //
-// The ellipse-vs-AABB mode split is a runtime null-check on proj_conic
+// The ellipse-vs-AABB mode split is a runtime null-check on proj_screen
 // (the CUDA template bool exists only to fold that check; the branch is
 // uniform across the grid so the cost is nil). All params fit in the
 // 128-byte push floor and are pushed directly.
@@ -101,11 +101,9 @@ void tile_range(float4 aabb, uint tile_width, uint tile_height,
 // Counting pass: tiles_per_splat[idx] = number of tiles this splat touches.
 // ---------------------------------------------------------------------------
 
-struct IsectCountParams {  // 56 bytes: pushed directly
+struct IsectCountParams {  // pushed directly
     float4* aabb;              // [total] xyxy in pixels
-    float* proj_xy;            // [total,2] or null (null -> AABB center)
-    float* proj_conic;         // [total,3]; null -> AABB mode
-    float* proj_opac;          // [total,1]
+    float* proj_screen;        // packed screen rows; null -> AABB mode
     i64mem_t* tiles_per_splat;  // [total]
     int* image_ids;            // [total] (packed) or null (iid = idx / N)
     int* tile_active;          // [I, tile_h, tile_w] 0/1; read when kSkipTiles
@@ -114,15 +112,17 @@ struct IsectCountParams {  // 56 bytes: pushed directly
     uint32_t tile_height;
     uint32_t total;            // I * N (or nnz in packed mode)
     uint32_t wgs_per_row;
+    // Row layout of proj_screen; xy_off < 0 -> center from the AABB.
+    int32_t row_stride, xy_off, conic_off, opac_off;
 };
 
 // Mode flags as specialization constants. Spec-folded so no load ever sits
 // behind a runtime branch over a possibly-null device pointer (llvmpipe's
 // JIT can speculate such loads; see backend README).
 [SpecializationConstant]
-const int kEllipse = 0;  // proj_conic/proj_opac present (ellipse counting)
+const int kEllipse = 0;  // proj_screen present (ellipse counting)
 [SpecializationConstant]
-const int kHasXy = 0;    // proj_xy present (else AABB center)
+const int kHasXy = 0;    // row carries a center (else AABB center)
 [SpecializationConstant]
 const int kPacked = 0;   // image_ids present (packed projection)
 [SpecializationConstant]
@@ -149,12 +149,13 @@ void intersect_tile_count(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     gindex_t tile_base = iid * gindex_t(p.tile_width) * gindex_t(p.tile_height);
 
     if (kEllipse != 0) {
+        float* row = p.proj_screen + p.row_stride * int(idx);
         float2 xy = kHasXy != 0
-            ? float2(p.proj_xy[2 * idx], p.proj_xy[2 * idx + 1])
+            ? float2(row[p.xy_off], row[p.xy_off + 1])
             : float2(0.5f * (aabb.x + aabb.z), 0.5f * (aabb.y + aabb.w));
-        float3 conic = float3(p.proj_conic[3 * idx], p.proj_conic[3 * idx + 1],
-                              p.proj_conic[3 * idx + 2]);
-        conic = conic * (0.5f / log(p.proj_opac[idx] / ALPHA_THRESHOLD));
+        float3 conic = float3(row[p.conic_off], row[p.conic_off + 1],
+                              row[p.conic_off + 2]);
+        conic = conic * (0.5f / log(row[p.opac_off] / ALPHA_THRESHOLD));
         p.tiles_per_splat[idx] = i64mem_make(count_ellipse_grid_overlaps(
             xy, conic,
             int(tile_min.x), int(tile_max.x), int(tile_min.y),
@@ -186,6 +187,7 @@ struct TileActiveParams {  // 40 bytes: pushed directly
     uint32_t tile_width, tile_height;
     uint32_t total;
     uint32_t wgs_per_row;
+    int32_t row_stride, xy_off, conic_off, opac_off;
 };
 
 [shader("compute")]
@@ -223,13 +225,11 @@ void tile_active_map(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 // pairs into the [cum_tiles[idx-1], cum_tiles[idx]) range.
 // ---------------------------------------------------------------------------
 
-struct IsectWriteParams {  // 92 bytes: pushed directly
+struct IsectWriteParams {  // pushed directly
     int* image_ids;      // [total] (packed mode) or null (iid = idx / N)
     float4* aabb;
     float* depths;       // [total] sorting depths
-    float* proj_xy;
-    float* proj_conic;   // null -> AABB mode
-    float* proj_opac;
+    float* proj_screen;  // packed screen rows; null -> AABB mode
     i64mem_t* cum_tiles;  // [total] inclusive scan of tiles_per_splat
     u64key_t* isect_ids;  // [n_isects]
     int* flatten_ids;    // [n_isects]
@@ -239,6 +239,7 @@ struct IsectWriteParams {  // 92 bytes: pushed directly
     uint32_t tile_height;
     uint32_t total;
     uint32_t wgs_per_row;
+    int32_t row_stride, xy_off, conic_off, opac_off;
 };
 
 [shader("compute")]
@@ -280,12 +281,13 @@ void intersect_tile_write(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
         depth_u32 ^= (1u << 31);
 
     if (kEllipse != 0) {
+        float* row = p.proj_screen + p.row_stride * int(idx);
         float2 xy = kHasXy != 0
-            ? float2(p.proj_xy[2 * idx], p.proj_xy[2 * idx + 1])
+            ? float2(row[p.xy_off], row[p.xy_off + 1])
             : float2(0.5f * (aabb.x + aabb.z), 0.5f * (aabb.y + aabb.w));
-        float3 conic = float3(p.proj_conic[3 * idx], p.proj_conic[3 * idx + 1],
-                              p.proj_conic[3 * idx + 2]);
-        conic = conic * (0.5f / log(p.proj_opac[idx] / ALPHA_THRESHOLD));
+        float3 conic = float3(row[p.conic_off], row[p.conic_off + 1],
+                              row[p.conic_off + 2]);
+        conic = conic * (0.5f / log(row[p.opac_off] / ALPHA_THRESHOLD));
 
         if (int(tile_max.y - tile_min.y) * TILE_SIZE_IX <=
             int(tile_max.x - tile_min.x) * TILE_SIZE_IY) {

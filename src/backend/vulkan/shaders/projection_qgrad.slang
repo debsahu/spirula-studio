@@ -22,6 +22,7 @@
 
 #define CudaDeviceExport ForceInline
 #include "int64_compat.slang"
+#include "screen.slang"
 #include "shaders/primitive_3dgs.slang"
 #include "shaders/harmonics.slang"
 #undef CudaDeviceExport
@@ -55,13 +56,8 @@ struct ProjectionQgradParams {
     int* camera_ids;        // [nnz] ORIGINAL order
     int* perm;              // [nnz] sorted_pos -> original_pos
     float4* aabb;           // [C,N] or [nnz] (original order)
-    // screen-space gradients: 3DGS xy/depth/conic/opac/rgb; 3DGUT
-    // scale/opac/rgb in vs0..vs2 (vs3/vs4 fallback)
-    float* vs0;
-    float* vs1;
-    float* vs2;
-    float* vs3;
-    float* vs4;
+    // packed screen-space gradient rows (SCR2_* for 2D, SCRG_* for 3DGUT)
+    float* vs_screen;
     // fp32 world grads (kWorldGradAdd: mean/quat/scale plain add)
     float* vw_means;
     float* vw_quats;
@@ -155,23 +151,21 @@ void _qg_camera_loop<let cam : CameraModelType, D : ICameraDistortion>(
         PbCamera<D> c = pb_load_camera<D>(p.viewmats, p.intrins,
                                           p.dist_coeffs, uint(cid));
         if (kEval3d != 0) {
-            float3 v_ss = float3(p.vs0[3 * idx], p.vs0[3 * idx + 1],
-                                 p.vs0[3 * idx + 2]);
-            float v_so = p.vs1[idx];
-            float3 v_rgb = float3(p.vs2[3 * idx], p.vs2[3 * idx + 1],
-                                  p.vs2[3 * idx + 2]);
+            float* v_row = scrg_row(p.vs_screen, idx);
+            float3 v_ss = scrg_scale(v_row);
+            float v_so = scrg_opac(v_row);
+            float3 v_rgb = scrg_rgb(v_row);
             pb_vjp_3dgut<cam, D>(s, c, p.width, p.height, v_ss, v_so, g);
             pb_sh_vjp<D>(s, c, p.features_sh + gid * p.sh_stride_src,
                          p.sh_value_packed, p.sh_value_bounds, qbase,
                          i64mem_get(p.sh_value_bounds_stride), v_rgb, g);
         } else {
-            float2 v_xy = float2(p.vs0[2 * idx], p.vs0[2 * idx + 1]);
-            float v_depth = p.vs1[idx];
-            float3 v_conic = float3(p.vs2[3 * idx], p.vs2[3 * idx + 1],
-                                    p.vs2[3 * idx + 2]);
-            float v_opac = p.vs3[idx];
-            float3 v_rgb = float3(p.vs4[3 * idx], p.vs4[3 * idx + 1],
-                                  p.vs4[3 * idx + 2]);
+            float* v_row = scr2_row(p.vs_screen, idx);
+            float2 v_xy = scr2_xy(v_row);
+            float v_depth = scr2_depth(v_row);
+            float3 v_conic = scr2_conic(v_row);
+            float v_opac = scr2_opac(v_row);
+            float3 v_rgb = scr2_rgb(v_row);
             pb_vjp_2d<cam, D>(s, c, p.width, p.height, v_xy, v_depth, v_conic,
                               v_opac, g);
             pb_sh_vjp<D>(s, c, p.features_sh + gid * p.sh_stride_src,

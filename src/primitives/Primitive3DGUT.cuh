@@ -294,8 +294,10 @@ struct Vanilla3DGUT : public _BasePrimitive3DGUT<sh_degree> {
             if (&wbuffer.quats(0)) atomicAddFVec(&wbuffer.quats(wi), v_quat);
             // if (&sbuffer.scales(0)) atomicAddFVec(&sbuffer.scales(si), v_scale);
             if (&wbuffer.scales(0)) atomicAddFVec(&wbuffer.scales(wi), v_scale);
-            if (&sbuffer.opacities(0)) atomicAddFVec(&sbuffer.opacities(si), opacity);
-            if (&sbuffer.colors(0)) atomicAddFVec(&sbuffer.colors(si), rgb);
+            if (sbuffer.allocated()) {
+                atomicAddFVec(&sbuffer.opacities(si), opacity);
+                atomicAddFVec(&sbuffer.colors(si), rgb);
+            }
         }
 
         __device__ __forceinline__ float evaluate_alpha(

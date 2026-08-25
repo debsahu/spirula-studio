@@ -14,26 +14,26 @@ namespace {
 
 // Mirrors RasterFwd2dParams in shaders/rasterize_fwd.slang.
 struct RasterFwd2dParams {
-    uint64_t s_xy, s_depth, s_conic, s_opac, s_rgb;
+    uint64_t s_screen;
     uint64_t tile_offsets, flatten_ids;
     uint64_t out_rgb, out_depth, out_T, out_last_ids;
     uint64_t dist_rgb, dist_depth, out_median;
     uint32_t I, n_isects, width, height, tile_width, tile_height;
 };
-static_assert(sizeof(RasterFwd2dParams) == 14 * 8 + 6 * 4,
+static_assert(sizeof(RasterFwd2dParams) == 10 * 8 + 6 * 4,
               "params layout must match the slang struct");
 
 // Mirrors RasterFwd3dgutParams in shaders/rasterize_fwd.slang.
 struct RasterFwd3dgutParams {
     uint64_t means, quats, scales, gaussian_ids;
-    uint64_t s_scale, s_opac, s_rgb;
+    uint64_t s_screen;
     uint64_t viewmats, intrins, dist_coeffs, aabb;
     uint64_t tile_offsets, flatten_ids;
     uint64_t out_rgb, out_depth, out_T, out_last_ids;
     uint64_t dist_rgb, dist_depth, out_median;
     uint32_t I, N, n_isects, width, height, tile_width, tile_height;
 };
-static_assert(sizeof(RasterFwd3dgutParams) == 20 * 8 + 7 * 4 + 4 /*pad*/,
+static_assert(sizeof(RasterFwd3dgutParams) == 18 * 8 + 7 * 4 + 4 /*pad*/,
               "params layout must match the slang struct");
 
 struct RasterOutputs {
@@ -106,11 +106,7 @@ launch_raster_2d_fwd(
     Vanilla3DGS<0>::ScreenBuffer sb(splats_s);
 
     RasterFwd2dParams p{};
-    p.s_xy = (uint64_t)sb.raw_data(0);
-    p.s_depth = (uint64_t)sb.raw_data(1);
-    p.s_conic = (uint64_t)sb.raw_data(2);
-    p.s_opac = (uint64_t)sb.raw_data(3);
-    p.s_rgb = (uint64_t)sb.raw_data(4);
+    p.s_screen = (uint64_t)sb.raw_data();
     p.tile_offsets = (uint64_t)tile_offsets.data_ptr();
     p.flatten_ids = (uint64_t)flatten_ids.data_ptr();
     p.out_rgb = (uint64_t)std::get<0>(o.renders).data_ptr();
@@ -233,9 +229,7 @@ std::tuple<
     p.quats = (uint64_t)wb.raw_data(1);
     p.scales = (uint64_t)wb.raw_data(2);
     p.gaussian_ids = (uint64_t)gaussian_ids.data_ptr();
-    p.s_scale = (uint64_t)sb.raw_data(0);
-    p.s_opac = (uint64_t)sb.raw_data(1);
-    p.s_rgb = (uint64_t)sb.raw_data(2);
+    p.s_screen = (uint64_t)sb.raw_data();
     p.viewmats = std::get<0>(viewmats);
     p.intrins = std::get<0>(intrins);
     p.dist_coeffs = vkk::or_fallback(std::get<0>(dist_coeffs));

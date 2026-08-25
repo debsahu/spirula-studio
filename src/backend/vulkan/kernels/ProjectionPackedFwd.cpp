@@ -29,7 +29,7 @@ struct PackedFwdParams {
     uint64_t mask_scan;
     uint64_t out_camera_ids, out_gaussian_ids, out_aabb, out_depths,
         out_radii;
-    uint64_t s0, s1, s2, s3, s4;
+    uint64_t s_screen;
     uint64_t sh_packed, sh_bounds;
     int64_t sh_bounds_stride;
     uint32_t sh_stride;
@@ -37,7 +37,7 @@ struct PackedFwdParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(PackedFwdParams) == 23 * 8 + 8 * 4,
+static_assert(sizeof(PackedFwdParams) == 19 * 8 + 8 * 4,
               "params layout must match the slang struct");
 
 using vkk::resolve_sh_quant;
@@ -151,16 +151,10 @@ launch_projection_packed_vk(
         p.out_radii = (uint64_t)radii.data_ptr();
         if (eval3d) {
             Vanilla3DGUT<0>::ScreenBuffer sb(splats_screen);
-            p.s0 = (uint64_t)sb.raw_data(0);
-            p.s1 = (uint64_t)sb.raw_data(1);
-            p.s2 = (uint64_t)sb.raw_data(2);
+            p.s_screen = (uint64_t)sb.raw_data();
         } else {
             Vanilla3DGS<0>::ScreenBuffer sb(splats_screen);
-            p.s0 = (uint64_t)sb.raw_data(0);
-            p.s1 = (uint64_t)sb.raw_data(1);
-            p.s2 = (uint64_t)sb.raw_data(2);
-            p.s3 = (uint64_t)sb.raw_data(3);
-            p.s4 = (uint64_t)sb.raw_data(4);
+            p.s_screen = (uint64_t)sb.raw_data();
         }
         p.sh_packed = q_packed;
         p.sh_bounds = q_bounds;

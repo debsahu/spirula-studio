@@ -109,9 +109,7 @@ __global__ void intersect_tile_kernel(
     const float4* __restrict__ intrins,
     const float4 *__restrict__ aabb_buffer,  // [..., N, 4], int32, xyxy in pixels
     const float *__restrict__ depths_buffer,  // [..., N]
-    const float2 *__restrict__ proj_xy,  // [..., N, 2], float, optional
-    const float3 *__restrict__ proj_conic,  // [..., N, 3], float, optional
-    const float *__restrict__ proj_opac,  // [..., N, 1], float, optional
+    const ProjEllipseView ellipse,  // packed screen rows; used iff is_ellipse
     const int64_t *__restrict__ cum_tiles_per_splat, // [..., N], optional for counting pass
     const uint32_t tile_width,
     const uint32_t tile_height,
@@ -150,10 +148,17 @@ __global__ void intersect_tile_kernel(
         return;
     }
 
-    [[maybe_unused]] float2 xy = is_ellipse ? (proj_xy ? proj_xy[idx] : float2{0.5f*(xmin+xmax), 0.5f*(ymin+ymax)}) : float2{};
-    [[maybe_unused]] float3 conic = is_ellipse ? proj_conic[idx] : float3{};
-    if constexpr (is_ellipse)
-        conic = conic * (0.5f / __logf(proj_opac[idx] / ALPHA_THRESHOLD));
+    [[maybe_unused]] float2 xy{};
+    [[maybe_unused]] float3 conic{};
+    if constexpr (is_ellipse) {
+        const float* row = ellipse.data + (int64_t)ellipse.stride * idx;
+        xy = ellipse.xy >= 0
+                 ? float2{row[ellipse.xy], row[ellipse.xy + 1]}
+                 : float2{0.5f * (xmin + xmax), 0.5f * (ymin + ymax)};
+        conic = float3{row[ellipse.conic], row[ellipse.conic + 1],
+                       row[ellipse.conic + 2]};
+        conic = conic * (0.5f / __logf(row[ellipse.opac] / ALPHA_THRESHOLD));
+    }
 
     uint2 tile_min, tile_max;
     tile_min.x = (uint32_t)min(max(0, (int)floorf((xmin + 0.5f) / TILE_SIZE_IX)), (int)tile_width);
@@ -376,9 +381,7 @@ std::tuple<
 > do_intersect_tile_generic(
     DeviceTensorFloatND aabb,     // [*N, 4] float32
     DeviceTensorFloatND depths,   // [*N] float32
-    DeviceTensorFloatND* proj_xy,    // null for AABB mode
-    DeviceTensorFloatND* proj_conic, // non-null enables ellipse mode
-    DeviceTensorFloatND* proj_opac,  // null for AABB mode
+    ProjEllipseView ellipse,      // .data null for AABB mode
     const uint32_t I,
     TorchTensorView intrins,      // [I, 4]
     const uint32_t image_width,
@@ -399,7 +402,7 @@ std::tuple<
     /* Count tiles intersected per splat */
     DeviceVector<int64_t> tiles_per_splat;
     tiles_per_splat.resize(PoolSlot::IsectTilesPerSplat, total_count);
-    (proj_conic != nullptr ?
+    (ellipse.data != nullptr ?
         intersect_tile_kernel<true, true> :
         intersect_tile_kernel<true, false>
     )<<<_LAUNCH_ARGS_1D(I*N, 256)>>>(
@@ -410,9 +413,7 @@ std::tuple<
         nullptr,  // intrins
         reinterpret_cast<const float4*>(aabb.data_ptr()),
         depths.data_ptr(),
-        proj_xy     != nullptr ? (float2*)proj_xy->data_ptr()    : nullptr,
-        proj_conic  != nullptr ? (float3*)proj_conic->data_ptr() : nullptr,
-        proj_opac   != nullptr ? proj_opac->data_ptr()           : nullptr,
+        ellipse,
         nullptr,  // cum_tiles_per_splat
         tile_width, tile_height,
         tile_active,
@@ -458,7 +459,7 @@ std::tuple<
     flatten_ids_a.resize(PoolSlot::IsectFlatA, n_isects);
     flatten_ids_b.resize(PoolSlot::IsectFlatB, n_isects);
 
-    (proj_conic != nullptr ?
+    (ellipse.data != nullptr ?
         intersect_tile_kernel<false, true> :
         intersect_tile_kernel<false, false>
     )<<<_LAUNCH_ARGS_1D(I*N, 256)>>>(
@@ -467,9 +468,7 @@ std::tuple<
         (const float4*)std::get<0>(intrins),
         reinterpret_cast<const float4*>(aabb.data_ptr()),
         depths.data_ptr(),
-        proj_xy     != nullptr ? (float2*)proj_xy->data_ptr()    : nullptr,
-        proj_conic  != nullptr ? (float3*)proj_conic->data_ptr() : nullptr,
-        proj_opac   != nullptr ? proj_opac->data_ptr()           : nullptr,
+        ellipse,
         cum_tiles_per_splat.data_ptr(),
         tile_width, tile_height,
         tile_active,
