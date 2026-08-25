@@ -461,10 +461,16 @@ direction and the per-image twist stay CLI-only.
 The trainer reads the sidecar back: `ColmapParser` picks up
 `rolling_shutter.bin`, `NerfstudioParser` the per-frame `rolling_shutter_twist`
 keys, and the twist rides through the DataManager into every projection kernel.
-3DGUT, `split_batch` and the fisheye/equirect warp path refuse rather than render
-a half-corrected image (`docs/notes/rolling-shutter.md`).
+3DGUT and `split_batch` handle it; the fisheye/equirect warp path still refuses,
+because a split face's shutter time is not linear in its own pixel coordinates
+(`docs/notes/rolling-shutter.md` has the measured error).
 
-A fit that does not beat global shutter by 1% of the robust cost is discarded.
+A fit that does not beat global shutter by 5% of the robust cost is discarded.
+
+A capture with a **strong** shutter needs `--max-error` loosened as well: the
+mapper's reprojection filter drops every observation the shutter moved, leaving
+only the rows where it does nothing, and the finishing pass then has nothing to
+see. `docs/notes/rolling-shutter.md` has the measured row histogram.
 Every real capture tested so far is rejected by that guard:
 
 | capture | shutter found | best gain |

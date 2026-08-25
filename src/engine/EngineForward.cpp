@@ -29,14 +29,6 @@ void forward_3dgs(
     int dist_type_int        // distortion channel set (DistortionType); emits D = W*S - C^2
 ) {
     const DistortionType dist_type = (DistortionType)dist_type_int;
-    // 3DGUT's alpha comes from a world-space ray the eval3d rasterizer builds
-    // per pixel, and that ray is still global-shutter: binning a Gaussian at
-    // its shutter pose while evaluating it at another renders neither.
-    if (primitive == "3dgut" && engine().camera.twists.data_ptr() != nullptr)
-        throw std::runtime_error(
-            "rolling shutter is not supported with the 3dgut primitive yet "
-            "(the eval3d rasterizer's per-pixel ray has no shutter); train "
-            "with 3dgs or mip, or drop rolling_shutter.bin");
     engine().primitive = primitive;
     engine().sh_degree = sh_degree;
     engine().packed = packed;
@@ -287,6 +279,7 @@ void forward_3dgs(
             _dt2d_tv(engine().camera.viewmats), _dv_tv(engine().camera.intrins),
             engine().camera.model_str,
         engine().camera.distortion_str, _dt2d_tv(engine().camera.dist_coeffs),
+            _rs_tv(engine().camera.twists),
             engine().fwd.aabb,
             (uint32_t)engine().camera.width, (uint32_t)engine().camera.height,
             tile_offsets, flatten_ids, dist_type, output_median);

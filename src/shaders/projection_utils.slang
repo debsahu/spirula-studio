@@ -359,7 +359,8 @@ bool persp_proj<D : ICameraDistortion, let assume_valid : bool>(
 
 // Rodrigues, for the small rotations one shutter interval covers.
 [ForceInline]
-float3x3 rotate_axis_angle(float3 aa) {
+[Differentiable]
+float3x3 rotate_axis_angle(no_diff float3 aa) {
     float th2 = dot(aa, aa);
     if (th2 < 1e-24f) return float3x3(1,0,0, 0,1,0, 0,0,1);
     float th = sqrt(th2);
@@ -864,6 +865,18 @@ _DEF_DIST_ENTRIES(_rational, DistRational, 8)
 
 #undef _DEF_DIST_ENTRIES
 
+
+// The camera at shutter time s, for a rasterizer generating a ray for a pixel
+// whose row is known: no implicit solve, unlike the projection's.
+[CudaDeviceExport]
+void shutter_ray_pose(float3x3 R, float3 t, float3 rs_omega, float3 rs_v,
+                      float2 rs_axis, float2 pixel,
+                      out float3x3 out_R, out float3 out_t) {
+    float s = rs_axis.x * pixel.x + rs_axis.y * pixel.y - 0.5f;
+    float3x3 Rw = rotate_axis_angle(s * rs_omega);
+    out_R = mul(Rw, R);
+    out_t = mul(Rw, t) + s * rs_v;
+}
 
 [CudaDeviceExport]
 [Differentiable]

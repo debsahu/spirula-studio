@@ -1134,7 +1134,7 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
         KERNEL_BLOCK_SIZE, KERNEL_QUANT_BITS, LEVEL_VALUE_BITS
     ><<<_CEIL_DIV(N, BLOCK_SIZE_LAUNCH), BLOCK_SIZE_LAUNCH, 0, stream>>>(
         C, N, num_sh_buffer,
-        splats_world, viewmats, intrins, dist_coeffs_buffer, image_width, image_height,
+        splats_world, viewmats, intrins, dist_coeffs_buffer, twists, image_width, image_height,
         camera_id_bounds, camera_ids, perm, aabb,
         v_splats_world, v_splats_screen,
         g1_splats_world, g2_splats_world, sh_packed, sh_quant_bounds,

@@ -354,6 +354,7 @@ struct HeteroSubBatch {
     TorchTensorView viewmats{0, 0, {}};
     TorchTensorView intrins{0, 0, {}};
     TorchTensorView dist_coeffs{0, 0, {}};
+    TorchTensorView twists{0, 0, {}};     // [num, 8] rolling shutter, or null
     TorchTensorView gt_rgb{0, 0, {}};
     TorchTensorView gt_depth{0, 0, {}};
     TorchTensorView gt_normal{0, 0, {}};

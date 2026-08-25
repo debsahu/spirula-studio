@@ -470,7 +470,7 @@ void fused_projection_bwd_optimizer_3dgs(
 ) {
     _fused_projection_bwd_optimizer_dispatch<Vanilla3DGS>(
         num_splats, max_sh_degree, splats_world, viewmats, intrins, image_width, image_height,
-        camera_model, distortion, dist_coeffs, camera_ids, gaussian_ids, aabb,
+        camera_model, distortion, dist_coeffs, twists, camera_ids, gaussian_ids, aabb,
         v_splats_world, v_splats_screen,
         g1_splats_world, g2_splats_world, sh_packed, sh_quant_bounds,
         sh_value_packed, sh_value_bounds,
@@ -533,7 +533,7 @@ void fused_projection_bwd_optimizer_mip(
 ) {
     _fused_projection_bwd_optimizer_dispatch<MipSplatting>(
         num_splats, max_sh_degree, splats_world, viewmats, intrins, image_width, image_height,
-        camera_model, distortion, dist_coeffs, camera_ids, gaussian_ids, aabb,
+        camera_model, distortion, dist_coeffs, twists, camera_ids, gaussian_ids, aabb,
         v_splats_world, v_splats_screen,
         g1_splats_world, g2_splats_world, sh_packed, sh_quant_bounds,
         sh_value_packed, sh_value_bounds,
@@ -596,7 +596,7 @@ void fused_projection_bwd_optimizer_3dgut(
 ) {
     _fused_projection_bwd_optimizer_dispatch<Vanilla3DGUT>(
         num_splats, max_sh_degree, splats_world, viewmats, intrins, image_width, image_height,
-        camera_model, distortion, dist_coeffs, camera_ids, gaussian_ids, aabb,
+        camera_model, distortion, dist_coeffs, twists, camera_ids, gaussian_ids, aabb,
         v_splats_world, v_splats_screen,
         g1_splats_world, g2_splats_world, sh_packed, sh_quant_bounds,
         sh_value_packed, sh_value_bounds,

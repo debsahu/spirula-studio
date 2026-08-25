@@ -24,6 +24,7 @@ template void rasterize_to_pixels_eval3d_bwd_kernel_wrapper<
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB
     const uint32_t image_width,
     const uint32_t image_height,
@@ -71,6 +72,7 @@ template void rasterize_to_pixels_eval3d_bwd_kernel_wrapper<
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB
     const uint32_t image_width,
     const uint32_t image_height,
@@ -118,6 +120,7 @@ template void rasterize_to_pixels_eval3d_bwd_kernel_wrapper<
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB
     const uint32_t image_width,
     const uint32_t image_height,
@@ -165,6 +168,7 @@ template void rasterize_to_pixels_eval3d_bwd_kernel_wrapper<
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB
     const uint32_t image_width,
     const uint32_t image_height,
@@ -212,6 +216,7 @@ template void rasterize_to_pixels_eval3d_bwd_kernel_wrapper<
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB
     const uint32_t image_width,
     const uint32_t image_height,
@@ -259,6 +264,7 @@ template void rasterize_to_pixels_eval3d_bwd_kernel_wrapper<
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB
     const uint32_t image_width,
     const uint32_t image_height,

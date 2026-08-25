@@ -146,6 +146,23 @@ int main(int argc, char** argv) {
                    {(int64_t)C, kCameraDistortionParams});
     };
 
+    // A non-zero rolling shutter for the eval3d cases: the per-pixel ray
+    // shutter is written twice (CUDA and Slang) and this is what pins them
+    // together. omega(3), v(3), then the vertical axis.
+    std::vector<float> rs_host((size_t)C * 8, 0.0f);
+    for (uint32_t c = 0; c < C; ++c) {
+        float* q = &rs_host[(size_t)c * 8];
+        q[0] = 0.010f + 0.002f * (float)c;
+        q[1] = -0.014f;
+        q[2] = 0.006f;
+        q[3] = 0.004f;
+        q[4] = -0.003f;
+        q[5] = 0.002f;
+        q[7] = 1.0f / (float)H;
+    }
+    float* d_rs = upload(rs_host);
+    const std::optional<TorchTensorView> rs_tv = ttv(d_rs, {(int64_t)C, 8});
+
     std::vector<float> acc;
 
     // === 1. Background SH forward ===
@@ -283,7 +300,7 @@ int main(int argc, char** argv) {
                 N, in_splats, splats_s, gauss_ids,
                 ttv(d_vm, {(int64_t)C, 16}), ttv(d_intr, {(int64_t)C, 4}),
                 cams[cfg.cam], dist_fixture::kTierNames[cfg.dist],
-                dist_tv(cfg.dist), aabb_2d, W, H,
+                dist_tv(cfg.dist), rs_tv, aabb_2d, W, H,
                 tile_offsets, flatten_ids, cfg.dt, cfg.median);
         } else {
             auto fn = cfg.prim == 0 ? rasterize_to_pixels_3dgs_fwd

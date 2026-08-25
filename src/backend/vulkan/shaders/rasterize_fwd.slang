@@ -309,6 +309,7 @@ struct RasterFwd3dgutParams {
     float* viewmats;     // [I, 16] row-major
     float4* intrins;     // [I]
     float* dist_coeffs;  // [I, 8] or null
+    float* twists;       // [I, 8] rolling shutter
     float4* aabb;        // [..] projected 2D AABB (xmin,ymin,xmax,ymax)
     int* tile_offsets;   // [I, tile_height, tile_width]
     int* flatten_ids;    // [n_isects]
@@ -359,8 +360,6 @@ void rasterize_fwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     }
     float4 intrin = p.intrins[image_id];
 
-    float3 ray_o = transform_ray_o(R, ct);
-
     uint i = mt_y * TILE_SIZE_Y + tid / TILE_SIZE_X;
     uint j = mt_x * TILE_SIZE_X + tid % TILE_SIZE_X;
     float px = float(j) + 0.5f;
@@ -372,6 +371,15 @@ void rasterize_fwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     bool ray_ok = false;
     SS_DISPATCH_DIST(_rf_ray)
     inside = inside && ray_ok;
+    // This pixel's row IS the shutter time, so the pose comes straight from it.
+    if (kRollingShutter != 0) {
+        float* q = p.twists + image_id * 8;
+        float3x3 sR; float3 st;
+        shutter_ray_pose(R, ct, float3(q[0], q[1], q[2]), float3(q[3], q[4], q[5]),
+                         float2(q[6], q[7]), float2(px, py), sR, st);
+        R = sR; ct = st;
+    }
+    float3 ray_o = transform_ray_o(R, ct);
     float3 ray_d = transform_ray_d(R, raydir);
 
     bool done = !inside;
@@ -545,3 +553,8 @@ void rasterize_fwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 // Declared last: spec IDs follow declaration order (see dist_spec.slang).
 [SpecializationConstant]
 const int kDistortion = 0;
+
+// Declared LAST so a host SpecList that stops at kDistortion leaves this 0 and
+// the shutter folds out of the pipeline.
+[SpecializationConstant]
+const int kRollingShutter = 0;

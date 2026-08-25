@@ -257,7 +257,7 @@ void projection_bwd_quantgrad_kernel_wrapper(
                                        distortion, VB, BLOCK>                    \
             <<<grid, BLOCK, 0, stream>>>(                                         \
                 C, N, num_sh_buffer, splats_world, viewmats, intrins,             \
-                dist_coeffs_buffer, image_width, image_height,                    \
+                dist_coeffs_buffer, twists, image_width, image_height,            \
                 camera_id_bounds, camera_ids, perm, aabb,                         \
                 v_splats_world, v_splats_screen, gq,                              \
                 sh_value_packed, sh_value_bounds, sh_value_bounds_stride)

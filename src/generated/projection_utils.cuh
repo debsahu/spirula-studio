@@ -3965,27 +3965,59 @@ inline __device__ bool generate_ray_rational(float2  uv_44, int camera_model_15,
     return _S977;
 }
 
+inline __device__ void shutter_ray_pose(Matrix<float, 3, 3>  R_0, float3  t_0, float3  rs_omega_0, float3  rs_v_0, float2  rs_axis_0, float2  pixel_0, Matrix<float, 3, 3>  * out_R_0, float3  * out_t_0)
+{
+    Matrix<float, 3, 3>  _S990;
+    float s_12 = rs_axis_0.x * pixel_0.x + rs_axis_0.y * pixel_0.y - 0.5f;
+    float3  _S991 = make_float3 (s_12) * rs_omega_0;
+    for(;;)
+    {
+        float th2_0 = dot_1(_S991, _S991);
+        if(th2_0 < 1.00000001954148138e-24f)
+        {
+            _S990 = makeMatrix<float, 3, 3> (1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+            break;
+        }
+        float th_0 = (F32_sqrt((th2_0)));
+        float3  a_0 = _S991 / make_float3 (th_0);
+        float c_3 = (F32_cos((th_0)));
+        float sn_0 = (F32_sin((th_0)));
+        float v_6 = 1.0f - c_3;
+        float _S992 = a_0.x;
+        float _S993 = a_0.y;
+        float _S994 = a_0.z;
+        float _S995 = _S994 * sn_0;
+        float _S996 = _S993 * sn_0;
+        float _S997 = _S992 * sn_0;
+        _S990 = makeMatrix<float, 3, 3> (c_3 + _S992 * _S992 * v_6, _S992 * _S993 * v_6 - _S995, _S992 * _S994 * v_6 + _S996, _S993 * _S992 * v_6 + _S995, c_3 + _S993 * _S993 * v_6, _S993 * _S994 * v_6 - _S997, _S994 * _S992 * v_6 - _S996, _S994 * _S993 * v_6 + _S997, c_3 + _S994 * _S994 * v_6);
+        break;
+    }
+    *out_R_0 = mul_1(_S990, R_0);
+    *out_t_0 = mul_2(_S990, t_0) + make_float3 (s_12) * rs_v_0;
+    return;
+}
+
 inline __device__ void _d_mul_1(DiffPair_vectorx3Cfloatx2C3x3E_0 * left_4, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * right_4, float3  dOut_3)
 {
-    float _S990 = (*right_4).primal_0.rows[int(0)].x * dOut_3.x;
+    float _S998 = (*right_4).primal_0.rows[int(0)].x * dOut_3.x;
     Matrix<float, 3, 3>  right_d_result_2;
     *&(((&right_d_result_2)->rows + (int(0)))->x) = (*left_4).primal_0.x * dOut_3.x;
-    float sum_10 = _S990 + (*right_4).primal_0.rows[int(0)].y * dOut_3.y;
+    float sum_10 = _S998 + (*right_4).primal_0.rows[int(0)].y * dOut_3.y;
     *&(((&right_d_result_2)->rows + (int(0)))->y) = (*left_4).primal_0.x * dOut_3.y;
     float sum_11 = sum_10 + (*right_4).primal_0.rows[int(0)].z * dOut_3.z;
     *&(((&right_d_result_2)->rows + (int(0)))->z) = (*left_4).primal_0.x * dOut_3.z;
     float3  left_d_result_2;
     *&((&left_d_result_2)->x) = sum_11;
-    float _S991 = (*right_4).primal_0.rows[int(1)].x * dOut_3.x;
+    float _S999 = (*right_4).primal_0.rows[int(1)].x * dOut_3.x;
     *&(((&right_d_result_2)->rows + (int(1)))->x) = (*left_4).primal_0.y * dOut_3.x;
-    float sum_12 = _S991 + (*right_4).primal_0.rows[int(1)].y * dOut_3.y;
+    float sum_12 = _S999 + (*right_4).primal_0.rows[int(1)].y * dOut_3.y;
     *&(((&right_d_result_2)->rows + (int(1)))->y) = (*left_4).primal_0.y * dOut_3.y;
     float sum_13 = sum_12 + (*right_4).primal_0.rows[int(1)].z * dOut_3.z;
     *&(((&right_d_result_2)->rows + (int(1)))->z) = (*left_4).primal_0.y * dOut_3.z;
     *&((&left_d_result_2)->y) = sum_13;
-    float _S992 = (*right_4).primal_0.rows[int(2)].x * dOut_3.x;
+    float _S1000 = (*right_4).primal_0.rows[int(2)].x * dOut_3.x;
     *&(((&right_d_result_2)->rows + (int(2)))->x) = (*left_4).primal_0.z * dOut_3.x;
-    float sum_14 = _S992 + (*right_4).primal_0.rows[int(2)].y * dOut_3.y;
+    float sum_14 = _S1000 + (*right_4).primal_0.rows[int(2)].y * dOut_3.y;
     *&(((&right_d_result_2)->rows + (int(2)))->y) = (*left_4).primal_0.z * dOut_3.y;
     float sum_15 = sum_14 + (*right_4).primal_0.rows[int(2)].z * dOut_3.z;
     *&(((&right_d_result_2)->rows + (int(2)))->z) = (*left_4).primal_0.z * dOut_3.z;
@@ -4031,62 +4063,62 @@ inline __device__ float3  mul_3(float3  left_5, Matrix<float, 3, 3>  right_5)
     return result_8;
 }
 
-inline __device__ float3  transform_ray_o(Matrix<float, 3, 3>  R_0, float3  t_0)
+inline __device__ float3  transform_ray_o(Matrix<float, 3, 3>  R_1, float3  t_1)
 {
-    return - mul_3(t_0, R_0);
+    return - mul_3(t_1, R_1);
 }
 
-inline __device__ float3  transform_ray_d(Matrix<float, 3, 3>  R_1, float3  raydir_12)
+inline __device__ float3  transform_ray_d(Matrix<float, 3, 3>  R_2, float3  raydir_12)
 {
-    return mul_3(raydir_12, R_1);
+    return mul_3(raydir_12, R_2);
 }
 
-inline __device__ float3  undo_transform_ray_d(Matrix<float, 3, 3>  R_2, float3  raydir_13)
+inline __device__ float3  undo_transform_ray_d(Matrix<float, 3, 3>  R_3, float3  raydir_13)
 {
-    return mul_3(raydir_13, transpose_0(R_2));
+    return mul_3(raydir_13, transpose_0(R_3));
 }
 
-inline __device__ void s_bwd_prop_mul_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S993, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S994, float3  _S995)
+inline __device__ void s_bwd_prop_mul_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1001, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1002, float3  _S1003)
 {
-    _d_mul_1(_S993, _S994, _S995);
+    _d_mul_1(_S1001, _S1002, _S1003);
     return;
 }
 
 inline __device__ void s_bwd_prop_transform_ray_o_0(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * dpR_0, DiffPair_vectorx3Cfloatx2C3x3E_0 * dpt_0, float3  _s_dOut_0)
 {
-    float3  _S996 = - _s_dOut_0;
-    float3  _S997 = make_float3 (0.0f);
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S998;
-    (&_S998)->primal_0 = (*dpt_0).primal_0;
-    (&_S998)->differential_0 = _S997;
-    Matrix<float, 3, 3>  _S999 = makeMatrix<float, 3, 3> (0.0f);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1000;
-    (&_S1000)->primal_0 = (*dpR_0).primal_0;
-    (&_S1000)->differential_0 = _S999;
-    s_bwd_prop_mul_0(&_S998, &_S1000, _S996);
-    dpt_0->primal_0 = (*dpt_0).primal_0;
-    dpt_0->differential_0 = _S998.differential_0;
-    dpR_0->primal_0 = (*dpR_0).primal_0;
-    dpR_0->differential_0 = _S1000.differential_0;
-    return;
-}
-
-inline __device__ void s_bwd_transform_ray_o_0(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1001, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1002, float3  _S1003)
-{
-    s_bwd_prop_transform_ray_o_0(_S1001, _S1002, _S1003);
-    return;
-}
-
-inline __device__ void transform_ray_o_vjp(Matrix<float, 3, 3>  R_3, float3  t_1, float3  v_ray_o_0, Matrix<float, 3, 3>  * v_R_0, float3  * v_t_0)
-{
-    Matrix<float, 3, 3>  _S1004 = makeMatrix<float, 3, 3> (0.0f);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 dp_R_0;
-    (&dp_R_0)->primal_0 = R_3;
-    (&dp_R_0)->differential_0 = _S1004;
+    float3  _S1004 = - _s_dOut_0;
     float3  _S1005 = make_float3 (0.0f);
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1006;
+    (&_S1006)->primal_0 = (*dpt_0).primal_0;
+    (&_S1006)->differential_0 = _S1005;
+    Matrix<float, 3, 3>  _S1007 = makeMatrix<float, 3, 3> (0.0f);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1008;
+    (&_S1008)->primal_0 = (*dpR_0).primal_0;
+    (&_S1008)->differential_0 = _S1007;
+    s_bwd_prop_mul_0(&_S1006, &_S1008, _S1004);
+    dpt_0->primal_0 = (*dpt_0).primal_0;
+    dpt_0->differential_0 = _S1006.differential_0;
+    dpR_0->primal_0 = (*dpR_0).primal_0;
+    dpR_0->differential_0 = _S1008.differential_0;
+    return;
+}
+
+inline __device__ void s_bwd_transform_ray_o_0(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1009, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1010, float3  _S1011)
+{
+    s_bwd_prop_transform_ray_o_0(_S1009, _S1010, _S1011);
+    return;
+}
+
+inline __device__ void transform_ray_o_vjp(Matrix<float, 3, 3>  R_4, float3  t_2, float3  v_ray_o_0, Matrix<float, 3, 3>  * v_R_0, float3  * v_t_0)
+{
+    Matrix<float, 3, 3>  _S1012 = makeMatrix<float, 3, 3> (0.0f);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 dp_R_0;
+    (&dp_R_0)->primal_0 = R_4;
+    (&dp_R_0)->differential_0 = _S1012;
+    float3  _S1013 = make_float3 (0.0f);
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_t_0;
-    (&dp_t_0)->primal_0 = t_1;
-    (&dp_t_0)->differential_0 = _S1005;
+    (&dp_t_0)->primal_0 = t_2;
+    (&dp_t_0)->differential_0 = _S1013;
     s_bwd_transform_ray_o_0(&dp_R_0, &dp_t_0, v_ray_o_0);
     *v_R_0 = dp_R_0.differential_0;
     *v_t_0 = dp_t_0.differential_0;
@@ -4095,38 +4127,38 @@ inline __device__ void transform_ray_o_vjp(Matrix<float, 3, 3>  R_3, float3  t_1
 
 inline __device__ void s_bwd_prop_transform_ray_d_0(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * dpR_1, DiffPair_vectorx3Cfloatx2C3x3E_0 * dpraydir_0, float3  _s_dOut_1)
 {
-    float3  _S1006 = make_float3 (0.0f);
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1007;
-    (&_S1007)->primal_0 = (*dpraydir_0).primal_0;
-    (&_S1007)->differential_0 = _S1006;
-    Matrix<float, 3, 3>  _S1008 = makeMatrix<float, 3, 3> (0.0f);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1009;
-    (&_S1009)->primal_0 = (*dpR_1).primal_0;
-    (&_S1009)->differential_0 = _S1008;
-    s_bwd_prop_mul_0(&_S1007, &_S1009, _s_dOut_1);
-    dpraydir_0->primal_0 = (*dpraydir_0).primal_0;
-    dpraydir_0->differential_0 = _S1007.differential_0;
-    dpR_1->primal_0 = (*dpR_1).primal_0;
-    dpR_1->differential_0 = _S1009.differential_0;
-    return;
-}
-
-inline __device__ void s_bwd_transform_ray_d_0(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1010, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1011, float3  _S1012)
-{
-    s_bwd_prop_transform_ray_d_0(_S1010, _S1011, _S1012);
-    return;
-}
-
-inline __device__ void transform_ray_d_vjp(Matrix<float, 3, 3>  R_4, float3  raydir_14, float3  v_ray_d_0, Matrix<float, 3, 3>  * v_R_1, float3  * v_raydir_0)
-{
-    Matrix<float, 3, 3>  _S1013 = makeMatrix<float, 3, 3> (0.0f);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 dp_R_1;
-    (&dp_R_1)->primal_0 = R_4;
-    (&dp_R_1)->differential_0 = _S1013;
     float3  _S1014 = make_float3 (0.0f);
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1015;
+    (&_S1015)->primal_0 = (*dpraydir_0).primal_0;
+    (&_S1015)->differential_0 = _S1014;
+    Matrix<float, 3, 3>  _S1016 = makeMatrix<float, 3, 3> (0.0f);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1017;
+    (&_S1017)->primal_0 = (*dpR_1).primal_0;
+    (&_S1017)->differential_0 = _S1016;
+    s_bwd_prop_mul_0(&_S1015, &_S1017, _s_dOut_1);
+    dpraydir_0->primal_0 = (*dpraydir_0).primal_0;
+    dpraydir_0->differential_0 = _S1015.differential_0;
+    dpR_1->primal_0 = (*dpR_1).primal_0;
+    dpR_1->differential_0 = _S1017.differential_0;
+    return;
+}
+
+inline __device__ void s_bwd_transform_ray_d_0(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1018, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1019, float3  _S1020)
+{
+    s_bwd_prop_transform_ray_d_0(_S1018, _S1019, _S1020);
+    return;
+}
+
+inline __device__ void transform_ray_d_vjp(Matrix<float, 3, 3>  R_5, float3  raydir_14, float3  v_ray_d_0, Matrix<float, 3, 3>  * v_R_1, float3  * v_raydir_0)
+{
+    Matrix<float, 3, 3>  _S1021 = makeMatrix<float, 3, 3> (0.0f);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 dp_R_1;
+    (&dp_R_1)->primal_0 = R_5;
+    (&dp_R_1)->differential_0 = _S1021;
+    float3  _S1022 = make_float3 (0.0f);
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_raydir_0;
     (&dp_raydir_0)->primal_0 = raydir_14;
-    (&dp_raydir_0)->differential_0 = _S1014;
+    (&dp_raydir_0)->differential_0 = _S1022;
     s_bwd_transform_ray_d_0(&dp_R_1, &dp_raydir_0, v_ray_d_0);
     *v_R_1 = dp_R_1.differential_0;
     *v_raydir_0 = dp_raydir_0.differential_0;
@@ -4135,9 +4167,9 @@ inline __device__ void transform_ray_d_vjp(Matrix<float, 3, 3>  R_4, float3  ray
 
 inline __device__ void _d_exp_0(DiffPair_float_0 * dpx_5, float dOut_4)
 {
-    float _S1015 = (F32_exp(((*dpx_5).primal_0))) * dOut_4;
+    float _S1023 = (F32_exp(((*dpx_5).primal_0))) * dOut_4;
     dpx_5->primal_0 = (*dpx_5).primal_0;
-    dpx_5->differential_0 = _S1015;
+    dpx_5->differential_0 = _S1023;
     return;
 }
 
@@ -4162,9 +4194,9 @@ inline __device__ float3  exp_0(float3  x_12)
 
 inline __device__ void _d_exp_vector_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * dpx_6, float3  dOut_5)
 {
-    float3  _S1016 = exp_0((*dpx_6).primal_0) * dOut_5;
+    float3  _S1024 = exp_0((*dpx_6).primal_0) * dOut_5;
     dpx_6->primal_0 = (*dpx_6).primal_0;
-    dpx_6->differential_0 = _S1016;
+    dpx_6->differential_0 = _S1024;
     return;
 }
 
@@ -4180,8 +4212,8 @@ inline __device__ Matrix<float, 3, 3>  compute_3dgut_iscl_rot(float4  quat_5, fl
     float wx_5 = quat_5.x * quat_5.y;
     float wy_5 = quat_5.x * quat_5.z;
     float wz_5 = quat_5.x * quat_5.w;
-    float3  _S1017 = exp_0(- scale_4);
-    return mul_1(makeMatrix<float, 3, 3> (_S1017.x, 0.0f, 0.0f, 0.0f, _S1017.y, 0.0f, 0.0f, 0.0f, _S1017.z), transpose_0(transpose_0(makeMatrix<float, 3, 3> (1.0f - 2.0f * (y2_5 + z2_5), 2.0f * (xy_5 + wz_5), 2.0f * (xz_5 - wy_5), 2.0f * (xy_5 - wz_5), 1.0f - 2.0f * (x2_5 + z2_5), 2.0f * (yz_5 + wx_5), 2.0f * (xz_5 + wy_5), 2.0f * (yz_5 - wx_5), 1.0f - 2.0f * (x2_5 + y2_5)))));
+    float3  _S1025 = exp_0(- scale_4);
+    return mul_1(makeMatrix<float, 3, 3> (_S1025.x, 0.0f, 0.0f, 0.0f, _S1025.y, 0.0f, 0.0f, 0.0f, _S1025.z), transpose_0(transpose_0(makeMatrix<float, 3, 3> (1.0f - 2.0f * (y2_5 + z2_5), 2.0f * (xy_5 + wz_5), 2.0f * (xz_5 - wy_5), 2.0f * (xy_5 - wz_5), 1.0f - 2.0f * (x2_5 + z2_5), 2.0f * (yz_5 + wx_5), 2.0f * (xz_5 + wy_5), 2.0f * (yz_5 - wx_5), 1.0f - 2.0f * (x2_5 + y2_5)))));
 }
 
 struct DiffPair_vectorx3Cfloatx2C4x3E_0
@@ -4190,27 +4222,27 @@ struct DiffPair_vectorx3Cfloatx2C4x3E_0
     float4  differential_0;
 };
 
-inline __device__ float3  s_primal_ctx_exp_0(float3  _S1018)
+inline __device__ float3  s_primal_ctx_exp_0(float3  _S1026)
 {
-    return exp_0(_S1018);
+    return exp_0(_S1026);
 }
 
-inline __device__ void s_bwd_prop_mul_1(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1019, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1020, Matrix<float, 3, 3>  _S1021)
+inline __device__ void s_bwd_prop_mul_1(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1027, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1028, Matrix<float, 3, 3>  _S1029)
 {
-    mul_0(_S1019, _S1020, _S1021);
+    mul_0(_S1027, _S1028, _S1029);
     return;
 }
 
-inline __device__ void s_bwd_prop_exp_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1022, float3  _S1023)
+inline __device__ void s_bwd_prop_exp_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1030, float3  _S1031)
 {
-    _d_exp_vector_0(_S1022, _S1023);
+    _d_exp_vector_0(_S1030, _S1031);
     return;
 }
 
 inline __device__ void s_bwd_prop_compute_3dgut_iscl_rot_0(DiffPair_vectorx3Cfloatx2C4x3E_0 * dpquat_0, DiffPair_vectorx3Cfloatx2C3x3E_0 * dpscale_0, Matrix<float, 3, 3>  _s_dOut_2)
 {
-    float _S1024 = (*dpquat_0).primal_0.y;
-    float x2_6 = _S1024 * _S1024;
+    float _S1032 = (*dpquat_0).primal_0.y;
+    float x2_6 = _S1032 * _S1032;
     float y2_6 = (*dpquat_0).primal_0.z * (*dpquat_0).primal_0.z;
     float z2_6 = (*dpquat_0).primal_0.w * (*dpquat_0).primal_0.w;
     float xy_6 = (*dpquat_0).primal_0.y * (*dpquat_0).primal_0.z;
@@ -4219,108 +4251,108 @@ inline __device__ void s_bwd_prop_compute_3dgut_iscl_rot_0(DiffPair_vectorx3Cflo
     float wx_6 = (*dpquat_0).primal_0.x * (*dpquat_0).primal_0.y;
     float wy_6 = (*dpquat_0).primal_0.x * (*dpquat_0).primal_0.z;
     float wz_6 = (*dpquat_0).primal_0.x * (*dpquat_0).primal_0.w;
-    float3  _S1025 = - (*dpscale_0).primal_0;
-    float3  _S1026 = s_primal_ctx_exp_0(_S1025);
-    Matrix<float, 3, 3>  _S1027 = transpose_0(transpose_0(makeMatrix<float, 3, 3> (1.0f - 2.0f * (y2_6 + z2_6), 2.0f * (xy_6 + wz_6), 2.0f * (xz_6 - wy_6), 2.0f * (xy_6 - wz_6), 1.0f - 2.0f * (x2_6 + z2_6), 2.0f * (yz_6 + wx_6), 2.0f * (xz_6 + wy_6), 2.0f * (yz_6 - wx_6), 1.0f - 2.0f * (x2_6 + y2_6))));
-    Matrix<float, 3, 3>  _S1028 = makeMatrix<float, 3, 3> (0.0f);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1029;
-    (&_S1029)->primal_0 = makeMatrix<float, 3, 3> (_S1026.x, 0.0f, 0.0f, 0.0f, _S1026.y, 0.0f, 0.0f, 0.0f, _S1026.z);
-    (&_S1029)->differential_0 = _S1028;
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1030;
-    (&_S1030)->primal_0 = _S1027;
-    (&_S1030)->differential_0 = _S1028;
-    s_bwd_prop_mul_1(&_S1029, &_S1030, _s_dOut_2);
-    Matrix<float, 3, 3>  _S1031 = transpose_0(_S1030.differential_0);
-    float3  _S1032 = make_float3 (_S1029.differential_0.rows[int(0)].x, _S1029.differential_0.rows[int(1)].y, _S1029.differential_0.rows[int(2)].z);
-    float3  _S1033 = make_float3 (0.0f);
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1034;
-    (&_S1034)->primal_0 = _S1025;
-    (&_S1034)->differential_0 = _S1033;
-    s_bwd_prop_exp_0(&_S1034, _S1032);
-    float3  _S1035 = - _S1034.differential_0;
-    Matrix<float, 3, 3>  _S1036 = transpose_0(_S1031);
-    float _S1037 = 2.0f * - _S1036.rows[int(2)].z;
-    float _S1038 = 2.0f * _S1036.rows[int(2)].y;
-    float _S1039 = 2.0f * _S1036.rows[int(2)].x;
-    float _S1040 = 2.0f * _S1036.rows[int(1)].z;
-    float _S1041 = 2.0f * - _S1036.rows[int(1)].y;
-    float _S1042 = 2.0f * _S1036.rows[int(1)].x;
-    float _S1043 = 2.0f * _S1036.rows[int(0)].z;
-    float _S1044 = 2.0f * _S1036.rows[int(0)].y;
-    float _S1045 = 2.0f * - _S1036.rows[int(0)].x;
-    float _S1046 = - _S1042 + _S1044;
-    float _S1047 = _S1039 + - _S1043;
-    float _S1048 = - _S1038 + _S1040;
-    float _S1049 = _S1038 + _S1040;
-    float _S1050 = _S1039 + _S1043;
-    float _S1051 = _S1042 + _S1044;
-    float _S1052 = (*dpquat_0).primal_0.w * (_S1041 + _S1045);
-    float _S1053 = (*dpquat_0).primal_0.z * (_S1037 + _S1045);
-    float _S1054 = (*dpquat_0).primal_0.y * (_S1037 + _S1041);
-    float _S1055 = (*dpquat_0).primal_0.x * _S1046 + (*dpquat_0).primal_0.z * _S1049 + (*dpquat_0).primal_0.y * _S1050 + _S1052 + _S1052;
-    float _S1056 = (*dpquat_0).primal_0.x * _S1047 + (*dpquat_0).primal_0.w * _S1049 + (*dpquat_0).primal_0.y * _S1051 + _S1053 + _S1053;
-    float _S1057 = (*dpquat_0).primal_0.x * _S1048 + (*dpquat_0).primal_0.w * _S1050 + (*dpquat_0).primal_0.z * _S1051 + _S1054 + _S1054;
-    float _S1058 = (*dpquat_0).primal_0.w * _S1046 + (*dpquat_0).primal_0.z * _S1047 + (*dpquat_0).primal_0.y * _S1048;
+    float3  _S1033 = - (*dpscale_0).primal_0;
+    float3  _S1034 = s_primal_ctx_exp_0(_S1033);
+    Matrix<float, 3, 3>  _S1035 = transpose_0(transpose_0(makeMatrix<float, 3, 3> (1.0f - 2.0f * (y2_6 + z2_6), 2.0f * (xy_6 + wz_6), 2.0f * (xz_6 - wy_6), 2.0f * (xy_6 - wz_6), 1.0f - 2.0f * (x2_6 + z2_6), 2.0f * (yz_6 + wx_6), 2.0f * (xz_6 + wy_6), 2.0f * (yz_6 - wx_6), 1.0f - 2.0f * (x2_6 + y2_6))));
+    Matrix<float, 3, 3>  _S1036 = makeMatrix<float, 3, 3> (0.0f);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1037;
+    (&_S1037)->primal_0 = makeMatrix<float, 3, 3> (_S1034.x, 0.0f, 0.0f, 0.0f, _S1034.y, 0.0f, 0.0f, 0.0f, _S1034.z);
+    (&_S1037)->differential_0 = _S1036;
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1038;
+    (&_S1038)->primal_0 = _S1035;
+    (&_S1038)->differential_0 = _S1036;
+    s_bwd_prop_mul_1(&_S1037, &_S1038, _s_dOut_2);
+    Matrix<float, 3, 3>  _S1039 = transpose_0(_S1038.differential_0);
+    float3  _S1040 = make_float3 (_S1037.differential_0.rows[int(0)].x, _S1037.differential_0.rows[int(1)].y, _S1037.differential_0.rows[int(2)].z);
+    float3  _S1041 = make_float3 (0.0f);
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1042;
+    (&_S1042)->primal_0 = _S1033;
+    (&_S1042)->differential_0 = _S1041;
+    s_bwd_prop_exp_0(&_S1042, _S1040);
+    float3  _S1043 = - _S1042.differential_0;
+    Matrix<float, 3, 3>  _S1044 = transpose_0(_S1039);
+    float _S1045 = 2.0f * - _S1044.rows[int(2)].z;
+    float _S1046 = 2.0f * _S1044.rows[int(2)].y;
+    float _S1047 = 2.0f * _S1044.rows[int(2)].x;
+    float _S1048 = 2.0f * _S1044.rows[int(1)].z;
+    float _S1049 = 2.0f * - _S1044.rows[int(1)].y;
+    float _S1050 = 2.0f * _S1044.rows[int(1)].x;
+    float _S1051 = 2.0f * _S1044.rows[int(0)].z;
+    float _S1052 = 2.0f * _S1044.rows[int(0)].y;
+    float _S1053 = 2.0f * - _S1044.rows[int(0)].x;
+    float _S1054 = - _S1050 + _S1052;
+    float _S1055 = _S1047 + - _S1051;
+    float _S1056 = - _S1046 + _S1048;
+    float _S1057 = _S1046 + _S1048;
+    float _S1058 = _S1047 + _S1051;
+    float _S1059 = _S1050 + _S1052;
+    float _S1060 = (*dpquat_0).primal_0.w * (_S1049 + _S1053);
+    float _S1061 = (*dpquat_0).primal_0.z * (_S1045 + _S1053);
+    float _S1062 = (*dpquat_0).primal_0.y * (_S1045 + _S1049);
+    float _S1063 = (*dpquat_0).primal_0.x * _S1054 + (*dpquat_0).primal_0.z * _S1057 + (*dpquat_0).primal_0.y * _S1058 + _S1060 + _S1060;
+    float _S1064 = (*dpquat_0).primal_0.x * _S1055 + (*dpquat_0).primal_0.w * _S1057 + (*dpquat_0).primal_0.y * _S1059 + _S1061 + _S1061;
+    float _S1065 = (*dpquat_0).primal_0.x * _S1056 + (*dpquat_0).primal_0.w * _S1058 + (*dpquat_0).primal_0.z * _S1059 + _S1062 + _S1062;
+    float _S1066 = (*dpquat_0).primal_0.w * _S1054 + (*dpquat_0).primal_0.z * _S1055 + (*dpquat_0).primal_0.y * _S1056;
     dpscale_0->primal_0 = (*dpscale_0).primal_0;
-    dpscale_0->differential_0 = _S1035;
-    float4  _S1059 = make_float4 (0.0f);
-    *&((&_S1059)->w) = _S1055;
-    *&((&_S1059)->z) = _S1056;
-    *&((&_S1059)->y) = _S1057;
-    *&((&_S1059)->x) = _S1058;
+    dpscale_0->differential_0 = _S1043;
+    float4  _S1067 = make_float4 (0.0f);
+    *&((&_S1067)->w) = _S1063;
+    *&((&_S1067)->z) = _S1064;
+    *&((&_S1067)->y) = _S1065;
+    *&((&_S1067)->x) = _S1066;
     dpquat_0->primal_0 = (*dpquat_0).primal_0;
-    dpquat_0->differential_0 = _S1059;
+    dpquat_0->differential_0 = _S1067;
     return;
 }
 
-inline __device__ void s_bwd_compute_3dgut_iscl_rot_0(DiffPair_vectorx3Cfloatx2C4x3E_0 * _S1060, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1061, Matrix<float, 3, 3>  _S1062)
+inline __device__ void s_bwd_compute_3dgut_iscl_rot_0(DiffPair_vectorx3Cfloatx2C4x3E_0 * _S1068, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1069, Matrix<float, 3, 3>  _S1070)
 {
-    s_bwd_prop_compute_3dgut_iscl_rot_0(_S1060, _S1061, _S1062);
+    s_bwd_prop_compute_3dgut_iscl_rot_0(_S1068, _S1069, _S1070);
     return;
 }
 
 inline __device__ void compute_3dgut_iscl_rot_vjp(float4  quat_6, float3  scale_5, Matrix<float, 3, 3>  v_iscl_rot_0, float4  * v_quat_0, float3  * v_scale_0)
 {
-    float4  _S1063 = make_float4 (0.0f);
+    float4  _S1071 = make_float4 (0.0f);
     DiffPair_vectorx3Cfloatx2C4x3E_0 dp_quat_0;
     (&dp_quat_0)->primal_0 = quat_6;
-    (&dp_quat_0)->differential_0 = _S1063;
-    float3  _S1064 = make_float3 (0.0f);
+    (&dp_quat_0)->differential_0 = _S1071;
+    float3  _S1072 = make_float3 (0.0f);
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_scale_0;
     (&dp_scale_0)->primal_0 = scale_5;
-    (&dp_scale_0)->differential_0 = _S1064;
+    (&dp_scale_0)->differential_0 = _S1072;
     s_bwd_compute_3dgut_iscl_rot_0(&dp_quat_0, &dp_scale_0, v_iscl_rot_0);
     *v_quat_0 = dp_quat_0.differential_0;
     *v_scale_0 = dp_scale_0.differential_0;
     return;
 }
 
-inline __device__ void _d_cross_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * a_0, DiffPair_vectorx3Cfloatx2C3x3E_0 * b_0, float3  dOut_6)
+inline __device__ void _d_cross_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * a_1, DiffPair_vectorx3Cfloatx2C3x3E_0 * b_0, float3  dOut_6)
 {
-    float _S1065 = dOut_6.y;
-    float _S1066 = dOut_6.z;
-    float _S1067 = dOut_6.x;
-    float _S1068 = (*a_0).primal_0.z * _S1065 + - (*a_0).primal_0.y * _S1066;
-    float _S1069 = - (*a_0).primal_0.z * _S1067 + (*a_0).primal_0.x * _S1066;
-    float _S1070 = (*a_0).primal_0.y * _S1067 + - (*a_0).primal_0.x * _S1065;
-    float3  _S1071 = make_float3 (- (*b_0).primal_0.z * _S1065 + (*b_0).primal_0.y * _S1066, (*b_0).primal_0.z * _S1067 + - (*b_0).primal_0.x * _S1066, - (*b_0).primal_0.y * _S1067 + (*b_0).primal_0.x * _S1065);
-    a_0->primal_0 = (*a_0).primal_0;
-    a_0->differential_0 = _S1071;
-    float3  _S1072 = make_float3 (_S1068, _S1069, _S1070);
+    float _S1073 = dOut_6.y;
+    float _S1074 = dOut_6.z;
+    float _S1075 = dOut_6.x;
+    float _S1076 = (*a_1).primal_0.z * _S1073 + - (*a_1).primal_0.y * _S1074;
+    float _S1077 = - (*a_1).primal_0.z * _S1075 + (*a_1).primal_0.x * _S1074;
+    float _S1078 = (*a_1).primal_0.y * _S1075 + - (*a_1).primal_0.x * _S1073;
+    float3  _S1079 = make_float3 (- (*b_0).primal_0.z * _S1073 + (*b_0).primal_0.y * _S1074, (*b_0).primal_0.z * _S1075 + - (*b_0).primal_0.x * _S1074, - (*b_0).primal_0.y * _S1075 + (*b_0).primal_0.x * _S1073);
+    a_1->primal_0 = (*a_1).primal_0;
+    a_1->differential_0 = _S1079;
+    float3  _S1080 = make_float3 (_S1076, _S1077, _S1078);
     b_0->primal_0 = (*b_0).primal_0;
-    b_0->differential_0 = _S1072;
+    b_0->differential_0 = _S1080;
     return;
 }
 
 inline __device__ float3  cross_0(float3  left_6, float3  right_6)
 {
-    float _S1073 = left_6.y;
-    float _S1074 = right_6.z;
-    float _S1075 = left_6.z;
-    float _S1076 = right_6.y;
-    float _S1077 = right_6.x;
-    float _S1078 = left_6.x;
-    return make_float3 (_S1073 * _S1074 - _S1075 * _S1076, _S1075 * _S1077 - _S1078 * _S1074, _S1078 * _S1076 - _S1073 * _S1077);
+    float _S1081 = left_6.y;
+    float _S1082 = right_6.z;
+    float _S1083 = left_6.z;
+    float _S1084 = right_6.y;
+    float _S1085 = right_6.x;
+    float _S1086 = left_6.x;
+    return make_float3 (_S1081 * _S1082 - _S1083 * _S1084, _S1083 * _S1085 - _S1086 * _S1082, _S1086 * _S1084 - _S1081 * _S1085);
 }
 
 inline __device__ float evaluate_alpha_3dgs(float3  mean_0, Matrix<float, 3, 3>  iscl_rot_0, float opacity_0, float3  ray_o_0, float3  ray_d_0)
@@ -4330,149 +4362,149 @@ inline __device__ float evaluate_alpha_3dgs(float3  mean_0, Matrix<float, 3, 3> 
     return opacity_0 * (F32_exp((-0.5f * dot_1(gcrod_0, gcrod_0) / dot_1(grd_0, grd_0))));
 }
 
-inline __device__ float3  s_primal_ctx_mul_0(Matrix<float, 3, 3>  _S1079, float3  _S1080)
+inline __device__ float3  s_primal_ctx_mul_0(Matrix<float, 3, 3>  _S1087, float3  _S1088)
 {
-    return mul_2(_S1079, _S1080);
+    return mul_2(_S1087, _S1088);
 }
 
-inline __device__ float3  s_primal_ctx_cross_0(float3  _S1081, float3  _S1082)
+inline __device__ float3  s_primal_ctx_cross_0(float3  _S1089, float3  _S1090)
 {
-    return cross_0(_S1081, _S1082);
+    return cross_0(_S1089, _S1090);
 }
 
-inline __device__ float s_primal_ctx_dot_0(float3  _S1083, float3  _S1084)
+inline __device__ float s_primal_ctx_dot_0(float3  _S1091, float3  _S1092)
 {
-    return dot_1(_S1083, _S1084);
+    return dot_1(_S1091, _S1092);
 }
 
-inline __device__ float s_primal_ctx_exp_1(float _S1085)
+inline __device__ float s_primal_ctx_exp_1(float _S1093)
 {
-    return (F32_exp((_S1085)));
+    return (F32_exp((_S1093)));
 }
 
-inline __device__ void s_bwd_prop_exp_1(DiffPair_float_0 * _S1086, float _S1087)
+inline __device__ void s_bwd_prop_exp_1(DiffPair_float_0 * _S1094, float _S1095)
 {
-    _d_exp_0(_S1086, _S1087);
+    _d_exp_0(_S1094, _S1095);
     return;
 }
 
-inline __device__ void s_bwd_prop_dot_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1088, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1089, float _S1090)
+inline __device__ void s_bwd_prop_dot_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1096, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1097, float _S1098)
 {
-    _d_dot_0(_S1088, _S1089, _S1090);
+    _d_dot_0(_S1096, _S1097, _S1098);
     return;
 }
 
-inline __device__ void s_bwd_prop_cross_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1091, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1092, float3  _S1093)
+inline __device__ void s_bwd_prop_cross_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1099, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1100, float3  _S1101)
 {
-    _d_cross_0(_S1091, _S1092, _S1093);
+    _d_cross_0(_S1099, _S1100, _S1101);
     return;
 }
 
-inline __device__ void s_bwd_prop_mul_2(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1094, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1095, float3  _S1096)
+inline __device__ void s_bwd_prop_mul_2(DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1102, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1103, float3  _S1104)
 {
-    _d_mul_0(_S1094, _S1095, _S1096);
+    _d_mul_0(_S1102, _S1103, _S1104);
     return;
 }
 
 inline __device__ void s_bwd_prop_evaluate_alpha_3dgs_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * dpmean_0, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * dpiscl_rot_0, DiffPair_float_0 * dpopacity_0, DiffPair_vectorx3Cfloatx2C3x3E_0 * dpray_o_0, DiffPair_vectorx3Cfloatx2C3x3E_0 * dpray_d_0, float _s_dOut_3)
 {
-    float3  _S1097 = (*dpray_o_0).primal_0 - (*dpmean_0).primal_0;
-    float3  _S1098 = s_primal_ctx_mul_0((*dpiscl_rot_0).primal_0, _S1097);
-    float3  _S1099 = s_primal_ctx_mul_0((*dpiscl_rot_0).primal_0, (*dpray_d_0).primal_0);
-    float3  _S1100 = s_primal_ctx_cross_0(_S1099, _S1098);
-    float _S1101 = -0.5f * s_primal_ctx_dot_0(_S1100, _S1100);
-    float _S1102 = s_primal_ctx_dot_0(_S1099, _S1099);
-    float _S1103 = _S1101 / _S1102;
-    float _S1104 = _S1102 * _S1102;
-    float _S1105 = (*dpopacity_0).primal_0 * _s_dOut_3;
-    float _S1106 = s_primal_ctx_exp_1(_S1103) * _s_dOut_3;
-    DiffPair_float_0 _S1107;
-    (&_S1107)->primal_0 = _S1103;
-    (&_S1107)->differential_0 = 0.0f;
-    s_bwd_prop_exp_1(&_S1107, _S1105);
-    float _S1108 = _S1107.differential_0 / _S1104;
-    float _S1109 = _S1101 * - _S1108;
-    float _S1110 = _S1102 * _S1108;
-    float3  _S1111 = make_float3 (0.0f);
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1112;
-    (&_S1112)->primal_0 = _S1099;
-    (&_S1112)->differential_0 = _S1111;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1113;
-    (&_S1113)->primal_0 = _S1099;
-    (&_S1113)->differential_0 = _S1111;
-    s_bwd_prop_dot_0(&_S1112, &_S1113, _S1109);
-    float _S1114 = -0.5f * _S1110;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1115;
-    (&_S1115)->primal_0 = _S1100;
-    (&_S1115)->differential_0 = _S1111;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1116;
-    (&_S1116)->primal_0 = _S1100;
-    (&_S1116)->differential_0 = _S1111;
-    s_bwd_prop_dot_0(&_S1115, &_S1116, _S1114);
-    float3  _S1117 = _S1116.differential_0 + _S1115.differential_0;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1118;
-    (&_S1118)->primal_0 = _S1099;
-    (&_S1118)->differential_0 = _S1111;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1119;
-    (&_S1119)->primal_0 = _S1098;
-    (&_S1119)->differential_0 = _S1111;
-    s_bwd_prop_cross_0(&_S1118, &_S1119, _S1117);
-    float3  _S1120 = _S1113.differential_0 + _S1112.differential_0 + _S1118.differential_0;
-    Matrix<float, 3, 3>  _S1121 = makeMatrix<float, 3, 3> (0.0f);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1122;
-    (&_S1122)->primal_0 = (*dpiscl_rot_0).primal_0;
-    (&_S1122)->differential_0 = _S1121;
+    float3  _S1105 = (*dpray_o_0).primal_0 - (*dpmean_0).primal_0;
+    float3  _S1106 = s_primal_ctx_mul_0((*dpiscl_rot_0).primal_0, _S1105);
+    float3  _S1107 = s_primal_ctx_mul_0((*dpiscl_rot_0).primal_0, (*dpray_d_0).primal_0);
+    float3  _S1108 = s_primal_ctx_cross_0(_S1107, _S1106);
+    float _S1109 = -0.5f * s_primal_ctx_dot_0(_S1108, _S1108);
+    float _S1110 = s_primal_ctx_dot_0(_S1107, _S1107);
+    float _S1111 = _S1109 / _S1110;
+    float _S1112 = _S1110 * _S1110;
+    float _S1113 = (*dpopacity_0).primal_0 * _s_dOut_3;
+    float _S1114 = s_primal_ctx_exp_1(_S1111) * _s_dOut_3;
+    DiffPair_float_0 _S1115;
+    (&_S1115)->primal_0 = _S1111;
+    (&_S1115)->differential_0 = 0.0f;
+    s_bwd_prop_exp_1(&_S1115, _S1113);
+    float _S1116 = _S1115.differential_0 / _S1112;
+    float _S1117 = _S1109 * - _S1116;
+    float _S1118 = _S1110 * _S1116;
+    float3  _S1119 = make_float3 (0.0f);
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1120;
+    (&_S1120)->primal_0 = _S1107;
+    (&_S1120)->differential_0 = _S1119;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1121;
+    (&_S1121)->primal_0 = _S1107;
+    (&_S1121)->differential_0 = _S1119;
+    s_bwd_prop_dot_0(&_S1120, &_S1121, _S1117);
+    float _S1122 = -0.5f * _S1118;
     DiffPair_vectorx3Cfloatx2C3x3E_0 _S1123;
-    (&_S1123)->primal_0 = (*dpray_d_0).primal_0;
-    (&_S1123)->differential_0 = _S1111;
-    s_bwd_prop_mul_2(&_S1122, &_S1123, _S1120);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1124;
-    (&_S1124)->primal_0 = (*dpiscl_rot_0).primal_0;
-    (&_S1124)->differential_0 = _S1121;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1125;
-    (&_S1125)->primal_0 = _S1097;
-    (&_S1125)->differential_0 = _S1111;
-    s_bwd_prop_mul_2(&_S1124, &_S1125, _S1119.differential_0);
-    float3  _S1126 = - _S1125.differential_0;
+    (&_S1123)->primal_0 = _S1108;
+    (&_S1123)->differential_0 = _S1119;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1124;
+    (&_S1124)->primal_0 = _S1108;
+    (&_S1124)->differential_0 = _S1119;
+    s_bwd_prop_dot_0(&_S1123, &_S1124, _S1122);
+    float3  _S1125 = _S1124.differential_0 + _S1123.differential_0;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1126;
+    (&_S1126)->primal_0 = _S1107;
+    (&_S1126)->differential_0 = _S1119;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1127;
+    (&_S1127)->primal_0 = _S1106;
+    (&_S1127)->differential_0 = _S1119;
+    s_bwd_prop_cross_0(&_S1126, &_S1127, _S1125);
+    float3  _S1128 = _S1121.differential_0 + _S1120.differential_0 + _S1126.differential_0;
+    Matrix<float, 3, 3>  _S1129 = makeMatrix<float, 3, 3> (0.0f);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1130;
+    (&_S1130)->primal_0 = (*dpiscl_rot_0).primal_0;
+    (&_S1130)->differential_0 = _S1129;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1131;
+    (&_S1131)->primal_0 = (*dpray_d_0).primal_0;
+    (&_S1131)->differential_0 = _S1119;
+    s_bwd_prop_mul_2(&_S1130, &_S1131, _S1128);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1132;
+    (&_S1132)->primal_0 = (*dpiscl_rot_0).primal_0;
+    (&_S1132)->differential_0 = _S1129;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1133;
+    (&_S1133)->primal_0 = _S1105;
+    (&_S1133)->differential_0 = _S1119;
+    s_bwd_prop_mul_2(&_S1132, &_S1133, _S1127.differential_0);
+    float3  _S1134 = - _S1133.differential_0;
     dpray_d_0->primal_0 = (*dpray_d_0).primal_0;
-    dpray_d_0->differential_0 = _S1123.differential_0;
+    dpray_d_0->differential_0 = _S1131.differential_0;
     dpray_o_0->primal_0 = (*dpray_o_0).primal_0;
-    dpray_o_0->differential_0 = _S1125.differential_0;
+    dpray_o_0->differential_0 = _S1133.differential_0;
     dpopacity_0->primal_0 = (*dpopacity_0).primal_0;
-    dpopacity_0->differential_0 = _S1106;
-    Matrix<float, 3, 3>  _S1127 = _S1122.differential_0 + _S1124.differential_0;
+    dpopacity_0->differential_0 = _S1114;
+    Matrix<float, 3, 3>  _S1135 = _S1130.differential_0 + _S1132.differential_0;
     dpiscl_rot_0->primal_0 = (*dpiscl_rot_0).primal_0;
-    dpiscl_rot_0->differential_0 = _S1127;
+    dpiscl_rot_0->differential_0 = _S1135;
     dpmean_0->primal_0 = (*dpmean_0).primal_0;
-    dpmean_0->differential_0 = _S1126;
+    dpmean_0->differential_0 = _S1134;
     return;
 }
 
-inline __device__ void s_bwd_evaluate_alpha_3dgs_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1128, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1129, DiffPair_float_0 * _S1130, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1131, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1132, float _S1133)
+inline __device__ void s_bwd_evaluate_alpha_3dgs_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1136, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1137, DiffPair_float_0 * _S1138, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1139, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1140, float _S1141)
 {
-    s_bwd_prop_evaluate_alpha_3dgs_0(_S1128, _S1129, _S1130, _S1131, _S1132, _S1133);
+    s_bwd_prop_evaluate_alpha_3dgs_0(_S1136, _S1137, _S1138, _S1139, _S1140, _S1141);
     return;
 }
 
 inline __device__ void evaluate_alpha_3dgs_vjp(float3  mean_1, Matrix<float, 3, 3>  iscl_rot_1, float opacity_1, float3  ray_o_1, float3  ray_d_1, float v_alpha_0, float3  * v_mean_0, Matrix<float, 3, 3>  * v_iscl_rot_1, float * v_opacity_0, float3  * v_ray_o_1, float3  * v_ray_d_1)
 {
-    float3  _S1134 = make_float3 (0.0f);
+    float3  _S1142 = make_float3 (0.0f);
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_mean_0;
     (&dp_mean_0)->primal_0 = mean_1;
-    (&dp_mean_0)->differential_0 = _S1134;
-    Matrix<float, 3, 3>  _S1135 = makeMatrix<float, 3, 3> (0.0f);
+    (&dp_mean_0)->differential_0 = _S1142;
+    Matrix<float, 3, 3>  _S1143 = makeMatrix<float, 3, 3> (0.0f);
     DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 dp_iscl_rot_0;
     (&dp_iscl_rot_0)->primal_0 = iscl_rot_1;
-    (&dp_iscl_rot_0)->differential_0 = _S1135;
+    (&dp_iscl_rot_0)->differential_0 = _S1143;
     DiffPair_float_0 dp_opacity_0;
     (&dp_opacity_0)->primal_0 = opacity_1;
     (&dp_opacity_0)->differential_0 = 0.0f;
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_ray_o_0;
     (&dp_ray_o_0)->primal_0 = ray_o_1;
-    (&dp_ray_o_0)->differential_0 = _S1134;
+    (&dp_ray_o_0)->differential_0 = _S1142;
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_ray_d_0;
     (&dp_ray_d_0)->primal_0 = ray_d_1;
-    (&dp_ray_d_0)->differential_0 = _S1134;
+    (&dp_ray_d_0)->differential_0 = _S1142;
     s_bwd_evaluate_alpha_3dgs_0(&dp_mean_0, &dp_iscl_rot_0, &dp_opacity_0, &dp_ray_o_0, &dp_ray_d_0, v_alpha_0);
     *v_mean_0 = dp_mean_0.differential_0;
     *v_iscl_rot_1 = dp_iscl_rot_0.differential_0;
@@ -4492,90 +4524,90 @@ inline __device__ void evaluate_color_3dgs(float3  mean_2, Matrix<float, 3, 3>  
 
 inline __device__ void s_bwd_prop_evaluate_color_3dgs_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * dpmean_1, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * dpiscl_rot_1, DiffPair_float_0 * dpopacity_1, DiffPair_vectorx3Cfloatx2C3x3E_0 * dprgb_0, DiffPair_vectorx3Cfloatx2C3x3E_0 * dpray_o_1, DiffPair_vectorx3Cfloatx2C3x3E_0 * dpray_d_1, float3  dpout_rgb_0, float dpdepth_0)
 {
-    float3  _S1136 = (*dpray_o_1).primal_0 - (*dpmean_1).primal_0;
-    float3  _S1137 = s_primal_ctx_mul_0((*dpiscl_rot_1).primal_0, _S1136);
-    float3  _S1138 = s_primal_ctx_mul_0((*dpiscl_rot_1).primal_0, (*dpray_d_1).primal_0);
-    float _S1139 = s_primal_ctx_dot_0(_S1138, _S1138);
-    float _S1140 = dpdepth_0 / (_S1139 * _S1139);
-    float _S1141 = - s_primal_ctx_dot_0(_S1137, _S1138) * - _S1140;
-    float _S1142 = _S1139 * _S1140;
-    float3  _S1143 = make_float3 (0.0f);
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1144;
-    (&_S1144)->primal_0 = _S1138;
-    (&_S1144)->differential_0 = _S1143;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1145;
-    (&_S1145)->primal_0 = _S1138;
-    (&_S1145)->differential_0 = _S1143;
-    s_bwd_prop_dot_0(&_S1144, &_S1145, _S1141);
-    float _S1146 = - _S1142;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1147;
-    (&_S1147)->primal_0 = _S1137;
-    (&_S1147)->differential_0 = _S1143;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1148;
-    (&_S1148)->primal_0 = _S1138;
-    (&_S1148)->differential_0 = _S1143;
-    s_bwd_prop_dot_0(&_S1147, &_S1148, _S1146);
-    float3  _S1149 = _S1145.differential_0 + _S1144.differential_0 + _S1148.differential_0;
-    Matrix<float, 3, 3>  _S1150 = makeMatrix<float, 3, 3> (0.0f);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1151;
-    (&_S1151)->primal_0 = (*dpiscl_rot_1).primal_0;
-    (&_S1151)->differential_0 = _S1150;
+    float3  _S1144 = (*dpray_o_1).primal_0 - (*dpmean_1).primal_0;
+    float3  _S1145 = s_primal_ctx_mul_0((*dpiscl_rot_1).primal_0, _S1144);
+    float3  _S1146 = s_primal_ctx_mul_0((*dpiscl_rot_1).primal_0, (*dpray_d_1).primal_0);
+    float _S1147 = s_primal_ctx_dot_0(_S1146, _S1146);
+    float _S1148 = dpdepth_0 / (_S1147 * _S1147);
+    float _S1149 = - s_primal_ctx_dot_0(_S1145, _S1146) * - _S1148;
+    float _S1150 = _S1147 * _S1148;
+    float3  _S1151 = make_float3 (0.0f);
     DiffPair_vectorx3Cfloatx2C3x3E_0 _S1152;
-    (&_S1152)->primal_0 = (*dpray_d_1).primal_0;
-    (&_S1152)->differential_0 = _S1143;
-    s_bwd_prop_mul_2(&_S1151, &_S1152, _S1149);
-    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1153;
-    (&_S1153)->primal_0 = (*dpiscl_rot_1).primal_0;
-    (&_S1153)->differential_0 = _S1150;
-    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1154;
-    (&_S1154)->primal_0 = _S1136;
-    (&_S1154)->differential_0 = _S1143;
-    s_bwd_prop_mul_2(&_S1153, &_S1154, _S1147.differential_0);
-    float3  _S1155 = - _S1154.differential_0;
+    (&_S1152)->primal_0 = _S1146;
+    (&_S1152)->differential_0 = _S1151;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1153;
+    (&_S1153)->primal_0 = _S1146;
+    (&_S1153)->differential_0 = _S1151;
+    s_bwd_prop_dot_0(&_S1152, &_S1153, _S1149);
+    float _S1154 = - _S1150;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1155;
+    (&_S1155)->primal_0 = _S1145;
+    (&_S1155)->differential_0 = _S1151;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1156;
+    (&_S1156)->primal_0 = _S1146;
+    (&_S1156)->differential_0 = _S1151;
+    s_bwd_prop_dot_0(&_S1155, &_S1156, _S1154);
+    float3  _S1157 = _S1153.differential_0 + _S1152.differential_0 + _S1156.differential_0;
+    Matrix<float, 3, 3>  _S1158 = makeMatrix<float, 3, 3> (0.0f);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1159;
+    (&_S1159)->primal_0 = (*dpiscl_rot_1).primal_0;
+    (&_S1159)->differential_0 = _S1158;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1160;
+    (&_S1160)->primal_0 = (*dpray_d_1).primal_0;
+    (&_S1160)->differential_0 = _S1151;
+    s_bwd_prop_mul_2(&_S1159, &_S1160, _S1157);
+    DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 _S1161;
+    (&_S1161)->primal_0 = (*dpiscl_rot_1).primal_0;
+    (&_S1161)->differential_0 = _S1158;
+    DiffPair_vectorx3Cfloatx2C3x3E_0 _S1162;
+    (&_S1162)->primal_0 = _S1144;
+    (&_S1162)->differential_0 = _S1151;
+    s_bwd_prop_mul_2(&_S1161, &_S1162, _S1155.differential_0);
+    float3  _S1163 = - _S1162.differential_0;
     dpray_d_1->primal_0 = (*dpray_d_1).primal_0;
-    dpray_d_1->differential_0 = _S1152.differential_0;
+    dpray_d_1->differential_0 = _S1160.differential_0;
     dpray_o_1->primal_0 = (*dpray_o_1).primal_0;
-    dpray_o_1->differential_0 = _S1154.differential_0;
+    dpray_o_1->differential_0 = _S1162.differential_0;
     dprgb_0->primal_0 = (*dprgb_0).primal_0;
     dprgb_0->differential_0 = dpout_rgb_0;
     dpopacity_1->primal_0 = (*dpopacity_1).primal_0;
     dpopacity_1->differential_0 = 0.0f;
-    Matrix<float, 3, 3>  _S1156 = _S1151.differential_0 + _S1153.differential_0;
+    Matrix<float, 3, 3>  _S1164 = _S1159.differential_0 + _S1161.differential_0;
     dpiscl_rot_1->primal_0 = (*dpiscl_rot_1).primal_0;
-    dpiscl_rot_1->differential_0 = _S1156;
+    dpiscl_rot_1->differential_0 = _S1164;
     dpmean_1->primal_0 = (*dpmean_1).primal_0;
-    dpmean_1->differential_0 = _S1155;
+    dpmean_1->differential_0 = _S1163;
     return;
 }
 
-inline __device__ void s_bwd_evaluate_color_3dgs_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1157, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1158, DiffPair_float_0 * _S1159, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1160, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1161, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1162, float3  _S1163, float _S1164)
+inline __device__ void s_bwd_evaluate_color_3dgs_0(DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1165, DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 * _S1166, DiffPair_float_0 * _S1167, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1168, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1169, DiffPair_vectorx3Cfloatx2C3x3E_0 * _S1170, float3  _S1171, float _S1172)
 {
-    s_bwd_prop_evaluate_color_3dgs_0(_S1157, _S1158, _S1159, _S1160, _S1161, _S1162, _S1163, _S1164);
+    s_bwd_prop_evaluate_color_3dgs_0(_S1165, _S1166, _S1167, _S1168, _S1169, _S1170, _S1171, _S1172);
     return;
 }
 
 inline __device__ void evaluate_color_3dgs_vjp(float3  mean_3, Matrix<float, 3, 3>  iscl_rot_3, float opacity_3, float3  rgb_1, float3  ray_o_3, float3  ray_d_3, float3  v_out_rgb_0, float v_depth_0, float3  * v_mean_1, Matrix<float, 3, 3>  * v_iscl_rot_2, float * v_opacity_1, float3  * v_rgb_0, float3  * v_ray_o_2, float3  * v_ray_d_2)
 {
-    float3  _S1165 = make_float3 (0.0f);
+    float3  _S1173 = make_float3 (0.0f);
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_mean_1;
     (&dp_mean_1)->primal_0 = mean_3;
-    (&dp_mean_1)->differential_0 = _S1165;
-    Matrix<float, 3, 3>  _S1166 = makeMatrix<float, 3, 3> (0.0f);
+    (&dp_mean_1)->differential_0 = _S1173;
+    Matrix<float, 3, 3>  _S1174 = makeMatrix<float, 3, 3> (0.0f);
     DiffPair_matrixx3Cfloatx2C3x2C3x3E_0 dp_iscl_rot_1;
     (&dp_iscl_rot_1)->primal_0 = iscl_rot_3;
-    (&dp_iscl_rot_1)->differential_0 = _S1166;
+    (&dp_iscl_rot_1)->differential_0 = _S1174;
     DiffPair_float_0 dp_opacity_1;
     (&dp_opacity_1)->primal_0 = opacity_3;
     (&dp_opacity_1)->differential_0 = 0.0f;
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_rgb_0;
     (&dp_rgb_0)->primal_0 = rgb_1;
-    (&dp_rgb_0)->differential_0 = _S1165;
+    (&dp_rgb_0)->differential_0 = _S1173;
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_ray_o_1;
     (&dp_ray_o_1)->primal_0 = ray_o_3;
-    (&dp_ray_o_1)->differential_0 = _S1165;
+    (&dp_ray_o_1)->differential_0 = _S1173;
     DiffPair_vectorx3Cfloatx2C3x3E_0 dp_ray_d_1;
     (&dp_ray_d_1)->primal_0 = ray_d_3;
-    (&dp_ray_d_1)->differential_0 = _S1165;
+    (&dp_ray_d_1)->differential_0 = _S1173;
     s_bwd_evaluate_color_3dgs_0(&dp_mean_1, &dp_iscl_rot_1, &dp_opacity_1, &dp_rgb_0, &dp_ray_o_1, &dp_ray_d_1, v_out_rgb_0, v_depth_0);
     *v_mean_1 = dp_mean_1.differential_0;
     *v_iscl_rot_2 = dp_iscl_rot_1.differential_0;

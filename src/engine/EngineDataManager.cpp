@@ -236,6 +236,7 @@ std::map<std::string, float> engine_train_step_managed(
         hs.viewmats     = b.viewmats_view;
         hs.intrins      = b.intrins_view;
         hs.dist_coeffs  = b.dist_coeffs_view;
+        hs.twists       = b.rs_twists_view;
         hs.gt_rgb       = b.rgb_view;
         hs.gt_depth     = b.depth_view;
         hs.gt_normal    = b.normal_view;

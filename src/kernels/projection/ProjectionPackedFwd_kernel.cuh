@@ -224,7 +224,7 @@ void projection_packed_mask_kernel_wrapper(
         projection_packed_mask_kernel<SplatPrimitive, camera_model, distortion, VB> \
         <<<_CEIL_DIV(C*N, block), block, 0, stream>>>( \
             C, N, \
-            splats_world, viewmats, intrins, dist_coeffs_buffer, \
+            splats_world, viewmats, intrins, dist_coeffs_buffer, twists, \
             image_width, image_height, \
             intersection_mask, \
             sh_value_packed, sh_value_bounds, num_sh_buffer, sh_bounds_stride)
@@ -266,7 +266,7 @@ void projection_packed_fwd_kernel_wrapper(
         projection_packed_fwd_kernel<SplatPrimitive, camera_model, distortion, VB> \
         <<<_CEIL_DIV(C*N, block), block, 0, stream>>>( \
             C, N, \
-            splats_world, viewmats, intrins, dist_coeffs_buffer, \
+            splats_world, viewmats, intrins, dist_coeffs_buffer, twists, \
             image_width, image_height, \
             intersection_mask_scan, \
             camera_ids, gaussian_ids, aabbs, sorting_depths, radii, splats_screen, \

@@ -74,6 +74,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB (xmin,ymin,xmax,ymax)
 #endif
     const uint32_t image_width,
@@ -171,6 +172,18 @@ __global__ void rasterize_to_pixels_bwd_kernel(
 
 #if IS_EVAL3D
     float3 ray_o = SlangProjectionUtils::transform_ray_o(R, t);
+    // Rolling shutter: ray_d needs the full per-pixel pose, but the ray ORIGIN
+    // only moves by -s * (R^T v) to first order in the twist, which is a
+    // block-level vector and a scalar -- no extra shared memory per pixel.
+    float3 rs_omega = {0.f, 0.f, 0.f}, rs_v = {0.f, 0.f, 0.f}, rs_Rt_v = {0.f, 0.f, 0.f};
+    float2 rs_axis = {0.f, 0.f};
+    if (twists != nullptr) {
+        const float* q = twists + image_id * 8;
+        rs_omega = {q[0], q[1], q[2]};
+        rs_v = {q[3], q[4], q[5]};
+        rs_axis = {q[6], q[7]};
+        rs_Rt_v = SlangProjectionUtils::transform_ray_d(R, rs_v);  // mul(v, R) = R^T v
+    }
     float3 total_v_ray_o = make_float3(0.0f, 0.0f, 0.0f);
 
     __shared__ float3 shared_v_ray_d[output_viewmat_grad ? BLOCK_SIZE : 1];
@@ -198,7 +211,13 @@ __global__ void rasterize_to_pixels_bwd_kernel(
             (int)camera_model, dist_coeffs,
             &raydir
         );
-        float3 ray_d = SlangProjectionUtils::transform_ray_d(R, raydir);  // mul(raydir, R);
+        float3x3 Rp = R;
+        if (twists != nullptr) {
+            float3 tp;
+            SlangProjectionUtils::shutter_ray_pose(
+                R, t, rs_omega, rs_v, rs_axis, {px, py}, &Rp, &tp);
+        }
+        float3 ray_d = SlangProjectionUtils::transform_ray_d(Rp, raydir);
         shared_ray_d_pix_bin_final[pix_id_local] =
             {ray_d.x, ray_d.y, ray_d.z, __int_as_float(bin_final)};
     #else
@@ -399,7 +418,15 @@ __global__ void rasterize_to_pixels_bwd_kernel(
             // evaluate alpha and early skip
         #if IS_EVAL3D
             float3 ray_d = {ray_d_pix_bin_final.x, ray_d_pix_bin_final.y, ray_d_pix_bin_final.z};
-            float alpha = splat.evaluate_alpha(ray_o, ray_d);
+            float3 ray_o_pix = ray_o;
+            if (twists != nullptr) {
+                const int gx = blockIdx.z * TILE_SIZE_DX + pix_id % TILE_SIZE_DX;
+                const int gy = blockIdx.y * TILE_SIZE_DY + pix_id / TILE_SIZE_DX;
+                const float s_pix = rs_axis.x * ((float)gx + 0.5f) +
+                                    rs_axis.y * ((float)gy + 0.5f) - 0.5f;
+                ray_o_pix = ray_o - s_pix * rs_Rt_v;
+            }
+            float alpha = splat.evaluate_alpha(ray_o_pix, ray_d);
             if (alpha <= ALPHA_THRESHOLD || dot(ray_d, ray_d) == 0.0f)
                 continue;
         #else
@@ -409,7 +436,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         #endif
 
         #if IS_EVAL3D
-            RenderOutput color = splat.evaluate_color(ray_o, ray_d);
+            RenderOutput color = splat.evaluate_color(ray_o_pix, ray_d);
             if (color.depth <= 0.0f)
                 continue;
         #else
@@ -530,8 +557,8 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         #endif
             {
             #if IS_EVAL3D
-                splat.evaluate_alpha_vjp(ray_o, ray_d, v_alpha, v_splat, v_ray_o_alpha, v_ray_d_alpha);
-                splat.evaluate_color_vjp(ray_o, ray_d, v_color, v_splat, v_ray_o_color, v_ray_d_color);
+                splat.evaluate_alpha_vjp(ray_o_pix, ray_d, v_alpha, v_splat, v_ray_o_alpha, v_ray_d_alpha);
+                splat.evaluate_color_vjp(ray_o_pix, ray_d, v_color, v_splat, v_ray_o_color, v_ray_d_color);
             #else
                 splat.evaluate_alpha_vjp(px, py, v_alpha, v_splat);
                 splat.evaluate_color_vjp(px, py, v_color, v_splat);
@@ -666,6 +693,7 @@ void rasterize_to_pixels_bwd_kernel_wrapper(
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB (xmin,ymin,xmax,ymax)
 #endif
     const uint32_t image_width,
@@ -724,7 +752,7 @@ void rasterize_to_pixels_bwd_kernel_wrapper(
         I, N, n_isects,
         gaussian_ids, splat_wbuffer, splat_sbuffer,
     #if IS_EVAL3D
-        viewmats, intrins, dist_coeffs_buffer, aabb,
+        viewmats, intrins, dist_coeffs_buffer, twists, aabb,
     #endif
         image_width, image_height, tile_width, tile_height,
         tile_offsets, flatten_ids,

@@ -27,13 +27,15 @@ static_assert(sizeof(RasterFwd2dParams) == 14 * 8 + 6 * 4,
 struct RasterFwd3dgutParams {
     uint64_t means, quats, scales, gaussian_ids;
     uint64_t s_scale, s_opac, s_rgb;
-    uint64_t viewmats, intrins, dist_coeffs, aabb;
+    uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [I,8] rolling shutter
+    uint64_t aabb;
     uint64_t tile_offsets, flatten_ids;
     uint64_t out_rgb, out_depth, out_T, out_last_ids;
     uint64_t dist_rgb, dist_depth, out_median;
     uint32_t I, N, n_isects, width, height, tile_width, tile_height;
 };
-static_assert(sizeof(RasterFwd3dgutParams) == 20 * 8 + 7 * 4 + 4 /*pad*/,
+static_assert(sizeof(RasterFwd3dgutParams) == 21 * 8 + 7 * 4 + 4 /*pad*/,
               "params layout must match the slang struct");
 
 struct RasterOutputs {
@@ -208,6 +210,7 @@ std::tuple<
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceTensor2D<float4> aabb,  // [..., N] projected 2D AABB
     const uint32_t image_width,
     const uint32_t image_height,
@@ -239,6 +242,7 @@ std::tuple<
     p.viewmats = std::get<0>(viewmats);
     p.intrins = std::get<0>(intrins);
     p.dist_coeffs = vkk::or_fallback(std::get<0>(dist_coeffs));
+    p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
     p.aabb = (uint64_t)aabb.data_ptr();
     p.tile_offsets = (uint64_t)tile_offsets.data_ptr();
     p.flatten_ids = (uint64_t)flatten_ids.data_ptr();
@@ -263,7 +267,8 @@ std::tuple<
     // 3 = kRasterPacked (gaussian_ids present), 4 = distortion tier.
     backend::vk::SpecList spec{cd.cam, dist_spec(dist_type),
                                output_median ? 1u : 0u,
-                               gaussian_ids.data_ptr() ? 1u : 0u, cd.dist};
+                               gaussian_ids.data_ptr() ? 1u : 0u, cd.dist,
+                               twists.has_value() ? 1u : 0u};
     dispatch_raster("rasterize_fwd.rasterize_fwd_3dgut", spec,
                     (uint32_t)batch, tile_width, tile_height, &p, sizeof(p));
 

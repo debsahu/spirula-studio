@@ -69,6 +69,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB (xmin,ymin,xmax,ymax)
 #endif
     const uint32_t image_width,
@@ -111,7 +112,6 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     float fx = intrin.x, fy = intrin.y, cx = intrin.z, cy = intrin.w;
     CameraDistortionCoeffsT<distortion> dist_coeffs = dist_coeffs_buffer.load<distortion>(image_id);
 
-    float3 ray_o = SlangProjectionUtils::transform_ray_o(R, t);
 #endif
 
     // this thread's pixel within the micro-tile
@@ -123,6 +123,16 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     bool inside = (i < image_height && j < image_width);
 
 #if IS_EVAL3D
+    // Rolling shutter: this pixel's row IS the shutter time, so the pose comes
+    // straight from it -- the projection's implicit solve has no counterpart here.
+    if (twists != nullptr) {
+        const float* q = twists + image_id * 8;
+        float3x3 sR; float3 st;
+        SlangProjectionUtils::shutter_ray_pose(
+            R, t, {q[0], q[1], q[2]}, {q[3], q[4], q[5]}, {q[6], q[7]}, {px, py}, &sR, &st);
+        R = sR; t = st;
+    }
+    float3 ray_o = SlangProjectionUtils::transform_ray_o(R, t);
     float3 raydir;
     inside &= SlangDistortion<distortion>::generate_ray(
         {(px-cx)/fx, (py-cy)/fy},
@@ -337,6 +347,7 @@ void rasterize_to_pixels_fwd_kernel_wrapper(
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,  // [C, 8] rolling shutter, or null
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB (xmin,ymin,xmax,ymax)
 #endif
     const uint32_t image_width,
@@ -371,7 +382,7 @@ void rasterize_to_pixels_fwd_kernel_wrapper(
         I, N, n_isects,
         gaussian_ids, splat_wbuffer, splat_sbuffer,
     #if IS_EVAL3D
-        viewmats, intrins, dist_coeffs_buffer, aabb,
+        viewmats, intrins, dist_coeffs_buffer, twists, aabb,
     #endif
         image_width, image_height, tile_width, tile_height, tile_offsets, flatten_ids,
         render_colors, render_Ts, last_ids,

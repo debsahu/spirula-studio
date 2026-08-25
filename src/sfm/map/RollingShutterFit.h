@@ -28,8 +28,10 @@ struct RollingShutterOptions {
     // Search bound on |readout| / median frame interval. Above 1 the readout
     // outlasts the interval, which only a subsampled capture can do.
     double max_ratio = 1.5;
-    // Relative cost drop below which the fit is called noise and rejected.
-    double min_gain = 0.01;
+    // Relative cost drop below which the readout fit is called noise. 5%, not
+    // 1%: a loosened reprojection filter lets a global-shutter capture reach
+    // 2.1% by overfitting (measured, BS-RSC Scene1 GS).
+    double min_gain = 0.05;
     // Observations sampled for one cost evaluation; the search runs ~60 of them.
     size_t sample_obs = 300000;
     // 0 picks for itself: a trajectory twist converges in two, a per-image one
@@ -42,6 +44,10 @@ struct RollingShutterOptions {
     // 0.5 measured best: below it the free twist absorbs pose error instead of
     // the shutter, and at 0 one round leaves the twist worse than no twist.
     double twist_prior = 0.5;
+    // Floor for the free-twist fallback, calibrated against a global-shutter
+    // control on the same rig: BS-RSC Scene1 reads 53% rolling / 12% global
+    // once the reprojection filter is loosened enough to keep the evidence.
+    double free_twist_gain = 0.25;
     bool verbose = true;
 };
 
@@ -200,6 +206,10 @@ inline double shutterCost(const Reconstruction& rec, const ShutterCostSet& cs,
 
 struct ShutterFit {
     ShutterDir dir = ShutterDir::Global;  // Global unless the guard accepted it
+    // Set when the axis came from the free-twist fallback rather than the
+    // readout search: there is no readout to report and the per-image prior
+    // must not pull the twist back toward a trajectory estimate of zero.
+    bool free_twist = false;
     double readout = 0;
     double gain = 0;  // relative cost drop against global shutter
     // What the search settled on before the guard. A camera can have a real
@@ -250,49 +260,6 @@ inline void searchReadout(const Reconstruction& rec, const ShutterSequence& sq,
             h *= 0.5;
         }
     }
-}
-
-// Fit one camera group: try both readout axes, keep the better, and reject the
-// fit outright unless it beats global shutter by `min_gain`. A tripod capture
-// has no signal at all and must come back Global rather than fitted to noise.
-inline ShutterFit fitShutter(const Reconstruction& rec, const ShutterSequence& sq,
-                             const RollingShutterOptions& opt) {
-    ShutterFit fit;
-    if (sq.image_ids.size() < 3) return fit;
-    const Camera& cam = rec.cameras.at(sq.camera_id);
-    ShutterCostSet cs = buildShutterCostSet(rec, sq.image_ids, opt.sample_obs);
-    if (cs.obs.size() < 100) return fit;
-
-    std::map<uint32_t, Twist> zero;
-    const double base = shutterCost(rec, cs, zero, ShutterAxis{});
-    if (!(base > 0)) return fit;
-
-    std::vector<ShutterDir> dirs;
-    if (opt.mode == "vertical") dirs = {ShutterDir::Vertical};
-    else if (opt.mode == "horizontal") dirs = {ShutterDir::Horizontal};
-    else dirs = {ShutterDir::Vertical, ShutterDir::Horizontal};
-
-    for (ShutterDir d : dirs) {
-        ShutterAxis axis = ShutterAxis::of(d, cam.width, cam.height);
-        if (axis.ax == 0 && axis.ay == 0) continue;
-        double r = 0, c = base;
-        searchReadout(rec, sq, cs, axis, opt.max_ratio, r, c);
-        const double gain = (base - c) / base;
-        if (opt.verbose)
-            fprintf(stderr, "[rs] camera %u %s: readout %.4f frame, cost %.2f%% of global\n",
-                    sq.camera_id, shutterDirName(d), r / sq.median_dt, 100.0 * (1.0 - gain));
-        if (gain > fit.best_gain) {
-            fit.best_gain = gain;
-            fit.best_dir = d;
-            fit.best_readout = r;
-        }
-    }
-    if (fit.best_gain >= opt.min_gain && fit.best_readout != 0) {
-        fit.dir = fit.best_dir;
-        fit.readout = fit.best_readout;
-        fit.gain = fit.best_gain;
-    }
-    return fit;
 }
 
 // Symmetric 6x6 by Gaussian elimination with partial pivoting. False if the
@@ -415,6 +382,102 @@ inline bool refineImageTwist(const Reconstruction& rec, const Image& im, const C
     return true;
 }
 
+// What a free per-image twist can explain on this axis, as a fraction of the
+// robust cost. Measured floor is ~1% (a global-shutter capture of the same
+// scene); a shutter the readout search cannot see reads tens of percent.
+inline double freeTwistGain(const Reconstruction& rec, const ShutterSequence& sq,
+                            const ShutterAxis& ax, double loss_param) {
+    const Camera& cam = rec.cameras.at(sq.camera_id);
+    const double d2 = loss_param * loss_param;
+    auto imageCost = [&](const Image& im, const Twist& xi) {
+        double c = 0;
+        for (size_t f = 0; f < im.point3D_ids.size(); f++) {
+            if (im.point3D_ids[f] == kInvalidPoint3D) continue;
+            auto it = rec.points3D.find(im.point3D_ids[f]);
+            if (it == rec.points3D.end()) continue;
+            const Pose p = poseAtShutterTime(im.pose, xi, ax.time(im.points2D[f]));
+            const Vec3 xc = mul(p.R, it->second.xyz) + p.t;
+            if (!cam.isSpherical() && xc.z <= 1e-9) continue;
+            const Vec2 q = cam.project(xc);
+            const double e2 = (q.x - im.points2D[f].x) * (q.x - im.points2D[f].x) +
+                              (q.y - im.points2D[f].y) * (q.y - im.points2D[f].y);
+            c += (e2 <= d2) ? e2 : (2.0 * loss_param * std::sqrt(e2) - d2);
+        }
+        return c;
+    };
+    double c0 = 0, c1 = 0;
+    for (uint32_t id : sq.image_ids) {
+        const Image& im = rec.images.at(id);
+        Twist xi{};
+        c0 += imageCost(im, xi);
+        refineImageTwist(rec, im, cam, ax, 0.0, loss_param, Twist{}, xi);
+        c1 += imageCost(im, xi);
+    }
+    return c0 > 0 ? 1.0 - c1 / c0 : 0.0;
+}
+
+
+// Fit one camera group: try both readout axes, keep the better, and reject the
+// fit outright unless it beats global shutter by `min_gain`. A tripod capture
+// has no signal at all and must come back Global rather than fitted to noise.
+inline ShutterFit fitShutter(const Reconstruction& rec, const ShutterSequence& sq,
+                             const RollingShutterOptions& opt) {
+    ShutterFit fit;
+    if (sq.image_ids.size() < 3) return fit;
+    const Camera& cam = rec.cameras.at(sq.camera_id);
+    ShutterCostSet cs = buildShutterCostSet(rec, sq.image_ids, opt.sample_obs);
+    if (cs.obs.size() < 100) return fit;
+
+    std::map<uint32_t, Twist> zero;
+    const double base = shutterCost(rec, cs, zero, ShutterAxis{});
+    if (!(base > 0)) return fit;
+
+    std::vector<ShutterDir> dirs;
+    if (opt.mode == "vertical") dirs = {ShutterDir::Vertical};
+    else if (opt.mode == "horizontal") dirs = {ShutterDir::Horizontal};
+    else dirs = {ShutterDir::Vertical, ShutterDir::Horizontal};
+
+    for (ShutterDir d : dirs) {
+        ShutterAxis axis = ShutterAxis::of(d, cam.width, cam.height);
+        if (axis.ax == 0 && axis.ay == 0) continue;
+        double r = 0, c = base;
+        searchReadout(rec, sq, cs, axis, opt.max_ratio, r, c);
+        const double gain = (base - c) / base;
+        if (opt.verbose)
+            fprintf(stderr, "[rs] camera %u %s: readout %.4f frame, cost %.2f%% of global\n",
+                    sq.camera_id, shutterDirName(d), r / sq.median_dt, 100.0 * (1.0 - gain));
+        if (gain > fit.best_gain) {
+            fit.best_gain = gain;
+            fit.best_dir = d;
+            fit.best_readout = r;
+        }
+    }
+    if (fit.best_gain >= opt.min_gain && fit.best_readout != 0) {
+        fit.dir = fit.best_dir;
+        fit.readout = fit.best_readout;
+        fit.gain = fit.best_gain;
+        return fit;
+    }
+    // The readout search sees nothing when the trajectory is a poor stand-in for
+    // the velocity during readout. A free per-image twist still finds it, and
+    // the axis it prefers names the direction (docs/notes/rolling-shutter.md).
+    if (!opt.per_image_twist) return fit;
+    for (ShutterDir d : dirs) {
+        const ShutterAxis axis = ShutterAxis::of(d, cam.width, cam.height);
+        if (axis.ax == 0 && axis.ay == 0) continue;
+        const double g = freeTwistGain(rec, sq, axis, cs.loss_param);
+        if (opt.verbose)
+            fprintf(stderr, "[rs] camera %u %s: a free per-image twist explains %.1f%%\n",
+                    sq.camera_id, shutterDirName(d), 100 * g);
+        if (g > fit.gain && g >= opt.free_twist_gain) {
+            fit.dir = d;
+            fit.gain = g;
+            fit.free_twist = true;
+            fit.readout = 0;
+        }
+    }
+    return fit;
+}
 // Fill `out` from the current poses: every registered image gets the twist its
 // camera group's readout implies, and every camera its fitted direction.
 inline void applyShutterFits(const Reconstruction& rec,

@@ -485,6 +485,7 @@ struct Raster3dgutBwdParams {  // via params ring
     float* viewmats;     // [I,16]
     float4* intrins;     // [I]
     float* dist_coeffs;  // [I,8] (fallback-backed)
+    float* twists;       // [I,8] rolling shutter
     float4* aabb;
     int* tile_offsets;
     int* flatten_ids;
@@ -536,11 +537,20 @@ struct VFrag3dgut_ {
 // One sweep step for the 3dgut entry.
 [ForceInline]
 void _rb3_step(Raster3dgutBwdParams p, int pix_id, int splat_idx,
-               bool active, float3 ray_o, Frag3dgut_ splat,
+               bool active, float3 ray_o_block, Frag3dgut_ splat,
                inout VFrag3dgut_ v_splat, inout float accum_weight,
                inout float accum_weight_den,
-               inout float3 total_v_ray_o) {
+               inout float3 total_v_ray_o,
+               uint3 wg, float2 rs_axis, float3 rs_Rt_v) {
     if (pix_id < 0 || pix_id >= (int)RB_BLOCK || !active) return;
+    float3 ray_o = ray_o_block;
+    if (kRollingShutter != 0) {
+        int gx = int(wg.z * TILE_SIZE_DX) + (pix_id % int(TILE_SIZE_DX));
+        int gy = int(wg.y * TILE_SIZE_DY) + (pix_id / int(TILE_SIZE_DX));
+        float s_pix = rs_axis.x * (float(gx) + 0.5f) +
+                      rs_axis.y * (float(gy) + 0.5f) - 0.5f;
+        ray_o = ray_o_block - s_pix * rs_Rt_v;
+    }
     float4 rb = _rb_raybin[pix_id];
     if (splat_idx > asint(rb.w)) return;
     float3 ray_d = rb.xyz;
@@ -636,6 +646,17 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     float3 tvec = float3(vm[3], vm[7], vm[11]);
     float4 intrin = p.intrins[image_id];
     float3 ray_o = transform_ray_o(R, tvec);
+    // ray_d needs the full per-pixel pose; the ray ORIGIN only moves by
+    // -s * (R^T v) to first order, a block constant times a per-pixel scalar.
+    float3 rs_omega = float3(0.0f), rs_v = float3(0.0f), rs_Rt_v = float3(0.0f);
+    float2 rs_axis = float2(0.0f);
+    if (kRollingShutter != 0) {
+        float* q = p.twists + image_id * 8;
+        rs_omega = float3(q[0], q[1], q[2]);
+        rs_v = float3(q[3], q[4], q[5]);
+        rs_axis = float2(q[6], q[7]);
+        rs_Rt_v = transform_ray_d(R, rs_v);
+    }
     float3 total_v_ray_o = float3(0.0f);
 
     // ---- load pixel state (2 pixels per thread) ----
@@ -652,7 +673,12 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
         bool ray_ok = false;
         SS_DISPATCH_DIST(_rb_ray)
         inside = inside && ray_ok;
-        float3 ray_d = transform_ray_d(R, raydir);
+        float3x3 Rp = R;
+        if (kRollingShutter != 0) {
+            float3 tp;
+            shutter_ray_pose(R, tvec, rs_omega, rs_v, rs_axis, float2(px, py), Rp, tp);
+        }
+        float3 ray_d = transform_ray_d(Rp, raydir);
         _rb_raybin[pix] = float4(ray_d, asfloat(bin_final));
         if (kViewmatGrad != 0) _rb_vrayd[pix] = float3(0.0f);
         _rb_load_pixel_state(
@@ -768,7 +794,8 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
             for (int t = 0; t < batch_size + (int)RB_BLOCK - 1; t++) {
                 _rb3_step(p, t - int(tid), splat_idx, active, ray_o, splat,
                           v_splat, accum_weight, accum_weight_den,
-                          total_v_ray_o);
+                          total_v_ray_o,
+                          wg, rs_axis, rs_Rt_v);
                 GroupMemoryBarrierWithGroupSync();
             }
 
@@ -841,3 +868,8 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 // Declared last: spec IDs follow declaration order (see dist_spec.slang).
 [SpecializationConstant]
 const int kDistortion = 0;
+
+// Declared LAST so a host SpecList that stops at kDistortion leaves this 0 and
+// the shutter folds out of the pipeline.
+[SpecializationConstant]
+const int kRollingShutter = 0;

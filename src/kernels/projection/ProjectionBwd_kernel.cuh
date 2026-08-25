@@ -175,7 +175,7 @@ void projection_fused_bwd_kernel_wrapper(
         projection_fused_bwd_kernel<SplatPrimitive, camera_model, distortion, VB> \
         <<<_CEIL_DIV(C*N, block), block, 0, stream>>>( \
             C, N, \
-            splats_world, viewmats, intrins, dist_coeffs_buffer, \
+            splats_world, viewmats, intrins, dist_coeffs_buffer, twists, \
             image_width, image_height, \
             camera_ids, gaussian_ids, aabb, v_splats_screen, \
             v_splats_world, v_viewmats, \

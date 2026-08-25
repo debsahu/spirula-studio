@@ -293,6 +293,7 @@ static std::map<std::string, float> _engine_train_step_split_one_per_camera(
     TorchTensorView viewmats,      // [B, 4, 4]
     TorchTensorView intrins,       // [B, 4]
     TorchTensorView dist_coeffs,   // [B, K]
+    TorchTensorView twists,        // [B, 8] rolling shutter, or null
     TorchTensorView gt_rgb,        // [B, H, W, 3] or null
     TorchTensorView gt_depth,      // [B, Hd, Wd, 1] or null
     TorchTensorView gt_normal,     // [B, Hn, Wn, 3] or null
@@ -318,7 +319,7 @@ static std::map<std::string, float> _engine_train_step_split_one_per_camera(
     // standard path with grad_scale = 1.
     if (B == 1) {
         set_camera_params(width, height, camera_model, distortion,
-                          viewmats, intrins, dist_coeffs);
+                          viewmats, intrins, dist_coeffs, twists);
         set_training_data(gt_rgb, gt_depth, gt_normal, gt_alpha,
                           cfg.loss.input_depth_is_ray_depth);
         return _engine_train_step_after_setup(
@@ -377,7 +378,9 @@ static std::map<std::string, float> _engine_train_step_split_one_per_camera(
         TorchTensorView aph_k = _slice_tv_first_dim(gt_alpha,    k);
         TorchTensorView bgi_k = _slice_tv_first_dim(bilagrid_cam_indices, k);
 
-        set_camera_params(width, height, camera_model, distortion, vmt_k, itr_k, dst_k);
+        TorchTensorView tws_k = _slice_tv_first_dim(twists, k);
+        set_camera_params(width, height, camera_model, distortion, vmt_k, itr_k, dst_k,
+                          tws_k);
         set_training_data(rgb_k, dep_k, nrm_k, aph_k,
                           cfg.loss.input_depth_is_ray_depth);
 
@@ -509,6 +512,7 @@ std::map<std::string, float> engine_train_step_hetero(
             TorchTensorView vmt_c = _slice_tv_first_dim(s.viewmats,    c);
             TorchTensorView itr_c = _slice_tv_first_dim(s.intrins,     c);
             TorchTensorView dst_c = _slice_tv_first_dim(s.dist_coeffs, c);
+            TorchTensorView tws_c = _slice_tv_first_dim(s.twists,      c);
             TorchTensorView rgb_c = _slice_tv_first_dim(s.gt_rgb,      c);
             TorchTensorView dep_c = _slice_tv_first_dim(s.gt_depth,    c);
             TorchTensorView nrm_c = _slice_tv_first_dim(s.gt_normal,   c);
@@ -516,7 +520,7 @@ std::map<std::string, float> engine_train_step_hetero(
             TorchTensorView bgi_c = _slice_tv_first_dim(s.bilagrid_cam_indices, c);
 
             set_camera_params(s.width, s.height, s.camera_model, s.distortion,
-                              vmt_c, itr_c, dst_c);
+                              vmt_c, itr_c, dst_c, tws_c);
             set_training_data(rgb_c, dep_c, nrm_c, aph_c,
                               cfg.loss.input_depth_is_ray_depth);
 
@@ -580,15 +584,10 @@ std::map<std::string, float> engine_train_step(
     const EngineStepConfig& cfg
 ) {
     if (cfg.optim.split_batch) {
-        // The split path re-installs one camera at a time; the twist would have
-        // to be sliced with it, which is not wired (docs/notes/rolling-shutter.md).
-        if (std::get<0>(twists) != 0)
-            throw std::runtime_error(
-                "rolling shutter is not supported with split_batch yet");
         return _engine_train_step_split_one_per_camera(
             step, max_steps, std::move(primitive), sh_degree, packed,
             width, height, std::move(camera_model), std::move(distortion),
-            viewmats, intrins, dist_coeffs,
+            viewmats, intrins, dist_coeffs, twists,
             gt_rgb, gt_depth, gt_normal, gt_alpha,
             bilagrid_cam_indices, cfg);
     }

@@ -34,7 +34,9 @@ static_assert(sizeof(Raster2dBwdParams) == 28 * 8 + 8 * 4,
 // Mirrors Raster3dgutBwdParams.
 struct Raster3dgutBwdParams {
     uint64_t means, quats, scales, s_scale, s_opac, s_rgb, gaussian_ids;
-    uint64_t viewmats, intrins, dist_coeffs, aabb;
+    uint64_t viewmats, intrins, dist_coeffs;
+    uint64_t twists = 0;  // [I,8] rolling shutter
+    uint64_t aabb;
     uint64_t tile_offsets, flatten_ids, render_Ts, last_ids;
     uint64_t out_rgb, out_depth, dist_rgb, dist_depth, awmap;
     uint64_t v_out_rgb, v_out_depth, v_render_Ts, v_median, v_dist_rgb,
@@ -43,7 +45,7 @@ struct Raster3dgutBwdParams {
     uint64_t o_accum_weight, o_accum_weight_den, v_viewmats;
     uint32_t I, N, n_isects, width, height, tile_width, tile_height, _pad0;
 };
-static_assert(sizeof(Raster3dgutBwdParams) == 34 * 8 + 8 * 4,
+static_assert(sizeof(Raster3dgutBwdParams) == 35 * 8 + 8 * 4,
               "params layout must match the slang struct");
 
 uint32_t dist_spec_bwd(DistortionType dist_type) {
@@ -199,6 +201,7 @@ std::tuple<
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceTensor2D<float4> aabb,
     const uint32_t image_width,
     const uint32_t image_height,
@@ -272,6 +275,7 @@ std::tuple<
         p.viewmats = std::get<0>(viewmats);
         p.intrins = std::get<0>(intrins);
         p.dist_coeffs = vkk::or_fallback(std::get<0>(dist_coeffs));
+        p.twists = twists.has_value() ? std::get<0>(twists.value()) : 0;
         p.aabb = (uint64_t)aabb.data_ptr();
         p.tile_offsets = (uint64_t)tile_offsets.data_ptr();
         p.flatten_ids = (uint64_t)flatten_ids.data_ptr();
@@ -326,7 +330,7 @@ std::tuple<
             cd.cam,         spec_dist,
             md ? 1u : 0u,   (uint32_t)accum_mode,
             need_viewmat_grad ? 1u : 0u, packed ? 1u : 0u,
-            cd.dist};
+            cd.dist, twists.has_value() ? 1u : 0u};
         vkk::dispatch_ring("rasterize_bwd.rasterize_bwd_3dgut", spec, I,
                            tile_height * 2, tile_width * 2, &p, sizeof(p));
     }

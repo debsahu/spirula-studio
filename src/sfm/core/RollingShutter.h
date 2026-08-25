@@ -139,9 +139,11 @@ struct RollingShutterData {
     std::map<uint32_t, ShutterModel> cameras;
     std::map<uint32_t, ImageRS> images;
 
+    // A direction is what makes a camera active, not a readout: the free-twist
+    // fallback names an axis and leaves the readout at 0.
     bool active() const {
         for (const auto& kv : cameras)
-            if (kv.second.dir != ShutterDir::Global && kv.second.readout != 0) return true;
+            if (kv.second.dir != ShutterDir::Global) return true;
         return false;
     }
 };

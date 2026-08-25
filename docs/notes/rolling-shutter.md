@@ -90,6 +90,57 @@ it from every Nth frame only (truth 0.900 of a frame interval):
 
 So subsampling degrades this gracefully; it does not break it.
 
+## The mapper eats the evidence
+
+**A shutter strong enough to matter is strong enough to make a global-shutter
+mapper delete its own evidence**, and that is why the finishing pass finds
+nothing on captures that obviously have one.
+
+BS-RSC Scene1 ships paired global- and rolling-shutter images of the same scene,
+which makes the mechanism measurable. On the rolling-shutter set at the default
+`--max-error`, the reconstruction is clean (0.25 px over 54k observations) and
+the fit reads zero -- because the surviving observations are only the rows where
+`s ~ 0`:
+
+| row band (of 768) | 0 | 96 | 192 | 288 | 384 | 480 | 576 | 672 |
+|---|---|---|---|---|---|---|---|---|
+| observations kept | 0% | 0% | 0% | 3% | 85% | 84% | 21% | 0% |
+
+Every off-centre correspondence disagrees with a global-shutter pose, the
+reprojection filter drops it, and what is left is the band the shutter does not
+move. The structure is then triangulated from that band, so the points are wrong
+in a way correlated with the shutter -- re-attaching the dropped features after
+the fact does not recover it either (measured: a flat curve).
+
+Loosening the filter keeps the evidence -- 27% of features triangulated becomes
+62%, rows 96-576 instead of 384-576 -- and the signal comes back.
+
+## When the trajectory twist is the wrong model
+
+Even with the evidence kept, the *readout search* still reads ~0 on that capture:
+a free per-image twist there is 5.9x larger than the trajectory implies and points
+in an uncorrelated direction (cos -0.18). The frames are far enough apart that the
+average velocity over a central difference says little about the velocity during
+one readout -- exactly the case `--rs-per-image-twist` exists for.
+
+So when the readout search is rejected, the fit falls back to scoring **which axis
+a free per-image twist explains better**. That is a real discriminator:
+
+| | vertical | horizontal |
+|---|---|---|
+| BS-RSC rolling shutter | **55.8%** | 26.6% |
+| BS-RSC global shutter (same scene) | 15.0% | 19.7% |
+
+It picks vertical on the rolling-shutter set, which is right, and stays under the
+floor on the global-shutter one. Both thresholds are calibrated against that pair
+and neither is generous: `min_gain` is 5% because a loosened filter lets a
+global-shutter capture reach 2.1% by overfitting, and `free_twist_gain` is 25%
+because the same capture reaches 20%.
+
+**So a strongly rolling-shutter capture needs both** a loosened `--max-error` and
+`--rs-per-image-twist`. Neither is the default, because both cost accuracy on the
+overwhelming majority of captures that have no shutter worth correcting.
+
 ## The guard
 
 `min_gain` (1%) is not optional. A capture with no shutter -- a tripod, a global
@@ -272,14 +323,39 @@ they differ by the constant `exp(s*omega)` and nothing optimizes camera poses
 under a rolling shutter yet. SH colour keeps the reference pose -- the view
 direction moves under 0.05 rad over a readout.
 
-**3DGUT refuses.** Its alpha comes from a world-space ray the eval3d rasterizer
-builds per pixel, and that ray is still global-shutter, so binning a Gaussian at
-its shutter pose while evaluating it at another would render neither. The engine
-throws rather than do that. Lifting it is the one remaining piece and needs no
-solve at all: the pixel's row is known, so the ray comes from the pose at
-`s = dot(axis, pixel) - 0.5` directly. K > 1 (split faces) also stays
-global-shutter -- each face points a different way and the twist would have to
-turn with it.
+**3DGUT and `split_batch` are in.** The eval3d rasterizer builds each pixel's
+world-space ray from the pose at `s = dot(axis, pixel) - 0.5` -- no solve, the
+row is known. In the backward the ray ORIGIN only moves by `-s * (R^T v)` to
+first order, which is a block constant times a per-pixel scalar, so it costs no
+extra shared memory in a kernel that is already tight on it. `split_batch` and
+the mixed-resolution sub-batch path slice the `[C,8]` twist alongside `viewmats`.
+
+Both are held to CUDA/Vulkan parity with a **non-zero** twist armed in
+`render_parity` and `raster_bwd_parity`: the per-pixel ray shutter is written
+twice, once in CUDA and once in Slang, and that is what pins them together.
+
+**The fisheye/equirect warp path still refuses**, and the reason is not plumbing.
+A split face is a pinhole view of a fisheye sensor, so the shutter time of a face
+pixel is a function of the pixel it came from on the *source* sensor -- which is
+not linear in face coordinates, and `rs_axis` can only express a linear one.
+Fitting a plane to it costs:
+
+| face | s range | linear-fit residual |
+|---|---|---|
+| centre, 60 deg | +-0.236 | 3.9% of range |
+| centre, 90 deg | +-0.354 | 7.6% |
+| side, 60 deg | +-0.458 | 13.4% |
+| side, 90 deg | +-0.696 | **18.3%** |
+
+An 18% error in `s` is 18% of the correction applied in the wrong place, smoothly
+across the face -- exactly the shape that biases geometry rather than blurring
+it. So the warp path needs the exact form instead: the rasterizer already has the
+face ray, so rotating it into the source camera frame and projecting it through
+`source_project` (camera_source.slang) gives the true source pixel and hence the
+true `s`. That costs a per-camera payload of the face rotation, the source
+intrinsics and model id, and it is the same reprojection the Gaussian-centre
+solve in `shutter_camera` would need. Equirectangular needs none of it -- a 360
+rig has no rolling shutter to correct.
 
 Two more pieces are designed but unbuilt. The **covariance smear**: a Gaussian
 spanning many rows is stretched, and to first order that is a rank-1 update to

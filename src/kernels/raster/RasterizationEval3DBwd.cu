@@ -27,6 +27,7 @@ void rasterize_to_pixels_eval3d_bwd_kernel_wrapper(
     const float *__restrict__ viewmats, // [B, C, 4, 4]
     const float4 *__restrict__ intrins,  // [B, C, 4], fx, fy, cx, cy
     const CameraDistortionCoeffsBuffer dist_coeffs_buffer,
+    const float *__restrict__ twists,
     const float4 *__restrict__ aabb,  // [..., N] projected 2D AABB
     const uint32_t image_width,
     const uint32_t image_height,
@@ -67,6 +68,7 @@ inline void launch_rasterize_to_pixels_eval3d_bwd_kernel(
     const CameraModelType camera_model,
     const CameraDistortionType distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceTensor2D<float4> aabb,  // [..., N] projected 2D AABB, for sub-tile culling
     // image size
     const uint32_t image_width,
@@ -112,7 +114,7 @@ inline void launch_rasterize_to_pixels_eval3d_bwd_kernel(
             (cudaStream_t)0, I, N, n_isects, \
             (uint32_t*)gaussian_ids.data_ptr(), \
             splat_wbuffer, splat_sbuffer, \
-            (const float*)std::get<0>(viewmats), (const float4*)std::get<0>(intrins), dist_coeffs, \
+            (const float*)std::get<0>(viewmats), (const float4*)std::get<0>(intrins), dist_coeffs, _rs_ptr(twists), \
             (const float4*)aabb.data_ptr(), \
             image_width, image_height, tile_width, tile_height, \
             tile_offsets.data_ptr(), flatten_ids.data_ptr(), \
@@ -165,6 +167,7 @@ inline std::tuple<
     const CameraModelType camera_model,
     const CameraDistortionType distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceTensor2D<float4> aabb,  // [..., N] projected 2D AABB, for sub-tile culling
     // image size
     const uint32_t image_width,
@@ -222,7 +225,7 @@ inline std::tuple<
     launch_rasterize_to_pixels_eval3d_bwd_kernel<SplatPrimitive, dist_type, accum_mode, output_median>(
         num_splats,
         splats_w, splats_s, gaussian_ids,
-        viewmats, intrins, camera_model, distortion, dist_coeffs, aabb,
+        viewmats, intrins, camera_model, distortion, dist_coeffs, twists, aabb,
         image_width, image_height, tile_offsets, flatten_ids,
         render_Ts, last_ids, render_outputs,
         distortion_fwd_outputs, loss_map, accum_weight_map,
@@ -257,6 +260,7 @@ inline std::tuple<
     const CameraModelType camera_model,
     const CameraDistortionType distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceTensor2D<float4> aabb,  // [..., N] projected 2D AABB, for sub-tile culling
     // image size
     const uint32_t image_width,
@@ -284,7 +288,7 @@ inline std::tuple<
         _rasterize_to_pixels_eval3d_bwd_tensor<SplatPrimitive, dist_type, accum_mode, output_median>
     (
         num_splats, splats_w, splats_s, gaussian_ids,
-        viewmats, intrins, camera_model, distortion, dist_coeffs, aabb,
+        viewmats, intrins, camera_model, distortion, dist_coeffs, twists, aabb,
         image_width, image_height, tile_offsets, flatten_ids,
         render_Ts, last_ids, render_outputs, distortion_fwd_outputs, loss_map, accum_weight_map,
         v_render_outputs, v_render_Ts, v_median, v_distortion_outputs, v_splats_w, v_splats_s,
@@ -314,6 +318,7 @@ std::tuple<
     const std::string camera_model,
     const std::string distortion,
     const TorchTensorView dist_coeffs,
+    const std::optional<TorchTensorView> twists,
     DeviceTensor2D<float4> aabb,  // [..., N] projected 2D AABB, for sub-tile culling
     // image size
     const uint32_t image_width,
@@ -360,7 +365,7 @@ std::tuple<
     return funcs[di][(int)accum_mode]
                 [v_median.data_ptr() != nullptr](
         num_splats, splats_w, splats_s, gaussian_ids,
-        viewmats, intrins, cmt(camera_model), cdt(distortion), dist_coeffs, aabb,
+        viewmats, intrins, cmt(camera_model), cdt(distortion), dist_coeffs, twists, aabb,
         image_width, image_height, tile_offsets, flatten_ids,
         render_Ts, last_ids, render_outputs, distortion_fwd_outputs, loss_map, accum_weight_map,
         v_render_outputs, v_render_Ts, v_median, v_distortion_outputs, v_splats_w, v_splats_s,
