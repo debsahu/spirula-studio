@@ -4,7 +4,7 @@
 
 inline __device__ bool splat_scale_is_dead(float3  log_scale_0)
 {
-    return !((F32_max(((F32_max((log_scale_0.x), (log_scale_0.y)))), (log_scale_0.z))) >= -87.3365478515625f);
+    return !((F32_max(((F32_max((log_scale_0.x), (log_scale_0.y)))), (log_scale_0.z))) > -40.0f);
 }
 
 inline __device__ float dot_0(float3  x_0, float3  y_0)

@@ -6,6 +6,13 @@
 // zero, so the optimizer writes a NaN into a splat that is merely small.
 // The shift cancels out of the ratios; it does not change what is computed.
 
+// mcmc_scale_reg penalizes the LOG scale, so its gradient never vanishes: an
+// unused splat drops ~lr a step forever. Floor it at densify.slang's
+// kDeadLogScale, where relocation takes over. Must match that value.
+static const float kMinLogScale = -40.0;
+// A -inf scale would reach the shifts below as -inf minus -inf. Clamp far
+// under any real splat, and under kMinLogScale, so they stay finite.
+static const float kFiniteLogScale = -1e4;
 // Smallest eigenvalue share fed to a log. Below this the share is zero or
 // (through rounding) negative, and x*log(x) is meant to vanish there anyway.
 static const float kMinEigenRatio = 1e-30;
@@ -72,6 +79,7 @@ float mcmc_opacity_reg(float opacity, float mcmc_opacity_reg_weight) {
 [Differentiable]
 float mcmc_scale_reg_3dgs(float3 scales, float mcmc_scale_reg_weight) {
     // scales = exp(scales);  // TODO: make it configurable? standard MCMC applies on post-exp but is not scale invariant
+    scales = max(scales, kMinLogScale);
     mcmc_scale_reg_weight *= 1e-2;  // approximately exp(scales) for Mip-NeRF 360 outdoor scenes
     return mcmc_scale_reg_weight * (scales.x + scales.y + scales.z) / 3.0;
 }
@@ -106,6 +114,7 @@ float[5] per_splat_losses(
     no_diff float quat_norm_reg_weight
 ) {
     constexpr bool is_3dgs = true;
+    scales = max(scales, kFiniteLogScale);
     float losses[5];
     losses[0] = mcmc_opacity_reg(opacity, mcmc_opacity_reg_weight);
     losses[4] = quat_norm_reg(quat, quat_norm_reg_weight);

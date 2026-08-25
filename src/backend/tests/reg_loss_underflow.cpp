@@ -1,20 +1,21 @@
-// A small splat must not be turned into a NaN by the per-splat regularizers.
+// The per-splat regularizers must not turn a small splat into a NaN, and must
+// not walk it down without end.
 //
 // scale_reg / erank_reg (shaders/per_splat_losses.slang) take ratios of
-// exp(scales); the backward divides by the square of a denominator that
-// flushes to zero once a splat drops under exp(-22.4), and 0/0 lands in the
-// scales the optimizer writes. That is reachable in any run: mcmc_scale_reg
-// walks an unused splat's log scale down by ~lr every step, and one NaN splat
-// blacks out every tile it touches. Self-checking; no reference file.
+// exp(scales); the backward divides by a denominator that flushes to zero
+// under exp(-22.4), and 0/0 lands in the scales the optimizer writes. That is
+// reachable in any run: mcmc_scale_reg penalizes the LOG scale, so an unused
+// splat drops ~lr a step until the kMinLogScale floor stops it. -inf, which
+// mcmc_relocation used to manufacture, is covered too.
 //
-// Drives the shared per_splat_losses backward through
-// fused_optim_3dgs_geometry -- the FPBO optimizer inlines the same function.
+// Self-checking. Drives the shared backward through fused_optim_3dgs_geometry.
 
 #include <kernels/optim/Optimizer.cuh>
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 using backend::MemcpyKind;
@@ -33,20 +34,34 @@ static DeviceVector<T> dv(const void* p, int64_t n) {
                                            std::vector<int64_t>{n, 1}));
 }
 
-static int64_t count_nonfinite(const float* d, int64_t n) {
+// nan_only spares the -inf case its own input: feeding -inf in is the point,
+// manufacturing a NaN out of it is the bug.
+static int64_t count_bad(const float* d, int64_t n, bool nan_only) {
     std::vector<float> h((size_t)n);
     backend::memcpy_sync(h.data(), d, (size_t)n * sizeof(float),
                          MemcpyKind::DeviceToHost);
     int64_t bad = 0;
-    for (float v : h) bad += std::isfinite(v) ? 0 : 1;
+    for (float v : h) bad += (nan_only ? std::isnan(v) : !std::isfinite(v)) ? 1 : 0;
     return bad;
+}
+
+static std::vector<float> download(const float* d, int64_t n) {
+    std::vector<float> h((size_t)n);
+    backend::memcpy_sync(h.data(), d, (size_t)n * sizeof(float),
+                         MemcpyKind::DeviceToHost);
+    return h;
 }
 
 static constexpr int64_t N = 1024;  // multiple of 256 (block reduces)
 
+// kMinLogScale / kDeadLogScale, shaders/per_splat_losses.slang + densify.slang.
+static constexpr float MIN_LOG_SCALE = -40.f;
+
 struct Case {
     const char* label;
     float erank, erank_s3, scale_reg_w, anisotropy;
+    bool neg_inf;      // seed every axis at -inf instead of sweeping
+    bool check_floor;  // mcmc_scale_reg must not push a splat below the floor
 };
 
 static bool run_case(const Case& c) {
@@ -56,13 +71,15 @@ static bool run_case(const Case& c) {
     // third axis pulled further down so the eigenvalue shares degenerate too.
     for (int64_t i = 0; i < N; i++) {
         float s = -1.f - 59.f * (float)i / (float)(N - 1);
+        if (c.neg_inf) s = -std::numeric_limits<float>::infinity();
         scales[3 * i + 0] = s;
         scales[3 * i + 1] = s;
-        scales[3 * i + 2] = s - c.anisotropy;
+        scales[3 * i + 2] = c.neg_inf ? s : s - c.anisotropy;
         for (int k = 0; k < 3; k++) means[3 * i + k] = 0.1f * (float)k;
         quats[4 * i + 0] = 1.f;
         opacs[i] = -2.f;
     }
+    std::vector<float> start = scales;
 
     float* d_means = upload(means);
     float* d_quats = upload(quats);
@@ -113,10 +130,20 @@ static bool run_case(const Case& c) {
     };
     int64_t total = 0;
     for (const Out& o : outs) {
-        int64_t bad = count_nonfinite(o.p, o.n);
-        if (bad) std::printf("  %s: %lld / %lld non-finite\n", o.name,
-                             (long long)bad, (long long)o.n);
+        int64_t bad = count_bad(o.p, o.n, c.neg_inf);
+        if (bad) std::printf("  %s: %lld / %lld %s\n", o.name,
+                             (long long)bad, (long long)o.n,
+                             c.neg_inf ? "NaN" : "non-finite");
         total += bad;
+    }
+    if (c.check_floor) {
+        std::vector<float> now = download(d_scales, 3 * N);
+        int64_t sank = 0;
+        for (int64_t i = 0; i < 3 * N; i++)
+            if (start[i] <= MIN_LOG_SCALE && now[i] < start[i] - 1e-5f) sank++;
+        if (sank) std::printf("  scales: %lld pushed below the floor\n",
+                              (long long)sank);
+        total += sank;
     }
     std::printf("%s %s\n", total ? "FAIL" : "ok  ", c.label);
 
@@ -133,11 +160,12 @@ static bool run_case(const Case& c) {
 
 int main() {
     const Case cases[] = {
-        {"shipping defaults (both reg weights zero)", 0.f, 0.f, 0.f, 0.f},
-        {"erank_reg on",                              0.1f, 0.05f, 0.f, 0.f},
-        {"scale_regularization on",                   0.f, 0.f, 0.1f, 0.f},
-        {"both on, anisotropic",                      0.1f, 0.05f, 0.1f, 25.f},
-        {"defaults, extreme anisotropy",              0.f, 0.f, 0.f, 90.f},
+        {"shipping defaults (both reg weights zero)", 0.f, 0.f, 0.f, 0.f, false, true},
+        {"erank_reg on",                              0.1f, 0.05f, 0.f, 0.f, false, false},
+        {"scale_regularization on",                   0.f, 0.f, 0.1f, 0.f, false, false},
+        {"both on, anisotropic",                      0.1f, 0.05f, 0.1f, 25.f, false, false},
+        {"defaults, extreme anisotropy",              0.f, 0.f, 0.f, 90.f, false, false},
+        {"-inf log scale (mcmc_relocation underflow)", 0.1f, 0.05f, 0.1f, 0.f, true, false},
     };
     bool ok = true;
     for (const Case& c : cases) ok &= run_case(c);

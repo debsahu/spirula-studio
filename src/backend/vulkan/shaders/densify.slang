@@ -338,7 +338,6 @@ void _dn_mcmc_relocation(inout float opacity, inout float3 scale, int n_idx) {
     n_idx = min(n_idx, 50);  // log_factorial only fits to 50
 
     opacity = _dn_sigmoid(opacity);
-    scale = float3(exp(scale.x), exp(scale.y), exp(scale.z));
 
     float new_opacity = 1.0f - pow(1.0f - opacity, 1.0f / float(n_idx));
 
@@ -351,13 +350,13 @@ void _dn_mcmc_relocation(inout float opacity, inout float3 scale, int n_idx) {
                          pow(new_opacity, float(k + 1));
         }
     }
-    float coeff = opacity / denom_sum;
+    // log(coeff * exp(s)) == log(coeff) + s, kept in log space: the round trip
+    // out and back flushes a splat near FLT_MIN to -inf, which per_splat_losses
+    // then turns into a NaN (shaders/per_splat_losses.slang).
+    float log_coeff = log(opacity / denom_sum);
 
-    opacity = new_opacity;
-    scale = coeff * scale;
-
-    opacity = log(opacity / (1.0f - opacity));  // logit
-    scale = float3(log(scale.x), log(scale.y), log(scale.z));
+    opacity = log(new_opacity / (1.0f - new_opacity));  // logit
+    scale = scale + log_coeff;
 }
 
 // ---------------------------------------------------------------------------

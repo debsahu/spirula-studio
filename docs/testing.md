@@ -11,8 +11,8 @@ quant-grad), rasterization bwd, tile intersect, warp, FPBO, optimizer (general
 (`mask_loss_semantics` and `reg_loss_underflow` are self-checking rather than
 dump-then-compare: the first pins what an image mask means in the loss, in
 both mask modes and with none; the second sweeps log scales past every
-exp(scales) underflow threshold and fails if the per-splat regularizers hand
-the optimizer a NaN),
+exp(scales) underflow threshold, down to -inf, and fails if the per-splat
+regularizers hand the optimizer a NaN or push a splat below kMinLogScale),
 meshing (activation, LBVH, occupancy/bisection/color, moment raster, the
 per-camera samplers and the visibility cull), plus
 `backend/tests/engine/` which drives the *real* engine end to end
