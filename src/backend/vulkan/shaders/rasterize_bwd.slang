@@ -213,7 +213,7 @@ bool _rb_pixel_grad(int pix_id, float alpha, float4 color,
 // ---------------------------------------------------------------------------
 
 struct Raster2dBwdParams {  // via params ring
-    float* s_xy;
+    float2* s_xy;
     float* s_depth;
     float* s_conic;
     float* s_opac;
@@ -291,15 +291,11 @@ void _rb2_alpha_vjp(Frag2d_ s, float2 delta, float sigma, float vis,
 // caller's barrier is never skipped.
 [ForceInline]
 void _rb2_step(int pix_id, int splat_idx, bool active,
-               uint wg_y, uint wg_z, Frag2d_ splat, uint2 cover,
+               uint wg_y, uint wg_z, Frag2d_ splat,
                inout Frag2d_ v_splat,
                inout float accum_weight, inout float accum_weight_den,
                inout bool touched) {
     if (pix_id < 0 || pix_id >= (int)RB_BLOCK || !active) return;
-    // Footprint mask first: three register ops, and it skips the groupshared
-    // reads and the exp() for the pixels this splat cannot reach.
-    uint cw = pix_id < 32 ? cover.x >> uint(pix_id) : cover.y >> uint(pix_id - 32);
-    if ((cw & 1u) == 0u) return;
     if (splat_idx > _rb_bin[pix_id]) return;
     int gx = int(wg_z * TILE_SIZE_DX) + pix_id % (int)TILE_SIZE_DX;
     int gy = int(wg_y * TILE_SIZE_DY) + pix_id / (int)TILE_SIZE_DX;
@@ -384,9 +380,9 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     uint n_waves = RB_THREADS / wsize;
 
     // Nothing past the tile's deepest surviving fragment can contribute.
-    for (int scan_end = min(range_end - 1, bin_max); scan_end >= range_start;) {
+    int count = 0;
+    for (int scan_end = min(range_end - 1, bin_max); scan_end >= range_start || count > 0;) {
         // ---- survivor compaction (back-to-front) ----
-        int count = 0;
         int s = scan_end;
         while (s >= range_start && count <= SURV_CAP - (int)RB_THREADS) {
             int gi = s - int(tid);
@@ -395,14 +391,13 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
             float c_opac = 0.0f;
             float3 c_conic = float3(0.0f);
             float2 c_xy = float2(0.0f);
-            uint2 c_cover = uint2(0u, 0u);
             if (gi >= range_start) {
                 c_sid = p.flatten_ids[gi];
                 c_opac = p.s_opac[c_sid];
                 c_conic = float3(p.s_conic[3 * c_sid],
                                  p.s_conic[3 * c_sid + 1],
                                  p.s_conic[3 * c_sid + 2]);
-                c_xy = float2(p.s_xy[2 * c_sid], p.s_xy[2 * c_sid + 1]);
+                c_xy = p.s_xy[c_sid];
                 if (c_opac > ALPHA_THRESHOLD) {
                     float kk = 0.5f / log(c_opac / ALPHA_THRESHOLD);
                     ok = ellipse_box_overlap_test(
@@ -438,7 +433,11 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
         GroupMemoryBarrierWithGroupSync();
 
         // ---- sweep compacted survivors in batches of RB_THREADS ----
-        int num_batches = (count + (int)RB_THREADS - 1) / (int)RB_THREADS;
+        // A partial batch costs a whole diagonal sweep, so only the very last
+        // one is allowed to be short; the tail rides into the next round.
+        bool drain = scan_end < range_start;
+        int num_batches = drain ? (count + (int)RB_THREADS - 1) / (int)RB_THREADS
+                                : count / (int)RB_THREADS;
         for (int b = 0; b < num_batches; b++) {
             int surv_pos = b * (int)RB_THREADS + int(tid);
             bool active = surv_pos < count;
@@ -448,7 +447,6 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
             Frag2d_ splat = {float2(0.0f), 0.0f, float3(0.0f), 0.0f,
                              float3(0.0f)};
             uint splat_sid = 0;
-            uint2 cover = uint2(0u, 0u);
             if (active) {
                 // Position, conic and opacity come from the cull's gather;
                 // only the two channels it had no use for are fetched again.
@@ -460,11 +458,6 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
                 splat.rgb = float3(p.s_rgb[3 * splat_sid],
                                    p.s_rgb[3 * splat_sid + 1],
                                    p.s_rgb[3 * splat_sid + 2]);
-                if (splat.opac > ALPHA_THRESHOLD)
-                    ellipse_pixel_mask8(
-                        splat.conic, log(splat.opac / ALPHA_THRESHOLD),
-                        splat.xy.x - (cull_bx0 + 0.5f),
-                        splat.xy.y - (cull_by0 + 0.5f), cover.x, cover.y);
             }
             Frag2d_ v_splat = {float2(0.0f), 0.0f, float3(0.0f), 0.0f,
                                float3(0.0f)};
@@ -474,8 +467,7 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 
             for (int t = 0; t < batch_size + (int)RB_BLOCK - 1; t++) {
                 _rb2_step(t - int(tid), splat_idx, active, wg.y, wg.z, splat,
-                          cover, v_splat, accum_weight, accum_weight_den,
-                          touched);
+                          v_splat, accum_weight, accum_weight_den, touched);
                 GroupMemoryBarrierWithGroupSync();
             }
 
@@ -505,6 +497,29 @@ void rasterize_bwd_2d(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
             }
         }
         GroupMemoryBarrierWithGroupSync();  // done reading surv[]
+        int rem = max(0, count - num_batches * (int)RB_THREADS);
+        int t_surv = 0, t_ssid = 0;
+        float2 t_xy = float2(0.0f);
+        float3 t_conic = float3(0.0f);
+        float t_opac = 0.0f;
+        if (int(tid) < rem) {
+            int src = num_batches * (int)RB_THREADS + int(tid);
+            t_surv = _rb_surv[src];
+            t_ssid = _rb_ssid[src];
+            t_xy = _rb_sxy[src];
+            t_conic = _rb_sconic[src];
+            t_opac = _rb_sopac[src];
+        }
+        GroupMemoryBarrierWithGroupSync();
+        if (int(tid) < rem) {
+            _rb_surv[tid] = t_surv;
+            _rb_ssid[tid] = t_ssid;
+            _rb_sxy[tid] = t_xy;
+            _rb_sconic[tid] = t_conic;
+            _rb_sopac[tid] = t_opac;
+        }
+        count = rem;
+        GroupMemoryBarrierWithGroupSync();
     }
 }
 
@@ -722,8 +737,8 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     uint n_waves = RB_THREADS / wsize;
 
     // Nothing past the tile's deepest surviving fragment can contribute.
-    for (int scan_end = min(range_end - 1, bin_max); scan_end >= range_start;) {
-        int count = 0;
+    int count = 0;
+    for (int scan_end = min(range_end - 1, bin_max); scan_end >= range_start || count > 0;) {
         int s = scan_end;
         while (s >= range_start && count <= SURV_CAP - (int)RB_THREADS) {
             int gi = s - int(tid);
@@ -773,7 +788,11 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
         scan_end = s;
         GroupMemoryBarrierWithGroupSync();
 
-        int num_batches = (count + (int)RB_THREADS - 1) / (int)RB_THREADS;
+        // A partial batch costs a whole diagonal sweep, so only the very last
+        // one is allowed to be short; the tail rides into the next round.
+        bool drain = scan_end < range_start;
+        int num_batches = drain ? (count + (int)RB_THREADS - 1) / (int)RB_THREADS
+                                : count / (int)RB_THREADS;
         for (int b = 0; b < num_batches; b++) {
             int surv_pos = b * (int)RB_THREADS + int(tid);
             bool active = surv_pos < count;
@@ -857,6 +876,21 @@ void rasterize_bwd_3dgut(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
                 }
             }
         }
+
+        int rem = max(0, count - num_batches * (int)RB_THREADS);
+        GroupMemoryBarrierWithGroupSync();
+        int t_surv = 0, t_ssid = 0;
+        if (int(tid) < rem) {
+            int src = num_batches * (int)RB_THREADS + int(tid);
+            t_surv = _rb_surv[src];
+            t_ssid = _rb_ssid[src];
+        }
+        GroupMemoryBarrierWithGroupSync();
+        if (int(tid) < rem) {
+            _rb_surv[tid] = t_surv;
+            _rb_ssid[tid] = t_ssid;
+        }
+        count = rem;
         GroupMemoryBarrierWithGroupSync();
     }
 

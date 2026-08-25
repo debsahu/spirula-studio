@@ -746,12 +746,18 @@ bool fill_params(const ResolvedPtr& d, size_t bytes, int value,
 // Stream-ordered device fill, shared by both memset entry points.
 void record_fill(const ResolvedPtr& d, size_t bytes, VkDeviceSize fill,
                  uint32_t word, Stream stream) {
-    std::optional<prof::Scope> _pms;
-    if (prof::enabled()) _pms.emplace(prof::MEMSET, bytes);
     vk::StreamImpl* st = vk::stream_impl(stream);
     if (!st) return;
+    // Opening a fresh command buffer waits for the ring entry's previous
+    // submission, so it is a GPU wait and not fill cost: charging it to
+    // MEMSET made a free 450 MB/step of zeroing read as 12 s of a 56 s run.
+    std::optional<prof::Scope> _pwait;
+    if (prof::enabled() && !st->recording) _pwait.emplace(prof::DEVSYNC);
     VkCommandBuffer cb = vk::stream_begin(st);
+    _pwait.reset();
     if (cb == VK_NULL_HANDLE) return;
+    std::optional<prof::Scope> _pms;
+    if (prof::enabled()) _pms.emplace(prof::MEMSET, bytes);
     vkCmdFillBuffer(cb, d.alloc.buffer, d.offset, fill, word);
     vk::stream_barrier(cb);
 }

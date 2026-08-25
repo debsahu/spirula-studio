@@ -362,22 +362,10 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         // load splats
         typename SplatPrimitive::FragmentBwd splat;
         uint32_t splat_wid, splat_sid;
-    #if !IS_EVAL3D
-        // Superset of the sub-tile pixels this splat can reach: three register
-        // ops per sweep step instead of a shared read and an exp().
-        uint32_t cover_lo = 0u, cover_hi = 0u;
-    #endif
         if (active) {
             splat_sid = flatten_ids[splat_idx]; // flatten index in [I * N] or [nnz]
             splat_wid = gaussian_ids ? gaussian_ids[splat_sid] : splat_sid % N;
             splat.load(splat_wbuffer, splat_sbuffer, splat_wid, splat_sid);
-        #if !IS_EVAL3D
-            if (splat.opac > ALPHA_THRESHOLD)
-                ellipse_pixel_mask8<TILE_SIZE_DX, TILE_SIZE_DY>(
-                    splat.conic, __logf(splat.opac / ALPHA_THRESHOLD),
-                    splat.xy.x - (cull_bx0 + 0.5f),
-                    splat.xy.y - (cull_by0 + 0.5f), cover_lo, cover_hi);
-        #endif
         }
 
         // accumulate gradient
@@ -394,12 +382,6 @@ __global__ void rasterize_to_pixels_bwd_kernel(
             int pix_id = t - thread_id;
             if (pix_id < 0 || pix_id >= BLOCK_SIZE || !active)
                 continue;
-        #if !IS_EVAL3D
-            uint32_t cw = pix_id < 32 ? (cover_lo >> pix_id)
-                                      : (cover_hi >> (pix_id - 32));
-            if ((cw & 1u) == 0u)
-                continue;
-        #endif
         #if IS_EVAL3D
             float4 ray_d_pix_bin_final = shared_ray_d_pix_bin_final[pix_id];
             if (splat_idx > __float_as_int(ray_d_pix_bin_final.w))
