@@ -55,7 +55,6 @@ struct FpboParams {
     // packed intersection ranges (kPacked)
     int* camera_id_bounds;
     int* camera_ids;
-    int* perm;
     float4* aabb;
     // packed screen-space gradient rows (SCR2_* for 2D, SCRG_* for 3DGUT)
     float* vs_screen;
@@ -141,8 +140,9 @@ void _fpbo_camera_loop<let cam : CameraModelType, D : ICameraDistortion>(
     FpboParams p, PbSplat s, uint gid, int cid_0, int cid_1, gindex_t qbase,
     gindex_t vstride, gindex_t vpitch, inout PbGrads g) {
     for (int cid_t = cid_0; cid_t < cid_1; ++cid_t) {
-        int idx = (kPacked != 0) ? p.perm[cid_t]
-                                 : cid_t * int(p.N) + int(gid);
+        // Packed: the forward emits (gaussian, camera) order, so cid_t is
+        // the out_idx that indexes aabb / camera_ids / vs_screen.
+        int idx = (kPacked != 0) ? cid_t : cid_t * int(p.N) + int(gid);
         int cid = (kPacked != 0) ? p.camera_ids[idx] : cid_t;
         float4 bb = p.aabb[idx];
         if (bb.z <= bb.x || bb.w <= bb.y)

@@ -190,9 +190,8 @@ __global__ void fused_projection_bwd_optimizer_3dgs_kernel
     const uint32_t image_height,
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
-    const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
-    const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4] (original order)
+    const int32_t *__restrict__ camera_ids,   // [nnz]
+    const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     typename SplatPrimitive::WorldBuffer v_splats_world,
     typename SplatPrimitive::ScreenBuffer v_splats_screen,
@@ -264,14 +263,11 @@ __global__ void fused_projection_bwd_optimizer_3dgs_kernel
     float3x3 v_R = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
     float3 v_t = {0.f, 0.f, 0.f};
 
-    // Loop over intersections.
-    // In packed mode `cid_t` is a SORTED position (sorted by gaussian_id),
-    // but `aabb` and `v_splats_screen` are stored in the ORIGINAL out_idx
-    // order from the forward's intersection-mask scan -- and `camera_ids`
-    // is also the ORIGINAL (unsorted) buffer here. `perm[cid_t]` recovers
-    // the original out_idx so all three reads land on the right entry.
+    // Loop over intersections. In packed mode the forward emits them in
+    // (gaussian, camera) order, so a splat's are contiguous and cid_t is
+    // itself the out_idx that indexes aabb / camera_ids / v_splats_screen.
     for (int cid_t = cid_0; cid_t < cid_1; ++cid_t) {
-        int idx = packed ? perm[cid_t] : cid_t * N + gid;
+        int idx = packed ? cid_t : cid_t * N + gid;
         int cid = (packed ? camera_ids[idx] : cid_t);
         if (aabb[idx].z <= aabb[idx].x || aabb[idx].w <= aabb[idx].y)
             continue;
@@ -982,9 +978,8 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     const uint32_t image_height,
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
-    const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
-    const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4] (original order)
+    const int32_t *__restrict__ camera_ids,   // [nnz]
+    const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     typename SplatPrimitive::WorldBuffer v_splats_world,
     typename SplatPrimitive::ScreenBuffer v_splats_screen,
@@ -1045,7 +1040,7 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     ><<<_CEIL_DIV(N, BLOCK_SIZE_LAUNCH), BLOCK_SIZE_LAUNCH, 0, stream>>>(
         C, N, num_sh_buffer,
         splats_world, viewmats, intrins, dist_coeffs_buffer, image_width, image_height,
-        camera_id_bounds, camera_ids, perm, aabb,
+        camera_id_bounds, camera_ids, aabb,
         v_splats_world, v_splats_screen,
         g1_splats_world, g2_splats_world, sh_packed, sh_quant_bounds,
         sh_value_packed, sh_value_bounds,

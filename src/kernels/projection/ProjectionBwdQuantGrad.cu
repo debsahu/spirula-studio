@@ -35,7 +35,6 @@ void projection_bwd_quantgrad_kernel_wrapper(
     const uint32_t image_height,
     const int32_t * camera_id_bounds,
     const int32_t * camera_ids,
-    const int32_t * perm,
     const float4 * aabb,
     typename SplatPrimitive::WorldBuffer v_splats_world,
     typename SplatPrimitive::ScreenBuffer v_splats_screen,
@@ -47,13 +46,8 @@ void projection_bwd_quantgrad_kernel_wrapper(
 );
 
 
-// Identity permutation + per-gaussian intersection ranges (copies of the FPBO
-// helpers; static so they don't clash with FusedProjectionBwdOptim.cu's).
-__global__ static void qg_iota_kernel(int64_t n, int32_t* __restrict__ buf) {
-    int64_t i = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) buf[i] = (int32_t)i;
-}
-
+// Per-gaussian intersection ranges (a copy of the FPBO helper; static so it
+// does not clash with FusedProjectionBwdOptim.cu's).
 __global__ static void qg_camera_id_bounds_kernel(
     int64_t nnz, int64_t N,
     const int32_t* __restrict__ gaussian_ids,   // [nnz], sorted by gid
@@ -107,31 +101,15 @@ static inline void launch_projection_bwd_quantgrad(
     if (N == 0) return;
     if (!is_packed && aabb.data_ptr() == nullptr) return;
 
-    // Build per-gaussian intersection ranges for the packed camera loop, exactly
-    // as the FPBO launcher does (sort a permutation alongside gaussian_ids so the
-    // kernel can recover original out_idx for aabb / screen-grad loads).
+    // Per-gaussian intersection ranges for the packed camera loop. The forward
+    // emits the list in (gaussian, camera) order, so gaussian_ids is already
+    // non-decreasing and cid_t is itself the out_idx.
     DeviceVector<int32_t> camera_id_bounds;
-    DeviceVector<int32_t> gaussian_ids_sorted_buf, perm_buf, perm_sorted_buf;
-    const int32_t* sorted_gaussian_ids_ptr = nullptr;
-    const int32_t* sorted_perm_ptr = nullptr;
     if (is_packed) {
         long nnz = camera_ids.size();
-        gaussian_ids_sorted_buf.resize(PoolSlot::FusedProjBwdGaussSorted, nnz);
-        perm_buf.resize(PoolSlot::FusedProjBwdPerm, nnz);
-        perm_sorted_buf.resize(PoolSlot::FusedProjBwdPermSorted, nnz);
-        qg_iota_kernel<<<_LAUNCH_ARGS_1D(nnz, 256)>>>(nnz, perm_buf.data_ptr());
-        CHECK_DEVICE_ERROR(cudaGetLastError());
-        cub::DoubleBuffer<int32_t> d_keys(gaussian_ids.data_ptr(), gaussian_ids_sorted_buf.data_ptr());
-        cub::DoubleBuffer<int32_t> d_values(perm_buf.data_ptr(), perm_sorted_buf.data_ptr());
-        int n_bits = 0;
-        while ((1U << n_bits) <= N) ++n_bits;
-        CUB_WRAPPER(cub::DeviceRadixSort::SortPairs, d_keys, d_values, nnz, 0, n_bits);
-        CHECK_DEVICE_ERROR(cudaGetLastError());
-        sorted_gaussian_ids_ptr = d_keys.selector ? gaussian_ids_sorted_buf.data_ptr() : gaussian_ids.data_ptr();
-        sorted_perm_ptr         = d_values.selector ? perm_sorted_buf.data_ptr() : perm_buf.data_ptr();
         camera_id_bounds.resize(PoolSlot::FusedProjBwdCamBounds, (int64_t)(N+1));
         qg_camera_id_bounds_kernel<<<_LAUNCH_ARGS_1D(nnz+1, 256)>>>(
-            nnz, N, sorted_gaussian_ids_ptr, camera_id_bounds.data_ptr());
+            nnz, N, gaussian_ids.data_ptr(), camera_id_bounds.data_ptr());
         CHECK_DEVICE_ERROR(cudaGetLastError());
     }
 
@@ -141,7 +119,6 @@ static inline void launch_projection_bwd_quantgrad(
             image_width, image_height, \
             is_packed ? camera_id_bounds.data_ptr() : nullptr, \
             is_packed ? camera_ids.data_ptr() : nullptr, \
-            is_packed ? sorted_perm_ptr : nullptr, \
             aabb.data_ptr(), \
             v_splats_world, v_splats_screen, gq, \
             sh_value_packed, sh_value_bounds, sh_value_bounds_stride, sh_value_bits )

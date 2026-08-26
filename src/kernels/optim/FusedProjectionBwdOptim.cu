@@ -33,7 +33,6 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     typename SplatPrimitive::WorldBuffer v_splats_world,
@@ -69,14 +68,6 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     const int32_t* __restrict__ steps
 );
 
-
-// Fill buffer[i] = i for i in [0, n). Used to build the identity permutation
-// that we sort alongside gaussian_ids so the FPBO kernel can map sorted
-// positions back to the original nnz position of aabb / v_splats_screen.
-__global__ static void fpbo_iota_kernel(int64_t n, int32_t* __restrict__ buf) {
-    int64_t i = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) buf[i] = (int32_t)i;
-}
 
 
 __global__ void camera_id_bounds_kernel(
@@ -160,54 +151,15 @@ inline void launch_fused_projection_bwd_optimizer_3dgs_kernel(
     bool packed = camera_ids.data_ptr() && gaussian_ids.data_ptr();
 
     DeviceVector<int32_t> camera_id_bounds;
-    DeviceVector<int32_t> gaussian_ids_sorted_buf;
-    DeviceVector<int32_t> perm_buf;
-    DeviceVector<int32_t> perm_sorted_buf;
-    const int32_t* sorted_gaussian_ids_ptr = nullptr;
-    const int32_t* sorted_perm_ptr = nullptr;
 
     if (packed) {
         long nnz = camera_ids.size();
-        // Sort by gaussian_id with an identity permutation as the *value*
-        // (NOT camera_ids). The original camera_ids / aabb / v_splats_screen
-        // arrays produced by the forward + raster_bwd are indexed by the
-        // out_idx assigned during ProjectionPackedFwd (the intersection-
-        // mask prefix scan), which is NOT the same as the sorted-by-gid
-        // position. Sorting camera_ids alongside gaussian_ids would keep
-        // (sorted_gid, sorted_cid) paired but `aabb` and `v_splats_screen`
-        // would still live in original order, so indexing them with the
-        // sorted position cid_t reads the wrong intersection. Sorting a
-        // permutation instead lets the kernel recover the original
-        // out_idx = perm[cid_t] for every aabb / screen-grad load.
-        gaussian_ids_sorted_buf.resize(PoolSlot::FusedProjBwdGaussSorted, nnz);
-        perm_buf.resize(PoolSlot::FusedProjBwdPerm, nnz);
-        perm_sorted_buf.resize(PoolSlot::FusedProjBwdPermSorted, nnz);
-
-        fpbo_iota_kernel<<<_LAUNCH_ARGS_1D(nnz, 256)>>>(
-            nnz, perm_buf.data_ptr()
-        );
-        CHECK_DEVICE_ERROR(cudaGetLastError());
-
-        cub::DoubleBuffer<int32_t> d_keys(
-            gaussian_ids.data_ptr(), gaussian_ids_sorted_buf.data_ptr()
-        );
-        cub::DoubleBuffer<int32_t> d_values(
-            perm_buf.data_ptr(), perm_sorted_buf.data_ptr()
-        );
-        int n_bits = 0;
-        while ((1U << n_bits) <= N)
-            ++n_bits;
-        CUB_WRAPPER(cub::DeviceRadixSort::SortPairs, d_keys, d_values, nnz, 0, n_bits);
-        CHECK_DEVICE_ERROR(cudaGetLastError());
-
-        sorted_gaussian_ids_ptr = d_keys.selector ? gaussian_ids_sorted_buf.data_ptr() : gaussian_ids.data_ptr();
-        sorted_perm_ptr = d_values.selector ? perm_sorted_buf.data_ptr() : perm_buf.data_ptr();
-
+        // The forward emits the list in (gaussian, camera) order, so
+        // gaussian_ids is already non-decreasing and cid_t is the out_idx --
+        // no sort, no permutation to carry.
         camera_id_bounds.resize(PoolSlot::FusedProjBwdCamBounds, (int64_t)(N+1));
         camera_id_bounds_kernel<<<_LAUNCH_ARGS_1D(nnz+1, 256)>>>(
-            nnz, N,
-            sorted_gaussian_ids_ptr,
-            camera_id_bounds.data_ptr()
+            nnz, N, gaussian_ids.data_ptr(), camera_id_bounds.data_ptr()
         );
         CHECK_DEVICE_ERROR(cudaGetLastError());
     }
@@ -222,7 +174,6 @@ inline void launch_fused_projection_bwd_optimizer_3dgs_kernel(
             image_width, image_height, \
             packed ? camera_id_bounds.data_ptr() : nullptr, \
             packed ? camera_ids.data_ptr() : nullptr, \
-            packed ? sorted_perm_ptr : nullptr, \
             (float4*)aabb.data_ptr(), \
             v_splats_world, \
             v_splats_screen, \

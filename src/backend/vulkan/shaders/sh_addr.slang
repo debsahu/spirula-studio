@@ -36,7 +36,8 @@ gindex_t sh_addr_base(ShAddrW a, uint gid) {
 
 [ForceInline]
 gindex_t sh_cell_at_w(gindex_t base, int c, gindex_t pair_pitch) {
-    return pair_pitch > 0
-        ? base + (gindex_t)(c >> 1) * pair_pitch + (gindex_t)(c & 1)
-        : base + (gindex_t)c;
+    // Branch-free (per cell): AoS folds to (c >> 0) * 1 + (c & 0).
+    int pair = int(min(pair_pitch, gindex_t(1)));
+    gindex_t pitch = pair_pitch + gindex_t(1 - pair);
+    return base + (gindex_t)(c >> pair) * pitch + (gindex_t)(c & pair);
 }

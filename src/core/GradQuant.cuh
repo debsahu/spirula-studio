@@ -59,13 +59,18 @@ struct Codec {
         float q = (float)reinterpret_cast<const SignedT*>(packed)[cell];
         return q * (amplitude(mm) * kInvQMax);
     }
-    __device__ static inline void encode1(
-        uint8_t* __restrict__ packed, int64_t cell, float v, float2 mm
-    ) {
+    // One cell's code as a value, for callers that assemble whole words
+    // themselves (the SH grad writeback's staged stores).
+    __device__ static inline SignedT encode1_code(float v, float2 mm) {
         float a = amplitude(mm);
         float qf = (a > 0.0f) ? rintf(v * (kQMax / a)) : 0.0f;
         qf = fminf(fmaxf(qf, -kQMax), kQMax);
-        reinterpret_cast<SignedT*>(packed)[cell] = (SignedT)qf;
+        return (SignedT)qf;
+    }
+    __device__ static inline void encode1(
+        uint8_t* __restrict__ packed, int64_t cell, float v, float2 mm
+    ) {
+        reinterpret_cast<SignedT*>(packed)[cell] = encode1_code(v, mm);
     }
 
     // Decode `count` contiguous cells starting at `base` into out[0..count).

@@ -39,6 +39,30 @@ Inputs are deterministic, and comparison is tolerance-based — fast-math
 exp/sqrt chains legitimately differ across compilers, and borderline-cull
 flips change whole rows, so a small allowance for those is built in.
 
+Two tests carry a **relative-RMS gate** alongside the per-element one, for the
+same reason: they contain discrete per-pixel or per-splat decisions that flip
+wherever an architecture's rounding differs from the reference's, so a handful
+of large outliers is expected while the vector as a whole must still agree.
+`msloss_parity`'s NMS / quantile / clip modes put an RX 7800 XT at 0.21% of
+tight elements out of tolerance (max_abs 4.19) against 0% on NVIDIA Vulkan --
+but 3.8e-4 relative RMS against 1.8e-7. A permuted or biased reference sits
+orders of magnitude above that, which is what the RMS gate is there to catch.
+
+`engine_train_parity` has two gates rather than one, because per-element
+agreement is not something any implementation can hold across 12 optimizer
+steps. The threshold-crossing kernels -- median depth, masked-tile skip, the
+rasterize-bwd survivor batching -- flip a handful of pixels per step wherever
+an architecture's rounding differs from the reference's, and Adam turns a
+flipped gradient sign into a full-size parameter step, so the trajectories
+separate. Measured against a CUDA reference (2026-08-25): NVIDIA Vulkan lands
+0.003% of elements out of tolerance at 4.8e-7 relative RMS, while an RX 7800 XT
+lands 4.4% at 1.4e-4 -- identically on amdvlk and RADV, and unchanged by
+`RADV_PERFTEST=wave32`, so it is not a wave-size effect. The divergence starts
+in `depth_loss` and `normal_loss` (discrete median-depth selection); `rgb_loss`,
+`ssim` and `psnr` stay at 1e-7. An indexing or layout break, by contrast, puts
+30%+ of elements out of tolerance at a relative RMS above 1. The RMS gate is
+what keeps the test sharp; the element gate is loose enough to absorb the drift.
+
 `msloss_parity` splits its reference into two channels. **Tight**: per-pixel
 gradients (deterministic given the raw-loss sums, which enter them only through
 smooth reduce math), the densification loss map in every mode, equal-shape

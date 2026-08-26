@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 #include "backend/api/BackendTypes.h"
 #include "backend/api/BackendRuntime.h"
@@ -988,11 +989,20 @@ public:
 // straight-line arithmetic plus log1pf / expm1f (single CUDA math-lib calls).
 // ============================================================================
 
+// The finite test that survives every compiler this header sees; neither
+// spelling of isfinite does (AGENTS.md gotchas). Mirrors _oq_finite in
+// backend/vulkan/shaders/optim_quant.slang.
+__device__ inline bool q_finite(float v) {
+    uint32_t u;
+    std::memcpy(&u, &v, sizeof(u));
+    return (u & 0x7f800000u) != 0x7f800000u;
+}
+
 // Packed-SH cell addressing, shared by every reader of the two SH quant
 // buffers and by the host decoders. Layouts: docs/notes/sh-quant-layout.md.
 struct ShQuantAddr {
     int64_t bounds_stride;    // cells per bound
-    int64_t pair_pitch;       // 0 = per-cell-block AoS
+    int64_t pair_pitch;       // 0 = per-cell-block AoS, else cells per PAIR
     int64_t cells_per_splat;
 
     __device__ int64_t base(int64_t gid) const {
@@ -1000,10 +1010,11 @@ struct ShQuantAddr {
             ? (gid >> 8) * ((cells_per_splat + 1) >> 1) * 512 + (gid & 255) * 2
             : gid * cells_per_splat;
     }
+    // Branch-free (this runs per cell): AoS folds to (c >> 0) * 1 + (c & 0).
     __device__ int64_t cell(int64_t base_cell, int c) const {
-        return pair_pitch > 0
-            ? base_cell + (int64_t)(c >> 1) * pair_pitch + (int64_t)(c & 1)
-            : base_cell + (int64_t)c;
+        int pair = (int)(pair_pitch > 0 ? 1 : 0);
+        int64_t pitch = pair_pitch + (1 - pair);
+        return base_cell + (int64_t)(c >> pair) * pitch + (int64_t)(c & pair);
     }
 };
 
@@ -1108,8 +1119,8 @@ public:
         // A non-finite bound would decode every one of the block's 256 cells
         // to NaN, which no later step can undo. Decode 0 instead: the block's
         // Adam state restarts rather than staying poisoned.
-        if (!std::isfinite(mm.x) || !std::isfinite(mm.y)) { mm.x = 0.0f; mm.y = 0.0f; }
-        if (!std::isfinite(mm.z) || !std::isfinite(mm.w)) { mm.z = 0.0f; mm.w = 0.0f; }
+        if (!q_finite(mm.x) || !q_finite(mm.y)) { mm.x = 0.0f; mm.y = 0.0f; }
+        if (!q_finite(mm.z) || !q_finite(mm.w)) { mm.z = 0.0f; mm.w = 0.0f; }
         return float2{
             mm.x + (mm.y - mm.x) * (u_q * kInvQMax),
             mm.z + (mm.w - mm.z) * (s_q * kInvQMax)

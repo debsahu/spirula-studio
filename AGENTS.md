@@ -479,6 +479,11 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   free of CUDA intrinsics for the same reason.
 - **Quantized gradient codecs must decode code 0 to exactly `0.0`.** Anything
   else and Adam amplifies the pseudo-gradient into visible floaters.
+- **`isfinite` has no spelling that works everywhere a `core/` header goes.**
+  MSVC declares `std::isfinite` as a host function template, so nvcc will not
+  call it from `__device__` code; gcc's `<cmath>` leaves nothing in the global
+  namespace for an unqualified call inside a template to find. `q_finite`
+  (`core/Tensor.h`) is the exponent test that does. Same for `isnan`/`isinf`.
 - **Never name a `thread_local` inside an `omp parallel` region.** The team
   threads are different threads, so each one resolves it to its *own* copy —
   which the calling thread never sized. Keep the storage `thread_local` if you

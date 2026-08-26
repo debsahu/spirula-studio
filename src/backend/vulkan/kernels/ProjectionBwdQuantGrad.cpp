@@ -1,7 +1,6 @@
 // Vulkan implementation of the grad-quant projection-backward launch API
 // (kernels/projection/ProjectionBwdQuantGrad.cuh). Mirrors ProjectionBwdQuantGrad.cu's
-// launcher (identity-permutation radix sort by gaussian id + per-splat
-// camera ranges when packed); the device work runs
+// launcher (per-splat camera ranges when packed); the device work runs
 // shaders/projection_qgrad.slang. Which attributes take the quantized
 // path is a spec-constant bitmask (kGqMask) so inactive attributes' loads
 // are dead at pipeline creation (llvmpipe speculated-load rule).
@@ -20,7 +19,7 @@ namespace {
 struct ProjectionQgradParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
-    uint64_t camera_id_bounds, camera_ids, perm;
+    uint64_t camera_id_bounds, camera_ids;
     uint64_t aabb;
     uint64_t vs_screen;
     uint64_t vw_means, vw_quats, vw_scales;
@@ -39,7 +38,7 @@ struct ProjectionQgradParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(ProjectionQgradParams) == 31 * 8 + 8 + 8 * 4,
+static_assert(sizeof(ProjectionQgradParams) == 30 * 8 + 8 + 8 * 4,
               "params layout must match the slang struct");
 
 using vkk::or_fallback;
@@ -91,8 +90,7 @@ void launch_projection_qgrad_vk(
         throw std::runtime_error(
             "projection_backward_quantgrad: SH cell count exceeds 2^32");
 
-    // Packed: sort an identity permutation by gaussian id, then build the
-    // per-splat camera ranges (exactly the CUDA launcher's steps).
+    // Packed: per-splat camera ranges (exactly the CUDA launcher's steps).
     vkk::PackedCameraRanges ranges;
     if (packed)
         ranges = vkk::build_packed_camera_ranges(gaussian_ids, N);
@@ -122,7 +120,6 @@ void launch_projection_qgrad_vk(
         (uint64_t)(packed ? ranges.camera_id_bounds.data_ptr() : nullptr));
     p.camera_ids = or_fallback((uint64_t)(packed ? camera_ids.data_ptr()
                                                  : nullptr));
-    p.perm = or_fallback((uint64_t)(packed ? ranges.sorted_perm : nullptr));
     p.aabb = (uint64_t)aabb.data_ptr();
     if (eval3d) {
         Vanilla3DGUT<0>::ScreenBuffer vsb(

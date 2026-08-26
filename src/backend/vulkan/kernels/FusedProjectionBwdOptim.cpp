@@ -15,7 +15,7 @@ namespace {
 struct FpboParams {
     uint64_t means, quats, scales, opacities, features_dc, features_sh;
     uint64_t viewmats, intrins, dist_coeffs;
-    uint64_t camera_id_bounds, camera_ids, perm, aabb;
+    uint64_t camera_id_bounds, camera_ids, aabb;
     uint64_t vs_screen;
     uint64_t vw_means, vw_quats, vw_scales, vw_opacities, vw_dc;
     uint64_t g1_means, g1_quats, g1_scales, g1_opacities, g1_dc, g1_sh;
@@ -41,7 +41,7 @@ struct FpboParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(FpboParams) == 48 * 8 + 16 * 4 + 10 * 4,
+static_assert(sizeof(FpboParams) == 47 * 8 + 16 * 4 + 10 * 4,
               "params layout must match the slang struct");
 
 using vkk::or_fallback;
@@ -145,7 +145,6 @@ void launch_fpbo_vk(
         (uint64_t)(packed ? ranges.camera_id_bounds.data_ptr() : nullptr));
     p.camera_ids = or_fallback((uint64_t)(packed ? camera_ids.data_ptr()
                                                  : nullptr));
-    p.perm = or_fallback((uint64_t)(packed ? ranges.sorted_perm : nullptr));
     p.aabb = (uint64_t)aabb.data_ptr();
     if (eval3d) {
         Vanilla3DGUT<0>::ScreenBuffer vsb(

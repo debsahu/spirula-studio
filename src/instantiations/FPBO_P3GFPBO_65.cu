@@ -26,7 +26,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,
@@ -84,7 +83,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,
@@ -142,7 +140,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,
@@ -200,7 +197,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,
@@ -258,7 +254,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,
@@ -316,7 +311,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,
@@ -374,7 +368,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,
@@ -432,7 +425,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,
@@ -490,7 +482,6 @@ template void fused_projection_bwd_optimizer_3dgs_kernel_wrapper<
     // fwd outputs
     const int32_t *__restrict__ camera_id_bounds,   // [N+1]
     const int32_t *__restrict__ camera_ids,   // [nnz] -- ORIGINAL (unsorted) order
-    const int32_t *__restrict__ perm,         // [nnz] -- sorted_pos -> original_pos
     const float4 *__restrict__ aabb,   // [C, N, 4] or [nnz, 4]
     // grad outputs from rasterization
     Vanilla3DGS<3>::WorldBuffer v_splats_world,

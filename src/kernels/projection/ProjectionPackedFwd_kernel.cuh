@@ -39,8 +39,11 @@ __global__ void projection_packed_mask_kernel(
     if (idx >= C * N) {
         return;
     }
-    const uint32_t cid = (idx / N) % C; // camera id
-    const uint32_t gid = idx % N; // gaussian id
+    // GAUSSIAN-major, so the nnz list the prefix scan compacts comes out
+    // sorted by gaussian id and the backward passes need no sort of their own
+    // (see the note on projection_*_packed_forward).
+    const uint32_t gid = idx / C; // gaussian id
+    const uint32_t cid = idx % C; // camera id
 
     // Load camera
     viewmats += cid * 16;
@@ -125,8 +128,8 @@ __global__ void projection_packed_fwd_kernel(
     if (out_idx_1 == out_idx)
         return;
 
-    const uint32_t cid = (idx / N) % C; // camera id
-    const uint32_t gid = idx % N; // gaussian id
+    const uint32_t gid = idx / C; // gaussian id (see the mask kernel)
+    const uint32_t cid = idx % C; // camera id
 
     // Load camera
     viewmats += cid * 16;

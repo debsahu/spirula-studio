@@ -95,9 +95,10 @@ void sh_block_atomic_add_f3_512(float3 *dst, uint idx, float3 val, uint thread_i
 // Cell index of coefficient `c` of the splat whose cells start at `base`.
 [ForceInline]
 int64_t sh_cell_at(int64_t base, int c, int64_t pair_pitch) {
-    return pair_pitch > 0
-        ? base + (int64_t)(c >> 1) * pair_pitch + (int64_t)(c & 1)
-        : base + (int64_t)c;
+    // Branch-free (per cell): AoS folds to (c >> 0) * 1 + (c & 0).
+    int pair = int(min(pair_pitch, int64_t(1)));
+    int64_t pitch = pair_pitch + int64_t(1 - pair);
+    return base + (int64_t)(c >> pair) * pitch + (int64_t)(c & pair);
 }
 
 // First cell of splat `gid` in the FPBO layout (pair_pitch 512).

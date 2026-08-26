@@ -309,10 +309,12 @@ struct PackedMaskParams {  // fits in the 128-byte push floor: pushed direct
     uint32_t wgs_per_row;
 };
 
+// GAUSSIAN-major, so the nnz list the prefix scan compacts comes out sorted
+// by gaussian id and the backward passes need no sort of their own.
 void run_packed_mask<let cam: CameraModelType, D : ICameraDistortion,
                      let eval3d: bool>(PackedMaskParams p, uint idx) {
-    uint cid = (idx / p.N) % p.C;
-    uint gid = idx % p.N;
+    uint gid = idx / p.C;
+    uint cid = idx % p.C;
 
     float* vm = p.viewmats + cid * 16;
     float3x3 R;
@@ -410,8 +412,8 @@ void run_packed_fwd<let cam: CameraModelType, D : ICameraDistortion,
     int out_idx = idx == 0 ? 0 : p.mask_scan[idx - 1];
     if (p.mask_scan[idx] == out_idx) return;
 
-    uint cid = (idx / p.N) % p.C;
-    uint gid = idx % p.N;
+    uint gid = idx / p.C;  // see run_packed_mask
+    uint cid = idx % p.C;
 
     float* vm = p.viewmats + cid * 16;
     float3x3 R;
