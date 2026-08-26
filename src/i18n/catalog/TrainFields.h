@@ -5823,6 +5823,66 @@ SS_MSG(max_gauss_ratio_help,
     TR("Sivri splat cezası devreye girmeden önce bir splat'ın ne kadar uzayabileceği. "
        "Düşük değerler daha yuvarlak splat'lar dayatır."));
 
+SS_MSG(dc_reg,
+    EN("Base color range penalty"), JA("基本色の範囲のペナルティ"),
+    ZH_HANS("基础颜色范围的惩罚"), ZH_HANT("基礎顏色範圍的懲罰"),
+    KO("기본 색 범위 페널티"), DE("Strafe für den Bereich der Grundfarbe"),
+    FR("Pénalité de plage de la couleur de base"),
+    ES("Penalización del rango del color base"),
+    PT("Penalidade do intervalo da cor base"),
+    IT("Penalità dell'intervallo del colore base"),
+    NL("Straf voor het bereik van de basiskleur"),
+    RU("Штраф за диапазон базового цвета"), TR("Temel renk aralığı cezası"));
+SS_MSG(dc_reg_help,
+    EN("Hold each splat's own base color -- the part that stays the same from "
+       "every angle -- inside the 0 to 1 range. Higher keeps surfaces clean; "
+       "too high clips the real range between bright and dark, so lower it "
+       "when the scene needs that room."),
+    JA("どの角度から見ても変わらないスプラット自身の基本色を、0 から 1 の範囲"
+       "に収めます。高いほど面がきれいになりますが、上げすぎると本当の明暗の幅"
+       "まで切り落とすので、その幅が要る場面では下げてください。"),
+    ZH_HANS("把泼溅自身的基础颜色约束在 0 到 1 的范围内，也就是从任何角度看都"
+            "不变的那部分。数值越高，表面越干净；过高则会切掉真实的明暗范围，"
+            "场景需要这个范围时请调低。"),
+    ZH_HANT("把潑濺自身的基礎顏色約束在 0 到 1 的範圍內，也就是從任何角度看都"
+            "不變的那部分。數值越高，表面越乾淨；過高則會切掉真實的明暗範圍，"
+            "場景需要這個範圍時請調低。"),
+    KO("어느 각도에서도 달라지지 않는 스플랫 자신의 기본 색을 0 에서 1 사이"
+       "로 붙잡아 둡니다. 값이 크면 면이 깨끗해지지만, 너무 크면 진짜 밝고 어두"
+       "운 폭까지 잘리므로 그 폭이 필요한 장면에서는 낮추세요."),
+    DE("Die eigene Grundfarbe jedes Splats -- den Teil, der aus jedem Winkel "
+       "gleich bleibt -- im Bereich 0 bis 1 halten. Höher hält Flächen sauber; "
+       "zu hoch schneidet den echten Abstand zwischen hell und dunkel ab, also "
+       "senken, wenn die Szene diesen Spielraum braucht."),
+    FR("Maintenir la couleur de base propre à chaque splat -- la part qui ne "
+       "change pas avec l'angle -- dans la plage 0 à 1. Plus haut garde les "
+       "surfaces propres ; trop haut rogne l'écart réel entre clair et sombre, "
+       "donc baissez-le quand la scène a besoin de cette marge."),
+    ES("Mantener el color base propio de cada splat -- la parte que no cambia "
+       "con el ángulo -- dentro del rango de 0 a 1. Más alto mantiene limpias "
+       "las superficies; demasiado recorta el rango real entre claro y oscuro, "
+       "así que bájalo cuando la escena necesite ese margen."),
+    PT("Manter a cor base de cada splat -- a parte que não muda com o ângulo "
+       "-- dentro do intervalo de 0 a 1. Mais alto mantém as superfícies limpas; "
+       "alto demais corta o intervalo real entre claro e escuro, então baixe "
+       "quando a cena precisar dessa margem."),
+    IT("Tenere il colore base proprio di ogni splat -- la parte che non cambia "
+       "con l'angolazione -- nell'intervallo da 0 a 1. Più alto mantiene pulite "
+       "le superfici; troppo alto taglia l'intervallo reale tra chiaro e scuro, "
+       "quindi abbassalo quando la scena ha bisogno di quel margine."),
+    NL("De eigen basiskleur van elke splat -- het deel dat vanuit elke hoek "
+       "gelijk blijft -- binnen het bereik 0 tot 1 houden. Hoger houdt vlakken "
+       "schoon; te hoog snijdt het echte bereik tussen licht en donker af, dus "
+       "verlaag het wanneer de scene die ruimte nodig heeft."),
+    RU("Удерживать собственный базовый цвет сплата -- ту часть, что не меняется "
+       "с углом, -- в пределах от 0 до 1. Больше -- поверхности чище; слишком "
+       "много -- срезается настоящий размах между светлым и тёмным, поэтому "
+       "снижайте, когда сцене нужен этот запас."),
+    TR("Her splat'ın kendi temel rengini -- açıya göre değişmeyen kısmını -- "
+       "0 ile 1 aralığında tutar. Yüksek değerler yüzeyleri temiz tutar; aşırısı "
+       "aydınlık ile karanlık arasındaki gerçek aralığı kırpar, bu yüzden sahne "
+       "o payı gerektirdiğinde düşürün."));
+
 SS_MSG(sh_reg,
     EN("View-dependent color penalty"), JA("視点依存色のペナルティ"),
     ZH_HANS("视角相关颜色的惩罚"), ZH_HANT("視角相關顏色的懲罰"),

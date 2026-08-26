@@ -62,6 +62,7 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     const float erank_reg_weight,
     const float erank_reg_weight_s3,
     const float quat_norm_reg_weight,
+    const float dc_reg_weight,
     const float sh_reg_weight,
     const float eps_tr,
     const int32_t scalar_step,
@@ -137,6 +138,7 @@ inline void launch_fused_projection_bwd_optimizer_3dgs_kernel(
     const float erank_reg_weight,
     const float erank_reg_weight_s3,
     const float quat_norm_reg_weight,
+    const float dc_reg_weight,
     const float sh_reg_weight,
     const float eps_tr,
     const int32_t scalar_step,
@@ -188,7 +190,7 @@ inline void launch_fused_projection_bwd_optimizer_3dgs_kernel(
             densify_score.data_ptr(), \
             lr_means, lr_quats, lr_scales, lr_opacs, lr_features_dc, lr_features_sh, \
             max_gauss_ratio, scale_regularization_weight, \
-            mcmc_opacity_reg_weight, mcmc_scale_reg_weight, erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight, sh_reg_weight, \
+            mcmc_opacity_reg_weight, mcmc_scale_reg_weight, erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight, dc_reg_weight, sh_reg_weight, \
             eps_tr, \
             scalar_step, steps_ptr \
         )
@@ -263,6 +265,7 @@ static inline void _fused_projection_bwd_optimizer_dispatch(
     const float erank_reg_weight,
     const float erank_reg_weight_s3,
     const float quat_norm_reg_weight,
+    const float dc_reg_weight,
     const float sh_reg_weight,
     bool use_scale_agnostic_mean,
     bool color_trust_linear,
@@ -318,6 +321,7 @@ static inline void _fused_projection_bwd_optimizer_dispatch(
         erank_reg_weight, \
         erank_reg_weight_s3, \
         quat_norm_reg_weight, \
+        dc_reg_weight, \
         sh_reg_weight, \
         eps_tr, \
         scalar_step, \
@@ -408,6 +412,7 @@ void fused_projection_bwd_optimizer_3dgs(
     const float erank_reg_weight,
     const float erank_reg_weight_s3,
     const float quat_norm_reg_weight,
+    const float dc_reg_weight,
     const float sh_reg_weight,
     bool use_scale_agnostic_mean,
     bool color_trust_linear,
@@ -426,7 +431,7 @@ void fused_projection_bwd_optimizer_3dgs(
         lr_features_sh, max_gauss_ratio, scale_regularization_weight,
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight,
         erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight,
-        sh_reg_weight, use_scale_agnostic_mean,
+        dc_reg_weight, sh_reg_weight, use_scale_agnostic_mean,
         color_trust_linear, eps_tr, step,
         quantization_level);
 }
@@ -470,6 +475,7 @@ void fused_projection_bwd_optimizer_mip(
     const float erank_reg_weight,
     const float erank_reg_weight_s3,
     const float quat_norm_reg_weight,
+    const float dc_reg_weight,
     const float sh_reg_weight,
     bool use_scale_agnostic_mean,
     bool color_trust_linear,
@@ -488,7 +494,7 @@ void fused_projection_bwd_optimizer_mip(
         lr_features_sh, max_gauss_ratio, scale_regularization_weight,
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight,
         erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight,
-        sh_reg_weight, use_scale_agnostic_mean,
+        dc_reg_weight, sh_reg_weight, use_scale_agnostic_mean,
         color_trust_linear, eps_tr, step,
         quantization_level);
 }
@@ -532,6 +538,7 @@ void fused_projection_bwd_optimizer_3dgut(
     const float erank_reg_weight,
     const float erank_reg_weight_s3,
     const float quat_norm_reg_weight,
+    const float dc_reg_weight,
     const float sh_reg_weight,
     bool use_scale_agnostic_mean,
     bool color_trust_linear,
@@ -550,7 +557,7 @@ void fused_projection_bwd_optimizer_3dgut(
         lr_features_sh, max_gauss_ratio, scale_regularization_weight,
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight,
         erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight,
-        sh_reg_weight, use_scale_agnostic_mean,
+        dc_reg_weight, sh_reg_weight, use_scale_agnostic_mean,
         color_trust_linear, eps_tr, step,
         quantization_level);
 }

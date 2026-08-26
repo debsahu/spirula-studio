@@ -227,6 +227,7 @@ inline int train_tier_rank(const char* tier) {
     X(float, erank_reg_s3, 0.0f, "shape", "advanced", "")                    \
     X(float, scale_regularization_weight, 0.0f, "shape", "advanced", "")     \
     X(float, max_gauss_ratio, 10.0f, "shape", "advanced", "")                \
+    X(float, dc_reg, 0.001f, "shape", "basic", "")                           \
     X(float, sh_reg, 0.001f, "shape", "basic", "")                           \
     X(float, overexposure_reg, 0.0f, "shape", "advanced", "")                \
     X(float, quat_norm_reg, 0.01f, "shape", "advanced", "")                  \
@@ -398,6 +399,7 @@ inline bool train_apply_preset(TrainConfig& c, const std::string& name) {
         c.image_color_gamut = "Rec.2020";
         c.image_color_is_linear = false;
         c.background_mode = "noise";
+        c.dc_reg = 0.0f;
         c.features_dc_lr = 0.0015f;
         c.features_sh_lr = 0.000075f;
         return true;
@@ -413,6 +415,7 @@ inline bool train_apply_preset(TrainConfig& c, const std::string& name) {
     if (name == "meshing") {
         c.primitive = "3dgut";
         c.sh_degree = 0;
+        c.dc_reg = 10.0f;
         c.sh_reg = 10.0f;
         c.overexposure_reg = 10.0f;
         c.background_mode = "noise";
@@ -458,6 +461,7 @@ inline bool train_apply_preset(TrainConfig& c, const std::string& name) {
         c.erank_reg = 0.0f;
         c.erank_reg_s3 = 0.0f;
         c.quat_norm_reg = 0.0f;
+        c.dc_reg = 0.0f;
         c.sh_reg = 0.0f;
         c.normal_supervision_weight = 0.0f;
         c.opacity_reg = 0.01f;

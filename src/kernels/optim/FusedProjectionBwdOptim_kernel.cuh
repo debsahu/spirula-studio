@@ -231,6 +231,7 @@ __global__ void fused_projection_bwd_optimizer_3dgs_kernel
     const float erank_reg_weight,
     const float erank_reg_weight_s3,
     const float quat_norm_reg_weight,
+    const float dc_reg_weight,
     const float sh_reg_weight,
     const float eps_tr,
     const int32_t scalar_step,
@@ -357,10 +358,10 @@ __global__ void fused_projection_bwd_optimizer_3dgs_kernel
     v_splat_world.scale += v_scale_t;
     v_splat_world.quat += v_quat_t;
     v_splat_world.opacity += v_opac_t;
-    v_splat_world.features_dc += sh_reg_weight * (
-        fmaxf(splat_world.features_dc - make_float3(0.5f / 0.28209479177387814f), 0.0f) +
-        fminf(splat_world.features_dc + make_float3(0.5f / 0.28209479177387814f), 0.0f)
-    );
+    v_splat_world.features_dc += dc_reg_weight *
+            fmaxf(splat_world.features_dc - make_float3(0.5f / 0.28209479177387814f), 0.0f) +
+        (dc_reg_weight + sh_reg_weight) *
+            fminf(splat_world.features_dc + make_float3(0.5f / 0.28209479177387814f), 0.0f);
 
     // optimizer for mean/quat/scale
 
@@ -1012,6 +1013,7 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     const float erank_reg_weight,
     const float erank_reg_weight_s3,
     const float quat_norm_reg_weight,
+    const float dc_reg_weight,
     const float sh_reg_weight,
     const float eps_tr,
     const int32_t scalar_step,
@@ -1054,6 +1056,7 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
         erank_reg_weight / (float)N,
         erank_reg_weight_s3 / (float)N,
         quat_norm_reg_weight / (float)N,
+        2.0f * dc_reg_weight / (float)(3*N),
         2.0f * sh_reg_weight / (float)(3*N),
         eps_tr,
         scalar_step, steps);

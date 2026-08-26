@@ -97,6 +97,7 @@ struct OptimConfig {
     float erank_reg_weight             = 0.0f;
     float erank_reg_weight_s3          = 0.0f;
     float quat_norm_reg_weight         = 0.0f;
+    float dc_reg_weight                = 0.0f;
     float sh_reg_weight                = 0.0f;
 
     bool  use_scale_agnostic_mean         = false;

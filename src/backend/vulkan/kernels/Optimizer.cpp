@@ -309,12 +309,13 @@ struct OptimGeoParams {
     float lr_means, lr_quats, lr_scales, lr_opacs, lr_features_dc;
     float max_gauss_ratio, scale_regularization_weight,
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight, erank_reg_weight,
-        erank_reg_weight_s3, quat_norm_reg_weight, sh_reg_weight, grad_scale;
+        erank_reg_weight_s3, quat_norm_reg_weight,
+        dc_reg_weight, sh_reg_weight, grad_scale, _pad;
     int32_t scalar_step;
     uint32_t has_steps, has_densify_score, numel, wgs_per_row;
     uint32_t _pad0;
 };
-static_assert(sizeof(OptimGeoParams) == 41 * 8 + 20 * 4,
+static_assert(sizeof(OptimGeoParams) == 41 * 8 + 22 * 4,
               "params layout must match the slang struct");
 
 int64_t tv_numel(const TorchTensorView& tv) {
@@ -443,7 +444,7 @@ void fused_optim_3dgs_geometry(
     const float max_gauss_ratio, const float scale_regularization_weight,
     const float mcmc_opacity_reg_weight, const float mcmc_scale_reg_weight,
     const float erank_reg_weight, const float erank_reg_weight_s3, const float quat_norm_reg_weight,
-    const float sh_reg_weight,
+    const float dc_reg_weight, const float sh_reg_weight,
     bool use_scale_agnostic_mean,
     NonShQuantState non_sh,
     GradQuantBuffers gq,
@@ -516,6 +517,7 @@ void fused_optim_3dgs_geometry(
     p.erank_reg_weight = erank_reg_weight / (float)num_splats;
     p.erank_reg_weight_s3 = erank_reg_weight_s3 / (float)num_splats;
     p.quat_norm_reg_weight = quat_norm_reg_weight / (float)num_splats;
+    p.dc_reg_weight = dc_reg_weight;
     p.sh_reg_weight = sh_reg_weight;
     p.grad_scale = grad_scale;
     p.scalar_step = step;

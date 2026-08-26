@@ -116,7 +116,7 @@ static bool run_case(const Case& c) {
             /*max_gauss_ratio=*/10.f, c.scale_reg_w,
             /*mcmc_op=*/0.01f, /*mcmc_scale=*/0.01f,
             c.erank, c.erank_s3, /*quat_norm=*/0.01f,
-            /*sh_reg=*/0.001f, /*scale_agnostic_mean=*/false, nq, gq,
+            /*dc_reg=*/0.001f, /*sh_reg=*/0.001f, /*scale_agnostic_mean=*/false, nq, gq,
             step, DeviceVector<int32_t>(), /*grad_scale=*/1.f,
             /*zero_grad=*/false);
         backend::device_synchronize();

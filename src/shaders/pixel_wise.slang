@@ -121,22 +121,30 @@ float srgb_to_linear_rgb_grad(float x) {
 [CudaDeviceExport]
 float splat_dc_encode(float dc) {
     const float kSh0 = 0.28209479177387814f;
+#if 1
     const float a = 1.0f / 255.0f;            // sqrt of the black floor
     float s = sqrt(0.5f + a * a);
     float u = kSh0 * dc + 0.5f;
     float w = u >= 0.0f ? 2.0f * sqrt(u + a * a) : 2.0f * a + u / a;
     return (w - 2.0f * s) * s / kSh0;
+#else
+    return linear_rgb_to_srgb(0.5f + kSh0 * dc) * (1.0f / kSh0) - 0.5f;
+#endif
 }
 
 [ForceInline]
 [CudaDeviceExport]
 float splat_dc_decode(float x) {
     const float kSh0 = 0.28209479177387814f;
+#if 1
     const float a = 1.0f / 255.0f;
     float s = sqrt(0.5f + a * a);
     float w = x * kSh0 / s + 2.0f * s;
     float u = w >= 2.0f * a ? 0.25f * w * w - a * a : (w - 2.0f * a) * a;
     return (u - 0.5f) / kSh0;
+#else
+    return max(srgb_to_linear_rgb(0.5f + kSh0 * x), 0.0f) * (1.0f / kSh0) - 0.5f;
+#endif
 }
 
 [Differentiable]

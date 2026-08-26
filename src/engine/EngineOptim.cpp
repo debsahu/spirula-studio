@@ -465,7 +465,7 @@ void engine_fused_proj_bwd_optim_step(int step, const OptimConfig& cfg) {
             cfg.max_gauss_ratio, cfg.scale_regularization_weight,
             cfg.mcmc_opacity_reg_weight, cfg.mcmc_scale_reg_weight,
             cfg.erank_reg_weight, cfg.erank_reg_weight_s3,
-            cfg.quat_norm_reg_weight, cfg.sh_reg_weight,
+            cfg.quat_norm_reg_weight, cfg.dc_reg_weight, cfg.sh_reg_weight,
             cfg.use_scale_agnostic_mean,
             // The two flags are tied to the same Python source
             // (splat_color_is_linear); collapse to one to halve the FPBO
@@ -579,7 +579,7 @@ void engine_optim_step(int step, const OptimConfig& cfg) {
         cfg.max_gauss_ratio, cfg.scale_regularization_weight,
         cfg.mcmc_opacity_reg_weight, cfg.mcmc_scale_reg_weight,
         cfg.erank_reg_weight, cfg.erank_reg_weight_s3, cfg.quat_norm_reg_weight,
-        cfg.sh_reg_weight,
+        cfg.dc_reg_weight, cfg.sh_reg_weight,
         cfg.use_scale_agnostic_mean,
         non_sh_optim,
         grad_q,
@@ -612,7 +612,7 @@ void engine_optim_step(int step, const OptimConfig& cfg) {
                 DeviceTensorFloatND(engine().optim.g1_features_dc),
                 DeviceTensorFloatND(engine().optim.g2_features_dc),
                 cfg.lr_features_dc, step + 1, per_splat_steps,
-                cfg.sh_reg_weight, 0.5f / 0.28209479177387814f,
+                cfg.dc_reg_weight, 0.5f / 0.28209479177387814f,
                 grad_scale, zero_grad);
         }
     }

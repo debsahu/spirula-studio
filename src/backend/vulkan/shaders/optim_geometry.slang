@@ -98,8 +98,10 @@ struct OptimGeoParams {
     float erank_reg_weight;
     float erank_reg_weight_s3;
     float quat_norm_reg_weight;
+    float dc_reg_weight;
     float sh_reg_weight;
     float grad_scale;
+    float _pad;
     int32_t scalar_step;
     uint32_t has_steps;
     uint32_t has_densify_score;
@@ -409,12 +411,13 @@ void fused_optim_3dgs_geometry(uint3 wg: SV_GroupID,
             // L1-shrinkage DC color regularization (mirrors the fp32 path's
             // fused_adam_step l2_reg + offset = 0.5/kSh0).
             const float dc_off = 0.5f / kGeoSh0;
-            v_dc.x += p.sh_reg_weight *
-                      (max(fdc.x - dc_off, 0.0f) + min(fdc.x + dc_off, 0.0f));
-            v_dc.y += p.sh_reg_weight *
-                      (max(fdc.y - dc_off, 0.0f) + min(fdc.y + dc_off, 0.0f));
-            v_dc.z += p.sh_reg_weight *
-                      (max(fdc.z - dc_off, 0.0f) + min(fdc.z + dc_off, 0.0f));
+            float under_reg_weight = p.dc_reg_weight + p.sh_reg_weight;
+            v_dc.x += p.dc_reg_weight * max(fdc.x - dc_off, 0.0f) +
+                under_reg_weight * min(fdc.x + dc_off, 0.0f);
+            v_dc.y += p.dc_reg_weight * max(fdc.y - dc_off, 0.0f) +
+                under_reg_weight * min(fdc.y + dc_off, 0.0f);
+            v_dc.z += p.dc_reg_weight * max(fdc.z - dc_off, 0.0f) +
+                under_reg_weight * min(fdc.z + dc_off, 0.0f);
 
             float g1[3], g2[3];
             oq_state_read<3>(kNonShQuant != 0, p.nq_dc_packed, p.nq_dc_bounds,

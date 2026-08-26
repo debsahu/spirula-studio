@@ -111,9 +111,9 @@ struct FpboParams {
     float erank_reg_weight;
     float erank_reg_weight_s3;
     float quat_norm_reg_weight;
+    float dc_reg_weight;
     float sh_reg_weight;
     float eps_tr;
-    float _padf;
     int32_t scalar_step;
     uint32_t has_steps;
     uint32_t has_densify_score;
@@ -247,9 +247,8 @@ void fpbo(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
         g.v_scale += v_scale_t;
         g.v_quat += v_quat_t;
         g.v_opacity += v_opac_t;
-        g.v_dc += p.sh_reg_weight *
-                  (max(s.dc - float3(0.5f / kSh0), float3(0.0f)) +
-                   min(s.dc + float3(0.5f / kSh0), float3(0.0f)));
+        g.v_dc += p.dc_reg_weight * max(s.dc - float3(0.5f / kSh0), float3(0.0f)) +
+            (p.dc_reg_weight + p.sh_reg_weight) * min(s.dc + float3(0.5f / kSh0), float3(0.0f));
     }
 
     // ---- optimizer ----

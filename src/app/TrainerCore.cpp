@@ -363,6 +363,7 @@ EngineStepConfig build_step_config(const TrainConfig& c, const RunState& st, int
     cfg.optim.erank_reg_weight            = c.erank_reg;
     cfg.optim.erank_reg_weight_s3         = c.erank_reg_s3;
     cfg.optim.quat_norm_reg_weight        = c.quat_norm_reg;
+    cfg.optim.dc_reg_weight               = c.dc_reg;
     cfg.optim.sh_reg_weight               = c.sh_reg;
     cfg.optim.use_scale_agnostic_mean     = c.use_scale_agnostic_mean;
     // quantization level -> bit depths
