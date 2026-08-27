@@ -128,6 +128,10 @@ struct SfmJob {
     // and the CLI refuses the combination outright.
     int matcher = 0;
     bool keep_intermediate = false;   // keep features/ and matches.bin
+    // Bundle adjustment on the host from the start. The escape hatch for a
+    // driver that resets under a long solve: a run falls back by itself when
+    // the device fails, but only after paying for the failure.
+    bool ba_cpu = false;
 
     // What colour space the photographs are in. Everything that reads pixels --
     // SfM, AI masking, depth and normals -- converts to sRGB first, which is

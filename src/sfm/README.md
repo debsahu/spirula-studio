@@ -149,6 +149,17 @@ not for the two deliberately ill-conditioned convergence checks in
 part here has an fp64 buffer atomic add, so all of them take the host path
 unless `--ba-real df` says otherwise.
 
+A device that *had* the feature and then failed anyway — `VK_ERROR_DEVICE_LOST`
+(what a Windows TDR reset looks like from here: the watchdog kills a driver
+whose kernel runs past two seconds, and a thousand-image dense factorization
+is one long kernel), or an allocation the driver refused — does not end the
+run. `runGlobalBA` re-runs that solve on the host and sends every later solve
+at least that big straight there, because the mapper's problems only grow;
+`VkContext`'s `VK_CHECK` throws rather than exits so it can. The run says so
+once, and `--ba-real cpu --ba-real-coarse cpu` (Spirula Studio: "Bundle
+adjustment on the CPU", under Advanced) skips the failed GPU attempt next time
+— worth setting on a card that resets once, since it resets again.
+
 Two devices deserve naming:
 
 - **Intel UHD 750 (Gen12, RPL-S desktop)** has *none* of the three: no fp64, no

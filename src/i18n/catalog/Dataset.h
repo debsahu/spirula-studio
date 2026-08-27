@@ -6214,6 +6214,83 @@ SS_MSG(section_fallbacks,
     ES("Alternativas"),  PT("Alternativas"), IT("Ripieghi"),
     NL("Terugvalopties"), RU("Запасные пути"), TR("Yedek yollar"));
 
+SS_MSG(sfm_ba_cpu,
+    EN("Bundle adjustment on the CPU"),
+    JA("バンドル調整を CPU で行う"),
+    ZH_HANS("在 CPU 上做光束法平差"),
+    ZH_HANT("在 CPU 上做光束法平差"),
+    KO("번들 조정을 CPU에서"),
+    DE("Bündelausgleichung auf der CPU"),
+    FR("Ajustement de faisceaux sur le CPU"),
+    ES("Ajuste de haces en la CPU"),
+    PT("Ajustamento de feixes na CPU"),
+    IT("Bundle adjustment sulla CPU"),
+    NL("Bundelaanpassing op de CPU"),
+    RU("Уравнивание связок на CPU"),
+    TR("Demet düzeltmesi CPU'da"));
+
+SS_MSG(sfm_ba_cpu_help,
+    EN("Solve the reconstruction's largest step on the CPU rather than the "
+       "GPU. Slower, and only worth it where the GPU cannot finish it: a "
+       "driver that resets under a long solve, or one card doing this and "
+       "something else at once. A run that hits either falls back by itself, "
+       "but the fallback costs the failure first."),
+    JA("復元でいちばん大きな計算を GPU ではなく CPU で解きます。遅くなるので、"
+       "GPU で完了できないときだけ使ってください。長い計算の途中でドライバが"
+       "リセットされる場合や、1 枚のカードでこれと別の作業を同時に走らせている"
+       "場合です。どちらに当たっても実行は自動で CPU に切り替わりますが、"
+       "そのぶん一度失敗する時間がかかります。"),
+    ZH_HANS("把重建里最大的一步放到 CPU 上解，而不是 GPU。会更慢，只在 GPU 跑不完"
+            "时才值得: 长时间计算中驱动被重置，或者同一块显卡还在做别的事。"
+            "遇到这两种情况时程序会自动改用 CPU，但要先花掉一次失败的时间。"),
+    ZH_HANT("把重建裡最大的一步放到 CPU 上解，而不是 GPU。會更慢，只在 GPU 跑不完"
+            "時才值得: 長時間計算中驅動被重設，或者同一張顯示卡還在做別的事。"
+            "遇到這兩種情況時程式會自動改用 CPU，但要先花掉一次失敗的時間。"),
+    KO("복원에서 가장 큰 단계를 GPU 대신 CPU에서 계산합니다. 느리므로 GPU가 끝내지 "
+       "못할 때만 쓸 만합니다. 긴 계산 도중 드라이버가 초기화되거나, 한 장의 "
+       "카드가 이 작업과 다른 작업을 함께 할 때입니다. 둘 중 하나에 걸리면 "
+       "실행이 알아서 CPU로 넘어가지만, 그전에 한 번 실패하는 시간이 듭니다."),
+    DE("Den größten Schritt der Rekonstruktion auf der CPU lösen statt auf der "
+       "GPU. Langsamer, und nur dort sinnvoll, wo die GPU ihn nicht zu Ende "
+       "bringt: ein Treiber, der bei einer langen Rechnung zurückgesetzt wird, "
+       "oder eine Karte, die nebenher noch etwas anderes tut. Ein Lauf weicht "
+       "in beiden Fällen von selbst aus, zahlt dafür aber erst den Fehlschlag."),
+    FR("Résoudre l'étape la plus lourde de la reconstruction sur le CPU plutôt "
+       "que sur le GPU. Plus lent, et utile seulement là où le GPU n'y arrive "
+       "pas : un pilote réinitialisé pendant un long calcul, ou une carte qui "
+       "fait autre chose en même temps. Un calcul qui tombe sur l'un ou "
+       "l'autre bascule tout seul, mais paie d'abord l'échec."),
+    ES("Resolver el paso más grande de la reconstrucción en la CPU en lugar de "
+       "la GPU. Más lento, y solo vale la pena donde la GPU no lo termina: un "
+       "controlador que se reinicia durante un cálculo largo, o una tarjeta "
+       "que además hace otra cosa. Una ejecución que se topa con eso cambia "
+       "sola, pero antes paga el fallo."),
+    PT("Resolver o passo maior da reconstrução na CPU em vez da GPU. Mais "
+       "lento, e só vale onde a GPU não consegue terminar: um driver que "
+       "reinicia durante um cálculo longo, ou uma placa que ainda faz outra "
+       "coisa. Uma execução que esbarra nisso muda sozinha, mas paga a falha "
+       "antes."),
+    IT("Risolvere il passaggio più grande della ricostruzione sulla CPU invece "
+       "che sulla GPU. Più lento, e utile solo dove la GPU non ci arriva: un "
+       "driver che si reimposta durante un calcolo lungo, o una scheda che sta "
+       "facendo anche altro. Un'esecuzione che incappa in questo ripiega da "
+       "sola, ma prima paga il fallimento."),
+    NL("De grootste stap van de reconstructie op de CPU oplossen in plaats van "
+       "op de GPU. Trager, en alleen de moeite waar de GPU hem niet afmaakt: "
+       "een stuurprogramma dat tijdens een lange berekening opnieuw start, of "
+       "een kaart die er iets anders bij doet. Een run die daartegenaan loopt "
+       "wijkt vanzelf uit, maar betaalt eerst de mislukking."),
+    RU("Решать самый большой шаг реконструкции на CPU, а не на GPU. Медленнее "
+       "и оправдано только там, где GPU его не заканчивает: драйвер "
+       "сбрасывается на длинном расчёте или та же карта занята чем-то ещё. "
+       "Запуск в обоих случаях переходит на CPU сам, но сначала теряет время "
+       "на неудачу."),
+    TR("Yeniden kurulumun en büyük adımını GPU yerine CPU'da çözer. Daha "
+       "yavaştır ve yalnızca GPU'nun bitiremediği yerde değer: uzun bir hesap "
+       "sırasında sıfırlanan bir sürücü ya da aynı anda başka iş de yapan bir "
+       "kart. Bunlara denk gelen bir çalışma kendiliğinden CPU'ya geçer, ama "
+       "önce başarısızlığın bedelini öder."));
+
 SS_MSG(use_ffmpeg,
     EN("Extract frames with ffmpeg"),
     JA("フレームの切り出しに ffmpeg を使う"),

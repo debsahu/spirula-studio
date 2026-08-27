@@ -1227,6 +1227,62 @@ SS_MSG(err_spawn_recon,
     RU("Не удалось запустить реконструкцию ({0})"),
     TR("Yeniden kurulum başlatılamadı ({0})"));
 
+SS_MSG(err_recon_gpu,
+    EN("the GPU could not finish the reconstruction -- the driver reported a "
+       "lost device or ran out of memory (the log has its error). Turn on "
+       "\"{0}\" under Advanced and run it again: that step is slower on the "
+       "CPU, but it does not put the whole model on the GPU at once."),
+    JA("GPU が復元を完了できませんでした。デバイスが失われた、またはメモリが"
+       "足りないとドライバが報告しています（詳しくはログを見てください）。「詳細設定」で「{0}」を"
+       "オンにして、もう一度実行してください。CPU では遅くなりますが、モデル全体を"
+       "一度に GPU へ載せずに済みます。"),
+    ZH_HANS("GPU 无法完成重建: 驱动报告设备丢失或显存不足（错误在日志里）。"
+            "请在「高级」中打开「{0}」后重新运行: 这一步在 CPU 上更慢，"
+            "但不必把整个模型一次性放到 GPU 上。"),
+    ZH_HANT("GPU 無法完成重建: 驅動回報裝置失效或記憶體不足（錯誤在日誌裡）。"
+            "請在「進階」中開啟「{0}」後重新執行: 這一步在 CPU 上較慢，"
+            "但不必把整個模型一次放到 GPU 上。"),
+    KO("GPU가 복원을 끝내지 못했습니다. 드라이버가 장치 손실이나 메모리 부족을 "
+       "알렸습니다(오류는 로그에 있습니다). 「고급」에서 「{0}」을 켜고 다시 "
+       "실행하세요. CPU에서는 느리지만 모델 전체를 한 번에 GPU에 올리지 않습니다."),
+    DE("Die GPU konnte die Rekonstruktion nicht abschließen -- der Treiber "
+       "meldete ein verlorenes Gerät oder zu wenig Speicher (der Fehler steht "
+       "im Protokoll). Schalten Sie unter \"Erweitert\" \"{0}\" ein und "
+       "starten Sie erneut: Auf der CPU ist dieser Schritt langsamer, legt "
+       "aber nicht das ganze Modell auf einmal auf die GPU."),
+    FR("Le GPU n'a pas pu terminer la reconstruction : le pilote a signalé un "
+       "périphérique perdu ou un manque de mémoire (son erreur est dans le "
+       "journal). Activez \"{0}\" sous \"Avancé\" et relancez : cette "
+       "étape est plus lente sur le CPU, mais elle ne met pas tout le modèle "
+       "sur le GPU d'un coup."),
+    ES("La GPU no pudo terminar la reconstrucción: el controlador informó de "
+       "un dispositivo perdido o de falta de memoria (su error está en el "
+       "registro). Active \"{0}\" en \"Avanzado\" y vuelva a ejecutarlo: "
+       "ese paso es más lento en la CPU, pero no pone todo el modelo en la "
+       "GPU de una vez."),
+    PT("A GPU não conseguiu terminar a reconstrução: o driver relatou "
+       "dispositivo perdido ou falta de memória (o erro está no registro). "
+       "Ative \"{0}\" em \"Avançado\" e execute de novo: esse passo é "
+       "mais lento na CPU, mas não coloca o modelo inteiro na GPU de uma vez."),
+    IT("La GPU non è riuscita a terminare la ricostruzione: il driver ha "
+       "segnalato un dispositivo perso o memoria esaurita (l'errore è nel "
+       "registro). Attivi \"{0}\" in \"Avanzate\" e riprovi: sulla CPU "
+       "quel passaggio è più lento, ma non mette tutto il modello sulla GPU "
+       "in una volta."),
+    NL("De GPU kon de reconstructie niet afmaken: het stuurprogramma meldde "
+       "een verloren apparaat of te weinig geheugen (de fout staat in het "
+       "logboek). Zet \"{0}\" aan onder \"Geavanceerd\" en voer het "
+       "opnieuw uit: die stap is trager op de CPU, maar zet niet het hele "
+       "model in één keer op de GPU."),
+    RU("GPU не смог завершить реконструкцию: драйвер сообщил о потере "
+       "устройства или нехватке памяти (его ошибка есть в журнале). Включите "
+       "\"{0}\" в разделе \"Дополнительно\" и запустите снова: на CPU "
+       "этот шаг медленнее, но не требует держать всю модель на GPU сразу."),
+    TR("GPU yeniden kurulumu tamamlayamadı: sürücü aygıt kaybı veya bellek "
+       "yetersizliği bildirdi (hatası günlükte). \"Gelişmiş\" altında "
+       "\"{0}\" seçeneğini açıp yeniden çalıştırın: bu adım CPU'da daha "
+       "yavaştır ama modelin tamamını bir kerede GPU'ya koymaz."));
+
 SS_MSG(err_recon_failed,
     EN("reconstruction failed (see the log). Common causes: too few "
        "overlapping images, not enough overlap between them, or the wrong "

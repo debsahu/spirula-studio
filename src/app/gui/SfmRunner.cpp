@@ -58,12 +58,16 @@ const char* pick(const char* const (&table)[N], int i, int fallback = 0) {
     return table[(i >= 0 && i < N) ? i : fallback];
 }
 
-// Is this line of the child's output worth showing to somebody who is not
-// debugging? Its own [run] block -- what it was asked for and what it got --
-// and anything it flagged. Everything else is the stream behind the bars.
-//
-// Both halves are asked of the same catalog the child printed from, so a
-// `--lang ja` run classifies as well as an English one.
+// A failed Vulkan call is the child's own English diagnostic -- a result name
+// and a source line -- not interface copy, so it is matched as one.
+bool child_line_is_gpu_failure(const std::string& l) {
+    return l.find("VK_ERROR_DEVICE_LOST") != std::string::npos ||
+           l.find("VK_ERROR_OUT_OF_DEVICE_MEMORY") != std::string::npos;
+}
+
+// Worth showing to somebody who is not debugging: the child's own [run] block
+// and anything it flagged. Both halves are asked of the catalog the child
+// printed from, so a `--lang ja` run classifies as well as an English one.
 bool child_line_is_notable(const std::string& l) {
 #ifndef SS_TOOL_SFM
     (void)l;
@@ -200,6 +204,7 @@ void SfmRunner::take_reconstruction(SfmJob& job) {
     job.features = _live.features;
     job.matcher = _live.matcher;
     job.keep_intermediate = _live.keep_intermediate;
+    job.ba_cpu = _live.ba_cpu;
     job.extra_args = _live.extra_args;
     // The lens is a reconstruction setting that happens to be stored on the
     // input it describes. The list itself cannot change while a run is live.
@@ -544,6 +549,12 @@ void SfmRunner::run(SfmJob job) {
             if (job.distortion_refine >= 2) argv.push_back("--no-final-extra-params");
             if (job.final_per_image_intrinsics)
                 argv.push_back("--final-per-image-intrinsics");
+            if (job.ba_cpu) {
+                argv.push_back("--ba-real");
+                argv.push_back("cpu");
+                argv.push_back("--ba-real-coarse");
+                argv.push_back("cpu");
+            }
             append_camera_overrides(job, prep, argv);
             if (job.max_features > 0) {
                 // Each frontend has its own count flag, because their budgets
@@ -583,9 +594,18 @@ void SfmRunner::run(SfmJob job) {
             std::string cmd;
             for (const auto& a : argv) cmd += (cmd.empty() ? "$ " : " ") + a;
             log(cmd);
-            const int rc = run_process(argv, "", [this](const std::string& l) {
+            // What to advise on failure depends on which stage lost the
+            // device: a CPU bundle adjustment is no answer to one lost while
+            // matching.
+            bool mapping = false, gpu_failure = false;
+            const int rc = run_process(argv, "", [&](const std::string& l) {
                 log(l, !child_line_is_notable(l));
                 note_progress(l);
+#ifdef SS_TOOL_SFM
+                const std::string map = sfm::slog::prefix(sfm::slog::Tag::Map);
+                if (l.compare(0, map.size(), map) == 0) mapping = true;
+#endif
+                if (mapping && child_line_is_gpu_failure(l)) gpu_failure = true;
             }, _cancel);
             if (rc == kCancelled) return fail(lmsg::err_cancelled.get());
             if (rc == kSpawnFailed)
@@ -599,7 +619,10 @@ void SfmRunner::run(SfmJob job) {
                 _partial = true;
                 log(lmsg::sfm_partial.get());
             } else if (rc != 0) {
-                return fail(lmsg::err_recon_failed.get());
+                return fail(gpu_failure
+                                ? fmt(lmsg::err_recon_gpu,
+                                      {spirula::i18n::msg::dataset::sfm_ba_cpu.get()})
+                                : lmsg::err_recon_failed.get());
             }
         }
 

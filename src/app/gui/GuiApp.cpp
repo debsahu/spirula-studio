@@ -3350,6 +3350,9 @@ void GuiApp::draw_sfm_advanced() {
     ui::Checkbox(dmsg::use_python_masking, &_sfm_job.prep.force_external_masking);
     ImGui::EndDisabled();
     ui::help_on_hover(dmsg::use_python_masking_help);
+
+    ui::Checkbox(dmsg::sfm_ba_cpu, &_sfm_job.ba_cpu);
+    ui::help_on_hover(dmsg::sfm_ba_cpu_help);
 }
 
 // ---------------------------------------------------------------------------
