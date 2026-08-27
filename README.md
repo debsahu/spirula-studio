@@ -19,7 +19,7 @@ Spirula Studio trains 3D Gaussian Splatting models &ndash; from raw photo/video 
 
 <div align="center">
 
-![Spirula Studio - Open Source 3D Gaussian Splatting Pipeline](https://spirula.studio/assets/video/spirula-studio-hero.webp)
+![Spirula Studio - Open Source 3D Gaussian Splatting Pipeline](https://spirula.studio/assets/video/spirula-studio-hero.webp?md5=0ff79909f5c779509664da20b9f9dd61)
 
 <sup>Dataset credit: [Garage](https://www.kaggle.com/datasets/simonbethke/garage) by Simon Bethke (CC BY-SA 4.0); Flight Systems and Control Lab at UTIAS; MegaDepth-X; Mip-NeRF 360.</sup>
 
