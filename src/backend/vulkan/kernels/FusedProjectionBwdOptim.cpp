@@ -32,6 +32,7 @@ struct FpboParams {
     float mcmc_opacity_reg_weight, mcmc_scale_reg_weight;
     float erank_reg_weight, erank_reg_weight_s3;
     float quat_norm_reg_weight, dc_reg_weight, sh_reg_weight;
+    float max_screen_size, max_screen_size_penalty;
     float eps_tr;
     int32_t scalar_step;
     uint32_t has_steps, has_densify_score;
@@ -41,7 +42,7 @@ struct FpboParams {
     uint32_t num_sh_buffer;
     uint32_t _pad0;
 };
-static_assert(sizeof(FpboParams) == 47 * 8 + 16 * 4 + 10 * 4,
+static_assert(sizeof(FpboParams) == 47 * 8 + 18 * 4 + 10 * 4,
               "params layout must match the slang struct");
 
 using vkk::or_fallback;
@@ -77,6 +78,7 @@ void launch_fpbo_vk(
     const float erank_reg_weight, const float erank_reg_weight_s3,
     const float quat_norm_reg_weight, const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size, const float max_screen_size_penalty,
     bool use_scale_agnostic_mean, bool color_trust_linear, float eps_tr,
     std::variant<int32_t, TorchTensorView> step, int quantization_level) {
     if (N == 0)
@@ -213,6 +215,9 @@ void launch_fpbo_vk(
     p.quat_norm_reg_weight = quat_norm_reg_weight / (float)N;
     p.dc_reg_weight = 2.0f * dc_reg_weight / (float)(3 * N);
     p.sh_reg_weight = 2.0f * sh_reg_weight / (float)(3 * N);
+    p.max_screen_size = max_screen_size;
+    p.max_screen_size_penalty =
+        radii.data_ptr() ? max_screen_size_penalty : 0.0f;
     p.eps_tr = eps_tr;
     p.scalar_step = scalar_step;
     p.has_steps = steps_ptr ? 1u : 0u;
@@ -257,7 +262,8 @@ void launch_fpbo_vk(
         lr_features_sh, max_gauss_ratio, scale_regularization_weight,       \
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight, erank_reg_weight,   \
         erank_reg_weight_s3, quat_norm_reg_weight, dc_reg_weight,           \
-        sh_reg_weight, use_scale_agnostic_mean, color_trust_linear,         \
+        sh_reg_weight, max_screen_size, max_screen_size_penalty,            \
+        use_scale_agnostic_mean, color_trust_linear,                        \
         eps_tr, step, quantization_level
 
 #define _FPBO_PARAMS                                                        \
@@ -287,6 +293,7 @@ void launch_fpbo_vk(
         const float mcmc_scale_reg_weight, const float erank_reg_weight,    \
         const float erank_reg_weight_s3, const float quat_norm_reg_weight,  \
         const float dc_reg_weight, const float sh_reg_weight,               \
+        const float max_screen_size, const float max_screen_size_penalty,   \
         bool use_scale_agnostic_mean, bool color_trust_linear,              \
         float eps_tr,                                                       \
         std::variant<int32_t, TorchTensorView> step, int quantization_level
@@ -304,7 +311,7 @@ static void _fpbo_call(bool eval3d, bool antialiased, _FPBO_PARAMS) {
                    scale_regularization_weight, mcmc_opacity_reg_weight,
                    mcmc_scale_reg_weight, erank_reg_weight,
                    erank_reg_weight_s3, quat_norm_reg_weight, dc_reg_weight,
-                   sh_reg_weight,
+                   sh_reg_weight, max_screen_size, max_screen_size_penalty,
                    use_scale_agnostic_mean, color_trust_linear, eps_tr, step,
                    quantization_level);
 }

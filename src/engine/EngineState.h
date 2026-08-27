@@ -249,6 +249,10 @@ struct SplatOptim {
     // accum_buffer with DensifyConfig::final_score_power applied to lane 0.
     // Empty when that power is 1, which is when accum_buffer IS the score.
     DeviceVector<float2>   densify_sample_score;   // [cur_N], or empty
+    // Summed log2(radii / max_screen_size) over the steps since the last
+    // refine, zeroed with accum_buffer. Empty when the oversize split
+    // channel is off.
+    DeviceVector<float>    densify_oversize;       // [max_N], or empty
 
     // Set per-step from cfg.optim.use_fused_proj_bwd_optim before forward/loss
     // so engine_compute_loss_backward knows to skip projection_*_backward and

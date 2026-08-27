@@ -22,6 +22,7 @@
 #include "shaders/projection_utils.slang"
 #undef CudaDeviceExport
 #include "optim_quant.slang"
+#include "screen_size_hinge.slang"
 
 [SpecializationConstant]
 const int kScaleAgnostic = 0;
@@ -101,6 +102,8 @@ struct OptimGeoParams {
     float dc_reg_weight;
     float sh_reg_weight;
     float grad_scale;
+    float max_screen_size;
+    float max_screen_size_penalty;
     float _pad;
     int32_t scalar_step;
     uint32_t has_steps;
@@ -226,6 +229,11 @@ void fused_optim_3dgs_geometry(uint3 wg: SV_GroupID,
             oq_state_read<3>(kNonShQuant != 0, p.nq_scales_packed,
                              p.nq_scales_bounds, p.g1_scales, p.g2_scales,
                              block_id, gid, g1, g2);
+            v_scale += screen_size_hinge_grad(
+                p.radii[gid], p.max_screen_size, p.max_screen_size_penalty,
+                scale,
+                oq_sqrt3(float3(g2[0], g2[1], g2[2]) * ibc2) +
+                    float3(kAdamEps));
             [ForceUnroll]
             for (int i = 0; i < 3; i++) {
                 g1[i] = kGeoBeta1 * g1[i] + (1.0f - kGeoBeta1) * v_scale[i];

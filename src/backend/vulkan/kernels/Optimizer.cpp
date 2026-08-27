@@ -310,12 +310,13 @@ struct OptimGeoParams {
     float max_gauss_ratio, scale_regularization_weight,
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight, erank_reg_weight,
         erank_reg_weight_s3, quat_norm_reg_weight,
-        dc_reg_weight, sh_reg_weight, grad_scale, _pad;
+        dc_reg_weight, sh_reg_weight, grad_scale, max_screen_size,
+        max_screen_size_penalty, _pad;
     int32_t scalar_step;
     uint32_t has_steps, has_densify_score, numel, wgs_per_row;
     uint32_t _pad0;
 };
-static_assert(sizeof(OptimGeoParams) == 41 * 8 + 22 * 4,
+static_assert(sizeof(OptimGeoParams) == 41 * 8 + 24 * 4,
               "params layout must match the slang struct");
 
 int64_t tv_numel(const TorchTensorView& tv) {
@@ -445,6 +446,7 @@ void fused_optim_3dgs_geometry(
     const float mcmc_opacity_reg_weight, const float mcmc_scale_reg_weight,
     const float erank_reg_weight, const float erank_reg_weight_s3, const float quat_norm_reg_weight,
     const float dc_reg_weight, const float sh_reg_weight,
+    const float max_screen_size, const float max_screen_size_penalty,
     bool use_scale_agnostic_mean,
     NonShQuantState non_sh,
     GradQuantBuffers gq,
@@ -520,6 +522,9 @@ void fused_optim_3dgs_geometry(
     p.dc_reg_weight = dc_reg_weight;
     p.sh_reg_weight = sh_reg_weight;
     p.grad_scale = grad_scale;
+    p.max_screen_size = max_screen_size;
+    p.max_screen_size_penalty =
+        radii.data_ptr() ? max_screen_size_penalty : 0.0f;
     p.scalar_step = step;
     p.has_steps = per_splat_steps.data_ptr() ? 1u : 0u;
     p.has_densify_score = densify_score.data_ptr() ? 1u : 0u;

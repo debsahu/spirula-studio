@@ -8,6 +8,7 @@
 // at the top of the file (above the auto-generated section). Including it
 // here keeps the kernel-side and dispatcher-side definitions in sync.
 #include "kernels/optim/FusedProjectionBwdOptim.cuh"
+#include "kernels/optim/ScreenSizeHinge.cuh"
 
 #ifndef NO_TORCH
 #define NO_TORCH
@@ -233,6 +234,8 @@ __global__ void fused_projection_bwd_optimizer_3dgs_kernel
     const float quat_norm_reg_weight,
     const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size,
+    const float max_screen_size_penalty,
     const float eps_tr,
     const int32_t scalar_step,
     const int32_t* __restrict__ steps
@@ -405,6 +408,11 @@ __global__ void fused_projection_bwd_optimizer_3dgs_kernel
             g1_scale = g1_splats_world.scales(gid);
             g2_scale = g2_splats_world.scales(gid);
         }
+        if (radii != nullptr)
+            v_splat_world.scale += screen_size_hinge_grad(
+                radii[gid], max_screen_size, max_screen_size_penalty,
+                splat_world.scale,
+                sqrtf(g2_scale * inv_bias_correction2) + eps);
         g1_scale = beta1 * g1_scale + (1.f - beta1) * v_splat_world.scale;
         g2_scale = beta2 * g2_scale + (1.f - beta2) * v_splat_world.scale*v_splat_world.scale;
         float3 new_scale = splat_world.scale - lr_scales * inv_bias_correction1 * g1_scale / (sqrtf(g2_scale * inv_bias_correction2) + eps);
@@ -1015,6 +1023,8 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     const float quat_norm_reg_weight,
     const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size,
+    const float max_screen_size_penalty,
     const float eps_tr,
     const int32_t scalar_step,
     const int32_t* __restrict__ steps
@@ -1058,6 +1068,7 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
         quat_norm_reg_weight / (float)N,
         2.0f * dc_reg_weight / (float)(3*N),
         2.0f * sh_reg_weight / (float)(3*N),
+        max_screen_size, max_screen_size_penalty,
         eps_tr,
         scalar_step, steps);
 }

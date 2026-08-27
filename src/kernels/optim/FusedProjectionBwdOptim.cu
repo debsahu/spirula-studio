@@ -64,6 +64,8 @@ void fused_projection_bwd_optimizer_3dgs_kernel_wrapper(
     const float quat_norm_reg_weight,
     const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size,
+    const float max_screen_size_penalty,
     const float eps_tr,
     const int32_t scalar_step,
     const int32_t* __restrict__ steps
@@ -140,6 +142,8 @@ inline void launch_fused_projection_bwd_optimizer_3dgs_kernel(
     const float quat_norm_reg_weight,
     const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size,
+    const float max_screen_size_penalty,
     const float eps_tr,
     const int32_t scalar_step,
     const std::optional<TorchTensorView> steps
@@ -191,6 +195,7 @@ inline void launch_fused_projection_bwd_optimizer_3dgs_kernel(
             lr_means, lr_quats, lr_scales, lr_opacs, lr_features_dc, lr_features_sh, \
             max_gauss_ratio, scale_regularization_weight, \
             mcmc_opacity_reg_weight, mcmc_scale_reg_weight, erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight, dc_reg_weight, sh_reg_weight, \
+            max_screen_size, max_screen_size_penalty, \
             eps_tr, \
             scalar_step, steps_ptr \
         )
@@ -267,6 +272,8 @@ static inline void _fused_projection_bwd_optimizer_dispatch(
     const float quat_norm_reg_weight,
     const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size,
+    const float max_screen_size_penalty,
     bool use_scale_agnostic_mean,
     bool color_trust_linear,
     float eps_tr,
@@ -323,6 +330,8 @@ static inline void _fused_projection_bwd_optimizer_dispatch(
         quat_norm_reg_weight, \
         dc_reg_weight, \
         sh_reg_weight, \
+        max_screen_size, \
+        max_screen_size_penalty, \
         eps_tr, \
         scalar_step, \
         steps_view \
@@ -414,6 +423,8 @@ void fused_projection_bwd_optimizer_3dgs(
     const float quat_norm_reg_weight,
     const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size,
+    const float max_screen_size_penalty,
     bool use_scale_agnostic_mean,
     bool color_trust_linear,
     float eps_tr,
@@ -431,7 +442,8 @@ void fused_projection_bwd_optimizer_3dgs(
         lr_features_sh, max_gauss_ratio, scale_regularization_weight,
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight,
         erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight,
-        dc_reg_weight, sh_reg_weight, use_scale_agnostic_mean,
+        dc_reg_weight, sh_reg_weight,
+        max_screen_size, max_screen_size_penalty, use_scale_agnostic_mean,
         color_trust_linear, eps_tr, step,
         quantization_level);
 }
@@ -477,6 +489,8 @@ void fused_projection_bwd_optimizer_mip(
     const float quat_norm_reg_weight,
     const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size,
+    const float max_screen_size_penalty,
     bool use_scale_agnostic_mean,
     bool color_trust_linear,
     float eps_tr,
@@ -494,7 +508,8 @@ void fused_projection_bwd_optimizer_mip(
         lr_features_sh, max_gauss_ratio, scale_regularization_weight,
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight,
         erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight,
-        dc_reg_weight, sh_reg_weight, use_scale_agnostic_mean,
+        dc_reg_weight, sh_reg_weight,
+        max_screen_size, max_screen_size_penalty, use_scale_agnostic_mean,
         color_trust_linear, eps_tr, step,
         quantization_level);
 }
@@ -540,6 +555,8 @@ void fused_projection_bwd_optimizer_3dgut(
     const float quat_norm_reg_weight,
     const float dc_reg_weight,
     const float sh_reg_weight,
+    const float max_screen_size,
+    const float max_screen_size_penalty,
     bool use_scale_agnostic_mean,
     bool color_trust_linear,
     float eps_tr,
@@ -557,7 +574,8 @@ void fused_projection_bwd_optimizer_3dgut(
         lr_features_sh, max_gauss_ratio, scale_regularization_weight,
         mcmc_opacity_reg_weight, mcmc_scale_reg_weight,
         erank_reg_weight, erank_reg_weight_s3, quat_norm_reg_weight,
-        dc_reg_weight, sh_reg_weight, use_scale_agnostic_mean,
+        dc_reg_weight, sh_reg_weight,
+        max_screen_size, max_screen_size_penalty, use_scale_agnostic_mean,
         color_trust_linear, eps_tr, step,
         quantization_level);
 }

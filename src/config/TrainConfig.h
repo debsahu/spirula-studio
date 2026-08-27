@@ -178,10 +178,13 @@ inline int train_tier_rank(const char* tier) {
     X(float, densify_score_power, 0.4f, "detail", "advanced", "")            \
     X(float, densify_score_clip_quantile, 1.0f, "detail", "advanced", "")    \
     X(float, densify_final_score_power, 1.0f, "detail", "advanced", "")      \
+    X(float, densify_oversize_split_fraction, 0.15f, "detail", "advanced", "") \
+    X(float, densify_oversize_score_blend, 0.5f, "detail", "advanced", "")   \
     X(bool, use_long_axis_split, true, "detail", "expert", "")               \
     X(TrainVec3f, long_axis_split_opacity_k, train_v3f(0.5f, 0.6f, 8000.0f), "detail", "basic", "") \
     X(float, max_screen_size, 0.3f, "detail", "basic", "")                   \
     X(float, max_screen_size_clip_hardness, 1.5f, "detail", "basic", "")     \
+    X(float, max_screen_size_penalty, 1.0f, "detail", "basic", "")           \
     X(float, max_world_size, kTrainInf, "detail", "expert", "")              \
                                                                              \
     /* ==== loss -- how the render is compared against the photo ==== */     \

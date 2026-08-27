@@ -48,12 +48,13 @@ bool _dn_finitef(float v) {
 // never null-pointer-gated (see KernelCommon.h null_fallback). The CUDA
 // kernel's accum_weight_scalar input is dropped: the launch API always
 // passes null for it.
-struct DensifyUpdateWeightParams {  // 72 bytes: pushed directly
+struct DensifyUpdateWeightParams {  // 88 bytes: pushed directly
     float* radii;         // [N]
     float* opacs;         // [N] logit-space (use_opacs gates)
     float* accum_weight;  // [N]
     float* accum_weight2; // [N] blend partner (use_w2 gates)
     float2* accum_buffer; // [N, 2] (score, count)
+    float* oversize_accum;  // [N] summed log2 oversize (use_oversize gates)
     float blend_w;
     float score_power;
     int score_mode;
@@ -61,6 +62,8 @@ struct DensifyUpdateWeightParams {  // 72 bytes: pushed directly
     uint use_w2;
     uint num_splats;
     uint wgs_per_row;
+    float max_scale2d;
+    uint use_oversize;
     uint _pad0;
 };
 
@@ -71,6 +74,9 @@ void densify_update_weight(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     uint idx = (wg.y * p.wgs_per_row + wg.x) * 256 + tid;
     if (idx >= p.num_splats) return;
     if (!(p.radii[idx] > 0.0f)) return;
+
+    if (p.use_oversize != 0 && p.radii[idx] > p.max_scale2d)
+        p.oversize_accum[idx] += log2(p.radii[idx] / p.max_scale2d);
 
     float weight = abs(p.accum_weight[idx]);
     // Geometric blend: weight^(1-w) * |accum_weight2|^w (see DensifyScoring.cu).
@@ -109,6 +115,35 @@ void densify_update_weight(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     }
     p.accum_buffer[idx] = accum;
 }
+
+// ---------------------------------------------------------------------------
+// densify_oversize_weight
+// ---------------------------------------------------------------------------
+
+struct DensifyOversizeWeightParams {  // 32 bytes: pushed directly
+    float* oversize_accum;  // [N]
+    float2* score;          // [N, 2], lane 0 = error score
+    float2* out;            // [N, 2], lane 0 = weight
+    float blend;
+    uint num_splats;
+    uint wgs_per_row;
+    uint _pad0;
+};
+
+[shader("compute")]
+[numthreads(256, 1, 1)]
+void densify_oversize_weight(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
+                             uniform DensifyOversizeWeightParams p) {
+    uint idx = (wg.y * p.wgs_per_row + wg.x) * 256 + tid;
+    if (idx >= p.num_splats) return;
+    const float kOversizeFloor = 1e-3f;
+    float s = max(p.score[idx].x, 0.0f);
+    float w = p.oversize_accum[idx] + kOversizeFloor;
+    if (p.blend > 0.0f)
+        w *= (p.blend == 1.0f) ? s : pow(s, p.blend);
+    p.out[idx] = float2(_dn_finitef(w) ? w : 0.0f, 0.0f);
+}
+
 
 // ---------------------------------------------------------------------------
 // densify_clip_scale

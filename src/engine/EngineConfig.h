@@ -100,6 +100,12 @@ struct OptimConfig {
     float dc_reg_weight                = 0.0f;
     float sh_reg_weight                = 0.0f;
 
+    // Soft on-screen size limit. The penalty enters the scale gradient
+    // scaled by Adam's denominator, so it reads as the share of one full
+    // learning-rate step spent per octave over the limit.
+    float max_screen_size              = 0.0f;
+    float max_screen_size_penalty      = 0.0f;
+
     bool  use_scale_agnostic_mean         = false;
     // SH-Adam optimizer-state quantization bit depth. 32 = no quantization (full
     // fp32 g1/g2). 4 or 8 = QuantizedAdamState<BITS, 256> with one float4 per
@@ -186,6 +192,10 @@ struct DensifyConfig {
     float min_opacity                   = 0.0f;
     float max_screen_size               = 0.0f;
     float max_screen_size_clip_hardness = 0.0f;
+    // With the soft penalty on, the hard clip drops to a once-per-refine
+    // backstop: the penalty needs room to find a balance above the limit,
+    // and a same-step split is what pays for the shrink.
+    bool  clip_screen_size_at_refine    = false;
     float max_world_size                = 0.0f;
     float noise_lr                      = 0.0f;
     float noise_lr_final                = 0.0f;
@@ -210,6 +220,11 @@ struct DensifyConfig {
     // sampling draw. Fused into the clip pass but written to a side buffer:
     // powering the running accumulator in place would compound every step.
     float final_score_power             = 1.0f;
+    // Share of each refine step's new splats drawn from the oversize channel
+    // (weight = accumulated log2 oversize * score^oversize_score_blend)
+    // instead of the plain error score. 0 keeps the single draw.
+    float oversize_split_fraction       = 0.0f;
+    float oversize_score_blend          = 0.5f;
     // Long-axis-split opacity split factor `k`, linearly scheduled from
     // `las_split_opacity_k_init` to `..._final` over `..._warmup` steps.
     float las_split_opacity_k_init      = 0.5f;

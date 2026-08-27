@@ -561,11 +561,24 @@ void Context::init() {
     g_context_created.store(true);
 
     if (spirula::env("VK_VERBOSE")) {
+        // The pinned size is what the shaders actually run at; printing the
+        // device default alone reads as "the pin did not happen".
+        char subgroup[48];
+        if (_caps.required_subgroup_size == _caps.subgroup_size)
+            std::snprintf(subgroup, sizeof(subgroup), "%u (pinned)",
+                          _caps.required_subgroup_size);
+        else if (_caps.required_subgroup_size)
+            std::snprintf(subgroup, sizeof(subgroup),
+                          "%u (pinned, device default %u)",
+                          _caps.required_subgroup_size, _caps.subgroup_size);
+        else
+            std::snprintf(subgroup, sizeof(subgroup), "%u (unpinned)",
+                          _caps.subgroup_size);
         std::fprintf(stderr,
-            "[spirula-vk] using %s (%s), subgroup %u, push %uB, "
+            "[spirula-vk] using %s (%s), subgroup %s, push %uB, "
             "float-atomic-add %s, int64 %s, int8 %s, timestamps %s\n",
             _device_name.c_str(), device_type_name(probe.props.deviceType),
-            _caps.subgroup_size, _caps.max_push_constants,
+            subgroup, _caps.max_push_constants,
             _caps.float32_atomic_add ? "native" : "EMULATED",
             _caps.shader_int64 ? "native" : "EMULATED",
             _caps.shader_int8 ? "native" : "emulated",

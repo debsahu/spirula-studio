@@ -21,6 +21,7 @@
 #include "atomic_float.slang"
 #include "proj_bwd_common.slang"
 #include "optim_quant.slang"
+#include "screen_size_hinge.slang"
 
 [SpecializationConstant]
 const int kEval3d = 0;
@@ -113,6 +114,8 @@ struct FpboParams {
     float quat_norm_reg_weight;
     float dc_reg_weight;
     float sh_reg_weight;
+    float max_screen_size;
+    float max_screen_size_penalty;
     float eps_tr;
     int32_t scalar_step;
     uint32_t has_steps;
@@ -278,6 +281,10 @@ void fpbo(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
         oq_state_read<3>(kNonShQuant != 0, p.nq_scales_packed,
                           p.nq_scales_bounds, p.g1_scales, p.g2_scales,
                           block_id, gid, g1, g2);
+        g.v_scale += screen_size_hinge_grad(
+            p.radii[gid], p.max_screen_size, p.max_screen_size_penalty,
+            s.scale,
+            oq_sqrt3(float3(g2[0], g2[1], g2[2]) * ibc2) + float3(kFpboEps));
         [ForceUnroll]
         for (int i = 0; i < 3; i++) {
             g1[i] = kFpboBeta1 * g1[i] + (1.0f - kFpboBeta1) * g.v_scale[i];

@@ -3966,6 +3966,140 @@ SS_MSG(densify_final_score_power_help,
        "başına biten puanı bu kuvvete yükseltir. 1'in üstünde yeni ayrıntı en "
        "yüksek puanlı splat'larda toplanır; 1'in altında sahneye daha eşit "
        "dağılır. 1 doğrudan puana göre çeker."));
+SS_MSG(densify_oversize_split_fraction,
+    EN("Split share for oversized splats"),
+    JA("大きすぎるスプラットに回す分割の割合"),
+    ZH_HANS("分给过大泼溅的分裂比例"), ZH_HANT("分給過大潑濺的分裂比例"),
+    KO("지나치게 큰 스플랫에 주는 분할 비율"),
+    DE("Teilungsanteil für übergroße Splats"),
+    FR("Part des divisions pour les splats trop grands"),
+    ES("Parte de las divisiones para splats demasiado grandes"),
+    PT("Parte das divisões para splats grandes demais"),
+    IT("Quota di divisioni per gli splat troppo grandi"),
+    NL("Splitsingsaandeel voor te grote splats"),
+    RU("Доля делений для слишком крупных сплатов"),
+    TR("Aşırı büyük splat'lara ayrılan bölme payı"));
+SS_MSG(densify_oversize_split_fraction_help,
+    EN("The share of each round's new splats spent on splats over the "
+       "on-screen size limit rather than on the error score. Splitting an "
+       "oversized splat is what lets it get smaller without leaving a hole. 0 "
+       "spends the whole budget on the error score."),
+    JA("一回の追加でつくるスプラットのうち、誤差の点数ではなく画面サイズの制限"
+       "を超えたスプラットに回す割合です。大きすぎるスプラットは分割してはじめ"
+       "て、穴を残さずに小さくなれます。0 なら全部を誤差の点数に使います。"),
+    ZH_HANS("每一轮新增的泼溅里，有多大比例分给超出屏幕尺寸限制的泼溅，而不是"
+            "按误差分数来分。过大的泼溅只有分裂之后，才能在不留下空洞的情况下"
+            "变小。0 表示全部按误差分数来分。"),
+    ZH_HANT("每一輪新增的潑濺裡，有多大比例分給超出螢幕尺寸限制的潑濺，而不是"
+            "按誤差分數來分。過大的潑濺只有分裂之後，才能在不留下空洞的情況下"
+            "變小。0 表示全部按誤差分數來分。"),
+    KO("한 번에 늘리는 스플랫 가운데, 오차 점수가 아니라 화면 크기 제한을 넘은 "
+       "스플랫에 주는 비율입니다. 지나치게 큰 스플랫은 나눠야 구멍을 남기지 않"
+       "고 작아질 수 있습니다. 0이면 전부 오차 점수에 씁니다."),
+    DE("Der Anteil der neuen Splats jeder Runde, der auf Splats über der "
+       "Bildschirmgrößen-Grenze entfällt statt auf die Fehlerbewertung. Erst "
+       "das Teilen lässt einen übergroßen Splat kleiner werden, ohne ein Loch "
+       "zu hinterlassen. 0 gibt das ganze Budget der Fehlerbewertung."),
+    FR("La part des nouveaux splats de chaque tour consacrée aux splats "
+       "au-delà de la limite de taille à l'écran plutôt qu'à la note d'erreur. "
+       "C'est la division qui permet à un splat trop grand de rétrécir sans "
+       "laisser de trou. 0 donne tout le budget à la note d'erreur."),
+    ES("La parte de los splats nuevos de cada ronda que se dedica a los "
+       "splats por encima del límite de tamaño en pantalla en vez de a la "
+       "puntuación de error. Dividir es lo que permite a un splat demasiado "
+       "grande encogerse sin dejar un hueco. 0 dedica todo el presupuesto a "
+       "la puntuación de error."),
+    PT("A parte dos splats novos de cada rodada dedicada aos splats acima do "
+       "limite de tamanho na tela em vez da pontuação de erro. Dividir é o "
+       "que permite a um splat grande demais encolher sem deixar um buraco. 0 "
+       "dedica todo o orçamento à pontuação de erro."),
+    IT("La quota degli splat nuovi di ogni giro destinata agli splat oltre il "
+       "limite di dimensione a schermo invece che al punteggio di errore. È "
+       "la divisione che permette a uno splat troppo grande di rimpicciolirsi "
+       "senza lasciare un buco. 0 destina tutto il budget al punteggio di "
+       "errore."),
+    NL("Het deel van de nieuwe splats per ronde dat naar splats boven de "
+       "schermgroottelimiet gaat in plaats van naar de foutscore. Splitsen is "
+       "wat een te grote splat laat krimpen zonder een gat achter te laten. 0 "
+       "geeft het hele budget aan de foutscore."),
+    RU("Доля новых сплатов каждого круга, которая уходит на сплаты сверх "
+       "предела размера на экране, а не на оценку ошибки. Именно деление "
+       "позволяет слишком крупному сплату уменьшиться, не оставив дыры. 0 "
+       "отдаёт весь запас оценке ошибки."),
+    TR("Her turda eklenen splat'ların, hata puanı yerine ekran boyutu "
+       "sınırını aşmış splat'lara ayrılan payı. Aşırı büyük bir splat ancak "
+       "bölününce delik bırakmadan küçülebilir. 0 bütün payı hata puanına "
+       "verir."));
+
+SS_MSG(densify_oversize_score_blend,
+    EN("Error weight in the oversized draw"),
+    JA("大きすぎる分の抽選での誤差の重み"),
+    ZH_HANS("过大泼溅抽选里的误差权重"), ZH_HANT("過大潑濺抽選裡的誤差權重"),
+    KO("큰 스플랫 뽑기에서 오차의 비중"),
+    DE("Fehlergewicht in der Ziehung für übergroße Splats"),
+    FR("Poids de l'erreur dans le tirage des splats trop grands"),
+    ES("Peso del error en el sorteo de splats grandes"),
+    PT("Peso do erro no sorteio dos splats grandes"),
+    IT("Peso dell'errore nell'estrazione degli splat troppo grandi"),
+    NL("Foutgewicht in de trekking voor te grote splats"),
+    RU("Вес ошибки в отборе слишком крупных сплатов"),
+    TR("Aşırı büyük splat çekilişinde hatanın ağırlığı"));
+SS_MSG(densify_oversize_score_blend_help,
+    EN("How much the error score still counts when picking which oversized "
+       "splats to split. 0 picks purely by how far over the limit a splat is, "
+       "which spends splats on empty sky; 1 picks exactly like the ordinary "
+       "draw. In between prefers oversized splats that also carry error."),
+    JA("どの大きすぎるスプラットを分割するか選ぶとき、誤差の点数をどれだけ効か"
+       "せるかです。0 は制限をどれだけ超えたかだけで選ぶので、何もない空にスプ"
+       "ラットを使ってしまいます。1 は普通の抽選と同じです。間の値は、誤差もあ"
+       "わせて持つ大きすぎるスプラットを先に選びます。"),
+    ZH_HANS("挑选要分裂哪些过大的泼溅时，误差分数还占多少分量。0 只按超出限制"
+            "的程度来挑，会把泼溅花在没有细节的天空上；1 和普通抽选完全一样。"
+            "取中间值会优先挑同时带着误差的过大泼溅。"),
+    ZH_HANT("挑選要分裂哪些過大的潑濺時，誤差分數還佔多少分量。0 只按超出限制"
+            "的程度來挑，會把潑濺花在沒有細節的天空上；1 和普通抽選完全一樣。"
+            "取中間值會優先挑同時帶著誤差的過大潑濺。"),
+    KO("어떤 큰 스플랫을 나눌지 고를 때 오차 점수를 얼마나 반영할지입니다. 0은 "
+       "제한을 얼마나 넘었는지만 보고 뽑아서 빈 하늘에 스플랫을 씁니다. 1은 보"
+       "통 뽑기와 똑같습니다. 그 사이 값은 오차까지 함께 지닌 큰 스플랫을 먼저 "
+       "고릅니다."),
+    DE("Wie stark die Fehlerbewertung noch zählt, wenn ausgewählt wird, "
+       "welche übergroßen Splats geteilt werden. 0 wählt allein danach, wie "
+       "weit ein Splat über der Grenze liegt, und verbraucht Splats am leeren "
+       "Himmel; 1 wählt genau wie die gewöhnliche Ziehung. Dazwischen kommen "
+       "übergroße Splats zuerst, die auch Fehler tragen."),
+    FR("Combien la note d'erreur compte encore au moment de choisir quels "
+       "splats trop grands diviser. 0 choisit uniquement selon le dépassement "
+       "de la limite, ce qui dépense des splats sur un ciel vide ; 1 choisit "
+       "exactement comme le tirage ordinaire. Entre les deux, les splats trop "
+       "grands qui portent aussi de l'erreur passent d'abord."),
+    ES("Cuánto cuenta todavía la puntuación de error al elegir qué splats "
+       "demasiado grandes dividir. 0 elige solo por cuánto se pasa del límite, "
+       "lo que gasta splats en cielo vacío; 1 elige igual que el sorteo "
+       "normal. En medio prefiere los splats grandes que además cargan "
+       "error."),
+    PT("Quanto a pontuação de erro ainda conta ao escolher quais splats "
+       "grandes demais dividir. 0 escolhe só pelo quanto passa do limite, o "
+       "que gasta splats em céu vazio; 1 escolhe igual ao sorteio comum. No "
+       "meio prefere os splats grandes que também carregam erro."),
+    IT("Quanto conta ancora il punteggio di errore nello scegliere quali "
+       "splat troppo grandi dividere. 0 sceglie solo in base a quanto un "
+       "splat supera il limite, e spende splat sul cielo vuoto; 1 sceglie "
+       "come l'estrazione ordinaria. Nel mezzo vengono prima gli splat troppo "
+       "grandi che portano anche errore."),
+    NL("Hoeveel de foutscore nog meetelt bij het kiezen welke te grote splats "
+       "worden gesplitst. 0 kiest alleen op hoever een splat over de limiet "
+       "zit, wat splats aan lege lucht besteedt; 1 kiest net als de gewone "
+       "trekking. Ertussenin gaan te grote splats voor die ook fout dragen."),
+    RU("Насколько оценка ошибки ещё учитывается при выборе слишком крупных "
+       "сплатов для деления. 0 выбирает только по превышению предела и тратит "
+       "сплаты на пустое небо; 1 выбирает так же, как обычная жеребьёвка. "
+       "Промежуточные значения сначала берут крупные сплаты, несущие и "
+       "ошибку."),
+    TR("Hangi aşırı büyük splat'ların bölüneceği seçilirken hata puanının ne "
+       "kadar sayıldığı. 0 yalnızca sınırın ne kadar aşıldığına bakar ve "
+       "splat'ları boş gökyüzüne harcar; 1 sıradan çekilişin tıpkısıdır. "
+       "Aradaki değerler hata da taşıyan aşırı büyük splat'ları öne alır."));
 
 SS_MSG(use_long_axis_split,
     EN("Split along the long axis"), JA("長い軸で分割する"),
@@ -4163,6 +4297,79 @@ SS_MSG(max_screen_size_clip_hardness_help,
     TR("Ekran boyutu sınırının ne kadar katı uygulandığı; 1'den başlar. Yüksek "
        "değerler aşırı büyük splat'ları kararlıca kırpar; düşük değerler onları "
        "yavaşça küçültür."));
+SS_MSG(max_screen_size_penalty,
+    EN("On-screen size pressure"), JA("画面サイズ制限の効き"),
+    ZH_HANS("屏幕尺寸限制的推力"), ZH_HANT("螢幕尺寸限制的推力"),
+    KO("화면 크기 제한의 압력"), DE("Druck der Bildschirmgrößen-Grenze"),
+    FR("Pression de la limite de taille à l'écran"),
+    ES("Presión del límite de tamaño en pantalla"),
+    PT("Pressão do limite de tamanho na tela"),
+    IT("Pressione del limite di dimensione a schermo"),
+    NL("Druk van de schermgroottelimiet"),
+    RU("Нажим предела размера на экране"),
+    TR("Ekran boyutu sınırının baskısı"));
+SS_MSG(max_screen_size_penalty_help,
+    EN("How hard the optimizer pushes a splat back under the on-screen size "
+       "limit, per doubling past it. This push is weighed against the photo "
+       "error, so a splat that has to be large -- sky, a wide flat wall -- "
+       "can stay large. 0 turns it off and clamps oversized splats on every "
+       "step instead."),
+    JA("画面サイズの制限を超えたスプラットを、制限の 2 倍ごとにどれだけ強く小"
+       "さくするかです。この力は写真との誤差と釣り合うので、空や広い壁のように"
+       "大きいままでよいスプラットは残ります。0 にすると力を切り、毎ステップき"
+       "っぱり抑える動きに戻ります。"),
+    ZH_HANS("超过屏幕尺寸限制的泼溅，每超出一倍要被推回多大的力。这个力和照片"
+            "误差相权衡，所以天空或大片平墙这类本该很大的泼溅可以保持很大。0 "
+            "关掉这个力，改为每一步都夹住过大的泼溅。"),
+    ZH_HANT("超過螢幕尺寸限制的潑濺，每超出一倍要被推回多大的力。這個力和照片"
+            "誤差相權衡，所以天空或大片平牆這類本該很大的潑濺可以保持很大。0 "
+            "關掉這個力，改為每一步都夾住過大的潑濺。"),
+    KO("화면 크기 제한을 넘은 스플랫을 제한의 두 배마다 얼마나 세게 도로 누를"
+       "지입니다. 이 힘은 사진 오차와 견주므로 하늘이나 넓은 벽처럼 커야 하는 "
+       "스플랫은 큰 채로 남습니다. 0은 힘을 끄고 매 단계마다 잘라내는 방식으로 "
+       "돌아갑니다."),
+    DE("Wie stark der Optimierer einen Splat unter die Bildschirmgrößen-Grenz"
+       "e zurückdrückt, je Verdopplung darüber. Dieser Druck wird gegen den "
+       "Bildfehler abgewogen, sodass ein Splat, der groß sein muss -- Himmel, "
+       "eine breite flache Wand -- groß bleiben darf. 0 schaltet ihn ab und "
+       "begrenzt übergroße Splats stattdessen in jedem Schritt."),
+    FR("Avec quelle force l'optimiseur ramène un splat sous la limite de "
+       "taille à l'écran, par doublement au-delà. Cette pression est mise en "
+       "balance avec l'erreur photométrique, si bien qu'un splat qui doit "
+       "être grand -- le ciel, un large mur plat -- peut le rester. 0 la "
+       "coupe et rabat les splats trop grands à chaque pas."),
+    ES("Con cuánta fuerza el optimizador devuelve un splat por debajo del "
+       "límite de tamaño en pantalla, por cada duplicación por encima. Esta "
+       "presión se sopesa contra el error fotométrico, así que un splat que "
+       "debe ser grande -- el cielo, un muro plano y ancho -- puede seguir "
+       "siéndolo. 0 la apaga y recorta los splats demasiado grandes en cada "
+       "paso."),
+    PT("Com quanta força o otimizador puxa um splat de volta para baixo do "
+       "limite de tamanho na tela, por duplicação acima dele. Essa pressão é "
+       "pesada contra o erro fotométrico, então um splat que precisa ser "
+       "grande -- o céu, uma parede plana e larga -- pode continuar grande. 0 "
+       "desliga a pressão e corta os splats grandes demais a cada passo."),
+    IT("Con quanta forza l'ottimizzatore riporta uno splat sotto il limite di "
+       "dimensione a schermo, per ogni raddoppio oltre di esso. Questa "
+       "pressione viene pesata contro l'errore fotometrico, così uno splat "
+       "che deve essere grande -- il cielo, un muro piatto e largo -- può "
+       "restare grande. 0 la spegne e taglia gli splat troppo grandi a ogni "
+       "passo."),
+    NL("Hoe hard de optimalisator een splat terugduwt onder de "
+       "schermgroottelimiet, per verdubbeling erboven. Deze druk wordt "
+       "afgewogen tegen de fotofout, zodat een splat die groot moet zijn -- "
+       "lucht, een brede vlakke muur -- groot mag blijven. 0 zet hem uit en "
+       "kapt te grote splats in plaats daarvan elke stap af."),
+    RU("Насколько сильно оптимизатор возвращает сплат под предел размера на "
+       "экране за каждое удвоение сверх него. Этот нажим уравновешивается "
+       "ошибкой по снимку, поэтому сплат, которому положено быть большим -- "
+       "небо, широкая плоская стена, -- остаётся большим. 0 отключает его и "
+       "вместо этого обрезает слишком крупные сплаты на каждом шаге."),
+    TR("İyileştiricinin bir splat'ı ekran boyutu sınırının altına ne kadar "
+       "sert geri ittiği; sınırın her katına bir kez. Bu baskı fotoğraf "
+       "hatasıyla tartılır, böylece büyük olmak zorunda olan bir splat -- "
+       "gökyüzü, geniş düz bir duvar -- büyük kalabilir. 0 baskıyı kapatır ve "
+       "bunun yerine her adımda aşırı büyük splat'ları kırpar."));
 
 SS_MSG(max_world_size,
     EN("Maximum world size"), JA("ワールド上の最大サイズ"),

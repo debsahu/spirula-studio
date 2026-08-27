@@ -365,6 +365,8 @@ EngineStepConfig build_step_config(const TrainConfig& c, const RunState& st, int
     cfg.optim.quat_norm_reg_weight        = c.quat_norm_reg;
     cfg.optim.dc_reg_weight               = c.dc_reg;
     cfg.optim.sh_reg_weight               = c.sh_reg;
+    cfg.optim.max_screen_size             = c.max_screen_size;
+    cfg.optim.max_screen_size_penalty     = c.max_screen_size_penalty;
     cfg.optim.use_scale_agnostic_mean     = c.use_scale_agnostic_mean;
     // quantization level -> bit depths
     cfg.optim.quantization_level = c.quantization_level;
@@ -390,6 +392,7 @@ EngineStepConfig build_step_config(const TrainConfig& c, const RunState& st, int
     cfg.densify.min_opacity                   = c.min_opacity;
     cfg.densify.max_screen_size               = c.max_screen_size;
     cfg.densify.max_screen_size_clip_hardness = c.max_screen_size_clip_hardness;
+    cfg.densify.clip_screen_size_at_refine    = c.max_screen_size_penalty > 0.0f;
     cfg.densify.max_world_size                = c.max_world_size * alpha;
     cfg.densify.noise_lr                      = c.noise_lr * noise_lr_scalar;
     cfg.densify.noise_lr_final                = c.noise_lr_final * noise_lr_scalar;
@@ -401,6 +404,8 @@ EngineStepConfig build_step_config(const TrainConfig& c, const RunState& st, int
     cfg.densify.score_power = c.densify_score_power;
     cfg.densify.score_clip_quantile = c.densify_score_clip_quantile;
     cfg.densify.final_score_power = c.densify_final_score_power;
+    cfg.densify.oversize_split_fraction = c.densify_oversize_split_fraction;
+    cfg.densify.oversize_score_blend = c.densify_oversize_score_blend;
     cfg.densify.las_split_opacity_k_init   = c.long_axis_split_opacity_k[0];
     cfg.densify.las_split_opacity_k_final  = c.long_axis_split_opacity_k[1];
     cfg.densify.las_split_opacity_k_warmup = (int)c.long_axis_split_opacity_k[2];
