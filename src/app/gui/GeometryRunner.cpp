@@ -223,6 +223,7 @@ bool run_geometry_step(const GeometryJob& job, const std::string& dataset,
     std::vector<std::string> argv = {
         exe_path(), "--lang", spirula::i18n::code(spirula::i18n::current()),
         "geometry", dataset,
+        "--image-dir", images.empty() ? std::string("images") : images,
         "--model", job.model,
         "--max-size", std::to_string(job.max_size),
         "--num-tokens", std::to_string(job.num_tokens),

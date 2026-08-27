@@ -171,6 +171,11 @@ inline bool reads_photos_in_place(const std::vector<PrepInput>& inputs) {
     return inputs.size() == 1 && !inputs[0].is_video;
 }
 
+// Where a job's images will be, before it has run: what PrepResult::image_dir
+// comes out as, for the panels that must read a dataset a previous run wrote.
+std::string planned_image_dir(const std::vector<PrepInput>& inputs,
+                              const std::string& workspace);
+
 struct PrepResult {
     std::string image_dir;           // absolute; what SfM should index
     std::string image_dir_cfg;       // what the trainer's image_dir should be

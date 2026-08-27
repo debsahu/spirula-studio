@@ -165,7 +165,8 @@ GeometryPanel::~GeometryPanel() {
 }
 
 void GeometryPanel::open(const std::string& input, bool is_video,
-                         const std::string& dataset, const std::string& lens,
+                         const std::string& dataset,
+                         const std::string& image_dir, const std::string& lens,
                          float focal_factor, const std::string& ffmpeg_exe,
                          bool force_ffmpeg) {
     // A job still running belongs to the old input; only the weights survive.
@@ -187,6 +188,7 @@ void GeometryPanel::open(const std::string& input, bool is_video,
     _src.ffmpeg_exe = ffmpeg_exe.empty() ? "ffmpeg" : ffmpeg_exe;
     _src.builtin_decode = !force_ffmpeg && backends().builtin_video;
     _dataset = dataset;
+    _image_dir = image_dir;
     _lens = lens;
     _focal_factor = focal_factor;
     _frame_idx = 0;
@@ -235,6 +237,7 @@ void GeometryPanel::start_job(const GeometryJob& settings) {
     const int idx = _frame_idx;
     const PreviewSource src = _src;
     const std::string dataset = _dataset;
+    const std::string image_dir = _image_dir;
     const std::string lens = _lens;
     const float focal_factor = _focal_factor;
     const bool frame_dirty = _frame_dirty;
@@ -247,8 +250,8 @@ void GeometryPanel::start_job(const GeometryJob& settings) {
         _status = dmsg::preview_working.get();
     }
 
-    _worker = std::thread([this, settings, src, dataset, lens, focal_factor, idx,
-                           frame_dirty] {
+    _worker = std::thread([this, settings, src, dataset, image_dir, lens,
+                           focal_factor, idx, frame_dirty] {
         // Every failure below leaves through `return set_error(...)`, so the
         // flag cannot be cleared at the end of the function.
         struct BusyGuard {
@@ -267,7 +270,7 @@ void GeometryPanel::start_job(const GeometryJob& settings) {
         };
 
 #ifndef SS_TOOL_GEOMETRY
-        (void)settings; (void)src; (void)dataset; (void)lens;
+        (void)settings; (void)src; (void)dataset; (void)image_dir; (void)lens;
         (void)focal_factor; (void)idx; (void)frame_dirty;
         set_error(lmsg::err_no_geometry_module.get());
 #else
@@ -288,6 +291,7 @@ void GeometryPanel::start_job(const GeometryJob& settings) {
                     try {
                         DatasetParserConfig cfg;
                         cfg.require_image_files = false;
+                        if (!image_dir.empty()) cfg.image_dir = image_dir;
                         const ParsedDataset ds = parse_dataset(dataset, cfg, "");
                         const int64_t total = ds.num_cameras;
                         const int64_t offers = std::min<int64_t>(total, 12);

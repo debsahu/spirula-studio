@@ -675,6 +675,15 @@ void resolve_photo_folder(const std::string& picked, std::string& images,
     }
 }
 
+std::string planned_image_dir(const std::vector<PrepInput>& inputs,
+                              const std::string& workspace) {
+    std::error_code ec;
+    if (reads_photos_in_place(inputs))
+        return fs::absolute(inputs[0].path, ec).string();
+    return workspace.empty() ? std::string()
+                             : (fs::path(workspace) / "images").string();
+}
+
 const Backends& backends() {
     static const Backends probed = [] {
         Backends b;

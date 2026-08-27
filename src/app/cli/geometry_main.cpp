@@ -45,6 +45,9 @@ enum class Tri { Auto, Yes, No };
 
 struct Options {
     std::string dataset;
+    // Relative to the dataset, or absolute: a capture reconstructed from
+    // photos read where they are keeps its images outside the dataset folder.
+    std::string image_dir = "images";
     std::string model = "moge2-vitb";
     // The written maps' longest side, and Metric3D's inference size on top of
     // that (metric3d/README.md). A ceiling on one face, not on the frame.
@@ -85,6 +88,7 @@ void usage() {
     for (const std::string& l : spirula::i18n::wrap(G::usage_target.get(), 80))
         std::fprintf(stderr, "    %s\n", l.c_str());
     std::fprintf(stderr, "\n%s\n", G::head_options.get());
+    help_row("--image-dir <dir>", G::opt_image_dir);
     help_row("--model <id|file>", G::opt_model);
     help_row("--max-size <n>", G::opt_max_size);
     help_row("--num-tokens <n>", G::opt_num_tokens);
@@ -478,6 +482,7 @@ int spirula_geometry_main(int argc, char** argv) {
         };
         if (a == "--help" || a == "-h") { usage(); return 0; }
         else if (a == "--check") return self_check();
+        else if (a == "--image-dir") o.image_dir = next();
         else if (a == "--model") o.model = next();
         else if (a == "--max-size") o.max_size = std::atoi(next());
         else if (a == "--num-tokens") o.num_tokens = std::atoi(next());
@@ -521,6 +526,7 @@ int spirula_geometry_main(int argc, char** argv) {
         // ---- the dataset --------------------------------------------------
         DatasetParserConfig cfg;
         cfg.require_image_files = false;   // the point cloud is not our business
+        cfg.image_dir = o.image_dir;
         const ParsedDataset ds = parse_dataset(o.dataset, cfg, "");
         const int64_t N = ds.num_cameras;
         NN_CHECK(N > 0, "'%s' holds no images", o.dataset.c_str());
@@ -641,7 +647,7 @@ int spirula_geometry_main(int argc, char** argv) {
 
         app::WriterPool writers;
         const double t_start = nn::now_ms();
-        int64_t written = 0, skipped = 0;
+        int64_t written = 0, skipped = 0, unreadable = 0;
         double model_ms = 0;
 
         for (int64_t i = 0; i < N; ++i) {
@@ -661,6 +667,7 @@ int spirula_geometry_main(int argc, char** argv) {
                                                  o.image_gamut, o.image_is_linear);
             if (img.empty()) {
                 NN_LOG_WARN("skipping %s\n", ds.image_filenames[(size_t)i].c_str());
+                ++unreadable;
                 continue;
             }
             const std::vector<float> src =
@@ -759,6 +766,15 @@ int spirula_geometry_main(int argc, char** argv) {
                     format(G::log_done, {(long long)written, (long long)skipped,
                                          human_time(nn::now_ms() - t_start)})
                         .c_str());
+        // Nothing readable means the wrong image_dir, not an empty dataset:
+        // exiting 0 reports a reconstruction that wrote an empty normals/ as
+        // a success.
+        if (written == 0 && unreadable > 0) {
+            std::fprintf(stderr, "%s\n",
+                         format(G::err_no_images_read, {image_root.string()})
+                             .c_str());
+            return 1;
+        }
         return writers.failures() ? 1 : 0;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "\nerror: %s\n", e.what());

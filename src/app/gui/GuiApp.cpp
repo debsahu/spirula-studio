@@ -2682,7 +2682,8 @@ void GuiApp::open_geometry_preview() {
                          : &_sources[(size_t)std::min((size_t)_mask_preview_input,
                                                       _sources.size() - 1)];
     _geometry_panel.open(in ? in->path : std::string(), in && in->is_video,
-                         _workspace, in ? in->camera_model : std::string("opencv"),
+                         _workspace, planned_image_dir(_sources, _workspace),
+                         in ? in->camera_model : std::string("opencv"),
                          in ? in->focal_factor : 0.0f, _ffmpeg_exe,
                          _sfm_job.prep.force_external_decode);
 }
