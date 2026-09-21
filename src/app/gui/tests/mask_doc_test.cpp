@@ -285,6 +285,220 @@ void test_index_roundtrip() {
     check(mk::utc_now_iso().size() == 20 && mk::utc_now_iso()[10] == 'T', "utc_now_iso shape");
 }
 
+// ---------------------------------------------------------------------------
+// Task 4: save, fingerprint decides, revert byte-exact
+// ---------------------------------------------------------------------------
+
+std::vector<uint8_t> box_layer(int w, int h, int x0, int y0, int x1, int y1) {
+    std::vector<uint8_t> v((size_t)w * h, 0);
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) v[(size_t)y * w + x] = 255;
+    return v;
+}
+
+void test_save_and_layers_roundtrip() {
+    Fixture f = make_dataset("save", 64, 48, {"a", "cam0/b"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> original = file_bytes(f.masks / "a.png");
+    int w = 0, h = 0;
+    std::vector<uint8_t> base;
+    app::load_stencil((f.masks / "a.png").string(), w, h, base);
+    const std::vector<uint8_t> drop = box_layer(64, 48, 4, 4, 14, 14);
+    const std::vector<uint8_t> keep = box_layer(64, 48, 40, 20, 50, 30);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    check(mk::base_state(mask_root, "a", idx) == mk::BaseState::Unedited, "unedited before save");
+    check(mk::save_frame(layer_root, mask_root, "a", 64, 48, base.data(), drop.data(),
+                         keep.data(), true, idx, err), "save_frame: " + err);
+    // The base is a byte copy of the mask as the run wrote it.
+    check(file_bytes(f.layer / "a.base.png") == original, "base is byte-identical to the original");
+    // The layers read back as the same sets, through the app's own reader.
+    mk::FrameLayers back;
+    std::string warn;
+    check(mk::read_layers(layer_root, "a", 64, 48, back, warn) && warn.empty(), "read_layers");
+    check(back.drop == drop, "drop layer round trips");
+    check(back.keep == keep, "keep layer round trips");
+    int lw, lh;
+    std::vector<uint8_t> raw;
+    app::load_stencil((f.layer / "a.drop.png").string(), lw, lh, raw);
+    check(raw == drop, "load_stencil reads .drop.png as the same set");
+    // The layer files are 0/255 and nothing else.
+    std::vector<uint8_t> png_px;
+    check(app::load_stencil((f.layer / "a.keep.png").string(), lw, lh, png_px), "keep decodes");
+    bool binary = true;
+    for (uint8_t v : back.keep) binary = binary && (v == 0 || v == 255);
+    check(binary, "keep layer is binary");
+    // masks/a.png is now the composite.
+    std::vector<uint8_t> comp;
+    app::load_stencil((f.masks / "a.png").string(), lw, lh, comp);
+    std::vector<uint8_t> want(base.size());
+    mk::composite(base.data(), drop.data(), keep.data(), base.size(), want.data());
+    check(comp == want, "masks/a.png holds the composite");
+    // Index entry.
+    check(idx.frames.count("a") == 1, "index has the entry");
+    uint64_t fp = 0;
+    mk::fingerprint_file((f.masks / "a.png").string(), fp);
+    check(idx.frames["a"].composite_fp == fp, "composite fingerprint is the file's");
+    mk::fingerprint_file((f.layer / "a.base.png").string(), fp);
+    check(idx.frames["a"].base_fp == fp, "base fingerprint is the file's");
+    size_t kept = 0;
+    for (uint8_t v : want) kept += v ? 1 : 0;
+    check(std::abs(idx.frames["a"].kept - (float)kept / (64.0f * 48.0f)) < 1e-6f, "kept fraction recorded");
+    check(mk::base_state(mask_root, "a", idx) == mk::BaseState::Unchanged, "unchanged after save");
+    mk::LayerIndex reloaded;
+    check(reloaded.load(layer_root, err) && reloaded.frames.count("a") == 1, "index was written to disk");
+    // A second save keeps the base as it was (never re-copied over).
+    const std::vector<uint8_t> drop2 = box_layer(64, 48, 0, 0, 2, 2);
+    check(mk::save_frame(layer_root, mask_root, "a", 64, 48, base.data(), drop2.data(),
+                         keep.data(), true, idx, err), "second save");
+    check(file_bytes(f.layer / "a.base.png") == original, "base untouched by a second save");
+    // Nested key lands nested.
+    check(mk::save_frame(layer_root, mask_root, "cam0/b", 64, 48, base.data(), drop.data(),
+                         keep.data(), true, idx, err), "save nested key");
+    check(fs::exists(f.layer / "cam0" / "b.drop.png"), "nested layer path");
+    // A layer of another size is skipped and named.
+    write_png_gray(f.layer / "a.keep.png", 32, 24, std::vector<uint8_t>(32 * 24, 255));
+    mk::FrameLayers mism;
+    check(!mk::read_layers(layer_root, "a", 64, 48, mism, warn) && !warn.empty(),
+          "size mismatch is reported");
+    check(mism.keep.size() == 64 * 48 && mism.keep[0] == 0, "mismatched layer reads as zero");
+    check(mism.drop == drop2, "the other layer still reads");
+    // Both wrong: both are named, not only the second.
+    write_png_gray(f.layer / "a.drop.png", 32, 24, std::vector<uint8_t>(32 * 24, 255));
+    warn.clear();
+    check(!mk::read_layers(layer_root, "a", 64, 48, mism, warn) &&
+              warn.find("a.drop.png") != std::string::npos &&
+              warn.find("a.keep.png") != std::string::npos,
+          "both mismatched layers are named in the warning");
+}
+
+void test_fingerprint_decides() {
+    Fixture f = make_dataset("rebase", 64, 48, {"a", "b"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    int w, h;
+    std::vector<uint8_t> base_a;
+    app::load_stencil((f.masks / "a.png").string(), w, h, base_a);
+    const std::vector<uint8_t> drop = box_layer(64, 48, 4, 4, 14, 14);
+    const std::vector<uint8_t> keep = box_layer(64, 48, 40, 20, 50, 30);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    check(mk::save_frame(layer_root, mask_root, "a", 64, 48, base_a.data(), drop.data(),
+                         keep.data(), true, idx, err), "save a");
+    const std::vector<uint8_t> composite_bytes = file_bytes(f.masks / "a.png");
+
+    // Same bytes: nothing regenerated, nothing touched.
+    mk::BaseState st;
+    check(mk::recomposite_frame(layer_root, mask_root, "a", idx, st, err) &&
+              st == mk::BaseState::Unchanged, "same bytes are Unchanged");
+    check(mk::recomposite_all(layer_root, err) == 0, "recomposite_all over an unchanged set is 0");
+
+    // Different bytes: the run regenerated it. The NEW mask must become the
+    // base, byte for byte, and the composite must be the layers over it.
+    const std::vector<uint8_t> new_mask = synth_mask(64, 48, 99);
+    write_png_gray(f.masks / "a.png", 64, 48, new_mask);
+    const std::vector<uint8_t> new_bytes = file_bytes(f.masks / "a.png");
+    check(new_bytes != composite_bytes, "fixture: the rewrite really differs");
+    check(mk::base_state(mask_root, "a", idx) == mk::BaseState::Regenerated, "Regenerated detected");
+    check(mk::recomposite_all(layer_root, err) == 1, "recomposite_all re-based one: " + err);
+    check(file_bytes(f.layer / "a.base.png") == new_bytes, ".base.png is the regenerated file, byte for byte");
+    std::vector<uint8_t> comp;
+    app::load_stencil((f.masks / "a.png").string(), w, h, comp);
+    std::vector<uint8_t> want(comp.size());
+    mk::composite(new_mask.data(), drop.data(), keep.data(), want.size(), want.data());
+    check(comp == want, "composite is the layers over the NEW base");
+    mk::LayerIndex re;
+    re.load(layer_root, err);
+    uint64_t fp;
+    mk::fingerprint_file((f.masks / "a.png").string(), fp);
+    check(re.frames["a"].composite_fp == fp, "index updated with the new composite fingerprint");
+    check(re.frames["a"].base_fp == mk::fnv1a64(new_bytes.data(), new_bytes.size()),
+          "index updated with the new base fingerprint");
+    // Criterion #3's failure signature: a base equal to a previous composite.
+    check(file_bytes(f.layer / "a.base.png") != composite_bytes, "no base equals an old composite");
+
+    // Missing: a cancelled re-run. Layers stay, nothing is written.
+    fs::remove(f.masks / "a.png");
+    check(mk::base_state(mask_root, "a", idx) == mk::BaseState::Missing, "Missing detected");
+    check(mk::recomposite_all(layer_root, err) == 0, "missing is not re-based");
+    check(fs::exists(f.layer / "a.drop.png") && fs::exists(f.layer / "a.keep.png"), "layers kept");
+    check(!fs::exists(f.masks / "a.png"), "no mask conjured");
+
+    // A layer at another size refuses to re-base and reports, and does not
+    // touch the base: the corrections must not be silently zeroed.
+    write_png_gray(f.masks / "a.png", 64, 48, synth_mask(64, 48, 5));
+    write_png_gray(f.layer / "a.drop.png", 32, 24, std::vector<uint8_t>(32 * 24, 255));
+    const std::vector<uint8_t> base_before = file_bytes(f.layer / "a.base.png");
+    check(mk::recomposite_all(layer_root, err) == -1 && !err.empty(), "mismatch refuses: " + err);
+    check(file_bytes(f.layer / "a.base.png") == base_before, "base untouched on refusal");
+}
+
+void test_revert_is_byte_exact() {
+    Fixture f = make_dataset("revert", 64, 48, {"a", "b"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> original_a = file_bytes(f.masks / "a.png");
+    const std::vector<uint8_t> original_b = file_bytes(f.masks / "b.png");
+    int w, h;
+    std::vector<uint8_t> base_a, base_b;
+    app::load_stencil((f.masks / "a.png").string(), w, h, base_a);
+    app::load_stencil((f.masks / "b.png").string(), w, h, base_b);
+    const std::vector<uint8_t> drop = box_layer(64, 48, 4, 4, 14, 14);
+    const std::vector<uint8_t> keep = box_layer(64, 48, 40, 20, 50, 30);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    mk::save_frame(layer_root, mask_root, "a", 64, 48, base_a.data(), drop.data(), keep.data(), true, idx, err);
+    mk::save_frame(layer_root, mask_root, "b", 64, 48, base_b.data(), keep.data(), drop.data(), true, idx, err);
+    check(file_bytes(f.masks / "a.png") != original_a, "fixture: a was changed by the save");
+    check(mk::revert_frame(layer_root, mask_root, "a", idx, err), "revert_frame: " + err);
+    check(file_bytes(f.masks / "a.png") == original_a, "masks/a.png is byte-identical to the original");
+    for (const char* tag : {"a.base.png", "a.drop.png", "a.keep.png"})
+        check(!fs::exists(f.layer / tag), std::string("removed ") + tag);
+    check(idx.frames.count("a") == 0, "entry removed");
+    check(idx.frames.count("b") == 1 && fs::exists(f.layer / "b.base.png"), "b untouched");
+    mk::LayerIndex disk;
+    disk.load(layer_root, err);
+    check(disk.frames.count("a") == 0 && disk.frames.count("b") == 1, "index on disk agrees");
+    check(mk::revert_all(layer_root, err) == 1, "revert_all reverts the remaining one");
+    check(file_bytes(f.masks / "b.png") == original_b, "masks/b.png byte-identical after revert_all");
+    disk.load(layer_root, err);
+    check(disk.frames.empty(), "index empty after revert_all");
+}
+
+void test_save_without_mask() {
+    // A frame with no mask on disk: layers and an entry, no base, no composite.
+    Fixture f = make_dataset("nomask", 64, 48, {"a"}, /*with_masks=*/false);
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> all_keep(64 * 48, 255);
+    const std::vector<uint8_t> drop = box_layer(64, 48, 4, 4, 14, 14);
+    const std::vector<uint8_t> none(64 * 48, 0);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    check(mk::base_state(mask_root, "a", idx) == mk::BaseState::Missing, "no mask is Missing");
+    check(mk::save_frame(layer_root, mask_root, "a", 64, 48, all_keep.data(), drop.data(),
+                         none.data(), /*write_composite=*/false, idx, err), "save layers only: " + err);
+    check(fs::exists(f.layer / "a.drop.png") && !fs::exists(f.layer / "a.base.png"), "layers, no base");
+    check(!fs::exists(f.masks / "a.png"), "no composite written");
+    check(idx.frames["a"].base_fp == 0 && idx.frames["a"].composite_fp == 0, "zero fingerprints");
+    // The run then writes the mask: it is a new base, and the layers apply.
+    const std::vector<uint8_t> m = synth_mask(64, 48, 3);
+    write_png_gray(f.masks / "a.png", 64, 48, m);
+    check(mk::recomposite_all(layer_root, err) == 1, "the arriving mask is re-based: " + err);
+    std::vector<uint8_t> comp;
+    int w, h;
+    app::load_stencil((f.masks / "a.png").string(), w, h, comp);
+    std::vector<uint8_t> want(comp.size());
+    mk::composite(m.data(), drop.data(), nullptr, want.size(), want.data());
+    check(comp == want, "layers applied over the arriving mask");
+    // Revert of an entry that never had a base deletes the layers only.
+    fs::remove(f.layer / "a.base.png");
+    idx.load(layer_root, err);
+    check(mk::revert_frame(layer_root, mask_root, "a", idx, err), "revert without base");
+    check(fs::exists(f.masks / "a.png") && !fs::exists(f.layer / "a.drop.png"), "mask left, layers gone");
+}
+
 }  // namespace
 
 int main() {
@@ -294,6 +508,10 @@ int main() {
     test_png_and_atomic_write();
     test_temp_write_path_unique();
     test_index_roundtrip();
+    test_save_and_layers_roundtrip();
+    test_fingerprint_decides();
+    test_revert_is_byte_exact();
+    test_save_without_mask();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }

@@ -67,5 +67,42 @@ struct LayerIndex {
     bool save(const std::string& layer_root, std::string& error) const;
 };
 
+// Unedited: no entry. Unchanged: the mask is the composite written last.
+// Regenerated: something else wrote it since. Missing: no mask on disk.
+enum class BaseState { Unedited, Unchanged, Regenerated, Missing };
+BaseState base_state(const std::string& mask_root, const std::string& key,
+                     const LayerIndex& idx);
+
+struct FrameLayers {
+    int w = 0, h = 0;
+    std::vector<uint8_t> drop, keep;   // w*h each, 0/255
+};
+// Absent layer files read as all zero. A file of another size reads as zero
+// too, names itself in `warning`, and makes this return false.
+bool read_layers(const std::string& layer_root, const std::string& key, int w,
+                 int h, FrameLayers& out, std::string& warning);   // warning: ", "-joined paths
+
+// Writes .drop.png and .keep.png, copies masks/<key>.png to .base.png on the
+// first save (when it exists), writes the composite of `base` under the
+// layers into masks/ when `write_composite`, and records the index entry.
+bool save_frame(const std::string& layer_root, const std::string& mask_root,
+                const std::string& key, int w, int h, const uint8_t* base,
+                const uint8_t* drop, const uint8_t* keep, bool write_composite,
+                LayerIndex& idx, std::string& error);
+
+// A regenerated mask becomes the new base and the layers are re-applied
+// over it. `found` says what was there; only Regenerated writes anything.
+bool recomposite_frame(const std::string& layer_root, const std::string& mask_root,
+                       const std::string& key, LayerIndex& idx, BaseState& found,
+                       std::string& error);
+// Over every entry of the index under `layer_root`. Re-based count, or -1.
+int recomposite_all(const std::string& layer_root, std::string& error);
+
+// masks/<key>.png becomes the byte copy in .base.png again; the three layer
+// files and the entry go. Without a base, only the layers and the entry go.
+bool revert_frame(const std::string& layer_root, const std::string& mask_root,
+                  const std::string& key, LayerIndex& idx, std::string& error);
+int revert_all(const std::string& layer_root, std::string& error);
+
 }  // namespace mask
 }  // namespace gui
