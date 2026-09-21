@@ -367,6 +367,10 @@ Paint MaskSession::paint_for(bool shift, bool ctrl) {
     return Paint::ForceDrop;
 }
 
+float MaskSession::step_brush(float r, bool grow) {
+    return grow ? std::min(4096.0f, r * 1.18f) : std::max(1.0f, r * 0.85f);
+}
+
 Rect MaskSession::undo() {
     if (!_doc || !_doc->can_undo()) return {};
     _doc->undo();

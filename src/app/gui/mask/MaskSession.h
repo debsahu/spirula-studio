@@ -77,6 +77,9 @@ public:
     // EditSession::combine_now's grammar over the layers: the mode a stroke
     // commits with, from the modifiers on the frame it completes.
     static Paint paint_for(bool shift, bool ctrl);
+    // `[`/`]`'s brush-radius step, clamped to [1, 4096] mask pixels: `grow`
+    // true widens by 1.18x, false narrows by 0.85x.
+    static float step_brush(float r, bool grow);
     Rect undo();
     Rect redo();
     void save();

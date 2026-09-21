@@ -1193,6 +1193,33 @@ void test_session() {
               mk::MaskSession::paint_for(false, true) == mk::Paint::ForceKeep &&
               mk::MaskSession::paint_for(true, true) == mk::Paint::Clear,
           "paint_for is combine_now's table: plain/Shift drop, Ctrl keep, both clear");
+    check(mk::MaskSession::step_brush(100.0f, true) == 100.0f * 1.18f &&
+              mk::MaskSession::step_brush(100.0f, false) == 100.0f * 0.85f,
+          "step_brush: grow x1.18, shrink x0.85");
+    check(mk::MaskSession::step_brush(4096.0f, true) == 4096.0f &&
+              mk::MaskSession::step_brush(4000.0f, true) == 4096.0f,
+          "step_brush clamps growth at 4096, exactly, not past it");
+    check(mk::MaskSession::step_brush(1.0f, false) == 1.0f &&
+              mk::MaskSession::step_brush(1.1f, false) == 1.0f,
+          "step_brush clamps shrink at 1, exactly, not below it");
+    {
+        // Monotonic in both directions, and the clamp is REACHED, not
+        // approached asymptotically: 4096/0.85^n < 1 well inside 200 steps.
+        float r = 24.0f;
+        bool grew = true, shrank = true;
+        for (int i = 0; i < 200; i++) {
+            const float next = mk::MaskSession::step_brush(r, true);
+            grew = grew && next >= r;
+            r = next;
+        }
+        check(grew && r == 4096.0f, "repeated growth is monotonic and lands exactly on 4096");
+        for (int i = 0; i < 200; i++) {
+            const float next = mk::MaskSession::step_brush(r, false);
+            shrank = shrank && next <= r;
+            r = next;
+        }
+        check(shrank && r == 1.0f, "repeated shrink is monotonic and lands exactly on 1");
+    }
     settle(s);
     check(s.doc() != nullptr && s.frame_index() == 0, "frame 0 loaded");
     check(s.shown_width() == 64 && s.shown_height() == 48, "shown size (no EXIF turn)");

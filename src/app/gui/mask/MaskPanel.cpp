@@ -245,8 +245,8 @@ void MaskSession::handle_keys(const Mapping& m) {
             _last_commit_ms = now_ms() - t0;
         }
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, true)) _brush = std::max(1.0f, _brush * 0.85f);
-    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, true)) _brush = std::min(4096.0f, _brush * 1.18f);
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, true)) _brush = step_brush(_brush, false);
+    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, true)) _brush = step_brush(_brush, true);
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         if (!io.KeyShift && _tool.id() == ToolId::Polygon && _tool.in_progress() &&
             _tool.pop_point())
