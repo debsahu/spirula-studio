@@ -8,6 +8,7 @@
 #include "app/gui/edit/Selection.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/MaskLayer.h"
+#include "app/gui/mask/MaskWindow.h"
 #include "core/ImageOrient.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
@@ -995,6 +996,137 @@ void test_orientation_mapping() {
     check(r.w() * r.h() == 50 && r.w() == 5 && r.h() == 10, "rect area and turn preserved");
 }
 
+// ---------------------------------------------------------------------------
+// Task 8: view math and the window's pixels
+// ---------------------------------------------------------------------------
+
+void test_view_math() {
+    const int dw = 800, dh = 600;
+    const float pw = 400.0f, ph = 400.0f;
+    check(std::fabs(mk::fit_scale(dw, dh, pw, ph) - 0.5f) < 1e-6f, "fit_scale is the smaller ratio");
+    mk::View v;
+    v.zoom = 1.0f;
+    v.cx = 400.0f;
+    v.cy = 300.0f;
+    mk::Mapping m = mk::mapping(v, dw, dh, pw, ph);
+    check(std::fabs(m.scale - 0.5f) < 1e-6f, "scale at zoom 1");
+    check(std::fabs(m.to_mask_x(200.0f) - 400.0f) < 1e-3f && std::fabs(m.to_mask_y(200.0f) - 300.0f) < 1e-3f,
+          "pane centre is the view centre");
+    check(std::fabs(m.to_screen_x(400.0f) - 200.0f) < 1e-3f, "to_screen inverts to_mask");
+    // Zoom about a point keeps that point under the cursor.
+    const float sx = 260.0f, sy = 150.0f;
+    const float before_x = m.to_mask_x(sx), before_y = m.to_mask_y(sy);
+    mk::zoom_about(v, 2.0f, sx, sy, dw, dh, pw, ph);
+    m = mk::mapping(v, dw, dh, pw, ph);
+    check(std::fabs(v.zoom - 2.0f) < 1e-6f, "zoom doubled");
+    check(std::fabs(m.to_mask_x(sx) - before_x) < 1e-2f && std::fabs(m.to_mask_y(sy) - before_y) < 1e-2f,
+          "the point under the cursor stayed put");
+    mk::zoom_about(v, 0.01f, sx, sy, dw, dh, pw, ph);
+    check(v.zoom == 1.0f, "zoom clamps at 1");
+    for (int i = 0; i < 40; i++) mk::zoom_about(v, 2.0f, sx, sy, dw, dh, pw, ph);
+    check(v.zoom == 64.0f, "zoom clamps at 64");
+    v.zoom = 4.0f;
+    v.cx = 400.0f;
+    v.cy = 300.0f;
+    m = mk::mapping(v, dw, dh, pw, ph);
+    mk::pan(v, 20.0f, -10.0f, m, dw, dh);
+    check(std::fabs(v.cx - (400.0f - 20.0f / m.scale)) < 1e-3f, "pan moves the centre against the drag");
+    mk::pan(v, -1e6f, 0.0f, m, dw, dh);
+    check(v.cx == (float)dw, "centre clamps to the mask");
+
+    // Window: at zoom 1 the whole 800x600 fits and needs no decimation.
+    v = mk::View{1.0f, 400.0f, 300.0f};
+    m = mk::mapping(v, dw, dh, pw, ph);
+    mk::Window w = mk::window_for(m, dw, dh, pw, ph);
+    check(w.r.x0 == 0 && w.r.y0 == 0 && w.r.x1 == dw && w.r.y1 == dh, "window is the whole mask");
+    check(w.step == 1 && w.tw == dw && w.th == dh, "no decimation under 4096");
+    // A 9000-wide mask fully visible decimates by 3.
+    mk::View big{1.0f, 4500.0f, 2000.0f};
+    const mk::Mapping bm = mk::mapping(big, 9000, 4000, pw, ph);
+    const mk::Window bw = mk::window_for(bm, 9000, 4000, pw, ph);
+    check(bw.step == 3 && bw.tw == 3000 && bw.th == 1334, "9000 wide decimates by 3 into 3000x1334");
+    // Zoomed to 64 the window is a small rect.
+    mk::View z{64.0f, 400.0f, 300.0f};
+    const mk::Mapping zm = mk::mapping(z, dw, dh, pw, ph);
+    const mk::Window zw = mk::window_for(zm, dw, dh, pw, ph);
+    check(zw.step == 1 && zw.r.w() <= 16 && zw.r.h() <= 16 && zw.r.w() >= 12, "64x window is ~12.5 px wide");
+    check(mk::same_window(zw, zw) && !mk::same_window(zw, w), "same_window");
+}
+
+void test_derive_window() {
+    // A 4x2 stored mask, identity turn, frame the same size.
+    const int W = 4, H = 2;
+    const uint8_t rgb[4 * 2 * 3] = {
+        90, 60, 30,  100, 100, 100,  200, 40, 80,  10, 20, 30,
+        90, 60, 30,  100, 100, 100,  200, 40, 80,  10, 20, 30};
+    const uint8_t comp[8] = {0, 255, 255, 255, 0, 255, 255, 255};
+    const uint8_t drop[8] = {0, 255, 0, 0, 0, 255, 0, 0};
+    const uint8_t keep[8] = {0, 0, 255, 0, 0, 0, 255, 0};
+    mk::WindowSource src;
+    src.rgb = rgb; src.fw = W; src.fh = H;
+    src.composite = comp; src.drop = drop; src.keep = keep;
+    src.W = W; src.H = H;
+    mk::Window win;
+    win.r = {0, 0, W, H};
+    win.step = 1;
+    win.tw = W;
+    win.th = H;
+    std::vector<uint8_t> rgba;
+    const mk::Rect t = mk::derive_window(win, win.r, src, rgba);
+    check(t.x0 == 0 && t.y0 == 0 && t.x1 == W && t.y1 == H, "texel rect is the whole window");
+    check(rgba.size() == (size_t)W * H * 4, "rgba sized");
+    // Texel 0: dropped, no layer -> Picture.cpp tint (r/3+150, g/3, b/3).
+    check(rgba[0] == 90 / 3 + 150 && rgba[1] == 60 / 3 && rgba[2] == 30 / 3 && rgba[3] == 255,
+          "dropped pixel tinted like Picture.cpp");
+    // Texel 1: drop layer over a kept composite -> 25% toward (235,45,45).
+    check(rgba[4] == (100 * 3 + 235) / 4 && rgba[5] == (100 * 3 + 45) / 4 && rgba[6] == (100 * 3 + 45) / 4,
+          "drop layer tint");
+    // Texel 2: keep layer -> 25% toward (60,220,90).
+    check(rgba[8] == (200 * 3 + 60) / 4 && rgba[9] == (40 * 3 + 220) / 4 && rgba[10] == (80 * 3 + 90) / 4,
+          "keep layer tint");
+    // Texel 3: kept, no layer -> the photo.
+    check(rgba[12] == 10 && rgba[13] == 20 && rgba[14] == 30, "kept pixel is the photo");
+    // A sub-rectangle writes only its texels.
+    std::fill(rgba.begin(), rgba.end(), 7);
+    const mk::Rect part = mk::derive_window(win, mk::Rect{2, 0, 3, 2}, src, rgba);
+    check(part.x0 == 2 && part.x1 == 3 && part.y0 == 0 && part.y1 == 2, "part texel rect");
+    check(rgba[0] == 7 && rgba[8] == (200 * 3 + 60) / 4 && rgba[12] == 7, "only the part was rewritten");
+    // Step 2 over uniform 2x2 blocks averages exactly; the mask decides by majority.
+    const uint8_t rgb2[4 * 2 * 3] = {
+        8, 8, 8,  8, 8, 8,  40, 40, 40,  40, 40, 40,
+        8, 8, 8,  8, 8, 8,  40, 40, 40,  40, 40, 40};
+    const uint8_t comp2[8] = {0, 0, 0, 255, 0, 0, 255, 255};
+    const uint8_t zero[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    src.rgb = rgb2; src.composite = comp2; src.drop = zero; src.keep = zero;
+    mk::Window w2;
+    w2.r = {0, 0, W, H};
+    w2.step = 2;
+    w2.tw = 2;
+    w2.th = 1;
+    mk::derive_window(w2, w2.r, src, rgba);
+    check(rgba[0] == 8 / 3 + 150 && rgba[1] == 8 / 3, "decimated block, all dropped, tinted");
+    check(rgba[4] == 40 && rgba[5] == 40 && rgba[6] == 40, "decimated block, 3 of 4 kept, photo");
+    // A turned source: orientation 6, stored 4x2 shows as 2x4; displayed
+    // (0,0) is stored (0, H-1) = (0,1), whose photo is (8,8,8) and comp 0.
+    src.turn = sfm::exifTransform(6);
+    mk::Window w3;
+    w3.r = {0, 0, 2, 4};
+    w3.step = 1;
+    w3.tw = 2;
+    w3.th = 4;
+    mk::derive_window(w3, w3.r, src, rgba);
+    check(rgba[0] == 8 / 3 + 150, "turned: displayed (0,0) reads stored (0,1)");
+    // displayed (1,3) is stored (3,0): photo 40, comp 255.
+    check(rgba[((size_t)3 * 2 + 1) * 4] == 40, "turned: displayed (1,3) reads stored (3,0)");
+    // A frame at another size than the mask is sampled to the mask grid.
+    const uint8_t rgb8[8 * 4 * 3] = {0};
+    src.turn = sfm::ExifTransform{};
+    src.rgb = rgb8; src.fw = 8; src.fh = 4;
+    src.composite = comp; src.drop = zero; src.keep = zero;
+    mk::derive_window(win, win.r, src, rgba);
+    check(rgba[12] == 0 && rgba[15] == 255, "frame sampled to mask grid, no crash");
+}
+
 }  // namespace
 
 int main() {
@@ -1018,6 +1150,8 @@ int main() {
     test_undo_redo();
     test_byte_cap_eviction();
     test_orientation_mapping();
+    test_view_math();
+    test_derive_window();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
