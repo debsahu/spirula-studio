@@ -3,6 +3,9 @@
 #include "app/gui/mask/MaskLayer.h"
 
 #include <cstdio>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 namespace gui {
 namespace mask {
@@ -48,6 +51,37 @@ bool read_file(const std::string& path, std::vector<uint8_t>& out) {
     std::fclose(f);
     out.resize(got);
     return n >= 0;
+}
+
+std::string normalize_dir(const std::string& dir) {
+    fs::path p = fs::path(dir).lexically_normal();
+    if (p.filename().empty() && p.has_parent_path()) p = p.parent_path();
+    return p.string();
+}
+
+std::string frame_key(const std::string& image_root, const std::string& file) {
+    const fs::path root(normalize_dir(image_root));
+    fs::path rel = fs::path(file).lexically_normal().lexically_relative(root);
+    if (rel.empty() || *rel.begin() == "..") rel = fs::path(file).filename();
+    rel.replace_extension();
+    return rel.generic_string();
+}
+
+std::string mask_file(const std::string& mask_root, const std::string& key) {
+    return (fs::path(mask_root) / (key + ".png")).string();
+}
+
+std::string layer_file(const std::string& layer_root, const std::string& key,
+                       Layer l) {
+    const char* tag = l == Layer::Base ? ".base.png"
+                    : l == Layer::Drop ? ".drop.png" : ".keep.png";
+    return (fs::path(layer_root) / (key + tag)).string();
+}
+
+void composite(const uint8_t* base, const uint8_t* drop, const uint8_t* keep,
+               size_t n, uint8_t* out) {
+    for (size_t i = 0; i < n; i++)
+        out[i] = (keep && keep[i]) ? 255 : (drop && drop[i]) ? 0 : base[i];
 }
 
 }  // namespace mask

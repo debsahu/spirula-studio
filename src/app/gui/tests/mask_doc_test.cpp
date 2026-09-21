@@ -134,10 +134,55 @@ void test_fnv() {
           "different bytes differ");
 }
 
+// ---------------------------------------------------------------------------
+// Task 2: composite truth table, keys, paths
+// ---------------------------------------------------------------------------
+
+void test_composite_truth_table() {
+    // Every (base, drop, keep) state. Polarity: 255 = keep.
+    const uint8_t base[8] = {0, 0, 0, 0, 255, 255, 255, 255};
+    const uint8_t drop[8] = {0, 255, 0, 255, 0, 255, 0, 255};
+    const uint8_t keep[8] = {0, 0, 255, 255, 0, 0, 255, 255};
+    uint8_t out[8];
+    mk::composite(base, drop, keep, 8, out);
+    const uint8_t want[8] = {0, 0, 255, 255, 255, 0, 255, 255};
+    for (int i = 0; i < 8; i++)
+        check(out[i] == want[i], "composite state " + std::to_string(i));
+    // Absent layers mean "no correction".
+    mk::composite(base, nullptr, nullptr, 8, out);
+    for (int i = 0; i < 8; i++)
+        check(out[i] == base[i], "composite with no layers is the base, " + std::to_string(i));
+    mk::composite(base, drop, nullptr, 8, out);
+    check(out[5] == 0 && out[4] == 255, "drop only");
+    mk::composite(base, nullptr, keep, 8, out);
+    check(out[2] == 255 && out[0] == 0, "keep only");
+}
+
+void test_keys_and_paths() {
+    const std::string root = "/data/set/images";
+    check(mk::frame_key(root, "/data/set/images/00023.jpg") == "00023", "key at root");
+    check(mk::frame_key(root, "/data/set/images/cam0/00023.jpg") == "cam0/00023", "key in camera");
+    check(mk::frame_key(root + "/", "/data/set/images/cam0/left/x.png") == "cam0/left/x",
+          "key with trailing slash on root");
+    check(mk::frame_key(root, "/elsewhere/y.jpg") == "y", "key outside root is the stem");
+    check(mk::normalize_dir("/a/b/") == "/a/b", "normalize_dir strips the slash");
+    check(mk::normalize_dir("/a/./b/../c") == "/a/c", "normalize_dir is lexical");
+    check(mk::mask_file("/data/set/masks", "cam0/00023") == "/data/set/masks/cam0/00023.png",
+          "mask_file");
+    check(mk::layer_file("/data/set/mask_edits", "cam0/00023", mk::Layer::Base) ==
+              "/data/set/mask_edits/cam0/00023.base.png", "layer_file base");
+    check(mk::layer_file("/data/set/mask_edits", "00023", mk::Layer::Drop) ==
+              "/data/set/mask_edits/00023.drop.png", "layer_file drop");
+    check(mk::layer_file("/data/set/mask_edits", "00023", mk::Layer::Keep) ==
+              "/data/set/mask_edits/00023.keep.png", "layer_file keep");
+}
+
 }  // namespace
 
 int main() {
     test_fnv();
+    test_composite_truth_table();
+    test_keys_and_paths();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }

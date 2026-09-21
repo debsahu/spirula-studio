@@ -24,5 +24,23 @@ bool fnv_parse(const std::string& s, uint64_t& out);
 
 bool read_file(const std::string& path, std::vector<uint8_t>& out);
 
+// `dir` lexically normalized, without a trailing separator: what the frame
+// keys and the skip test are computed against.
+std::string normalize_dir(const std::string& dir);
+
+// "<rel_dir>/<stem>" of `file` under `image_root` ("cam0/00023", or "00023"
+// at the root itself). Lexical, as group_frames_by_camera keys it.
+std::string frame_key(const std::string& image_root, const std::string& file);
+
+std::string mask_file(const std::string& mask_root, const std::string& key);
+
+enum class Layer { Base, Drop, Keep };
+std::string layer_file(const std::string& layer_root, const std::string& key,
+                       Layer l);
+
+// final = keep ? 255 : drop ? 0 : base. Either layer may be null.
+void composite(const uint8_t* base, const uint8_t* drop, const uint8_t* keep,
+               size_t n, uint8_t* out);
+
 }  // namespace mask
 }  // namespace gui
