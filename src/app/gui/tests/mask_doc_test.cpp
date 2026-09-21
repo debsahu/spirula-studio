@@ -195,7 +195,10 @@ void test_png_and_atomic_write() {
     check(png.size() > 8 && png[1] == 'P' && png[2] == 'N' && png[3] == 'G', "PNG signature");
     const fs::path p = d / "sub" / "a.png";
     check(mk::write_file_atomic(p.string(), png.data(), png.size()), "write_file_atomic creates dirs");
-    check(!fs::exists(d / "sub" / "a.png.tmp"), "no temp file left behind");
+    bool tmp_leftover = false;
+    for (const auto& entry : fs::directory_iterator(d / "sub"))
+        if (entry.path().extension() == ".tmp") tmp_leftover = true;
+    check(!tmp_leftover, "no temp file left behind");
     check(file_bytes(p) == png, "file holds exactly the encoded bytes");
     int w = 0, h = 0;
     std::vector<uint8_t> back;
@@ -216,6 +219,33 @@ void test_png_and_atomic_write() {
         check(file_bytes(p) == other, "path holds the new bytes");
     }
     check(!mk::fingerprint_file((d / "missing.png").string(), fp), "fingerprint of a missing file fails");
+}
+
+// A fixed temp name (<dst>.tmp) lets two writers of the same destination
+// fopen() the same inode and interleave writes before either renames. The
+// property that rules that out: every call gets its own sibling name.
+void test_temp_write_path_unique() {
+    const fs::path d = scratch("temp_names");
+    const fs::path dst = d / "shared.bin";
+    const std::string a = mk::temp_write_path(dst.string());
+    const std::string b = mk::temp_write_path(dst.string());
+    check(a != b, "temp_write_path differs across calls for the same destination");
+    check(fs::path(a).parent_path() == dst.parent_path() &&
+              fs::path(b).parent_path() == dst.parent_path(),
+          "temp paths are siblings of the destination");
+    // Concurrent-in-flight writers do not collide on disk, and the write
+    // that lands last still wins cleanly -- the hard-link guarantee holds.
+    const std::vector<uint8_t> first = {9, 9, 9};
+    check(mk::write_file_atomic(dst.string(), first.data(), first.size()), "first write lands");
+    const fs::path link = d / "shared.link";
+    std::error_code ec;
+    fs::create_hard_link(dst, link, ec);
+    if (!ec) {
+        const std::vector<uint8_t> second = {1, 2};
+        check(mk::write_file_atomic(dst.string(), second.data(), second.size()), "second write lands");
+        check(file_bytes(link) == first, "hard link unaffected by the second write");
+        check(file_bytes(dst) == second, "destination holds the second write");
+    }
 }
 
 void test_index_roundtrip() {
@@ -262,6 +292,7 @@ int main() {
     test_composite_truth_table();
     test_keys_and_paths();
     test_png_and_atomic_write();
+    test_temp_write_path_unique();
     test_index_roundtrip();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;

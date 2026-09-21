@@ -11,11 +11,18 @@
 extern "C" unsigned char* stbi_write_png_to_mem(const unsigned char* pixels, int stride_bytes,
                                                 int x, int y, int n, int* out_len);
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <stdexcept>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -105,11 +112,22 @@ bool encode_gray_png(const uint8_t* px, int w, int h, std::vector<uint8_t>& png)
     return true;
 }
 
+std::string temp_write_path(const std::string& dst) {
+    static std::atomic<uint64_t> counter{0};
+#ifdef _WIN32
+    const unsigned long pid = GetCurrentProcessId();
+#else
+    const long pid = (long)getpid();
+#endif
+    return dst + "." + std::to_string(pid) + "." +
+           std::to_string(counter.fetch_add(1, std::memory_order_relaxed)) + ".tmp";
+}
+
 bool write_file_atomic(const std::string& path, const uint8_t* data, size_t n) {
     std::error_code ec;
     const fs::path dst(path);
     fs::create_directories(dst.parent_path(), ec);
-    const fs::path tmp = dst.parent_path() / (dst.filename().string() + ".tmp");
+    const fs::path tmp(temp_write_path(dst.string()));
     FILE* f = std::fopen(tmp.string().c_str(), "wb");
     if (!f) return false;
     const bool wrote = n == 0 || std::fwrite(data, 1, n, f) == n;
