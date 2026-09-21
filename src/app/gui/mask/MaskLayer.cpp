@@ -403,9 +403,19 @@ int revert_all(const std::string& layer_root, std::string& error) {
     if (!idx.load(layer_root, error)) return -1;
     std::vector<std::string> keys;
     for (const auto& [k, e] : idx.frames) keys.push_back(k);
-    for (const std::string& k : keys)
-        if (!revert_frame(layer_root, idx.mask_root, k, idx, error)) return -1;
-    return (int)keys.size();
+    int reverted = 0;
+    std::string failures;
+    for (const std::string& k : keys) {
+        std::string frame_error;
+        if (!revert_frame(layer_root, idx.mask_root, k, idx, frame_error)) {
+            if (!failures.empty()) failures += "; ";
+            failures += k + ": " + frame_error;
+            continue;
+        }
+        reverted++;
+    }
+    error = failures;
+    return reverted;
 }
 
 }  // namespace mask

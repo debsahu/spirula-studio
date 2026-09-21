@@ -104,6 +104,9 @@ int recomposite_all(const std::string& layer_root, std::string& error);
 // files and the entry go. Without a base, only the layers and the entry go.
 bool revert_frame(const std::string& layer_root, const std::string& mask_root,
                   const std::string& key, LayerIndex& idx, std::string& error);
+// A failing frame does not stop the rest: returns the count reverted, with
+// any per-frame failures named in `error`. -1 only if the index would not
+// load.
 int revert_all(const std::string& layer_root, std::string& error);
 
 }  // namespace mask

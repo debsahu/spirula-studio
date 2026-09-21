@@ -49,7 +49,11 @@ byte, then removes the three layer files and the index entry. If a layer
 file cannot be removed, revert refuses: it reports the failure and keeps the
 index entry standing rather than claiming success, because an orphaned
 `.drop.png` with no entry pointing at it would be silently read as a live
-correction the next time the frame opens.
+correction the next time the frame opens. Reverting every edited frame at
+once has the same shape as the re-masking pass below: one frame's removal
+failure does not stop the rest, every frame in the index is still attempted,
+and the ones that failed are named rather than folded into the count of
+ones genuinely reverted.
 
 ## Re-masking
 

@@ -580,6 +580,54 @@ void test_recomposite_all_continues_past_failure() {
           "b's base untouched: refusing one frame must not corrupt it");
 }
 
+// Fix round 2: revert_all had the same abort-on-first-failure shape
+// recomposite_all was corrected out of last round, and round 1 made it more
+// reachable by turning a swallowed error into a first-class false.
+void test_revert_all_continues_past_failure() {
+    Fixture f = make_dataset("revert_continue", 64, 48, {"a", "b", "c"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> original_a = file_bytes(f.masks / "a.png");
+    const std::vector<uint8_t> original_c = file_bytes(f.masks / "c.png");
+    const std::vector<uint8_t> drop = box_layer(64, 48, 4, 4, 14, 14);
+    const std::vector<uint8_t> keep = box_layer(64, 48, 40, 20, 50, 30);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    for (const char* k : {"a", "b", "c"}) {
+        int w, h;
+        std::vector<uint8_t> base;
+        app::load_stencil((f.masks / (std::string(k) + ".png")).string(), w, h, base);
+        check(mk::save_frame(layer_root, mask_root, k, 64, 48, base.data(), drop.data(),
+                             keep.data(), true, idx, err), std::string("save ") + k);
+    }
+    check(file_bytes(f.masks / "a.png") != original_a && file_bytes(f.masks / "c.png") != original_c,
+          "fixture: a and c were changed by the save");
+
+    // "b", the middle key in sorted order, cannot have its .drop.png removed.
+    const fs::path drop_b = f.layer / "b.drop.png";
+    std::error_code ec;
+    fs::remove(drop_b, ec);
+    fs::create_directories(drop_b / "nested", ec);
+    check(fs::is_directory(drop_b) && !fs::is_empty(drop_b),
+          "fixture: b.drop.png is a non-empty directory fs::remove refuses");
+
+    const int reverted = mk::revert_all(layer_root, err);
+    check(reverted == 2, "a and c revert despite b's refusal, got " + std::to_string(reverted));
+    check(err.find('b') != std::string::npos, "the failing key is named in the batch error: " + err);
+    check(file_bytes(f.masks / "a.png") == original_a, "a genuinely reverted, not just counted");
+    check(file_bytes(f.masks / "c.png") == original_c, "c genuinely reverted -- attempted past b");
+    for (const char* tag : {"a.base.png", "a.drop.png", "a.keep.png",
+                            "c.base.png", "c.drop.png", "c.keep.png"})
+        check(!fs::exists(f.layer / tag), std::string("removed ") + tag);
+
+    mk::LayerIndex disk;
+    check(disk.load(layer_root, err), "reload the persisted index: " + err);
+    check(disk.frames.count("a") == 0 && disk.frames.count("c") == 0,
+          "a and c fully reverted on disk");
+    check(disk.frames.count("b") == 1, "b kept its entry -- skipped, not silently marked done");
+    check(fs::exists(drop_b), "b's undeletable layer path is still there");
+}
+
 }  // namespace
 
 int main() {
@@ -595,6 +643,7 @@ int main() {
     test_save_without_mask();
     test_revert_reports_removal_failure();
     test_recomposite_all_continues_past_failure();
+    test_revert_all_continues_past_failure();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
