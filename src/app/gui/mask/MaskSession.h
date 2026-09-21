@@ -107,6 +107,9 @@ private:
     void upload_rect(const Rect& shown);
 
     bool _open = false;
+    // Set once in open() before the worker starts, read by both threads
+    // thereafter, cleared only after close()'s join(): safe by ordering,
+    // not by exclusivity -- neither field is ever mutable mid-session.
     std::string _workspace, _image_root, _mask_root, _layer_root;
     std::vector<FrameRef> _frames;
     int _idx = -1;
