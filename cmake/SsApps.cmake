@@ -414,6 +414,8 @@ if(SS_BUILD_GUI)
     # The mask editor's layer, document and session, none of which draw.
     add_executable(mask_doc_test
         ${SS_SRC}/app/gui/tests/mask_doc_test.cpp
-        ${SS_SRC}/app/gui/mask/MaskLayer.cpp)
+        ${SS_SRC}/app/gui/mask/MaskLayer.cpp
+        ${SS_SRC}/app/FrameMask.cpp
+        ${SS_SRC}/app/FrameLook.cpp)
     ss_configure_app(mask_doc_test)
 endif()

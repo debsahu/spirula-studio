@@ -42,5 +42,27 @@ std::string layer_file(const std::string& layer_root, const std::string& key,
 void composite(const uint8_t* base, const uint8_t* drop, const uint8_t* keep,
                size_t n, uint8_t* out);
 
+bool encode_gray_png(const uint8_t* px, int w, int h, std::vector<uint8_t>& png);
+// Through a sibling temp file and a rename, so an existing file's inode is
+// never written into: masks gathered beside photos can be hard links.
+bool write_file_atomic(const std::string& path, const uint8_t* data, size_t n);
+bool fingerprint_file(const std::string& path, uint64_t& out);
+std::string utc_now_iso();
+
+struct IndexEntry {
+    uint64_t base_fp = 0;        // of .base.png; 0 while no base exists
+    uint64_t composite_fp = 0;   // of masks/<key>.png as last written; 0 if never
+    float kept = 0.0f;
+    std::string saved_at;        // UTC, "2026-09-21T10:00:00Z"
+};
+
+struct LayerIndex {
+    std::string mask_root;
+    std::map<std::string, IndexEntry> frames;
+    // A missing file is an empty index and succeeds; a corrupt one fails.
+    bool load(const std::string& layer_root, std::string& error);
+    bool save(const std::string& layer_root, std::string& error) const;
+};
+
 }  // namespace mask
 }  // namespace gui

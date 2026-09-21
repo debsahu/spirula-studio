@@ -2,8 +2,20 @@
 
 #include "app/gui/mask/MaskLayer.h"
 
+#include "data/Json.h"
+#include "data/JsonWrite.h"
+#include "external/stb_image_write.h"
+
+// v1.16 defines this at :1132 but omits it from the public prototype block;
+// STBIWDEF expands to extern "C" here (no STB_IMAGE_WRITE_STATIC build).
+extern "C" unsigned char* stbi_write_png_to_mem(const unsigned char* pixels, int stride_bytes,
+                                                int x, int y, int n, int* out_len);
+
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <filesystem>
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
@@ -82,6 +94,108 @@ void composite(const uint8_t* base, const uint8_t* drop, const uint8_t* keep,
                size_t n, uint8_t* out) {
     for (size_t i = 0; i < n; i++)
         out[i] = (keep && keep[i]) ? 255 : (drop && drop[i]) ? 0 : base[i];
+}
+
+bool encode_gray_png(const uint8_t* px, int w, int h, std::vector<uint8_t>& png) {
+    int len = 0;
+    unsigned char* p = stbi_write_png_to_mem(px, w, w, h, 1, &len);
+    if (!p || len <= 0) return false;
+    png.assign(p, p + len);
+    std::free(p);
+    return true;
+}
+
+bool write_file_atomic(const std::string& path, const uint8_t* data, size_t n) {
+    std::error_code ec;
+    const fs::path dst(path);
+    fs::create_directories(dst.parent_path(), ec);
+    const fs::path tmp = dst.parent_path() / (dst.filename().string() + ".tmp");
+    FILE* f = std::fopen(tmp.string().c_str(), "wb");
+    if (!f) return false;
+    const bool wrote = n == 0 || std::fwrite(data, 1, n, f) == n;
+    const bool closed = std::fclose(f) == 0;
+    if (!wrote || !closed) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    fs::rename(tmp, dst, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    return true;
+}
+
+bool fingerprint_file(const std::string& path, uint64_t& out) {
+    std::vector<uint8_t> bytes;
+    if (!read_file(path, bytes)) return false;
+    out = fnv1a64(bytes.data(), bytes.size());
+    return true;
+}
+
+std::string utc_now_iso() {
+    const std::time_t t = std::time(nullptr);
+    std::tm tm{};
+#ifdef _WIN32
+    gmtime_s(&tm, &t);
+#else
+    gmtime_r(&t, &tm);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm);
+    return buf;
+}
+
+bool LayerIndex::load(const std::string& layer_root, std::string& error) {
+    frames.clear();
+    mask_root.clear();
+    const std::string path = (fs::path(layer_root) / kIndexFileName).string();
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return true;
+    JsonValue doc;
+    try {
+        doc = json_parse_file(path);
+    } catch (const std::exception& e) {
+        error = path + ": " + e.what();
+        return false;
+    }
+    if (const JsonValue* r = doc.find("mask_root")) mask_root = r->as_string();
+    const JsonValue* fr = doc.find("frames");
+    if (!fr || !fr->is_object()) return true;
+    for (const auto& [key, v] : fr->obj) {
+        IndexEntry e;
+        if (const JsonValue* b = v.find("base")) fnv_parse(b->as_string(), e.base_fp);
+        if (const JsonValue* c = v.find("composite")) fnv_parse(c->as_string(), e.composite_fp);
+        e.kept = (float)v.get_double("kept", 0.0);
+        if (const JsonValue* s = v.find("saved_at")) e.saved_at = s->as_string();
+        frames[key] = e;
+    }
+    return true;
+}
+
+bool LayerIndex::save(const std::string& layer_root, std::string& error) const {
+    JsonWriter w;
+    w.object();
+    w.field("spirula_mask_edits", 1);
+    w.field("mask_root", mask_root);
+    w.key("frames").object();
+    for (const auto& [key, e] : frames) {
+        w.key(key.c_str()).object();
+        w.field("base", fnv_hex(e.base_fp));
+        w.field("composite", fnv_hex(e.composite_fp));
+        w.field("kept", e.kept);
+        w.field("saved_at", e.saved_at);
+        w.end();
+    }
+    w.end();
+    w.end();
+    const std::string text = w.str();
+    const std::string path = (fs::path(layer_root) / kIndexFileName).string();
+    if (!write_file_atomic(path, (const uint8_t*)text.data(), text.size())) {
+        error = path;
+        return false;
+    }
+    return true;
 }
 
 }  // namespace mask

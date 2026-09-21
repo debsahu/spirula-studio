@@ -3,6 +3,7 @@
 // whose every pixel is known. SS_MASK_BENCH=<dir> also runs the timing
 // floors at 7680x3840 and writes that fixture dataset into <dir>.
 
+#include "app/FrameMask.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
@@ -164,6 +165,11 @@ void test_keys_and_paths() {
     check(mk::frame_key(root, "/data/set/images/cam0/00023.jpg") == "cam0/00023", "key in camera");
     check(mk::frame_key(root + "/", "/data/set/images/cam0/left/x.png") == "cam0/left/x",
           "key with trailing slash on root");
+    // lexically_relative does not normalize its own argument, so a dot
+    // segment in image_root (not the file) needs normalize_dir's call.
+    check(mk::frame_key("/data/set/other/../images", "/data/set/images/cam0/00023.jpg") ==
+              "cam0/00023",
+          "key with dot segment in root");
     check(mk::frame_key(root, "/elsewhere/y.jpg") == "y", "key outside root is the stem");
     check(mk::normalize_dir("/a/b/") == "/a/b", "normalize_dir strips the slash");
     check(mk::normalize_dir("/a/./b/../c") == "/a/c", "normalize_dir is lexical");
@@ -177,12 +183,86 @@ void test_keys_and_paths() {
               "/data/set/mask_edits/00023.keep.png", "layer_file keep");
 }
 
+// ---------------------------------------------------------------------------
+// Task 3: PNG bytes, atomic write, index round trip
+// ---------------------------------------------------------------------------
+
+void test_png_and_atomic_write() {
+    const fs::path d = scratch("png");
+    const std::vector<uint8_t> px = synth_mask(64, 48, 7);
+    std::vector<uint8_t> png;
+    check(mk::encode_gray_png(px.data(), 64, 48, png), "encode_gray_png");
+    check(png.size() > 8 && png[1] == 'P' && png[2] == 'N' && png[3] == 'G', "PNG signature");
+    const fs::path p = d / "sub" / "a.png";
+    check(mk::write_file_atomic(p.string(), png.data(), png.size()), "write_file_atomic creates dirs");
+    check(!fs::exists(d / "sub" / "a.png.tmp"), "no temp file left behind");
+    check(file_bytes(p) == png, "file holds exactly the encoded bytes");
+    int w = 0, h = 0;
+    std::vector<uint8_t> back;
+    check(app::load_stencil(p.string(), w, h, back) && w == 64 && h == 48, "load_stencil reads it");
+    check(back == px, "decoded pixels are the input, every one");
+    uint64_t fp = 0;
+    check(mk::fingerprint_file(p.string(), fp) && fp == mk::fnv1a64(png.data(), png.size()),
+          "fingerprint_file is the fingerprint of the bytes");
+    // Writing again replaces the directory entry rather than the inode: a
+    // hard link to the first file must keep the first bytes.
+    const fs::path link = d / "sub" / "link.png";
+    std::error_code ec;
+    fs::create_hard_link(p, link, ec);
+    if (!ec) {
+        const std::vector<uint8_t> other = {1, 2, 3, 4};
+        check(mk::write_file_atomic(p.string(), other.data(), other.size()), "rewrite");
+        check(file_bytes(link) == png, "hard link still holds the old bytes");
+        check(file_bytes(p) == other, "path holds the new bytes");
+    }
+    check(!mk::fingerprint_file((d / "missing.png").string(), fp), "fingerprint of a missing file fails");
+}
+
+void test_index_roundtrip() {
+    const fs::path d = scratch("index");
+    mk::LayerIndex idx;
+    std::string err;
+    check(idx.load(d.string(), err) && idx.frames.empty(), "absent index loads empty");
+    idx.mask_root = "/data/set/masks";
+    mk::IndexEntry e;
+    e.base_fp = 0xcbf29ce484222325ull;
+    e.composite_fp = 0x85944171f73967e8ull;
+    e.kept = 0.4375f;
+    e.saved_at = "2026-09-21T10:00:00Z";
+    idx.frames["cam0/00023"] = e;
+    idx.frames["00001"] = mk::IndexEntry{};
+    check(idx.save(d.string(), err), "index saves: " + err);
+    check(fs::exists(d / mk::kIndexFileName), "index.json exists");
+    mk::LayerIndex back;
+    check(back.load(d.string(), err), "index loads: " + err);
+    check(back.mask_root == "/data/set/masks", "mask_root round trips");
+    check(back.frames.size() == 2, "two entries");
+    const mk::IndexEntry& r = back.frames["cam0/00023"];
+    check(r.base_fp == e.base_fp, "base fingerprint round trips exactly (64 bits)");
+    check(r.composite_fp == e.composite_fp, "composite fingerprint round trips exactly");
+    check(r.kept == e.kept, "kept round trips");
+    check(r.saved_at == e.saved_at, "saved_at round trips");
+    check(back.frames["00001"].base_fp == 0 && back.frames["00001"].composite_fp == 0,
+          "zero fingerprints round trip");
+    const std::vector<uint8_t> text = file_bytes(d / mk::kIndexFileName);
+    const std::string s(text.begin(), text.end());
+    check(s.find("\"85944171f73967e8\"") != std::string::npos, "fingerprints are hex strings");
+    check(s.find("spirula_mask_edits") != std::string::npos, "marker key present");
+    // Garbage is an error, not an empty index.
+    const std::vector<uint8_t> junk = {'{', 'x'};
+    mk::write_file_atomic((d / mk::kIndexFileName).string(), junk.data(), junk.size());
+    check(!back.load(d.string(), err) && !err.empty(), "corrupt index fails with a message");
+    check(mk::utc_now_iso().size() == 20 && mk::utc_now_iso()[10] == 'T', "utc_now_iso shape");
+}
+
 }  // namespace
 
 int main() {
     test_fnv();
     test_composite_truth_table();
     test_keys_and_paths();
+    test_png_and_atomic_write();
+    test_index_roundtrip();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
