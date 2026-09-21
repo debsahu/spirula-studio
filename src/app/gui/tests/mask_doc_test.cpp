@@ -888,6 +888,12 @@ void test_byte_cap_eviction() {
     d.set_history_byte_cap_for_test(want_bytes_a + 1);
     d.paint(mk::Paint::ForceKeep, box_stencil(64, 48, 30, 20, 45, 35), full);
     check(exclusive(d) && composite_consistent(d), "invariant after B");
+    std::vector<uint8_t> bd2, bk2;
+    d.read_rect(full, bd2, bk2);
+    const size_t want_bytes_b = gui::rle_encode(dropAfterA).size() + gui::rle_encode(keepAfterA).size() +
+                                 gui::rle_encode(bd2).size() + gui::rle_encode(bk2).size();
+    check(d.history_bytes() == want_bytes_b,
+          "history_bytes after the eviction equals B's own RLE size, not a stale total");
     check(d.history_size() == 1, "the byte cap evicted one op, well under the 96-op cap");
     check(d.can_undo(), "the newest op (B) is still undoable");
 
