@@ -972,6 +972,18 @@ void test_orientation_mapping() {
             check(back.x0 == dx && back.y0 == dy && back.x1 == dx + 1 && back.y1 == dy + 1,
                   "rect_to_displayed maps a one-pixel rect back, orientation " + std::to_string(o));
         }
+        // A genuinely multi-pixel, non-square rect: area and aspect are
+        // invariant under any 90-degree turn/mirror, so a corner-crossing
+        // bug shows up here as a wrong or negative w()/h(), not just on 1x1.
+        {
+            const mk::Rect sr{4, 6, 13, 9};   // 9 x 3, stored
+            const mk::Rect dr = mk::rect_to_displayed(sr, t, W, H);
+            const bool swapped = (t.turns_cw & 1) != 0;
+            check(dr.x1 > dr.x0 && dr.y1 > dr.y0,
+                  "multi-pixel rect stays ordered, orientation " + std::to_string(o));
+            check(dr.w() == (swapped ? sr.h() : sr.w()) && dr.h() == (swapped ? sr.w() : sr.h()),
+                  "multi-pixel rect area/aspect preserved, orientation " + std::to_string(o));
+        }
     }
     // Orientation 6 (one turn clockwise), the phone-portrait case, by hand:
     // displayed (5, 10) is stored (10, H-1-5) = (10, 42).
