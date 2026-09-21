@@ -1025,6 +1025,13 @@ void test_view_math() {
     check(v.zoom == 1.0f, "zoom clamps at 1");
     for (int i = 0; i < 40; i++) mk::zoom_about(v, 2.0f, sx, sy, dw, dh, pw, ph);
     check(v.zoom == 64.0f, "zoom clamps at 64");
+    // Cursor at a pane corner, zooming in from an already-cornered view: the
+    // recentred point lands off-image and must come back clamped, not just
+    // the zoom factor -- the final clamp_view() has to run after recentring.
+    mk::View corner{1.0f, 0.0f, 0.0f};
+    mk::zoom_about(corner, 8.0f, 0.0f, 0.0f, dw, dh, pw, ph);
+    check(corner.zoom == 8.0f && corner.cx == 0.0f && corner.cy == 0.0f,
+          "zoom_about clamps the recentred centre, not only the zoom factor");
     v.zoom = 4.0f;
     v.cx = 400.0f;
     v.cy = 300.0f;
@@ -1051,6 +1058,15 @@ void test_view_math() {
     const mk::Window zw = mk::window_for(zm, dw, dh, pw, ph);
     check(zw.step == 1 && zw.r.w() <= 16 && zw.r.h() <= 16 && zw.r.w() >= 12, "64x window is ~12.5 px wide");
     check(mk::same_window(zw, zw) && !mk::same_window(zw, w), "same_window");
+    // Same rect, different step/tw/th: a hand-built Window (as derive_window's
+    // own fixtures do) must not read as the same window just because the
+    // visible rect agrees.
+    mk::Window step_diff = zw; step_diff.step += 1;
+    check(!mk::same_window(zw, step_diff), "same_window: same rect, different step");
+    mk::Window tw_diff = zw; tw_diff.tw += 1;
+    check(!mk::same_window(zw, tw_diff), "same_window: same rect, different tw");
+    mk::Window th_diff = zw; th_diff.th += 1;
+    check(!mk::same_window(zw, th_diff), "same_window: same rect, different th");
 }
 
 void test_derive_window() {
@@ -1106,8 +1122,19 @@ void test_derive_window() {
     mk::derive_window(w2, w2.r, src, rgba);
     check(rgba[0] == 8 / 3 + 150 && rgba[1] == 8 / 3, "decimated block, all dropped, tinted");
     check(rgba[4] == 40 && rgba[5] == 40 && rgba[6] == 40, "decimated block, 3 of 4 kept, photo");
+    // An exact 2-of-4 tie in a step-2 block counts as dropped: hiding a
+    // correction is worse than over-showing one. This is reachable on real
+    // 8K captures, whose SS_MASK_BENCH size decimates to exactly step 2.
+    const uint8_t rgb3[4 * 2 * 3] = {
+        100, 100, 100,  100, 100, 100,  40, 40, 40,  40, 40, 40,
+        100, 100, 100,  100, 100, 100,  40, 40, 40,  40, 40, 40};
+    const uint8_t comp3[8] = {0, 255, 255, 255, 0, 255, 255, 255};
+    src.rgb = rgb3; src.composite = comp3; src.drop = zero; src.keep = zero;
+    mk::derive_window(w2, w2.r, src, rgba);
+    check(rgba[0] == 100 / 3 + 150 && rgba[1] == 100 / 3, "2-of-4 tie counts as dropped");
+    check(rgba[4] == 40 && rgba[5] == 40 && rgba[6] == 40, "non-tied block stays kept");
     // A turned source: orientation 6, stored 4x2 shows as 2x4; displayed
-    // (0,0) is stored (0, H-1) = (0,1), whose photo is (8,8,8) and comp 0.
+    // (1,3) is stored (3,0), whose photo is 40 and comp 255.
     src.turn = sfm::exifTransform(6);
     mk::Window w3;
     w3.r = {0, 0, 2, 4};
@@ -1115,8 +1142,6 @@ void test_derive_window() {
     w3.tw = 2;
     w3.th = 4;
     mk::derive_window(w3, w3.r, src, rgba);
-    check(rgba[0] == 8 / 3 + 150, "turned: displayed (0,0) reads stored (0,1)");
-    // displayed (1,3) is stored (3,0): photo 40, comp 255.
     check(rgba[((size_t)3 * 2 + 1) * 4] == 40, "turned: displayed (1,3) reads stored (3,0)");
     // A frame at another size than the mask is sampled to the mask grid.
     const uint8_t rgb8[8 * 4 * 3] = {0};

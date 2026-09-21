@@ -117,7 +117,8 @@ Rect derive_window(const Window& win, const Rect& part, const WindowSource& src,
                     }
                 uint8_t* o = &rgba[((size_t)ty * win.tw + (size_t)tx) * 4];
                 if (!cnt) { o[0] = o[1] = o[2] = 0; o[3] = 255; continue; }
-                shade(acc[0] / cnt, acc[1] / cnt, acc[2] / cnt, dropped * 2 > cnt,
+                // A decimated tie reads as dropped: hiding a correction is worse than over-showing one.
+                shade(acc[0] / cnt, acc[1] / cnt, acc[2] / cnt, dropped * 2 >= cnt,
                       ld * 2 > cnt, lk * 2 > cnt, o);
             }
         }
