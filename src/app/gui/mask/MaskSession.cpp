@@ -23,6 +23,19 @@ bool inside(const fs::path& p, const fs::path& root) {
     return !rel.empty() && *rel.begin() != "..";
 }
 
+// Undoes read_layers' own ", "-joined `warning` (MaskLayer.h) so each
+// mismatched file can be reported with ITS OWN size, not the first one's.
+std::vector<std::string> split_paths(const std::string& joined) {
+    std::vector<std::string> out;
+    size_t start = 0;
+    for (;;) {
+        const size_t sep = joined.find(", ", start);
+        out.push_back(joined.substr(start, sep - start));
+        if (sep == std::string::npos) return out;
+        start = sep + 2;
+    }
+}
+
 }  // namespace
 
 MaskSession::MaskSession() = default;
@@ -95,6 +108,10 @@ void MaskSession::close() {
     _rgb.clear();
     _frames.clear();
     _idx = -1;
+    _workspace.clear();
+    _image_root.clear();
+    _mask_root.clear();
+    _layer_root.clear();
     std::lock_guard<std::mutex> lk(_mu);
     _loaded = Loaded{};
     _loaded_ready = false;
@@ -220,11 +237,18 @@ void MaskSession::pump() {
     _tool_reset = true;
     _win_dirty = true;
     if (!l.warning.empty()) {
-        int lw = 0, lh = 0;
-        app::image_size(l.warning.substr(0, l.warning.find(", ")), lw, lh);
-        post_status(spirula::i18n::format(msg::err_size_mismatch,
-                                          {l.warning, lw, lh, _doc->width(), _doc->height()}),
-                    true);
+        // One sentence per mismatched file, each with its own size: a joined
+        // path list with one file's dimensions used to name every file it
+        // is not is worse than either a single file or an honest omission.
+        std::string text;
+        for (const std::string& path : split_paths(l.warning)) {
+            int lw = 0, lh = 0;
+            app::image_size(path, lw, lh);
+            if (!text.empty()) text += " ";
+            text += spirula::i18n::format(msg::err_size_mismatch,
+                                          {path, lw, lh, _doc->width(), _doc->height()});
+        }
+        post_status(text, true);
     }
 }
 

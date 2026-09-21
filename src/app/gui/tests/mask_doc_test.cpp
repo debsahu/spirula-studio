@@ -1207,7 +1207,7 @@ void test_session() {
     const mk::Rect changed = s.commit_stroke(box, mk::Paint::ForceDrop, m);
     check(!changed.empty() && changed.x0 <= 4 && changed.x1 >= 14, "commit returns the changed rect");
     check(s.doc()->dirty() && s.doc()->drop()[(size_t)8 * 64 + 8] == 255, "painted and dirty");
-    // A 2x mapping: pane (8,8)-(28,28) is mask (4,4)-(14,14).
+    // A 2x mapping: pane (80,8)-(100,28) is mask (40,4)-(50,14).
     mk::Mapping m2;
     m2.scale = 2.0f;
     gui::ShapeStroke box2;
@@ -1278,6 +1278,37 @@ void test_session() {
     settle(s);
     check(s.corrected_count() == 0 && !fs::exists(f.layer / "cam0" / "a.drop.png"), "everything reverted");
     s.close();
+}
+
+// Two mismatched layer files, each its own size: the joined warning from
+// read_layers must not collapse into one file's dimensions for both names.
+void test_session_size_mismatch() {
+    Fixture f = make_dataset("session_mismatch", 64, 48, {"a"});
+    write_png_gray(f.layer / "a.drop.png", 32, 24, std::vector<uint8_t>(32 * 24, 255));
+    write_png_gray(f.layer / "a.keep.png", 16, 12, std::vector<uint8_t>(16 * 12, 255));
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), err), "open: " + err);
+    settle(s);
+    const std::string e = s.error();
+    check(e.find((f.layer / "a.drop.png").string()) != std::string::npos &&
+              e.find((f.layer / "a.keep.png").string()) != std::string::npos,
+          "both mismatched files are named");
+    check(e.find("32x24") != std::string::npos && e.find("16x12") != std::string::npos,
+          "each file reports its own size, not the first file's for both");
+    s.close();
+}
+
+void test_session_close_resets_paths() {
+    Fixture f = make_dataset("session_close_reset", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), err), "open: " + err);
+    settle(s);
+    s.close();
+    check(s.layer_root().empty() && s.mask_root().empty(), "closed session reports no paths");
+    check(s.frame_count() == 0 && s.frame_index() == -1, "closed session reports no frames");
+    check(!s.is_open(), "closed session reports not open");
 }
 
 // ---------------------------------------------------------------------------
@@ -1413,6 +1444,8 @@ int main() {
     test_view_math();
     test_derive_window();
     test_session();
+    test_session_size_mismatch();
+    test_session_close_resets_paths();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
