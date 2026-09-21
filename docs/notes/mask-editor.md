@@ -104,7 +104,40 @@ three repeats each, median.
 
 | quantity | median | notes |
 |---|---|---|
-| (pending) | | |
+| load_rgb 8K JPEG | 78.1 ms | cold decode from disk each call |
+| load_stencil 8K PNG | 44.6 ms | |
+| encode_gray_png 8K mask | 226.1 ms | |
+| rle_encode 8K plane | 10.8 ms | |
+| stroke commit (CPU) 8K, 20 strokes | 1.1 ms | worst max across 3 runs 4.8 ms; bar 100 ms median / 250 ms max |
+| history bytes after 20 strokes | 60039 bytes | identical in all 3 runs |
+| derive 4096x3840 window (full re-derive) | 7.0 ms | |
+| derive whole mask, step 2 | 8.3 ms | |
+| MaskDoc::save 8K | 702.5 ms | |
+| undo x20 + redo x20 | 9.3 ms | |
+| resident memory, one 8K frame open | 387.3 MB above baseline | out-of-band `/usr/bin/time -l` peak RSS, not part of the committed bench; see note below; bar 600 MB |
+
+M5 Pro, 18 cores, macOS 26.6.2, load average ~2.96/18 during measurement (quiet,
+not idle). Fixture: 7680x3840, three synthetic frames. Three repeats of the
+full test binary; the table above is the median of those three runs, taken
+per line. Criterion #9's row is not produced by `bench_8k` -- the brief for
+this task specifies no memory instrumentation -- it is `/usr/bin/time -l`'s
+maximum resident set size (peak over the process lifetime, from `getrusage`,
+not a snapshot at exit) for the whole `mask_doc_test` binary with
+`SS_MASK_BENCH` set, minus the same measurement with it unset (baseline
+~11.0 MB, three repeats each, both stable to within 2 MB). The delta spans
+the moment inside `bench_8k` where the decoded RGB frame, all four mask
+planes, and the largest window texture are simultaneously live, which is the
+"one 8K frame open" case criterion #9 describes, but it also includes
+whatever transient codec buffers happen to be resident at that instant.
+
+Criterion 4 of the plan (stroke commit at 8K, median of 20 strokes of radius
+100 px and 500 px length, bar 100 ms median / 250 ms max): CPU half measured
+at 1.1 / 4.8 ms. PASS. The GL upload is added by the panel and reported live
+in its status strip ("Last stroke"); see the in-app measurement below.
+
+Criterion 9 of the plan (resident memory <= 600 MB above baseline with one 8K
+frame open): measured at 387.3 MB above baseline. PASS, by the out-of-band
+`/usr/bin/time -l` method described above, not by anything in `bench_8k`.
 
 ## Not in this phase
 

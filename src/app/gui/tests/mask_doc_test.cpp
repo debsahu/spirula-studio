@@ -1152,6 +1152,113 @@ void test_derive_window() {
     check(rgba[12] == 0 && rgba[15] == 255, "frame sampled to mask grid, no crash");
 }
 
+// ---------------------------------------------------------------------------
+// Task 9: floors at 8K. SS_MASK_BENCH=<dir> writes the fixture there and
+// prints medians of three repeats; nothing here fails on a number.
+// ---------------------------------------------------------------------------
+
+template <class F>
+double median_ms(F&& f, int repeats = 3) {
+    std::vector<double> t;
+    for (int i = 0; i < repeats; i++) {
+        const auto a = std::chrono::steady_clock::now();
+        f();
+        const auto b = std::chrono::steady_clock::now();
+        t.push_back(std::chrono::duration<double, std::milli>(b - a).count());
+    }
+    std::sort(t.begin(), t.end());
+    return t[t.size() / 2];
+}
+
+void bench_8k(const char* dir) {
+    const int W = 7680, H = 3840;
+    const fs::path root(dir), images = root / "images", masks = root / "masks";
+    std::error_code ec;
+    fs::create_directories(images, ec);
+    fs::create_directories(masks, ec);
+    for (int i = 0; i < 3; i++) {
+        const std::string key = "f000" + std::to_string(i);
+        if (!fs::exists(images / (key + ".jpg")))
+            write_jpg_rgb(images / (key + ".jpg"), W, H, synth_rgb(W, H, (uint32_t)i));
+        if (!fs::exists(masks / (key + ".png")))
+            write_png_gray(masks / (key + ".png"), W, H, synth_mask(W, H, (uint32_t)i));
+    }
+    std::printf("bench: fixture at %s\n", dir);
+    int fw, fh;
+    std::vector<uint8_t> rgb;
+    std::printf("bench load_rgb 8K JPEG           %8.1f ms\n",
+                median_ms([&] { app::load_rgb((images / "f0000.jpg").string(), fw, fh, rgb); }));
+    int mw, mh;
+    std::vector<uint8_t> base;
+    std::printf("bench load_stencil 8K PNG        %8.1f ms\n",
+                median_ms([&] { app::load_stencil((masks / "f0000.png").string(), mw, mh, base); }));
+    std::vector<uint8_t> png;
+    std::printf("bench encode_gray_png 8K mask    %8.1f ms\n",
+                median_ms([&] { mk::encode_gray_png(base.data(), W, H, png); }));
+    std::printf("bench rle_encode 8K plane        %8.1f ms\n",
+                median_ms([&] { gui::rle_encode(base); }));
+
+    const fs::path layer = root / mk::kLayerDirName;
+    fs::remove_all(layer, ec);
+    mk::LayerIndex idx;
+    idx.mask_root = masks.string();
+    std::string err, warn;
+    mk::MaskDoc d;
+    d.load(layer.string(), masks.string(), "f0000", W, H, idx, err, warn);
+
+    // Criterion #4, CPU half: 20 brush strokes, radius 100 px, 500 px long:
+    // rasterize + paint (with the op's RLE) + derive the stroke's part of a
+    // 4096-square window at step 1.
+    mk::Window win;
+    win.r = {1000, 0, 5096, 3840};
+    win.step = 1;
+    win.tw = 4096;
+    win.th = 3840;
+    std::vector<uint8_t> rgba;
+    mk::WindowSource src;
+    src.rgb = rgb.data(); src.fw = fw; src.fh = fh;
+    src.W = W; src.H = H;
+    std::vector<double> strokes;
+    for (int k = 0; k < 20; k++) {
+        gui::ShapeStroke s;
+        s.kind = gui::ShapeKind::Brush;
+        s.brush_radius = 100.0f;
+        const float x = 1200.0f + 150.0f * k, y = 400.0f + 120.0f * k;
+        s.pts = {x, y, x + 250.0f, y + 50.0f, x + 500.0f, y};
+        const auto a = std::chrono::steady_clock::now();
+        const mk::Rect r = mk::stroke_bounds(s, W, H);
+        gui::Stencil st;
+        gui::rasterize_shape(s, W, H, st);
+        d.paint(k % 2 ? mk::Paint::ForceKeep : mk::Paint::ForceDrop, std::move(st), r);
+        src.composite = d.composite().data(); src.drop = d.drop().data(); src.keep = d.keep().data();
+        mk::derive_window(win, d.last_change(), src, rgba);
+        const auto b = std::chrono::steady_clock::now();
+        strokes.push_back(std::chrono::duration<double, std::milli>(b - a).count());
+    }
+    std::sort(strokes.begin(), strokes.end());
+    std::printf("bench stroke commit (CPU) 8K     median %8.1f ms   max %8.1f ms   [bar: median <= 100, max <= 250]\n",
+                strokes[10], strokes.back());
+    std::printf("bench history bytes after 20     %zu\n", d.history_bytes());
+    std::printf("bench derive full 4096x3840 win  %8.1f ms\n",
+                median_ms([&] { mk::derive_window(win, win.r, src, rgba); }));
+    mk::Window whole;
+    whole.r = {0, 0, W, H};
+    whole.step = 2;
+    whole.tw = 3840;
+    whole.th = 1920;
+    std::printf("bench derive whole mask step 2   %8.1f ms\n",
+                median_ms([&] { mk::derive_window(whole, whole.r, src, rgba); }));
+    std::printf("bench MaskDoc::save 8K           %8.1f ms\n",
+                median_ms([&] { d.save(layer.string(), masks.string(), idx, err); }));
+    std::printf("bench undo x20                   %8.1f ms\n",
+                median_ms([&] { for (int k = 0; k < 20; k++) d.undo(); for (int k = 0; k < 20; k++) d.redo(); }, 1));
+    fs::remove_all(layer, ec);
+    for (int i = 0; i < 3; i++) {
+        const std::string key = "f000" + std::to_string(i);
+        write_png_gray(masks / (key + ".png"), W, H, synth_mask(W, H, (uint32_t)i));
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -1177,6 +1284,7 @@ int main() {
     test_orientation_mapping();
     test_view_math();
     test_derive_window();
+    if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
