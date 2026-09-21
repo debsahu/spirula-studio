@@ -341,6 +341,8 @@ bool recomposite_frame(const std::string& layer_root, const std::string& mask_ro
                       layers.keep.data(), true, idx, error);
 }
 
+// -1 only if the index would not load. One bad frame does not withhold the
+// rest of the batch; each failure is named in `error`, "; "-joined.
 int recomposite_all(const std::string& layer_root, std::string& error) {
     LayerIndex idx;
     if (!idx.load(layer_root, error)) return -1;
@@ -348,11 +350,18 @@ int recomposite_all(const std::string& layer_root, std::string& error) {
     std::vector<std::string> keys;
     for (const auto& [k, e] : idx.frames) keys.push_back(k);
     int rebased = 0;
+    std::string failures;
     for (const std::string& k : keys) {
         BaseState st;
-        if (!recomposite_frame(layer_root, idx.mask_root, k, idx, st, error)) return -1;
+        std::string frame_error;
+        if (!recomposite_frame(layer_root, idx.mask_root, k, idx, st, frame_error)) {
+            if (!failures.empty()) failures += "; ";
+            failures += k + ": " + frame_error;
+            continue;
+        }
         if (st == BaseState::Regenerated) rebased++;
     }
+    error = failures;
     return rebased;
 }
 
@@ -369,8 +378,22 @@ bool revert_frame(const std::string& layer_root, const std::string& mask_root,
             return false;
         }
     }
-    for (Layer l : {Layer::Base, Layer::Drop, Layer::Keep})
-        fs::remove(layer_file(layer_root, key, l), ec);
+    // An orphaned layer file with no index entry gets silently re-read as a
+    // correction next time this frame opens, so a failed removal must leave
+    // the entry standing, not just report false.
+    std::string failed;
+    for (Layer l : {Layer::Base, Layer::Drop, Layer::Keep}) {
+        const std::string path = layer_file(layer_root, key, l);
+        fs::remove(path, ec);
+        if (ec) {
+            if (!failed.empty()) failed += ", ";
+            failed += path;
+        }
+    }
+    if (!failed.empty()) {
+        error = "could not remove: " + failed;
+        return false;
+    }
     idx.frames.erase(key);
     return idx.save(layer_root, error);
 }

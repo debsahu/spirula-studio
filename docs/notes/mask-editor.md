@@ -44,6 +44,13 @@ can sit inside the image tree, where a sibling is walked as images. The
 dataset root is the one place nothing walks; a workspace that is itself inside
 the photo folder is refused with a message.
 
+Reverting a frame copies `.base.png` back over `masks/<key>.png` byte for
+byte, then removes the three layer files and the index entry. If a layer
+file cannot be removed, revert refuses: it reports the failure and keeps the
+index entry standing rather than claiming success, because an orphaned
+`.drop.png` with no entry pointing at it would be silently read as a live
+correction the next time the frame opens.
+
 ## Re-masking
 
 Five sites write masks. Instead of five hooks there is one pass at the end of
@@ -51,9 +58,13 @@ Five sites write masks. Instead of five hooks there is one pass at the end of
 whose fingerprint differs from the recorded composite fingerprint is a new
 base, copied to `.base.png`, and the layers are re-composed over it. A mask
 whose fingerprint matches is the composite written last time and is left
-alone. A missing mask (a cancelled re-run) leaves the layers in place. The
-same check runs when a frame is opened in the editor. A `spirula sam`
-re-mask from the command line is re-composited on the next open.
+alone. A missing mask (a cancelled re-run) leaves the layers in place. A
+frame the pass cannot re-base -- its layers no longer match the mask's size
+-- does not stop the rest of the pass: every other frame `index.json` lists
+is still attempted, and the ones that failed are named, not folded into the
+count of ones that succeeded or left unreported. The same check runs when a
+frame is opened in the editor. A `spirula sam` re-mask from the command line
+is re-composited on the next open.
 
 Known limitation: a crash between the composite's rename and the index
 write leaves the composite looking regenerated, and the next open copies it

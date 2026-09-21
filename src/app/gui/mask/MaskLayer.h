@@ -95,7 +95,9 @@ bool save_frame(const std::string& layer_root, const std::string& mask_root,
 bool recomposite_frame(const std::string& layer_root, const std::string& mask_root,
                        const std::string& key, LayerIndex& idx, BaseState& found,
                        std::string& error);
-// Over every entry of the index under `layer_root`. Re-based count, or -1.
+// Over every entry of the index under `layer_root`. A failing frame does not
+// stop the rest: returns the rebased count, with any per-frame failures
+// named in `error`. -1 only if the index itself could not be loaded.
 int recomposite_all(const std::string& layer_root, std::string& error);
 
 // masks/<key>.png becomes the byte copy in .base.png again; the three layer
