@@ -22,6 +22,7 @@
 #include "data/SparseEdit.h"
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/Gui.h"
+#include "i18n/catalog/MaskEdit.h"
 #include "i18n/catalog/Render.h"
 #include "i18n/catalog/Train.h"
 #include "i18n/catalog/TrainFields.h"
@@ -65,6 +66,7 @@ namespace dmsg = spirula::i18n::msg::dataset;
 namespace gmsg = spirula::i18n::msg::geometry;
 namespace tmsg = spirula::i18n::msg::train;
 namespace rmsg = spirula::i18n::msg::render;
+namespace mmsg = spirula::i18n::msg::maskedit;
 using spirula::i18n::Msg;
 using spirula::format_duration;
 
@@ -296,6 +298,9 @@ void GuiApp::shutdown() {
     _mesh_preview_open = false;
     close_native_previews();
     _segment.destroy_gl();
+    // Same ordering as _compare above: destroy_gl while GL is still current.
+    _mask_editor.destroy_gl();
+    _mask_editor.close();
     _geometry_panel.destroy_gl();
     _colmap.cancel();
     _sfm.cancel();
@@ -2618,6 +2623,8 @@ std::string GuiApp::state_json() {
     out += _dialog.is_open() ? "true" : "false";
     out += ",\"models_open\":" + std::to_string(_compare.count());
     out += ",\"dataset\":" + quoted(_cfg.data);
+    out += ",\"mask_editor_open\":";
+    out += _mask_editor.is_open() ? "true" : "false";
     return out;
 }
 
@@ -2703,6 +2710,8 @@ void GuiApp::frame() {
         case Screen::Batch:  draw_batch();  break;
         case Screen::Mesh:   draw_mesh();   break;
     }
+
+    if (_mask_editor.is_open()) _mask_editor.draw();
 
     if (_dialog.draw()) handle_dialog_result(_dialog.results());
     // The save dialog steps aside while the folder picker is up; bring it
@@ -5351,6 +5360,26 @@ void GuiApp::draw_dataset_rerun(const WorkspaceState& prior) {
     if (go) start_dataset_job();
 }
 
+// The correction editor, offered wherever the dataset already has masks.
+void GuiApp::draw_mask_editor_entry(const WorkspaceState& prior) {
+    if (!prior.masks) return;
+    ImGui::BeginDisabled(dataset_busy() || native_work_busy());
+    if (ui::Button(mmsg::correct_masks)) {
+        const fs::path ws(_workspace);
+        open_mask_editor(_workspace, (ws / "images").string(), (ws / "masks").string());
+    }
+    ImGui::EndDisabled();
+    ui::help_on_hover(mmsg::correct_masks_help);
+}
+
+void GuiApp::open_mask_editor(const std::string& workspace, const std::string& image_dir,
+                              const std::string& mask_dir) {
+    if (dataset_busy() || native_work_busy()) return;
+    close_native_previews();
+    std::string err;
+    if (!_mask_editor.open(workspace, image_dir, mask_dir, err)) log(err);
+}
+
 // ---------------------------------------------------------------------------
 // Starting over
 // ---------------------------------------------------------------------------
@@ -6064,6 +6093,7 @@ void GuiApp::draw_dataset_form(float height, bool running) {
             }
         }
         if (ready) {
+            draw_mask_editor_entry(workspace_state());
             draw_dataset_rerun(workspace_state());
             draw_dataset_reset();
         }
@@ -6304,6 +6334,30 @@ void GuiApp::draw_train() {
         ui::TextDisabledRaw(row ? row->dataset : std::string());
     } else {
         ui::TextDisabledRaw(_cfg.data);
+        // Offered when the dataset's mask folder exists; probed at most once
+        // a second, as workspace_state() does.
+        const std::string key = _cfg.data + "\n" + _cfg.mask_dir;
+        const double now = ImGui::GetTime();
+        if (key != _train_masks_key || now - _train_masks_at > 1.0) {
+            std::error_code ec;
+            fs::path md(_cfg.mask_dir);
+            if (md.is_relative()) md = fs::path(_cfg.data) / md;
+            _train_masks_key = key;
+            _train_masks_at = now;
+            _train_has_masks = !_cfg.data.empty() && fs::is_directory(md, ec) && !fs::is_empty(md, ec);
+        }
+        if (_train_has_masks) {
+            ImGui::SameLine();
+            ImGui::BeginDisabled(training_busy() || native_work_busy());
+            if (ui::Button(mmsg::correct_masks)) {
+                fs::path id(_cfg.image_dir), md(_cfg.mask_dir);
+                if (id.is_relative()) id = fs::path(_cfg.data) / id;
+                if (md.is_relative()) md = fs::path(_cfg.data) / md;
+                open_mask_editor(_cfg.data, id.string(), md.string());
+            }
+            ImGui::EndDisabled();
+            ui::help_on_hover(mmsg::correct_masks_help);
+        }
     }
     // Two ways to watch a run: the scene in 3D, or one training photograph
     // beside the render of the same camera. Right-aligned on the header row so

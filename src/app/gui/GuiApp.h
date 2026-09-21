@@ -24,6 +24,7 @@
 #include "app/gui/MeshRunner.h"
 #include "app/gui/ModelCache.h"
 #include "app/gui/SegmentPanel.h"
+#include "app/gui/mask/MaskSession.h"
 #include "app/gui/SfmRunner.h"
 #include "app/gui/SourceList.h"
 #include "app/gui/SourceProbe.h"
@@ -359,6 +360,9 @@ private:
     // "Re-run masking only" and friends: what probe_workspace already knows,
     // as the actions it implies.
     void draw_dataset_rerun(const WorkspaceState& prior);
+    void draw_mask_editor_entry(const WorkspaceState& prior);
+    void open_mask_editor(const std::string& workspace, const std::string& image_dir,
+                          const std::string& mask_dir);
     // Throwing the whole project away rather than one step of it: the run's
     // own files, and the options, each on its own button.
     void draw_dataset_reset();
@@ -748,6 +752,13 @@ private:
     bool _border_enable = false;
     MaskSettings _mask;
     SegmentPanel _segment;
+    // The mask correction editor (app/gui/mask/). Opened from the dataset
+    // screen and the train screen; drawn from frame() so both can reach it.
+    mask::MaskSession _mask_editor;
+    // draw_train()'s mask-folder probe: what it last checked, and when.
+    std::string _train_masks_key;
+    double _train_masks_at = -1.0;
+    bool _train_has_masks = false;
     // Which input "Try the mask" runs on: which input a new clicked object
     // prompts (MaskClick::source) and which one's stencil the panel edits.
     int _mask_preview_input = 0;
