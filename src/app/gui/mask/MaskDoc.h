@@ -92,6 +92,9 @@ public:
     bool can_redo() const { return _head < (int)_ops.size(); }
     size_t history_bytes() const { return _bytes; }
     int history_size() const { return (int)_ops.size(); }
+    // Test-only: shrinks the byte budget so eviction is reachable without a
+    // 256 MB fixture. Defaults to kMaxHistoryBytes; production never calls it.
+    void set_history_byte_cap_for_test(size_t bytes) { _byte_cap = bytes; }
     const spirula::i18n::Msg* last_label() const;
     // What the last paint, undo or redo changed, in stored pixels.
     const Rect& last_change() const { return _last; }
@@ -124,6 +127,7 @@ private:
     std::vector<std::unique_ptr<MaskOp>> _ops;
     int _head = 0;
     size_t _bytes = 0;
+    size_t _byte_cap = kMaxHistoryBytes;
 };
 
 }  // namespace mask

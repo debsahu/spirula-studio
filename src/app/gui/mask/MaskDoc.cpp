@@ -78,6 +78,7 @@ bool MaskDoc::load(const std::string& layer_root, const std::string& mask_root,
     _ops.clear();
     _head = 0;
     _bytes = 0;
+    _byte_cap = kMaxHistoryBytes;
     _revision = _saved = 0;
     _last = Rect{};
     if (!recomposite_frame(layer_root, mask_root, key, idx, _state, error)) return false;
@@ -238,7 +239,7 @@ void MaskDoc::run(std::unique_ptr<MaskOp> op) {
     _ops.push_back(std::move(op));
     _head = (int)_ops.size();
     while ((int)_ops.size() > kMaxHistoryOps ||
-           (_bytes > kMaxHistoryBytes && _ops.size() > 1)) {
+           (_bytes > _byte_cap && _ops.size() > 1)) {
         _bytes -= _ops.front()->bytes();
         _ops.erase(_ops.begin());
         _head--;

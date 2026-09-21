@@ -4,6 +4,7 @@
 // floors at 7680x3840 and writes that fixture dataset into <dir>.
 
 #include "app/FrameMask.h"
+#include "app/gui/edit/Selection.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "core/SourcePath.h"
@@ -852,6 +853,53 @@ void test_undo_redo() {
     check(d.last_change().x0 <= 2 && d.last_change().x1 >= 4, "last_change after undo");
 }
 
+// ---------------------------------------------------------------------------
+// Fix round 1: the byte cap must evict independently of the op-count cap.
+// ---------------------------------------------------------------------------
+
+void test_byte_cap_eviction() {
+    Fixture f = make_dataset("bytecap", 64, 48, {"a"});
+    mk::LayerIndex idx;
+    idx.mask_root = f.masks.string();
+    std::string err, warn;
+    mk::MaskDoc d;
+    check(d.load(f.layer.string(), f.masks.string(), "a", 64, 48, idx, err, warn), "load");
+    const std::vector<uint8_t> drop0 = d.drop(), keep0 = d.keep();
+    const mk::Rect full{0, 0, 64, 48};
+
+    // A's own before/after RLE size, computed the same way StrokeOp does, so
+    // the check below pins an exact value rather than an inequality a wrong
+    // byte count could still satisfy.
+    std::vector<uint8_t> bd, bk;
+    d.read_rect(full, bd, bk);
+    d.paint(mk::Paint::ForceDrop, box_stencil(64, 48, 4, 4, 12, 12), full);
+    check(exclusive(d) && composite_consistent(d), "invariant after A");
+    std::vector<uint8_t> ad, ak;
+    d.read_rect(full, ad, ak);
+    const size_t want_bytes_a = gui::rle_encode(bd).size() + gui::rle_encode(bk).size() +
+                                 gui::rle_encode(ad).size() + gui::rle_encode(ak).size();
+    check(d.history_bytes() == want_bytes_a,
+          "history_bytes after one push equals its own RLE size, not an under-count");
+    check(d.history_size() == 1 && d.can_undo(), "one op recorded so far");
+    const std::vector<uint8_t> dropAfterA = d.drop(), keepAfterA = d.keep();
+
+    // A cap just over A's own size forces B's push to evict A on bytes alone;
+    // 2 ops sits far under kMaxHistoryOps, so the op-count cap never fires.
+    d.set_history_byte_cap_for_test(want_bytes_a + 1);
+    d.paint(mk::Paint::ForceKeep, box_stencil(64, 48, 30, 20, 45, 35), full);
+    check(exclusive(d) && composite_consistent(d), "invariant after B");
+    check(d.history_size() == 1, "the byte cap evicted one op, well under the 96-op cap");
+    check(d.can_undo(), "the newest op (B) is still undoable");
+
+    d.undo();
+    check(d.drop() == dropAfterA && d.keep() == keepAfterA,
+          "undo lands on the state after A, before B -- B's entry survived the eviction");
+    check(d.drop() != drop0 || d.keep() != keep0,
+          "and NOT on the pristine original -- A's own undo entry is gone, not B's");
+    check(!d.can_undo(), "no further undo: the evicted op cannot be recovered");
+    check(exclusive(d) && composite_consistent(d), "invariant holds across the eviction boundary");
+}
+
 }  // namespace
 
 int main() {
@@ -873,6 +921,7 @@ int main() {
     test_read_write_rect_roundtrip();
     test_noop_paint_does_not_dirty();
     test_undo_redo();
+    test_byte_cap_eviction();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
