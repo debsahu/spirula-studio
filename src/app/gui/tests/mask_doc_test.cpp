@@ -4,6 +4,7 @@
 // floors at 7680x3840 and writes that fixture dataset into <dir>.
 
 #include "app/FrameMask.h"
+#include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
@@ -628,6 +629,121 @@ void test_revert_all_continues_past_failure() {
     check(fs::exists(drop_b), "b's undeletable layer path is still there");
 }
 
+// ---------------------------------------------------------------------------
+// Task 5: the document
+// ---------------------------------------------------------------------------
+
+gui::Stencil box_stencil(int W, int H, int x0, int y0, int x1, int y1) {
+    gui::ShapeStroke s;
+    s.kind = gui::ShapeKind::Box;
+    s.pts = {(float)x0, (float)y0, (float)x1, (float)y1};
+    gui::Stencil st;
+    gui::rasterize_shape(s, W, H, st);
+    return st;
+}
+
+bool exclusive(const mk::MaskDoc& d) {
+    for (size_t i = 0; i < d.drop().size(); i++)
+        if (d.drop()[i] && d.keep()[i]) return false;
+    return true;
+}
+
+bool composite_consistent(const mk::MaskDoc& d) {
+    std::vector<uint8_t> want(d.base().size());
+    mk::composite(d.base().data(), d.drop().data(), d.keep().data(), want.size(), want.data());
+    if (want != d.composite()) return false;
+    int64_t kept = 0;
+    for (uint8_t v : want) kept += v ? 1 : 0;
+    return kept == d.kept();
+}
+
+void test_doc_load_and_paint() {
+    Fixture f = make_dataset("doc", 64, 48, {"a"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err, warn;
+    mk::MaskDoc d;
+    check(d.load(layer_root, mask_root, "a", 64, 48, idx, err, warn), "load: " + err);
+    check(d.width() == 64 && d.height() == 48, "size from the mask");
+    check(d.base_state() == mk::BaseState::Unedited, "unedited");
+    check(d.base() == synth_mask(64, 48, 0), "base is the mask on disk");
+    check(d.composite() == d.base() && !d.dirty(), "composite is the base, clean");
+    check(composite_consistent(d), "kept count at load");
+    const uint64_t rev0 = d.revision();
+
+    // ForceDrop over a keep region. `bounds` deliberately larger than the box.
+    d.paint(mk::Paint::ForceDrop, box_stencil(64, 48, 20, 16, 30, 26), mk::Rect{10, 10, 40, 40});
+    check(d.dirty() && d.revision() != rev0, "dirty after a paint");
+    check(d.drop()[(size_t)20 * 64 + 25] == 255 && d.composite()[(size_t)20 * 64 + 25] == 0,
+          "forced drop: layer set and composite 0");
+    check(d.drop()[(size_t)20 * 64 + 35] == 0, "outside the box untouched");
+    check(exclusive(d) && composite_consistent(d), "invariant after ForceDrop");
+    check(d.last_change().x0 <= 20 && d.last_change().x1 >= 30, "last_change covers the stroke");
+
+    // ForceKeep over a dropped region, overlapping the drop box: keep wins,
+    // and the overlap leaves the drop layer.
+    d.paint(mk::Paint::ForceKeep, box_stencil(64, 48, 25, 20, 60, 44), mk::Rect{0, 0, 64, 48});
+    check(d.keep()[(size_t)30 * 64 + 50] == 255 && d.composite()[(size_t)30 * 64 + 50] == 255,
+          "forced keep: layer set and composite 255");
+    check(d.drop()[(size_t)22 * 64 + 27] == 0 && d.keep()[(size_t)22 * 64 + 27] == 255,
+          "overlap: drop cleared where keep painted");
+    check(exclusive(d) && composite_consistent(d), "invariant after ForceKeep");
+
+    // ForceDrop back over PART of the still-standing keep region, with no
+    // Clear in between: the overlap must clear keep there, not just set drop.
+    d.paint(mk::Paint::ForceDrop, box_stencil(64, 48, 40, 25, 55, 35), mk::Rect{0, 0, 64, 48});
+    check(d.drop()[(size_t)30 * 64 + 45] == 255 && d.keep()[(size_t)30 * 64 + 45] == 0,
+          "ForceDrop over a keep region clears keep, not just sets drop");
+    check(d.keep()[(size_t)40 * 64 + 58] == 255, "keep survives outside the new drop box");
+    check(exclusive(d) && composite_consistent(d), "invariant after ForceDrop-over-keep overlap");
+
+    // Clear puts both layers back over its stencil.
+    d.paint(mk::Paint::Clear, box_stencil(64, 48, 0, 0, 64, 48), mk::Rect{0, 0, 64, 48});
+    check(d.drop() == std::vector<uint8_t>(64 * 48, 0) && d.keep() == std::vector<uint8_t>(64 * 48, 0),
+          "clear everything");
+    check(d.composite() == d.base() && composite_consistent(d), "composite back to the base");
+
+    // A stencil pixel outside `bounds` is ignored, so bounds really bound.
+    d.paint(mk::Paint::ForceDrop, box_stencil(64, 48, 0, 0, 64, 48), mk::Rect{0, 0, 8, 8});
+    check(d.drop()[0] == 255 && d.drop()[(size_t)10 * 64 + 10] == 0, "bounds clip the stencil");
+    check(composite_consistent(d), "kept count tracks a clipped paint");
+
+    // A bounds rectangle that runs off the image edge must be clipped to the
+    // canvas before it is used, not just to the stencil.
+    d.paint(mk::Paint::ForceKeep, box_stencil(64, 48, 0, 0, 64, 48), mk::Rect{60, 44, 200, 200});
+    check(d.keep()[(size_t)47 * 64 + 63] == 255, "the clipped corner is painted");
+    check(d.keep()[(size_t)43 * 64 + 62] == 0 && d.drop()[(size_t)43 * 64 + 62] == 0,
+          "just above the off-edge bounds is untouched");
+    check(exclusive(d) && composite_consistent(d), "invariant after an off-edge bounds paint");
+
+    // Save through the document, reload, same planes.
+    check(d.save(layer_root, mask_root, idx, err), "doc save: " + err);
+    check(!d.dirty(), "clean after save");
+    mk::MaskDoc e;
+    check(e.load(layer_root, mask_root, "a", 64, 48, idx, err, warn), "reload");
+    check(e.base_state() == mk::BaseState::Unchanged, "unchanged after our own save");
+    check(e.drop() == d.drop() && e.keep() == d.keep() && e.composite() == d.composite(),
+          "planes survive a save and load");
+    check(mk::clip(mk::Rect{-5, -5, 100, 100}, 64, 48).x1 == 64, "clip");
+    check(mk::join(mk::Rect{1, 1, 2, 2}, mk::Rect{5, 5, 9, 9}).x1 == 9, "join");
+    check(mk::join(mk::Rect{}, mk::Rect{5, 5, 9, 9}).x0 == 5, "join with empty");
+}
+
+void test_doc_without_mask() {
+    Fixture f = make_dataset("docnomask", 64, 48, {"a"}, false);
+    mk::LayerIndex idx;
+    idx.mask_root = f.masks.string();
+    std::string err, warn;
+    mk::MaskDoc d;
+    check(d.load(f.layer.string(), f.masks.string(), "a", 64, 48, idx, err, warn), "load without mask");
+    check(d.base_state() == mk::BaseState::Missing, "state Missing");
+    check(d.base() == std::vector<uint8_t>(64 * 48, 255), "base is all keep");
+    d.paint(mk::Paint::ForceDrop, box_stencil(64, 48, 0, 0, 8, 8), mk::Rect{0, 0, 64, 48});
+    check(d.save(f.layer.string(), f.masks.string(), idx, err), "save without mask: " + err);
+    check(!fs::exists(f.masks / "a.png") && fs::exists(f.layer / "a.drop.png"), "layers only");
+}
+
 }  // namespace
 
 int main() {
@@ -644,6 +760,8 @@ int main() {
     test_revert_reports_removal_failure();
     test_recomposite_all_continues_past_failure();
     test_revert_all_continues_past_failure();
+    test_doc_load_and_paint();
+    test_doc_without_mask();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }

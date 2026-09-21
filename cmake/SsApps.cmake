@@ -415,6 +415,11 @@ if(SS_BUILD_GUI)
     add_executable(mask_doc_test
         ${SS_SRC}/app/gui/tests/mask_doc_test.cpp
         ${SS_SRC}/app/gui/mask/MaskLayer.cpp
+        ${SS_SRC}/app/gui/mask/MaskDoc.cpp
+        ${SS_SRC}/app/gui/edit/EditDoc.cpp
+        ${SS_SRC}/app/gui/edit/ElementGrid.cpp
+        ${SS_SRC}/app/gui/edit/SelectShape.cpp
+        ${SS_SRC}/app/gui/edit/Selection.cpp
         ${SS_SRC}/app/FrameMask.cpp
         ${SS_SRC}/app/FrameLook.cpp)
     ss_configure_app(mask_doc_test)
