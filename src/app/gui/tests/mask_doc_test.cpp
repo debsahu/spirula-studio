@@ -8,6 +8,7 @@
 #include "app/gui/edit/Selection.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/MaskLayer.h"
+#include "app/gui/mask/MaskSession.h"
 #include "app/gui/mask/MaskWindow.h"
 #include "core/ImageOrient.h"
 #include "core/SourcePath.h"
@@ -22,6 +23,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -1153,6 +1155,132 @@ void test_derive_window() {
 }
 
 // ---------------------------------------------------------------------------
+// Task 11: the session end to end, without drawing
+// ---------------------------------------------------------------------------
+
+void settle(mk::MaskSession& s) {
+    for (int i = 0; i < 2000 && !s.idle(); i++)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    s.pump();
+}
+
+void test_session() {
+    Fixture f = make_dataset("session", 64, 48, {"cam0/a", "cam0/b", "cam1/c"});
+    const std::vector<uint8_t> original_a = file_bytes(f.masks / "cam0" / "a.png");
+    mk::MaskSession s;
+    std::string err;
+    // Refusals.
+    check(!s.open(f.images.string(), f.images.string(), f.masks.string(), err) &&
+              err == spirula::i18n::msg::maskedit::err_workspace_inside_images.get(),
+          "workspace inside images is refused with the message");
+    check(!s.open((f.images / "sub").string(), f.images.string(), f.masks.string(), err) &&
+              err == spirula::i18n::msg::maskedit::err_workspace_inside_images.get(),
+          "a workspace under the image root is refused");
+    const fs::path empty = scratch("session_empty");
+    check(!s.open(f.root.string(), empty.string(), f.masks.string(), err) &&
+              err.find(mk::normalize_dir(empty.string())) != std::string::npos,
+          "no frames is refused naming the folder");
+    check(!s.is_open(), "not open after refusals");
+
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), err), "open: " + err);
+    check(s.is_open() && s.frame_count() == 3, "three frames");
+    check(s.frames()[0].key == "cam0/a" && s.frames()[0].camera == "cam0" &&
+              s.frames()[2].key == "cam1/c" && s.frames()[2].camera == "cam1",
+          "frames keyed and grouped as the run keys them");
+    check(s.layer_root() == (f.root / mk::kLayerDirName).string(), "layer root under the workspace");
+    check(mk::MaskSession::paint_for(false, false) == mk::Paint::ForceDrop &&
+              mk::MaskSession::paint_for(true, false) == mk::Paint::ForceDrop &&
+              mk::MaskSession::paint_for(false, true) == mk::Paint::ForceKeep &&
+              mk::MaskSession::paint_for(true, true) == mk::Paint::Clear,
+          "paint_for is combine_now's table: plain/Shift drop, Ctrl keep, both clear");
+    settle(s);
+    check(s.doc() != nullptr && s.frame_index() == 0, "frame 0 loaded");
+    check(s.shown_width() == 64 && s.shown_height() == 48, "shown size (no EXIF turn)");
+    check(s.corrected_count() == 0 && s.error().empty(), "nothing corrected yet");
+
+    // A stroke in pane pixels under an identity mapping.
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    const mk::Rect changed = s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    check(!changed.empty() && changed.x0 <= 4 && changed.x1 >= 14, "commit returns the changed rect");
+    check(s.doc()->dirty() && s.doc()->drop()[(size_t)8 * 64 + 8] == 255, "painted and dirty");
+    // A 2x mapping: pane (8,8)-(28,28) is mask (4,4)-(14,14).
+    mk::Mapping m2;
+    m2.scale = 2.0f;
+    gui::ShapeStroke box2;
+    box2.kind = gui::ShapeKind::Box;
+    box2.pts = {80.0f, 8.0f, 100.0f, 28.0f};
+    s.commit_stroke(box2, mk::Paint::ForceKeep, m2);
+    check(s.doc()->keep()[(size_t)8 * 64 + 45] == 255 && s.doc()->keep()[(size_t)8 * 64 + 39] == 0,
+          "pane pixels mapped through the scale");
+    const mk::Rect un = s.undo();
+    check(!un.empty() && s.doc()->keep()[(size_t)8 * 64 + 45] == 0, "undo through the session");
+    check(!s.redo().empty() && s.doc()->keep()[(size_t)8 * 64 + 45] == 255, "redo through the session");
+
+    // Explicit save: the composite lands, the doc stays open and clean.
+    s.save();
+    settle(s);
+    check(!s.doc()->dirty() && s.error().empty(), "clean after save: " + s.error());
+    check(s.corrected_count() == 1, "one corrected frame");
+    check(file_bytes(f.masks / "cam0" / "a.png") != original_a, "masks/cam0/a.png rewritten");
+    check(file_bytes(f.layer / "cam0" / "a.base.png") == original_a, "base is the original");
+
+    // Paint, then switch frames: autosave, then the next frame loads.
+    s.commit_stroke(box, mk::Paint::Clear, m);
+    check(s.doc()->dirty(), "dirty again");
+    s.go_to(2);
+    settle(s);
+    check(s.frame_index() == 2 && s.doc() && s.doc()->key() == "cam1/c", "frame 2 open");
+    check(s.doc()->base_state() == mk::BaseState::Unedited, "frame 2 untouched");
+    mk::LayerIndex disk;
+    disk.load(s.layer_root(), err);
+    check(disk.frames.count("cam0/a") == 1, "frame 0 was saved on the way out");
+    // Back to 0: our own composite is Unchanged and the layers are there.
+    s.go_to(0);
+    settle(s);
+    check(s.doc()->base_state() == mk::BaseState::Unchanged, "reopened frame is Unchanged");
+    check(s.doc()->drop()[(size_t)8 * 64 + 8] == 0 && s.doc()->keep()[(size_t)8 * 64 + 45] == 255,
+          "layers as saved (clear applied, keep kept)");
+
+    // Someone regenerated the mask meanwhile: reopening re-bases it.
+    s.go_to(1);
+    settle(s);
+    write_png_gray(f.masks / "cam0" / "a.png", 64, 48, synth_mask(64, 48, 77));
+    const std::vector<uint8_t> regenerated = file_bytes(f.masks / "cam0" / "a.png");
+    s.go_to(0);
+    settle(s);
+    check(s.doc()->base_state() == mk::BaseState::Regenerated, "regenerated mask detected on open");
+    check(file_bytes(f.layer / "cam0" / "a.base.png") == regenerated, "re-based to the regenerated file");
+    check(s.doc()->base() == synth_mask(64, 48, 77), "doc base is the new mask");
+
+    // Revert the open frame: the mask is the base again, entry gone.
+    s.revert_open_frame();
+    settle(s);
+    check(file_bytes(f.masks / "cam0" / "a.png") == regenerated, "revert copies the base back");
+    check(s.corrected_count() == 0 && s.doc() && s.doc()->base_state() == mk::BaseState::Unedited,
+          "reverted and reloaded");
+
+    // Close with a dirty frame saves it.
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.close();
+    check(!s.is_open(), "closed");
+    disk.load(s.layer_root().empty() ? (f.root / mk::kLayerDirName).string() : s.layer_root(), err);
+    check(disk.frames.count("cam0/a") == 1, "close saved the dirty frame");
+    check(fs::exists(f.layer / "cam0" / "a.drop.png"), "layer file written by close");
+
+    // revert_every_frame.
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), err), "reopen");
+    settle(s);
+    s.revert_every_frame();
+    settle(s);
+    check(s.corrected_count() == 0 && !fs::exists(f.layer / "cam0" / "a.drop.png"), "everything reverted");
+    s.close();
+}
+
+// ---------------------------------------------------------------------------
 // Task 9: floors at 8K. SS_MASK_BENCH=<dir> writes the fixture there and
 // prints medians of three repeats; nothing here fails on a number.
 // ---------------------------------------------------------------------------
@@ -1284,6 +1412,7 @@ int main() {
     test_orientation_mapping();
     test_view_math();
     test_derive_window();
+    test_session();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;

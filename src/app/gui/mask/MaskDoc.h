@@ -101,7 +101,12 @@ public:
 
     bool dirty() const { return _revision != _saved; }
     uint64_t revision() const { return _revision; }
-    void mark_saved(uint64_t revision) { _saved = revision; }
+    // `composite_written` is what makes a Missing frame's later saves keep
+    // writing layers only, and a written one report Unchanged.
+    void mark_saved(uint64_t revision, bool composite_written) {
+        _saved = revision;
+        if (composite_written && _state != BaseState::Missing) _state = BaseState::Unchanged;
+    }
     bool save(const std::string& layer_root, const std::string& mask_root,
               LayerIndex& idx, std::string& error);
 
