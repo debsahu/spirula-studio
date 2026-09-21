@@ -56,6 +56,9 @@ struct MaskOp {
     virtual const spirula::i18n::Msg& label() const = 0;
     virtual size_t bytes() const = 0;
     virtual Rect touched() const = 0;
+    // False after the first apply() means it wrote nothing: run() then
+    // records no history entry and leaves the document clean.
+    virtual bool changed() const { return true; }
 };
 
 inline constexpr size_t kMaxHistoryBytes = 256u << 20;
@@ -102,6 +105,9 @@ public:
     // For ops. `drop_r` / `keep_r` are r.w()*r.h(), row-major.
     void read_rect(const Rect& r, std::vector<uint8_t>& drop_r,
                    std::vector<uint8_t>& keep_r) const;
+    // Copies verbatim -- no exclusivity check. Safe because its only caller,
+    // StrokeOp, only ever replays bytes a read_rect once captured from a
+    // valid document, never a caller-synthesized pair.
     void write_rect(const Rect& r, const uint8_t* drop_r, const uint8_t* keep_r);
     void paint_rect(Paint mode, const Stencil& st, const Rect& r);
 

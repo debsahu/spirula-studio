@@ -417,7 +417,6 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/mask/MaskLayer.cpp
         ${SS_SRC}/app/gui/mask/MaskDoc.cpp
         ${SS_SRC}/app/gui/edit/EditDoc.cpp
-        ${SS_SRC}/app/gui/edit/ElementGrid.cpp
         ${SS_SRC}/app/gui/edit/SelectShape.cpp
         ${SS_SRC}/app/gui/edit/Selection.cpp
         ${SS_SRC}/app/FrameMask.cpp

@@ -8,6 +8,7 @@
 #include "app/gui/mask/MaskLayer.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
+#include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
 #include <chrono>
@@ -744,6 +745,113 @@ void test_doc_without_mask() {
     check(!fs::exists(f.masks / "a.png") && fs::exists(f.layer / "a.drop.png"), "layers only");
 }
 
+// ---------------------------------------------------------------------------
+// Carried from the Task 5 review: read_rect/write_rect had no coverage, and
+// a paint that flips no bytes must not dirty the document.
+// ---------------------------------------------------------------------------
+
+void test_read_write_rect_roundtrip() {
+    Fixture f = make_dataset("rw_rect", 64, 48, {"a"});
+    mk::LayerIndex idx;
+    idx.mask_root = f.masks.string();
+    std::string err, warn;
+    mk::MaskDoc d;
+    check(d.load(f.layer.string(), f.masks.string(), "a", 64, 48, idx, err, warn), "load");
+    d.paint(mk::Paint::ForceDrop, box_stencil(64, 48, 5, 5, 20, 20), mk::Rect{0, 0, 64, 48});
+    d.paint(mk::Paint::ForceKeep, box_stencil(64, 48, 15, 15, 40, 40), mk::Rect{0, 0, 64, 48});
+
+    const mk::Rect r{3, 3, 45, 45};
+    std::vector<uint8_t> drop_r, keep_r;
+    d.read_rect(r, drop_r, keep_r);
+    check(drop_r != keep_r, "fixture: the two layers differ inside the rect");
+
+    d.write_rect(r, drop_r.data(), keep_r.data());
+    std::vector<uint8_t> drop_r2, keep_r2;
+    d.read_rect(r, drop_r2, keep_r2);
+    check(drop_r2 == drop_r && keep_r2 == keep_r, "read_rect/write_rect round trip is byte-exact");
+}
+
+void test_noop_paint_does_not_dirty() {
+    Fixture f = make_dataset("noop_paint", 64, 48, {"a"});
+    mk::LayerIndex idx;
+    idx.mask_root = f.masks.string();
+    std::string err, warn;
+    mk::MaskDoc d;
+    check(d.load(f.layer.string(), f.masks.string(), "a", 64, 48, idx, err, warn), "load");
+    const uint64_t rev0 = d.revision();
+    const mk::Rect last0 = d.last_change();
+
+    // Fully off-canvas: box_stencil clips to an empty run, so every pixel is 0.
+    d.paint(mk::Paint::ForceDrop, box_stencil(64, 48, 100, 100, 120, 120), mk::Rect{0, 0, 64, 48});
+    check(d.revision() == rev0, "a paint that flips no bytes leaves the revision unchanged");
+    check(!d.dirty(), "and leaves the doc clean");
+    check(!d.can_undo() && d.history_size() == 0, "and pushes no undo entry");
+    check(d.last_change().x0 == last0.x0 && d.last_change().x1 == last0.x1 &&
+          d.last_change().y0 == last0.y0 && d.last_change().y1 == last0.y1,
+          "and reports no change rectangle");
+}
+
+// ---------------------------------------------------------------------------
+// Task 6: undo restores exactly; caps
+// ---------------------------------------------------------------------------
+
+void test_undo_redo() {
+    Fixture f = make_dataset("undo", 64, 48, {"a"});
+    mk::LayerIndex idx;
+    idx.mask_root = f.masks.string();
+    std::string err, warn;
+    mk::MaskDoc d;
+    check(d.load(f.layer.string(), f.masks.string(), "a", 64, 48, idx, err, warn), "load");
+    const std::vector<uint8_t> drop0 = d.drop(), keep0 = d.keep(), comp0 = d.composite();
+    check(!d.can_undo() && !d.can_redo() && d.history_size() == 0, "empty history");
+
+    // 96 strokes, alternating modes, each different.
+    for (int k = 0; k < 96; k++) {
+        const int x = (k * 7) % 56, y = (k * 5) % 40;
+        const mk::Paint mode = k % 3 == 0 ? mk::Paint::ForceDrop
+                             : k % 3 == 1 ? mk::Paint::ForceKeep : mk::Paint::Clear;
+        d.paint(mode, box_stencil(64, 48, x, y, x + 8, y + 8), mk::Rect{0, 0, 64, 48});
+        check(exclusive(d), "invariant after stroke " + std::to_string(k));
+    }
+    check(d.history_size() == 96 && d.can_undo() && !d.can_redo(), "96 ops held");
+    check(d.history_bytes() <= mk::kMaxHistoryBytes, "history bytes under the cap");
+    check(d.last_label() == &spirula::i18n::msg::maskedit::op_clear, "last label is the 96th op's");
+    // The 95th op (k=94, 94%3==1) is ForceKeep -- separates a ForceDrop/
+    // ForceKeep label swap from the all-Clear tail this loop ends on.
+    d.undo();
+    check(d.last_label() == &spirula::i18n::msg::maskedit::op_keep, "label after undo is the 95th op's");
+    d.redo();
+    const std::vector<uint8_t> dropN = d.drop(), keepN = d.keep(), compN = d.composite();
+    check(dropN != drop0 || keepN != keep0, "fixture: the strokes changed something");
+
+    for (int k = 0; k < 96; k++) d.undo();
+    check(!d.can_undo() && d.can_redo(), "at the start of history");
+    check(d.drop() == drop0 && d.keep() == keep0, "96 undos restore both layers byte-exact");
+    check(d.composite() == comp0 && composite_consistent(d), "composite and count restored");
+
+    for (int k = 0; k < 96; k++) d.redo();
+    check(d.drop() == dropN && d.keep() == keepN && d.composite() == compN, "96 redos replay exactly");
+    check(composite_consistent(d), "count after redo");
+
+    // Undo, then a new stroke truncates the redo branch.
+    d.undo();
+    d.undo();
+    d.paint(mk::Paint::ForceDrop, box_stencil(64, 48, 1, 1, 3, 3), mk::Rect{0, 0, 64, 48});
+    check(!d.can_redo() && d.history_size() == 95, "redo branch truncated");
+
+    // The 97th op evicts the oldest: still 96, and undo bottoms out early.
+    // Alternating mode keeps both strokes real changes -- a repeated identical
+    // stroke is a no-op under the Task 6 fix below and would push only one.
+    d.redo();
+    for (int k = 0; k < 2; k++)
+        d.paint(k == 0 ? mk::Paint::ForceKeep : mk::Paint::ForceDrop,
+                box_stencil(64, 48, 2, 2, 4, 4), mk::Rect{0, 0, 64, 48});
+    check(d.history_size() == mk::kMaxHistoryOps, "op cap holds at 96");
+    // last_change reports the undone rectangle.
+    d.undo();
+    check(d.last_change().x0 <= 2 && d.last_change().x1 >= 4, "last_change after undo");
+}
+
 }  // namespace
 
 int main() {
@@ -762,6 +870,9 @@ int main() {
     test_revert_all_continues_past_failure();
     test_doc_load_and_paint();
     test_doc_without_mask();
+    test_read_write_rect_roundtrip();
+    test_noop_paint_does_not_dirty();
+    test_undo_redo();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }

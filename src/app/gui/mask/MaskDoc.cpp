@@ -4,12 +4,14 @@
 
 #include "app/FrameMask.h"
 #include "app/gui/edit/Selection.h"
+#include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 
 namespace fs = std::filesystem;
+namespace msg = spirula::i18n::msg::maskedit;
 
 namespace gui {
 namespace mask {
@@ -162,18 +164,106 @@ void MaskDoc::write_rect(const Rect& r, const uint8_t* drop_r, const uint8_t* ke
     recomposite(r);
 }
 
-// ---- Task 6 replaces this block with the StrokeOp history ----
+namespace {
+
+// One stroke: the RLE of each layer's rectangle before and after. The first
+// apply is the paint itself; a redo patches the after-state back in.
+class StrokeOp : public MaskOp {
+public:
+    StrokeOp(Paint mode, Stencil st, const Rect& r)
+        : _mode(mode), _st(std::move(st)), _r(r) {}
+
+    void apply(MaskDoc& doc) override {
+        if (!_applied) {
+            std::vector<uint8_t> d, k;
+            doc.read_rect(_r, d, k);
+            _before_drop = rle_encode(d);
+            _before_keep = rle_encode(k);
+            doc.paint_rect(_mode, _st, _r);
+            doc.read_rect(_r, d, k);
+            _after_drop = rle_encode(d);
+            _after_keep = rle_encode(k);
+            _changed = _before_drop != _after_drop || _before_keep != _after_keep;
+            std::vector<uint8_t>().swap(_st.in);
+            _applied = true;
+            return;
+        }
+        patch(doc, _after_drop, _after_keep);
+    }
+    void undo(MaskDoc& doc) override { patch(doc, _before_drop, _before_keep); }
+    const spirula::i18n::Msg& label() const override {
+        return _mode == Paint::ForceDrop ? msg::op_drop
+             : _mode == Paint::ForceKeep ? msg::op_keep : msg::op_clear;
+    }
+    size_t bytes() const override {
+        return _before_drop.size() + _before_keep.size() + _after_drop.size() +
+               _after_keep.size() + _st.in.size();
+    }
+    Rect touched() const override { return _r; }
+    bool changed() const override { return _changed; }
+
+private:
+    void patch(MaskDoc& doc, const std::vector<uint8_t>& d, const std::vector<uint8_t>& k) {
+        const size_t n = (size_t)_r.w() * (size_t)_r.h();
+        std::vector<uint8_t> dd(n, 0), kk(n, 0);
+        rle_decode(d, dd);
+        rle_decode(k, kk);
+        doc.write_rect(_r, dd.data(), kk.data());
+    }
+
+    Paint _mode;
+    Stencil _st;
+    Rect _r;
+    bool _applied = false;
+    bool _changed = true;
+    std::vector<uint8_t> _before_drop, _before_keep, _after_drop, _after_keep;
+};
+
+}  // namespace
+
 void MaskDoc::paint(Paint mode, Stencil st, const Rect& bounds) {
     const Rect r = clip(bounds, _w, _h);
     if (r.empty() || st.W != _w || st.H != _h) return;
-    paint_rect(mode, st, r);
-    _last = r;
+    run(std::make_unique<StrokeOp>(mode, std::move(st), r));
+}
+
+void MaskDoc::run(std::unique_ptr<MaskOp> op) {
+    op->apply(*this);
+    if (!op->changed()) return;
+    _ops.resize((size_t)_head);
+    _bytes = 0;
+    for (auto& o : _ops) _bytes += o->bytes();
+    _bytes += op->bytes();
+    _last = op->touched();
+    _ops.push_back(std::move(op));
+    _head = (int)_ops.size();
+    while ((int)_ops.size() > kMaxHistoryOps ||
+           (_bytes > kMaxHistoryBytes && _ops.size() > 1)) {
+        _bytes -= _ops.front()->bytes();
+        _ops.erase(_ops.begin());
+        _head--;
+    }
     _revision++;
 }
-void MaskDoc::run(std::unique_ptr<MaskOp>) {}
-void MaskDoc::undo() {}
-void MaskDoc::redo() {}
-const spirula::i18n::Msg* MaskDoc::last_label() const { return nullptr; }
+
+void MaskDoc::undo() {
+    if (!can_undo()) return;
+    _ops[(size_t)--_head]->undo(*this);
+    _last = _ops[(size_t)_head]->touched();
+    _revision++;
+}
+
+void MaskDoc::redo() {
+    if (!can_redo()) return;
+    _ops[(size_t)_head]->apply(*this);
+    _last = _ops[(size_t)_head]->touched();
+    _head++;
+    _revision++;
+}
+
+const spirula::i18n::Msg* MaskDoc::last_label() const {
+    return _head > 0 ? &_ops[(size_t)_head - 1]->label() : nullptr;
+}
 
 bool MaskDoc::save(const std::string& layer_root, const std::string& mask_root,
                    LayerIndex& idx, std::string& error) {
