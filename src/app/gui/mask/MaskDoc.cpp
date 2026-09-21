@@ -2,6 +2,7 @@
 
 #include "app/gui/mask/MaskDoc.h"
 
+#include "app/FrameLook.h"
 #include "app/FrameMask.h"
 #include "app/gui/edit/Selection.h"
 #include "i18n/catalog/MaskEdit.h"
@@ -32,24 +33,62 @@ Rect join(const Rect& a, const Rect& b) {
             std::max(a.x1, b.x1), std::max(a.y1, b.y1)};
 }
 
-// ---- Task 7 replaces these four with the real mapping ----
-void to_stored(const sfm::ExifTransform&, int, int, float dx, float dy, float& sx, float& sy) {
-    sx = dx;
-    sy = dy;
+void to_stored(const sfm::ExifTransform& t, int W, int H, float dx, float dy,
+               float& sx, float& sy) {
+    int dw = W, dh = H;
+    spirula::oriented_size(t.turns_cw, dw, dh);
+    const float mx = t.mirror ? (float)dw - dx : dx;
+    switch (t.turns_cw & 3) {
+        case 1:  sx = dy;            sy = (float)H - mx; break;
+        case 2:  sx = (float)W - mx; sy = (float)H - dy; break;
+        case 3:  sx = (float)W - dy; sy = mx;            break;
+        default: sx = mx;            sy = dy;            break;
+    }
 }
-void to_stored(const sfm::ExifTransform&, int, int, int dx, int dy, int& sx, int& sy) {
-    sx = dx;
-    sy = dy;
+
+void to_stored(const sfm::ExifTransform& t, int W, int H, int dx, int dy,
+               int& sx, int& sy) {
+    int dw = W, dh = H;
+    spirula::oriented_size(t.turns_cw, dw, dh);
+    const int mx = t.mirror ? dw - 1 - dx : dx;
+    switch (t.turns_cw & 3) {
+        case 1:  sx = dy;         sy = H - 1 - mx; break;
+        case 2:  sx = W - 1 - mx; sy = H - 1 - dy; break;
+        case 3:  sx = W - 1 - dy; sy = mx;         break;
+        default: sx = mx;         sy = dy;         break;
+    }
 }
-void to_displayed(const sfm::ExifTransform&, int, int, int sx, int sy, int& dx, int& dy) {
-    dx = sx;
-    dy = sy;
+
+// The inverse turn's "stored" image is our displayed one, so the same
+// function under app::inverse_turn goes the other way.
+void to_displayed(const sfm::ExifTransform& t, int W, int H, int sx, int sy,
+                  int& dx, int& dy) {
+    int dw = W, dh = H;
+    spirula::oriented_size(t.turns_cw, dw, dh);
+    to_stored(app::inverse_turn(t), dw, dh, sx, sy, dx, dy);
 }
-ShapeStroke stroke_to_stored(const ShapeStroke& s, const sfm::ExifTransform&, int, int) {
-    return s;
+
+ShapeStroke stroke_to_stored(const ShapeStroke& s, const sfm::ExifTransform& t,
+                             int W, int H) {
+    ShapeStroke out = s;
+    for (size_t i = 0; i + 1 < s.pts.size(); i += 2)
+        to_stored(t, W, H, s.pts[i], s.pts[i + 1], out.pts[i], out.pts[i + 1]);
+    return out;
 }
-Rect rect_to_displayed(const Rect& stored, const sfm::ExifTransform&, int, int) {
-    return stored;
+
+Rect rect_to_displayed(const Rect& stored, const sfm::ExifTransform& t, int W, int H) {
+    if (stored.empty()) return {};
+    const int cx[2] = {stored.x0, stored.x1 - 1}, cy[2] = {stored.y0, stored.y1 - 1};
+    Rect out;
+    bool first = true;
+    for (int i = 0; i < 2; i++)
+        for (int j = 0; j < 2; j++) {
+            int dx, dy;
+            to_displayed(t, W, H, cx[i], cy[j], dx, dy);
+            if (first) { out = {dx, dy, dx + 1, dy + 1}; first = false; }
+            else out = join(out, Rect{dx, dy, dx + 1, dy + 1});
+        }
+    return out;
 }
 
 Rect stroke_bounds(const ShapeStroke& s, int W, int H) {

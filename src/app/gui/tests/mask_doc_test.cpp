@@ -3,10 +3,12 @@
 // whose every pixel is known. SS_MASK_BENCH=<dir> also runs the timing
 // floors at 7680x3840 and writes that fixture dataset into <dir>.
 
+#include "app/FrameLook.h"
 #include "app/FrameMask.h"
 #include "app/gui/edit/Selection.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/MaskLayer.h"
+#include "core/ImageOrient.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
 #include "i18n/catalog/MaskEdit.h"
@@ -906,6 +908,81 @@ void test_byte_cap_eviction() {
     check(exclusive(d) && composite_consistent(d), "invariant holds across the eviction boundary");
 }
 
+// ---------------------------------------------------------------------------
+// Task 7: orientation mapping vs orient_pixels
+// ---------------------------------------------------------------------------
+
+void test_orientation_mapping() {
+    const int W = 64, H = 48;   // stored
+    for (int o = 1; o <= 8; o++) {
+        const sfm::ExifTransform t = sfm::exifTransform(o);
+        int dw = W, dh = H;
+        spirula::oriented_size(t.turns_cw, dw, dh);
+        // Three probe pixels; orient_pixels says where each lands.
+        const int probes[3][2] = {{0, 0}, {W - 1, H - 1}, {10, 42}};
+        for (const auto& p : probes) {
+            std::vector<uint8_t> stored((size_t)W * H, 0), shown((size_t)dw * dh, 0);
+            stored[(size_t)p[1] * W + p[0]] = 255;
+            spirula::orient_pixels(stored.data(), W, H, 1, t.turns_cw, t.mirror, shown.data());
+            int found_x = -1, found_y = -1;
+            for (int y = 0; y < dh; y++)
+                for (int x = 0; x < dw; x++)
+                    if (shown[(size_t)y * dw + x]) { found_x = x; found_y = y; }
+            int sx, sy;
+            mk::to_stored(t, W, H, found_x, found_y, sx, sy);
+            check(sx == p[0] && sy == p[1],
+                  "to_stored inverts orient_pixels, orientation " + std::to_string(o) +
+                      " probe " + std::to_string(p[0]) + "," + std::to_string(p[1]));
+            int dx, dy;
+            mk::to_displayed(t, W, H, sx, sy, dx, dy);
+            check(dx == found_x && dy == found_y, "to_displayed agrees, orientation " + std::to_string(o));
+            // The continuous form at the pixel centre lands in the same pixel.
+            float fx, fy;
+            mk::to_stored(t, W, H, found_x + 0.5f, found_y + 0.5f, fx, fy);
+            check((int)std::floor(fx) == p[0] && (int)std::floor(fy) == p[1],
+                  "continuous form at the centre, orientation " + std::to_string(o));
+        }
+        // A one-point brush paints that stored pixel plus its 4 edge
+        // neighbours only: rasterize_shape clamps radius to 1.0 and
+        // stamps `<= r*r` (SelectShape.cpp:20-33,:133-135) -- a plus disc.
+        {
+            const int dx = 5, dy = 10;
+            gui::ShapeStroke s;
+            s.kind = gui::ShapeKind::Brush;
+            s.brush_radius = 0.4f;
+            s.pts = {dx + 0.5f, dy + 0.5f};
+            const gui::ShapeStroke st = mk::stroke_to_stored(s, t, W, H);
+            gui::Stencil sten;
+            gui::rasterize_shape(st, W, H, sten);
+            int sx, sy;
+            mk::to_stored(t, W, H, dx, dy, sx, sy);
+            size_t count = 0, near = 0;
+            for (int y = 0; y < H; y++)
+                for (int x = 0; x < W; x++)
+                    if (sten.at(x, y)) {
+                        count++;
+                        near += std::abs(x - sx) + std::abs(y - sy) <= 1;
+                    }
+            check(count == 5 && near == 5 && sten.at(sx, sy),
+                  "brush point lands on the mapped stored pixel (plus its 4 neighbours), orientation " +
+                      std::to_string(o));
+            const mk::Rect b = mk::stroke_bounds(st, W, H);
+            check(b.x0 <= sx && sx < b.x1 && b.y0 <= sy && sy < b.y1, "bounds contain it");
+            const mk::Rect back = mk::rect_to_displayed(mk::Rect{sx, sy, sx + 1, sy + 1}, t, W, H);
+            check(back.x0 == dx && back.y0 == dy && back.x1 == dx + 1 && back.y1 == dy + 1,
+                  "rect_to_displayed maps a one-pixel rect back, orientation " + std::to_string(o));
+        }
+    }
+    // Orientation 6 (one turn clockwise), the phone-portrait case, by hand:
+    // displayed (5, 10) is stored (10, H-1-5) = (10, 42).
+    int sx, sy;
+    mk::to_stored(sfm::exifTransform(6), W, H, 5, 10, sx, sy);
+    check(sx == 10 && sy == 42, "orientation 6 by hand");
+    // A multi-pixel rect maps to a rect of the same area.
+    const mk::Rect r = mk::rect_to_displayed(mk::Rect{2, 3, 12, 8}, sfm::exifTransform(6), W, H);
+    check(r.w() * r.h() == 50 && r.w() == 5 && r.h() == 10, "rect area and turn preserved");
+}
+
 }  // namespace
 
 int main() {
@@ -928,6 +1005,7 @@ int main() {
     test_noop_paint_does_not_dirty();
     test_undo_redo();
     test_byte_cap_eviction();
+    test_orientation_mapping();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
