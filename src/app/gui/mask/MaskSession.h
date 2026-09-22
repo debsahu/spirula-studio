@@ -10,6 +10,8 @@
 #include "app/gui/edit/EditTool.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/MaskWindow.h"
+#include "app/gui/mask/Livewire.h"
+#include "app/gui/mask/PathTool.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -29,6 +31,11 @@ struct FrameRef {
     std::string key;       // frame_key under the image root
     std::string camera;    // the camera folder, "" for the image root
 };
+
+// The continuous inverse of to_stored (MaskDoc.h): a stored point to the
+// displayed frame. Plan 1 has the pixel form only.
+void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
+                  float& dx, float& dy);
 
 class MaskSession {
 public:
@@ -108,6 +115,9 @@ private:
     void handle_keys(const Mapping& m);
     void ensure_window(const Mapping& m, float pane_w, float pane_h);
     void upload_rect(const Rect& shown);
+    // The pen tool (MaskPanel.cpp drives it; these two have no ImGui).
+    void ensure_livewire();
+    PathSpace path_space(const Mapping& m) const;
 
     bool _open = false;
     // Set once in open() before the worker starts, read by both threads
@@ -131,6 +141,14 @@ private:
     float _brush = 24.0f;            // mask pixels
     bool _panning = false;
     double _last_commit_ms = 0.0;
+    // Which button started the stroke in progress: right paints ForceKeep,
+    // left ForceDrop, until that stroke ends.
+    bool _stroke_right = false;
+
+    PathTool _path;
+    std::unique_ptr<Livewire> _livewire;   // the open frame's edge map, built on first use
+    bool _path_mode = false;
+    double _livewire_ms = 0.0;
 
     // MaskPanel.cpp's texture and window.
     GLuint _tex = 0;

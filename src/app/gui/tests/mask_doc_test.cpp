@@ -1886,6 +1886,36 @@ void test_path_tool_space() {
           "closed polygon starts at the fed first anchor");
 }
 
+// ---------------------------------------------------------------------------
+// Plan 2, Task 10: stored -> displayed, continuous, is the inverse of plan
+// 1's to_stored for all eight EXIF orientations
+// ---------------------------------------------------------------------------
+
+void test_to_displayed_float() {
+    const int W = 40, H = 24;
+    const float pts[][2] = {{0.5f, 0.5f}, {39.5f, 23.5f}, {12.25f, 3.75f}, {0.0f, 23.0f}, {40.0f, 0.0f}};
+    for (int o = 1; o <= 8; o++) {
+        const sfm::ExifTransform t = sfm::exifTransform(o);
+        int dw = W, dh = H;
+        spirula::oriented_size(t.turns_cw, dw, dh);
+        for (const float* p : pts) {
+            float dx, dy, sx, sy;
+            mk::to_displayed(t, W, H, p[0], p[1], dx, dy);
+            check(dx >= -1e-4f && dx <= (float)dw + 1e-4f && dy >= -1e-4f && dy <= (float)dh + 1e-4f,
+                  "to_displayed lands inside the displayed size, orientation " + std::to_string(o));
+            mk::to_stored(t, W, H, dx, dy, sx, sy);
+            check(std::fabs(sx - p[0]) < 1e-4f && std::fabs(sy - p[1]) < 1e-4f,
+                  "to_stored(to_displayed(p)) == p, orientation " + std::to_string(o));
+        }
+    }
+    // Orientation 6 by hand, the phone-portrait case: stored (10, H - 5) is
+    // displayed (5, 10) in plan 1's pixel form, so the continuous form at
+    // (10.5, 18.5) is (5.5, 10.5).
+    float dx, dy;
+    mk::to_displayed(sfm::exifTransform(6), W, H, 10.5f, 18.5f, dx, dy);
+    check(std::fabs(dx - 5.5f) < 1e-4f && std::fabs(dy - 10.5f) < 1e-4f, "orientation 6 by hand");
+}
+
 // Anchor on the vertical arm, target on the horizontal: the straight line
 // between them is off both edges, so this is the case criterion #7 needs
 // -- the true minimum curves around the corner.
@@ -2187,6 +2217,7 @@ int main() {
     test_path_tool_basic();
     test_path_tool_livewire();
     test_path_tool_space();
+    test_to_displayed_float();
     test_livewire_corner_path();
     test_livewire_sign_alignment();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);

@@ -7,6 +7,8 @@
 #include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -235,6 +237,9 @@ void MaskSession::pump() {
     spirula::oriented_size(_turn.turns_cw, _dw, _dh);
     _view = View{1.0f, 0.5f * (float)_dw, 0.5f * (float)_dh};
     _tool_reset = true;
+    _livewire.reset();
+    _path.set_livewire(nullptr);
+    _path.cancel();
     _win_dirty = true;
     if (!l.warning.empty()) {
         // One sentence per mismatched file, each with its own size: a joined
@@ -395,6 +400,61 @@ WindowSource MaskSession::window_source() const {
     s.W = _doc->width();
     s.H = _doc->height();
     s.turn = _turn;
+    return s;
+}
+
+// Derived by inverting to_stored's switch, not through inverse_turn: the
+// mirror is applied before the turn in one and after it in the other.
+void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
+                  float& dx, float& dy) {
+    int dw = W, dh = H;
+    spirula::oriented_size(t.turns_cw, dw, dh);
+    float mx;
+    switch (t.turns_cw & 3) {
+        case 1:  dy = sx;            mx = (float)H - sy; break;
+        case 2:  mx = (float)W - sx; dy = (float)H - sy; break;
+        case 3:  dy = (float)W - sx; mx = sy;            break;
+        default: mx = sx;            dy = sy;            break;
+    }
+    dx = t.mirror ? (float)dw - mx : mx;
+}
+
+void MaskSession::ensure_livewire() {
+    if (_livewire || !_doc || _rgb.empty()) return;
+    const auto t0 = std::chrono::steady_clock::now();
+    auto lw = std::make_unique<Livewire>();
+    lw->build(_rgb.data(), _fw, _fh);
+    _livewire_ms = std::chrono::duration<double, std::milli>(
+                       std::chrono::steady_clock::now() - t0).count();
+    _livewire = std::move(lw);
+    _path.set_livewire(_livewire.get());
+    char ms[32];
+    std::snprintf(ms, sizeof ms, "%.0f", _livewire_ms);
+    post_status(spirula::i18n::format(msg::path_edge_map,
+                                      {_livewire->width(), _livewire->height(),
+                                       _livewire->step(), std::string(ms)}),
+                false);
+}
+
+// Pane px -> displayed mask px (the mapping) -> stored mask px (the EXIF
+// turn) -> stored frame px (the mask-to-frame scale), and back.
+PathSpace MaskSession::path_space(const Mapping& m) const {
+    PathSpace s;
+    const int W = _doc ? _doc->width() : 1, H = _doc ? _doc->height() : 1;
+    const float kx = (float)_fw / (float)std::max(1, W), ky = (float)_fh / (float)std::max(1, H);
+    const sfm::ExifTransform turn = _turn;
+    s.to_frame = [m, turn, W, H, kx, ky](float x, float y, float& fx, float& fy) {
+        float sx, sy;
+        to_stored(turn, W, H, m.to_mask_x(x), m.to_mask_y(y), sx, sy);
+        fx = sx * kx;
+        fy = sy * ky;
+    };
+    s.from_frame = [m, turn, W, H, kx, ky](float fx, float fy, float& x, float& y) {
+        float dx, dy;
+        to_displayed(turn, W, H, fx / kx, fy / ky, dx, dy);
+        x = m.to_screen_x(dx);
+        y = m.to_screen_y(dy);
+    };
     return s;
 }
 

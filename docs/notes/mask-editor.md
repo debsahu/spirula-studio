@@ -671,6 +671,59 @@ drops an anchor, a click on the first anchor, Enter or a right click closes,
 Ctrl+Z takes an anchor back, Esc cancels. Two polygon tools in one panel
 with opposite right-click meanings was judged worse than the departure.
 
+### Task 10 manual check, in the app (2026-09-22)
+
+Driven through `guictl.py` against `/tmp/spirula_mask_bench` (`SS_GUI_AUTOMATION=1
+SS_GUI_OFFSCREEN=1`), restored to pristine afterward (`masks/f0000.png` MD5
+`4c8f42a2...` before and after; `mask_edits/` removed). The five observations
+the brief asked for:
+
+1. **Status strip built the edge map once.** Clicking **Path** showed the hint
+   text (`hint_path`) and "Path anchors: 0"; the "Edge map: ..." line was not
+   caught in a screenshot (it is replaced by the hint text once the build
+   finishes, and the 7680x3840 bench frame builds fast), so N was not read off
+   the strip this run -- inferred fast, not measured, unlike Task 9's bench.
+2. **A left-click path snapped to the edge, closed, and painted drop (red).**
+   Three anchors placed along the boundary the blue channel's diagonal stripes
+   make; the committed polyline visibly followed the boundary between anchors
+   rather than cutting a straight line across it (screenshot: the polyline
+   traces a staircase along the stripe edge, not the anchors' straight-line
+   triangle). Closing on the first anchor painted the interior red-tinted and
+   moved Kept 50.1% -> 44.9%.
+3. **Save/undo round-trip is byte-exact, once the async save is waited out.**
+   `cmp mask_edits/f0000.base.png masks/f0000.png` after a committed path +
+   Save differed; after Ctrl+Z + Save it matched again -- confirmed by `cmp`
+   returning 0 AND by independently decoding both PNGs' IDAT streams
+   (byte-identical, 29,495,040 bytes, same per-row filter sequence). One
+   caveat found the hard way: `cmp` run immediately after clicking Save can
+   read the file mid-write (the save is async) and report the WRONG answer in
+   either direction -- this run caught exactly that (an early `cmp` on the
+   dirty state reported "identical" when it should not have, because the
+   write had not started; the correct result appeared once enough time had
+   passed). A test harness that does not wait for the save queue to drain
+   will get a coin-flip here, not a false pass specifically.
+4. **A right-click path closes on a right click near the first anchor and
+   paints keep (green/lighter).** Three anchors and the close all placed with
+   the right button; the region tinted lighter, not red, and Kept rose
+   (50.1% -> 50.2%) rather than fell -- confirms `_stroke_right`'s button
+   grammar (the first button held decides ForceDrop/ForceKeep for the whole
+   stroke, Task 10 Step 7) end to end, not just in `PathTool`'s own tests.
+5. **Esc mid-path cancels cleanly; zoom mid-path keeps the polyline on the
+   traced feature.** Two anchors placed, Esc: overlay gone, Kept and "Last
+   stroke" unchanged, nothing added to the undo stack. Separately, two
+   anchors placed, then a 7x wheel-zoom centered mid-canvas: the committed
+   polyline was still exactly on the stripe-boundary feature it had traced
+   before the zoom (screenshot), confirming `path_space`'s frame-pixel
+   storage survives a view change mid-path (Decision 4).
+
+**One thing this check surfaced that the brief did not ask about**:
+`hint_buttons` (the always-shown line above `hint_path`) still reads "Ctrl+drag:
+force keep... Right click closes a polygon" -- the grammar Task 10 replaced.
+It is now wrong for every tool, not just Path: right-drag is force-keep, Ctrl
+is no longer read for paint mode at all. Left unedited (out of Task 10's file
+list, and a 13-language catalog string is not a one-line fix to make under
+time pressure); flagged for the operator/reviewer rather than changed here.
+
 ## Not in this phase
 
 Propagate, find-missing, slideshow, view modes and the peek key, session

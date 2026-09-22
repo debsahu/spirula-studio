@@ -552,6 +552,112 @@ SS_MSG(log_recomposite_failed,
     RU("Не удалось заново применить исправления масок: {0}"),
     TR("Maske düzeltmeleri yeniden uygulanamadı: {0}"));
 
+// ===========================================================================
+// The pen tool (plan 2)
+// ===========================================================================
+
+SS_MSG(tool_path,
+    EN("Path"),       JA("パス"),       ZH_HANS("路径"),  ZH_HANT("路徑"),
+    KO("패스"),        DE("Pfad"),       FR("Chemin"),
+    ES("Trazado"),    PT("Traçado"),    IT("Tracciato"),
+    NL("Pad"),        RU("Контур"),     TR("Yol"));
+
+SS_MSG(hint_path,
+    EN("Click along an edge to drop anchors; the path snaps to the edge. Click the first "
+       "anchor, Enter or right-click closes it and paints its inside. Ctrl+Z takes an anchor "
+       "back; Esc cancels."),
+    JA("輪郭に沿ってクリックして点を置くと、パスが輪郭に沿います。最初の点をクリックするか "
+       "Enter か右クリックで閉じ、内側を塗ります。Ctrl+Z で点を戻し、Esc で中止します。"),
+    ZH_HANS("沿边缘点击放下锚点，路径会贴合边缘。点击第一个锚点、按 Enter 或右键闭合并涂抹其"
+            "内部。Ctrl+Z 撤回一个锚点，Esc 取消。"),
+    ZH_HANT("沿邊緣點擊放下錨點，路徑會貼合邊緣。點擊第一個錨點、按 Enter 或右鍵閉合並塗抹其"
+            "內部。Ctrl+Z 收回一個錨點，Esc 取消。"),
+    KO("윤곽을 따라 클릭해 앵커를 놓으면 경로가 윤곽에 붙습니다. 첫 앵커 클릭, Enter 또는 "
+       "오른쪽 클릭으로 닫고 안쪽을 칠합니다. Ctrl+Z는 앵커를 되돌리고 Esc는 취소합니다."),
+    DE("Entlang einer Kante klicken, um Anker zu setzen; der Pfad legt sich an die Kante. "
+       "Erster Anker, Eingabe oder Rechtsklick schließt ihn und malt sein Inneres. Strg+Z "
+       "nimmt einen Anker zurück, Esc bricht ab."),
+    FR("Cliquez le long d'un contour pour poser des ancres ; le chemin épouse le contour. "
+       "La première ancre, Entrée ou un clic droit le ferme et peint son intérieur. Ctrl+Z "
+       "retire une ancre, Échap annule."),
+    ES("Haga clic a lo largo de un borde para poner anclas; el trazado se ajusta al borde. "
+       "La primera ancla, Intro o clic derecho lo cierra y pinta su interior. Ctrl+Z quita "
+       "un ancla; Esc cancela."),
+    PT("Clique ao longo de um contorno para pôr âncoras; o traçado cola-se ao contorno. A "
+       "primeira âncora, Enter ou clique direito fecha-o e pinta o interior. Ctrl+Z retira "
+       "uma âncora; Esc cancela."),
+    IT("Fai clic lungo un bordo per posare ancoraggi; il tracciato segue il bordo. Il primo "
+       "ancoraggio, Invio o clic destro lo chiude e ne dipinge l'interno. Ctrl+Z toglie un "
+       "ancoraggio; Esc annulla."),
+    NL("Klik langs een rand om ankers te zetten; het pad volgt de rand. Het eerste anker, "
+       "Enter of rechtsklik sluit het en schildert de binnenkant. Ctrl+Z neemt een anker "
+       "terug; Esc breekt af."),
+    RU("Щёлкайте вдоль края, чтобы ставить опорные точки; контур прилипает к краю. Первая "
+       "точка, Enter или правая кнопка замыкают его и закрашивают внутренность. Ctrl+Z "
+       "убирает точку, Esc отменяет."),
+    TR("Kenar boyunca tıklayarak çapalar bırakın; yol kenara yapışır. İlk çapa, Enter veya "
+       "sağ tık onu kapatır ve içini boyar. Ctrl+Z bir çapayı geri alır; Esc iptal eder."));
+
+SS_MSG(path_building,
+    EN("Preparing the edge map for this frame..."),
+    JA("このフレームの輪郭マップを準備中..."),
+    ZH_HANS("正在为此帧准备边缘图..."),
+    ZH_HANT("正在為此影格準備邊緣圖..."),
+    KO("이 프레임의 윤곽 맵을 준비하는 중..."),
+    DE("Kantenkarte für dieses Bild wird vorbereitet..."),
+    FR("Préparation de la carte des contours de cette image..."),
+    ES("Preparando el mapa de bordes de este fotograma..."),
+    PT("A preparar o mapa de contornos deste quadro..."),
+    IT("Preparazione della mappa dei bordi di questo fotogramma..."),
+    NL("Randkaart voor dit frame wordt voorbereid..."),
+    RU("Подготовка карты краёв для этого кадра..."),
+    TR("Bu kare için kenar haritası hazırlanıyor..."));
+
+SS_MSG(path_edge_map,
+    EN("Edge map: {0}x{1}, step {2}, built in {3} ms"),
+    JA("輪郭マップ: {0}x{1}、間隔 {2}、作成 {3} ms"),
+    ZH_HANS("边缘图：{0}x{1}，步长 {2}，用时 {3} ms"),
+    ZH_HANT("邊緣圖：{0}x{1}，步長 {2}，用時 {3} ms"),
+    KO("윤곽 맵: {0}x{1}, 간격 {2}, 생성 {3} ms"),
+    DE("Kantenkarte: {0}x{1}, Schritt {2}, erstellt in {3} ms"),
+    FR("Carte des contours : {0}x{1}, pas {2}, calculée en {3} ms"),
+    ES("Mapa de bordes: {0}x{1}, paso {2}, calculado en {3} ms"),
+    PT("Mapa de contornos: {0}x{1}, passo {2}, calculado em {3} ms"),
+    IT("Mappa dei bordi: {0}x{1}, passo {2}, calcolata in {3} ms"),
+    NL("Randkaart: {0}x{1}, stap {2}, gemaakt in {3} ms"),
+    RU("Карта краёв: {0}x{1}, шаг {2}, построена за {3} мс"),
+    TR("Kenar haritası: {0}x{1}, adım {2}, {3} ms içinde oluşturuldu"));
+
+SS_MSG(path_straight,
+    EN("No edge map for this frame; the path uses straight segments."),
+    JA("このフレームには輪郭マップがないため、パスは直線で結ばれます。"),
+    ZH_HANS("此帧没有边缘图，路径使用直线段。"),
+    ZH_HANT("此影格沒有邊緣圖，路徑使用直線段。"),
+    KO("이 프레임에는 윤곽 맵이 없어 경로가 직선으로 이어집니다."),
+    DE("Keine Kantenkarte für dieses Bild; der Pfad verwendet gerade Abschnitte."),
+    FR("Pas de carte des contours pour cette image ; le chemin utilise des segments droits."),
+    ES("No hay mapa de bordes para este fotograma; el trazado usa segmentos rectos."),
+    PT("Sem mapa de contornos para este quadro; o traçado usa segmentos retos."),
+    IT("Nessuna mappa dei bordi per questo fotogramma; il tracciato usa segmenti retti."),
+    NL("Geen randkaart voor dit frame; het pad gebruikt rechte stukken."),
+    RU("Для этого кадра нет карты краёв; контур строится прямыми отрезками."),
+    TR("Bu kare için kenar haritası yok; yol düz parçalar kullanır."));
+
+SS_MSG(path_anchors,
+    EN("Path anchors: {0}"),
+    JA("パスの点: {0}"),
+    ZH_HANS("路径锚点：{0}"),
+    ZH_HANT("路徑錨點：{0}"),
+    KO("패스 앵커: {0}"),
+    DE("Pfadanker: {0}"),
+    FR("Ancres du chemin : {0}"),
+    ES("Anclas del trazado: {0}"),
+    PT("Âncoras do traçado: {0}"),
+    IT("Ancoraggi del tracciato: {0}"),
+    NL("Padankers: {0}"),
+    RU("Точек контура: {0}"),
+    TR("Yol çapaları: {0}"));
+
 }  // namespace maskedit
 }  // namespace msg
 }  // namespace i18n
