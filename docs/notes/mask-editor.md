@@ -439,10 +439,12 @@ succeeding.
 `(15520, 7760)`, 2 distinct values `{0, 255}`, SAM drop frac **0.159191**
 (brief expected ~0.159) and the operator's recorded reference drop frac
 **0.068559**, matching `mask_editor_edits.json`'s `f00000.drop_frac` exactly.
-One brief defect found and fixed here: its Step 1 `uv run` line lists
-`--with pillow` only but the script imports `numpy` -- ran with
-`--with pillow --with numpy` instead, which is the only change from the
-brief's script.
+One brief defect found and fixed here: its Step 1 `uv run` line
+(`task-16-brief.md:17`) lists `--with pillow` only but the script imports
+`numpy` at `:23` -- ran with `--with pillow --with numpy` instead, which is
+the only change from the brief's script. This is the ninth defect this plan
+has found in its own briefs (see the standing tally at the top of this
+task's brief); independently confirmed by review.
 
 **Diffed the SAM mask against the operator's reference before touching the
 GUI**, to know what the correction actually was rather than guessing at
@@ -464,7 +466,15 @@ cannot fail.
 `SS_GUI_AUTOMATION=1` + `guictl.py` (`build/spirula`, not the `.app` bundle --
 the bundle binary hung idle at `_glfwWaitEventsTimeoutCocoa` and never bound
 the automation port on this run; `build/spirula` answered immediately, same
-binary content otherwise, not investigated further as out of scope).
+binary content otherwise, not investigated further as out of scope). **Fix
+round 1**: the reviewer could not reproduce this. They tried both the app
+bundle's inner binary directly
+(`build/Spirula Studio.app/Contents/MacOS/spirula`, bound the automation port
+within 15 s, no hang) and the bundle launch path itself (fails immediately
+with `PermissionError`, not a hang). The observation above may still be a
+real one-off -- a first-launch Gatekeeper/quarantine check is plausible -- but
+it is now unconfirmed and flagged as such rather than as a reproducible
+defect, so nobody chases a phantom.
 `native_dialogs` set to 0 in `~/.config/spirula-studio/gui.conf` for the
 built-in folder browser, restored to 1 after. Opened the dataset, clicked
 **Correct masks**, screenshot confirmed the same SAM mask rendered (`Kept:
@@ -497,6 +507,28 @@ the delta is 6.6x inside the +-0.005 band. Re-verified the saved file is still
 strictly binary after the paint (`{0: 8,166,010 px, 255: 112,269,190 px}`,
 no intermediate values from box-edge antialiasing) and unchanged in size,
 before trusting the numbers above.
+
+**Fix round 1 -- sensitivity table, to show what 0.97 is actually demanding.**
+`0.9857 >= 0.97` alone does not tell a reader whether the bar is a formality
+or a real test. Recomputed by shifting the same full-width force-keep
+boundary off its true row (7056) and rescoring the resulting drop mask
+against the reference, independently (not copied from the reviewer's
+figures, which were given only as a target to check against):
+
+| offset from the true row 7056 | boundary row | IoU | verdict |
+|---|---|---|---|
+| 0 (exact) | 7056 | 0.9934 | PASS |
+| -100 rows (1.3% of frame height) | 6956 | 0.9826 | PASS |
+| +50 rows (0.6%) | 7106 | 0.9125 | fail |
+| -200 rows (2.6%) | 6856 | 0.9647 | fail |
+
+All four values matched the reviewer's exactly; no discrepancy to report. A
+boundary error of about 50 rows out of 7760 -- well under 1.5% of the frame
+height -- already fails. So the 0.9857 PASS above means the box drag
+reproduced the reference band *closely*, not merely approximately, and the
+caveat two paragraphs below (that this run's stroke was informed by a diff a
+blind operator would not have) cuts both ways: it is also what the bar would
+have caught had the bounds been wrong.
 
 **What this run does and does not establish.** One frame, one operator
 correction, one geometrically simple region (a sharp horizontal band, not an
