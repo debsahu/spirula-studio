@@ -123,6 +123,8 @@ public:
     bool sam_available() const;
     // The process-wide inference pool, MiB -- readable with the editor closed.
     static double sam_pool_mib();
+    // Checkpoint loads in this process (MaskSam::load_count), for P12.
+    static int sam_loads();
     // GuiApp's checkpoint, every frame; "" = not cached. A NEW path drops the
     // warm session (released once any job stops) and keeps the clicks.
     void set_sam_model(const std::string& path, bool text_prompts);

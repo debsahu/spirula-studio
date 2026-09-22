@@ -4307,19 +4307,16 @@ void test_session_sam_vetoed_all() {
 }
 
 // Stands in for MaskSam's busy() and release(): `busy` is a job still inside a
-// stage; each release records whether it came while busy and the editor open.
+// stage; each release records whether it came while busy.
 struct FakeSamOps {
     bool busy = false;
     int releases = 0, releases_while_busy = 0;
-    bool open_at_release = false;
     int sleep_ms = 0;
-    const mk::MaskSession* s = nullptr;
     mk::SamOps ops() {
         return {[this](mk::MaskSam&) { return busy; },
                 [this](mk::MaskSam&) {
                     releases++;
                     releases_while_busy += busy ? 1 : 0;
-                    open_at_release = s && s->is_open();
                     if (sleep_ms) std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
                     return false;
                 }};
@@ -4332,7 +4329,6 @@ void test_session_close_parks_busy_job() {
     Fixture f = make_dataset("sam_close_parks", 64, 48, {"a"});
     FakeSamOps fake;
     mk::MaskSession s;
-    fake.s = &s;
     s.set_sam_ops(fake.ops());
     std::string err;
     check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
@@ -4353,14 +4349,13 @@ void test_session_close_parks_busy_job() {
     check(fake.releases == 1, "retire: the poll releases once, not every frame");
 }
 
-// An idle session is released by close() itself, while the editor is still
-// open -- not left to ~MaskSam -- and a later close with no SAM reports 0 ms.
+// An idle session is released by close() itself, not left to ~MaskSam, and a
+// later close with no SAM reports 0 ms.
 void test_session_close_releases_idle() {
     Fixture f = make_dataset("sam_close_idle", 64, 48, {"a"});
     FakeSamOps fake;
     fake.sleep_ms = 5;
     mk::MaskSession s;
-    fake.s = &s;
     s.set_sam_ops(fake.ops());
     std::string err;
     check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
@@ -4369,8 +4364,8 @@ void test_session_close_releases_idle() {
     s.set_sam_model("/m/a.ggml", true);
     s.sam();
     s.close();
-    check(fake.releases == 1 && fake.open_at_release && !s.sam_retiring(),
-          "close idle: close releases an idle session itself, before the editor is torn down");
+    check(fake.releases == 1 && !s.sam_retiring(),
+          "close idle: close releases an idle session itself, not ~MaskSam");
     check(s.sam_close_ms() >= 5.0, "close idle: sam_close_ms covers that release");
     check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
           "close idle: reopen: " + err);

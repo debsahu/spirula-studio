@@ -215,6 +215,8 @@ struct MaskSam::Job {
 
 namespace {
 
+std::atomic<int> g_loads{0};
+
 // The MiB on the TOTAL line of Session::vramReport(); -1 when there is none.
 double total_mib(const std::string& report) {
     const size_t at = report.find("TOTAL");
@@ -224,6 +226,7 @@ double total_mib(const std::string& report) {
 }  // namespace
 
 bool MaskSam::available() { return true; }
+int MaskSam::load_count() { return g_loads.load(); }
 
 double MaskSam::pool_mib() {
     return (double)nn::vk::VramPool::get().totalCapacity() / 1048576.0;
@@ -406,6 +409,7 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         s.encoded_key.clear();
         sam::ModelParams p;
         p.model_path = j.model;
+        g_loads++;
         if (!s.session->loadModel(p)) {
             const std::string e = s.session->lastError();
             s.session.reset();
@@ -529,6 +533,7 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
 #ifndef SS_BUILD_SAM
 
 bool MaskSam::available() { return false; }
+int MaskSam::load_count() { return 0; }
 double MaskSam::pool_mib() { return -1.0; }
 bool MaskSam::text_supported() const { return false; }
 bool MaskSam::busy() const { return false; }

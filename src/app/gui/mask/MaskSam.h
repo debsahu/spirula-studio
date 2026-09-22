@@ -78,6 +78,9 @@ public:
     bool release();
     // The session's own TOTAL, MiB, as of the last job; -1 with no session.
     double vram_mib() const;
+    // loadModel calls in this process, by any MaskSam: a reload is +1, a
+    // session that survived a release is +0. 0 with no inference layer.
+    static int load_count();
 
     // The editor's own prompt state -- never the dataset screen's.
     MaskSettings& prompt();

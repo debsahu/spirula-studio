@@ -136,7 +136,7 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
 void MaskSession::close() {
     if (!_open && !_worker.joinable()) return;
     if (_doc && _doc->dirty()) save();
-    close_sam();
+    close_sam();   // order vs the worker join is free: the save never touches SAM
     {
         std::lock_guard<std::mutex> lk(_qmu);
         _quit = true;
@@ -542,6 +542,8 @@ bool MaskSession::sam_available() const { return MaskSam::available(); }
 
 double MaskSession::sam_pool_mib() { return MaskSam::pool_mib(); }
 
+int MaskSession::sam_loads() { return MaskSam::load_count(); }
+
 // Idempotent: GuiApp calls it every frame. A changed path cancels the job and
 // defers the release to sam_pump(), so the UI thread never joins an encode.
 void MaskSession::set_sam_model(const std::string& path, bool text_prompts) {
@@ -628,9 +630,8 @@ void MaskSession::sam_forget() {
     _sam_blocker.clear();
 }
 
-// Before the worker's join, so the weights go back before a ~700 ms save lands.
-// A running job is cancelled and parked instead: joining it here froze the UI
-// for the whole stage, 2887 ms mid-encode and 7805 ms mid-load.
+// An idle session is released here; a running job is cancelled and parked, as
+// joining it froze the UI for the whole stage, 2887 ms mid-encode, 7805 mid-load.
 void MaskSession::close_sam() {
     _sam_close_ms = 0.0;
     if (!_sam) return;

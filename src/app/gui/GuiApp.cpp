@@ -2672,6 +2672,7 @@ std::string GuiApp::state_json() {
     out += ",\"sam_retiring\":";
     out += _mask_editor.sam_retiring() ? "true" : "false";
     out += ",\"sam_retire_ms\":" + std::to_string(_mask_editor.sam_retire_ms());
+    out += ",\"sam_loads\":" + std::to_string(mask::MaskSession::sam_loads());
     out += ",\"sam_ui_ms\":" + std::to_string(_mask_editor.sam_ui_ms());
     out += ",\"sam_click\":[" + std::to_string(_mask_editor.sam_click_x()) + "," +
            std::to_string(_mask_editor.sam_click_y()) + "]";
