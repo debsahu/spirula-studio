@@ -8,6 +8,7 @@
 #include "app/gui/edit/Selection.h"
 #include "app/gui/mask/Livewire.h"
 #include "app/gui/mask/MaskDoc.h"
+#include "app/gui/mask/PathTool.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "app/gui/mask/MaskSession.h"
 #include "app/gui/mask/MaskWindow.h"
@@ -1680,6 +1681,198 @@ void test_livewire_once() {
     check(lw.builds() == 1, "100 cursor moves, one build");
 }
 
+// ---------------------------------------------------------------------------
+// Plan 2, Task 8: the pen tool
+// ---------------------------------------------------------------------------
+
+gui::ViewportInput at(float x, float y) {
+    gui::ViewportInput in;
+    in.hovered = true;
+    in.x = x;
+    in.y = y;
+    in.W = 200;
+    in.H = 120;
+    return in;
+}
+
+gui::ViewportInput click_at(float x, float y) {
+    gui::ViewportInput in = at(x, y);
+    in.clicked = in.down = true;
+    return in;
+}
+
+gui::ViewportInput right_click_at(float x, float y) {
+    gui::ViewportInput in = at(x, y);
+    in.right_clicked = true;
+    return in;
+}
+
+bool same_points(const std::vector<float>& a, const std::vector<float>& b, float tol) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); i++)
+        if (std::fabs(a[i] - b[i]) > tol) return false;
+    return true;
+}
+
+void test_path_tool_basic() {
+    mk::PathTool t;
+    std::vector<float> out;
+    bool consumed = false;
+    check(!t.in_progress() && !t.snapping(), "idle, no livewire");
+    check(!t.update(at(10, 10), out, consumed) && !consumed, "a move does nothing while idle");
+    gui::ViewportInput off = click_at(10, 10);
+    off.hovered = false;
+    check(!t.update(off, out, consumed) && !consumed && !t.in_progress(),
+          "a click off the canvas does nothing");
+
+    check(!t.update(click_at(10, 10), out, consumed) && consumed && t.in_progress(),
+          "first click drops an anchor and is consumed");
+    check(t.anchor_count() == 1, "one anchor");
+    std::vector<float> an, co, li;
+    t.update(at(30, 30), out, consumed);
+    t.overlay(an, co, li);
+    check(same_points(an, {10, 10}, 1e-6f) && same_points(co, {10, 10}, 1e-6f) &&
+              same_points(li, {10, 10, 30, 30}, 1e-6f),
+          "live segment is a straight line to the cursor without a livewire");
+    check(!consumed, "a plain move is not consumed");
+    gui::ViewportInput drag = at(30, 30);
+    drag.down = true;
+    t.update(drag, out, consumed);
+    check(consumed, "the held button stays the tool's");
+
+    t.update(click_at(50, 10), out, consumed);
+    check(t.anchor_count() == 2 && !t.commit_pending(out), "two anchors cannot close");
+    check(t.in_progress(), "a refused commit keeps the path");
+    t.update(click_at(50, 40), out, consumed);
+    t.overlay(an, co, li);
+    check(same_points(co, {10, 10, 50, 10, 50, 40}, 1e-6f), "committed polyline is the anchors");
+
+    // Close on the first anchor: within 10 px of it, with 3 anchors.
+    t.update(at(40, 27), out, consumed);
+    check(!t.near_first(), "15 px away is not near the first anchor");
+    t.update(at(12, 11), out, consumed);
+    check(t.near_first(), "2.2 px away is near");
+    check(t.update(click_at(12, 11), out, consumed) && consumed, "clicking the first anchor closes");
+    check(same_points(out, {10, 10, 50, 10, 50, 40}, 1e-6f), "closed polygon is the three anchors");
+    check(!t.in_progress() && t.anchor_count() == 0, "closing resets the tool");
+
+    // Enter closes.
+    t.update(click_at(10, 10), out, consumed);
+    t.update(click_at(50, 10), out, consumed);
+    t.update(click_at(50, 40), out, consumed);
+    check(t.commit_pending(out) && out.size() == 6, "Enter closes three anchors");
+
+    // A right click closes; below 3 anchors it is refused and keeps the path.
+    t.update(click_at(10, 10), out, consumed);
+    t.update(click_at(50, 10), out, consumed);
+    check(!t.update(right_click_at(50, 40), out, consumed) && consumed && t.in_progress(),
+          "right click with two anchors: refused, consumed, path kept");
+    t.update(click_at(50, 40), out, consumed);
+    check(t.update(right_click_at(70, 70), out, consumed) && out.size() == 6,
+          "right click with three anchors closes");
+
+    // Pop.
+    t.update(click_at(10, 10), out, consumed);
+    t.update(click_at(50, 10), out, consumed);
+    t.update(click_at(50, 40), out, consumed);
+    check(t.pop_anchor() && t.anchor_count() == 2, "pop takes one anchor");
+    t.overlay(an, co, li);
+    check(same_points(co, {10, 10, 50, 10}, 1e-6f), "pop trims the committed polyline");
+    check(t.pop_anchor() && t.pop_anchor() && !t.in_progress(), "pop to empty");
+    check(!t.pop_anchor(), "pop on empty is false");
+
+    // Cancel.
+    t.update(click_at(10, 10), out, consumed);
+    t.cancel();
+    check(!t.in_progress(), "cancel empties the path");
+}
+
+void test_path_tool_livewire() {
+    const int W = 200, H = 120;
+    mk::Livewire lw;
+    lw.build(step_edge_rgb(W, H).data(), W, H);
+    mk::PathTool t;
+    t.set_livewire(&lw);
+    check(t.snapping(), "snapping with a ready livewire");
+    std::vector<float> out, an, co, li;
+    bool consumed;
+    t.update(click_at(100, 10), out, consumed);
+    check(lw.has_anchor(), "the first anchor seeds the search");
+    t.update(at(100, 60), out, consumed);
+    t.overlay(an, co, li);
+    check(li.size() >= 2 * 51, "live segment follows the edge: " + std::to_string(li.size() / 2));
+    bool on_edge = true;
+    for (size_t i = 2; i + 3 < li.size(); i += 2) on_edge &= std::floor(li[i]) == 99.0f || std::floor(li[i]) == 100.0f;
+    check(on_edge, "live segment's interior points sit on the ridge");
+    check(li[0] == 100.0f && li[1] == 10.0f && li[li.size() - 2] == 100.0f && li[li.size() - 1] == 60.0f,
+          "live segment's ends are the exact anchor and cursor");
+    const double ms = t.last_segment_ms();
+    check(ms >= 0.0 && ms < 1000.0, "segment time recorded: " + std::to_string(ms) + " ms");
+
+    t.update(click_at(100, 110), out, consumed);
+    t.overlay(an, co, li);
+    const size_t after_two = co.size();
+    check(after_two >= 2 * 101, "committed polyline runs down the edge");
+    check(co[0] == 100.0f && co[1] == 10.0f && co[after_two - 2] == 100.0f && co[after_two - 1] == 110.0f,
+          "committed ends are exact anchors");
+    check(li.empty() || li.size() == 4, "live segment cleared after a click");
+
+    t.update(click_at(150, 60), out, consumed);
+    t.overlay(an, co, li);
+    check(co.size() > after_two, "third anchor appends its segment");
+    check(t.pop_anchor(), "pop the third");
+    t.overlay(an, co, li);
+    check(co.size() == after_two, "pop restores the two-anchor polyline exactly");
+    t.update(click_at(150, 60), out, consumed);
+    check(t.commit_pending(out) && out.size() >= 6 && out[0] == 100.0f && out[1] == 10.0f,
+          "Enter closes with the edge path back to the first anchor");
+    check(lw.builds() == 1, "the tool never rebuilt the cost image");
+
+    // Detaching the livewire falls back to straight segments.
+    t.set_livewire(nullptr);
+    check(!t.snapping(), "no livewire, no snapping");
+    t.update(click_at(10, 10), out, consumed);
+    t.update(at(30, 30), out, consumed);
+    t.overlay(an, co, li);
+    check(same_points(li, {10, 10, 30, 30}, 1e-6f), "straight again");
+    t.cancel();
+}
+
+void test_path_tool_space() {
+    // Fed pixels are frame pixels scaled by 2 and offset by (5, 7): what a
+    // zoomed canvas does. Anchors and the closed polygon must come back in
+    // fed pixels; the livewire sees frame pixels.
+    const int W = 200, H = 120;
+    mk::Livewire lw;
+    lw.build(step_edge_rgb(W, H).data(), W, H);
+    mk::PathTool t;
+    t.set_livewire(&lw);
+    mk::PathSpace sp;
+    sp.to_frame = [](float x, float y, float& fx, float& fy) { fx = (x - 5.0f) * 0.5f; fy = (y - 7.0f) * 0.5f; };
+    sp.from_frame = [](float fx, float fy, float& x, float& y) { x = fx * 2.0f + 5.0f; y = fy * 2.0f + 7.0f; };
+    t.set_space(sp);
+    std::vector<float> out, an, co, li;
+    bool consumed;
+    t.update(click_at(205, 27), out, consumed);      // frame (100, 10)
+    t.update(click_at(205, 227), out, consumed);     // frame (100, 110)
+    t.update(click_at(305, 127), out, consumed);     // frame (150, 60)
+    t.overlay(an, co, li);
+    check(same_points(an, {205, 27, 205, 227, 305, 127}, 1e-3f), "anchors reported in fed pixels");
+    bool on_edge = true;
+    for (size_t i = 2; i + 3 < co.size() && i < 2 * 100; i += 2) {
+        const float fx = (co[i] - 5.0f) * 0.5f;
+        on_edge &= std::floor(fx) == 99.0f || std::floor(fx) == 100.0f;
+    }
+    check(on_edge, "the committed edge run maps back to the ridge in frame pixels");
+    t.update(at(30, 30), out, consumed);
+    check(!t.near_first(), "fed (30,30) is 175 px from the first anchor");
+    t.update(at(210, 30), out, consumed);
+    check(t.near_first(), "fed (210,30) is 5.8 px from it");
+    check(t.update(click_at(210, 30), out, consumed) && out.size() >= 6, "closes in fed space");
+    check(std::fabs(out[0] - 205.0f) < 1e-3f && std::fabs(out[1] - 27.0f) < 1e-3f,
+          "closed polygon starts at the fed first anchor");
+}
+
 // Anchor on the vertical arm, target on the horizontal: the straight line
 // between them is off both edges, so this is the case criterion #7 needs
 // -- the true minimum curves around the corner.
@@ -1878,6 +2071,9 @@ int main() {
     test_livewire_reanchor();
     test_livewire_diagonal();
     test_livewire_once();
+    test_path_tool_basic();
+    test_path_tool_livewire();
+    test_path_tool_space();
     test_livewire_corner_path();
     test_livewire_sign_alignment();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
