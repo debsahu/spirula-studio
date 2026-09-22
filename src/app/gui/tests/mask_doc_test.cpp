@@ -8,6 +8,8 @@
 #include "app/gui/edit/Selection.h"
 #include "app/gui/mask/Livewire.h"
 #include "app/gui/mask/MaskAdd.h"
+#include "app/gui/MaskSettings.h"
+#include "app/gui/mask/MaskSam.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/PathTool.h"
 #include "app/gui/mask/MaskLayer.h"
@@ -27,6 +29,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -2850,6 +2853,66 @@ void bench_add_history() {
         }
 }
 
+// ---------------------------------------------------------------------------
+// SAM assist: the guarded half's stub, and the editor's own clicks
+// ---------------------------------------------------------------------------
+
+void test_mask_sam_stub_refuses() {
+    mk::MaskSam sam;
+    const auto px = std::make_shared<const std::vector<uint8_t>>((size_t)4 * 4 * 3, 7);
+    check(!mk::MaskSam::available(), "sam stub: unavailable without SS_BUILD_SAM");
+    check(mk::MaskSam::pool_mib() < 0.0, "sam stub: no pool to read");
+    check(!sam.has_model(), "sam stub: no model by default");
+    sam.set_model("/nonexistent/sam3.ggml", true);
+    check(sam.has_model(), "sam stub: set_model is recorded");
+    check(!sam.text_supported(), "sam stub: no text tower whatever the catalog says");
+    check(!sam.busy(), "sam stub: never busy");
+    check(sam.vram_mib() < 0.0, "sam stub: reports no device accounting");
+    check(!sam.start_points("f", px, 4, 4, {mk::SamPoint{1.0f, 1.0f}}, false),
+          "sam stub: refuses a point");
+    check(!sam.start_text("f", px, 4, 4, "person"), "sam stub: refuses a phrase");
+    check(px.use_count() == 1, "sam stub: a refused start keeps no reference to the frame");
+    std::string key = "untouched";
+    std::vector<mk::AddRegion> out(1);
+    bool keep = true;
+    float score = -1.0f;
+    double ms = -1.0;
+    check(!sam.take_result(key, out, keep, score, ms), "sam stub: no result to take");
+    check(key == "untouched" && out.size() == 1 && keep && score == -1.0f && ms == -1.0,
+          "sam stub: take_result left every output alone");
+    sam.cancel();
+    sam.release();
+    check(!sam.busy() && sam.vram_mib() < 0.0 && sam.has_model(),
+          "sam stub: release leaves it idle, unaccounted, and still pointed at its model");
+}
+
+// Clicks on two objects, two frames and two cameras: a prompt must send only
+// the current object's clicks on this frame and camera, in click order.
+void test_mask_sam_clicks() {
+    mk::MaskSam sam;
+    gui::MaskSettings& p = sam.prompt();
+    check(p.clicks.empty() && p.object_count == 1 && p.current_object == 0,
+          "sam clicks: the editor's state starts empty");
+    sam.add_click(3, "cam0", 10.0f, 20.0f);
+    sam.add_click(3, "cam0", 30.0f, 40.0f);
+    sam.add_click(4, "cam0", 50.0f, 60.0f);
+    sam.add_click(3, "cam1", 70.0f, 80.0f);
+    p.current_object = p.object_count++;
+    sam.add_click(3, "cam0", 90.0f, 99.0f);
+    const gui::MaskClick& last = p.clicks.back();
+    check(p.clicks.size() == 5 && last.object == 1 && last.frame == 3 && last.camera == "cam0" &&
+              last.source.empty() && last.positive && last.x == 90.0f && last.y == 99.0f,
+          "sam clicks: a click is keyed by frame index, camera and current object, source empty");
+    const std::vector<mk::SamPoint> one = sam.object_points(3, "cam0");
+    check(one.size() == 1 && one[0].x == 90.0f && one[0].y == 99.0f,
+          "sam clicks: a prompt sends only the current object's clicks");
+    p.current_object = 0;
+    const std::vector<mk::SamPoint> zero = sam.object_points(3, "cam0");
+    check(zero.size() == 2 && zero[0].x == 10.0f && zero[1].x == 30.0f,
+          "sam clicks: ... only this frame and camera, in click order");
+    check(sam.object_points(3, "cam2").empty(), "sam clicks: a camera with no clicks sends none");
+}
+
 }  // namespace
 
 int main() {
@@ -2906,6 +2969,8 @@ int main() {
     test_add_stencil_rejects_empty();
     test_add_stencil_is_one_undo_step();
     test_add_history_bytes();
+    test_mask_sam_stub_refuses();
+    test_mask_sam_clicks();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

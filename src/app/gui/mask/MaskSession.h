@@ -32,6 +32,8 @@ struct FrameRef {
     std::string camera;    // the camera folder, "" for the image root
 };
 
+class MaskSam;
+
 // The continuous inverse of to_stored (MaskDoc.h): a stored point to the
 // displayed frame. Plan 1 has the pixel form only.
 void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
@@ -170,6 +172,7 @@ private:
 
     PathTool _path;
     std::unique_ptr<Livewire> _livewire;   // the open frame's edge map, built on first use
+    std::unique_ptr<MaskSam> _sam;   // created on first use, dropped in close()
     bool _path_mode = false;
     double _livewire_ms = 0.0;
 

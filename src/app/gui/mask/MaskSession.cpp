@@ -1,6 +1,7 @@
 // MaskSession.cpp -- see MaskSession.h.
 
 #include "app/gui/mask/MaskSession.h"
+#include "app/gui/mask/MaskSam.h"
 
 #include "app/FrameLook.h"
 #include "app/FrameMask.h"
