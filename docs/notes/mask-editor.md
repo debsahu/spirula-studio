@@ -11,7 +11,7 @@ MaskSession   the frames of a dataset, the worker, the open frame
 MaskPanel.cpp the window: canvas, tools, status, navigation
 ```
 
-Every `file:line` below was re-derived against commit `8fe56631`, and they
+Every `file:line` below was re-derived against commit `4c4e4601`, and they
 drift with every commit that touches the file. Each one is quoted alongside
 the symbol or the statement it points at, so re-find it by that and treat the
 number as a hint. A citation that lands somewhere unrelated means the file
@@ -1662,13 +1662,37 @@ eraser to `Clear` fails that check and fails "the eraser puts back exactly
 what the brush took" **not at all** -- which is the evidence that the block is
 doing the work.
 
-### Separate radii, one per tool
+### ONE radius, shared -- and this reverses the first ruling
 
-The size you paint with and the size you correct with are rarely the same, and
-every paint program keeps them apart. `radius()` / `set_radius()`
-(`MaskSession.h:77-82`) address whichever tool is up; the slider, `[`/`]`, the
-wheel and the strip all go through them. The app run below shows both radii
-live at once.
+Separate radii shipped first, on the general argument that every paint program
+keeps them apart. **The operator used it on a real 120 MP correction and asked
+for the opposite**: *"carry over eraser and brush size from each other, rather
+than keeping it independent."* Their experience of the task beats the
+generalisation, so `_eraser` is gone and `radius()` / `set_radius()`
+(`MaskSession.h:82-83`) address the one float. The slider, `[`/`]` and
+Alt+wheel all move it whichever tool is up.
+
+**The test was inverted, not deleted.** It guarded independence, which is now
+the defect; the risk in this design is a **second copy surviving** -- a switch
+that forgets to carry the value, or a writer that moves only one of them. It
+now asserts the carry in both directions and that the clamp carries with it.
+Four mutations, each killed by a named check: a second copy with no carry (the
+design being reversed) fails all four; a second copy carried one way fails the
+"BOTH ways" and clamp checks; a switch that resets to the default fails the two
+carry checks and the clamp check; `set_radius` without the clamp fails the
+clamp check.
+
+Worth recording precisely, because it is the kind of thing that makes a test
+look stronger than it is: **the "set_erasing never moves the radius" loop is a
+backstop, not the load-bearing check.** It kills the no-carry mutant and does
+**not** kill the reset-on-switch one -- by the time the loop runs that mutant
+has already pinned the value at the default, and every further switch resets it
+to the same number. The three directional checks are what bite.
+
+The strip keeps naming the **active tool** (`Eraser: 24 px`, not a generic
+`Radius:`). The brush and the eraser are indistinguishable on the canvas, so
+the label is the confirmation of which one is armed, and the sharing is
+self-evident the moment you switch and the number does not change.
 
 ### The slider
 
@@ -1772,10 +1796,14 @@ A synthetic three-frame workspace whose base mask drops one 200x200 block, so
 - Erasing inside the base-dropped block took `Kept` **94.9% -> 95.4%** and
   carved a clean untinted capsule out of the red region. Predicted area for an
   18 px radius over a ~77 mask-px path is 0.48% of the frame.
-- Brush (24 px) over base-kept ground: **95.4% -> 94.7%**, predicted 0.70%.
-  The eraser (18 px) over the same path: **94.7% -> 95.2%**. It does not fully
-  restore, **because the two radii are independent** -- which is the clearest
-  demonstration of that in the run.
+- Brush over base-kept ground, then the eraser over the identical path.
+  **With separate radii** (brush 24 px, eraser 18 px): `Kept` 95.4% -> 94.7%
+  -> 95.2%, an under-restore of 0.2 pp, which was the clearest demonstration in
+  that run that the two radii really were independent. **With the shared
+  radius, re-run on the same fixture, same path, same drag**: 94.9% -> 94.2%
+  -> **94.9%**, and the strip read `Eraser: 24 px` on the switch. The
+  under-restore is gone, which is the cheapest available check on the reversal
+  and one that could have failed.
 - Plain wheel still zooms: the photo's width at a fixed row goes 895 -> 1492
   screen px over three notches in (clipped by the canvas at 1584).
 
