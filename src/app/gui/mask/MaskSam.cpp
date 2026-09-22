@@ -220,8 +220,8 @@ bool MaskSam::launch(Job j) {
     return true;
 }
 
-// The job thread. `cancel` is read between every stage; the encode itself is
-// one opaque call, so a cancel issued during it waits that out (~1.5 s at 8K).
+// The job thread. `cancel` is read between every stage; encodeImage is one
+// opaque call, so a cancel issued in it waits it out: up to 1.9 s at 15520x7760.
 void MaskSam::run(State& s, Job j) {
     const auto t0 = std::chrono::steady_clock::now();
     auto finish = [&s](const std::string& error) {
