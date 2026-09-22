@@ -11,6 +11,64 @@ MaskSession   the frames of a dataset, the worker, the open frame
 MaskPanel.cpp the window: canvas, tools, status, navigation
 ```
 
+Every `file:line` below was re-derived against commit `d26a1d3e`, and they
+drift with every commit that touches the file. Each one is quoted alongside
+the symbol or the statement it points at, so re-find it by that and treat the
+number as a hint. A citation that lands somewhere unrelated means the file
+moved, not that the claim did.
+
+## What this is to take on
+
+For whoever has to decide whether to carry this. Each claim below is a command
+you can run, so none of it has to be taken on trust.
+
+**Licence.** Original work in this repository, under the project's own GPLv3
+(`LICENSE`). No file in the change set carries another project's copyright
+header and nothing was vendored in.
+
+**No new third-party dependency.** `cmake/SsApps.cmake` is the only build file
+the branch touches at all, and its whole diff is 25 insertions and 1 deletion
+-- the deletion being the source-glob line it rewrites to add
+`${SS_SRC}/app/gui/mask/*.cpp`, so the new directory compiles into the GUI --
+plus two new test targets, `frame_mask_test` and `mask_doc_test`. No
+`find_package`, no `FetchContent`, no new library, no new link line.
+`git diff --name-only 66342882 HEAD` is 33 files, 20 added and 13 modified,
+and no manifest, lockfile or vendored tree is among them.
+
+**The readers are untouched.** `git diff --stat 66342882 HEAD -- src/data
+src/sfm src/kernels` is empty: nothing that parses a dataset, a reconstruction
+or a kernel changed.
+
+**The livewire is written from the paper, not ported.** Mortensen and Barrett,
+"Intelligent Scissors for Image Composition", SIGGRAPH 1995, is the source of
+the three local cost terms (gradient magnitude, gradient direction, Laplacian
+zero crossing) and of the Dijkstra formulation, and is cited in the header
+(`Livewire.h:3`). Two halves to that claim, and they are not equally strong.
+Checkable: `src/app/gui/mask/Livewire.{h,cpp}` carries no third-party
+copyright, SPDX tag or permission notice -- nor does any other file in the
+33 -- and nothing was vendored. Not checkable from the tree, and recorded here
+as the author's statement rather than as a finding: no existing implementation
+was consulted or copied. The lazy expansion, the 8-connected link tables, the
+decimation policy and the `_parent` bit-packing (`Livewire.h:84`) are this
+tree's own design decisions either way.
+
+**One existing file moved; no code was rewritten with it.** The even-odd
+scanline fill left `app/gui/edit/SelectShape.cpp` for `src/core/PolygonFill.h`
+so that `app/FrameMask.cpp`, which the CLI compiles, can reach it. Same
+routine, one caller more.
+
+**Blast radius outside the new directory.** The feature is `src/app/gui/mask/`
+plus its catalog `src/i18n/catalog/MaskEdit.h`. Everything else it modifies is
+named here and nowhere else: `FrameMask`, `DatasetPrep`, `GuiApp`,
+`SegmentPanel`, `edit/SelectShape.cpp` and `i18n/catalog/Dataset.h` for the
+integration, and `tools/guictl.py` with `app/gui/Automation.cpp` for the
+shared GUI test harness -- the last two are a fix to pre-existing tooling,
+explained under "A pre-existing automation-tooling defect" below and flagged
+there because they sit outside the feature.
+
+**Upstreaming.** Nothing here has been offered upstream and nothing has been
+pushed anywhere. This is a branch in this repository.
+
 ## Two levels
 
 A stencil belongs to a camera (`app::FrameStencil`, edited in `SegmentPanel`,
@@ -282,7 +340,7 @@ reading `imgui.cpp:1850-1856`): a synthetic `ImGuiKey_LeftCtrl` event is
 silently rewritten to `ImGuiKey_LeftSuper` before it reaches the app, so
 `io.KeyCtrl` -- the flag `MaskSession::handle_keys` and `paint_for` both read
 -- never becomes true, and `io.KeySuper` does instead. ImGui's own mouse code
-then converts a Super-held left click into a right click (`imgui.cpp:1958-1967`,
+then converts a Super-held left click into a right click (`imgui.cpp:1957-1967`,
 "macOS: Convert Ctrl(Super)+Left click into Right-click"), which is why a
 synthetic `Ctrl+drag` silently behaved exactly like the app's own documented
 right-click no-op, and why `guictl.py key "Ctrl+Z"` never reached
@@ -297,7 +355,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:112` and `:250`), and
+does (both call the identical function, `MaskPanel.cpp:126` and `:313`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -313,14 +371,14 @@ screen px at this zoom), all plain drags (ForceDrop).
 
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
-(`MaskSession.cpp:343-359`, `if (r.empty()) return {};`) and `upload_rect`
-does the same (`MaskPanel.cpp:65`), so a coordinate-mapping bug that made
+(`MaskSession.cpp:384-395`, `if (r.empty()) return {};`) and `upload_rect`
+does the same (`MaskPanel.cpp:69`), so a coordinate-mapping bug that made
 every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:267`), read before the series and after every one of
+readout (`MaskPanel.cpp:326`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -424,7 +482,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:112` (`ui::Button(msg::undo)`) and `:250`
+   worked. `MaskPanel.cpp:126` (`ui::Button(msg::undo)`) and `:313`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -439,7 +497,7 @@ frame `f0000`:
    masks/f0000.png /tmp/f0000_regenerated.png` exited 0. **PASS.**
 
 Criterion #3 as a whole is fully covered only by combining this task with Task 14, not
-by either alone: `recomposite_frame` (`MaskLayer.cpp:317-345`) is the single primitive
+by either alone: `recomposite_frame` (`MaskLayer.cpp:341-375`) is the single primitive
 behind both paths -- the hand-crafted PNG rewrite above exercises it through "open a
 frame whose mask fingerprint no longer matches," and Task 14 already drove the same
 function through `recomposite_all` and the `DatasetPrep::run()` call site, end to end,
@@ -468,8 +526,10 @@ what was inferred rather than run flagged as such.
   "Kept %" and painted a lighter/keep-tinted stroke inside a drop region;
   Shift+Ctrl+drag over that same stroke returned "Kept %" exactly to its
   pre-stroke value and removed the tint. "The modifier read is the one held
-  at release" is read from source (`MaskPanel.cpp:215`, sampled on the
-  commit frame) rather than reproduced with the modifier changed mid-drag.
+  at release" is read from source (`MaskPanel.cpp:232-233` samples
+  `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
+  and `:255` hands those to `paint_for` on the frame the stroke commits)
+  rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
   brush and polygon (four corners placed by individual clicks, closed with
@@ -502,7 +562,8 @@ what was inferred rather than run flagged as such.
   switching from a dirty `f0000` to `f0001` autosaved `f0000`'s layers to
   disk and the new frame's status read "Saved". `<` and the slider were
   **not** independently exercised; `go_to()` is the single function behind
-  all three (`MaskPanel.cpp`), so this is inferred from the one call tested.
+  all three (`MaskPanel.cpp:151`, `:155`, `:157`), so this is inferred from
+  the one call tested.
 - [x] **Closing the window with Done or its close box while dirty writes the
   files.** Both exercised independently: Done and the title-bar close box
   (unnamed item, clicked by coordinate) each wrote the dirty frame's layer
@@ -514,7 +575,7 @@ what was inferred rather than run flagged as such.
 branch. Verified **not** a regression from this plan: `git diff --stat
 66342882 HEAD -- src/app/gui/tests/align_fit_test.cpp
 src/app/gui/edit/AlignFit.cpp` (the test's entire source list per
-`cmake/SsApps.cmake:374-377`) is empty, and the same failure was reproduced
+`cmake/SsApps.cmake:382-384`) is empty, and the same failure was reproduced
 building and running `align_fit_test` from a clean worktree at `66342882`
 (the branch's own cut point) with no other changes. The eight `mask_doc_test`
 targets in Step 2 all reported 0; only this ninth, unrelated test misses, and
@@ -531,7 +592,7 @@ Source data lives outside this submodule, in the parent slam repo at
 `work/osmo_playroom/`: `masks_eq/f00000/` (the SAM 3 output before hand
 correction) and `masks_eq_edited/f00000/` (what the operator painted),
 15520x7760, mode L, values exactly `{0, 255}`. **Both of those trees are
-255 = DROP -- the opposite of spirula's 255 = KEEP** (`src/app/FrameMask.h:53-54`).
+255 = DROP -- the opposite of spirula's 255 = KEEP** (`src/app/FrameMask.h:52-53`).
 Inverted on the way in with `PIL.ImageOps.invert`, confirmed by re-reading the
 inverted file's own pixel values afterward, not assumed from the invert call
 succeeding.
@@ -666,9 +727,25 @@ with the livewire (`Livewire.h`): Dijkstra over a cost image from gradient
 magnitude, gradient direction and Laplacian zero crossings, after Mortensen
 and Barrett 1995, with diagonal links weighted by their length. The cost
 image is built once per frame shown over the frame decimated to at most 4096
-px on its long edge (1.9 px of precision at 8K, 3.8 px on a 15520-wide
-still, both under the masker's rim dilation). The search is lazy: each
-cursor move pops the heap only until the cursor's pixel is settled.
+px on its long edge. **The decimation step is an INTEGER** -- `Livewire.cpp:76`
+is `ceil(long edge / 4096)` -- so the precision is exactly **2 frame px at 8K
+and exactly 4 on a 15520-wide still**, which is why every grid this note
+reports is 3840x1920 or 3880x1940 and never anything 4096 wide. The search is
+lazy: each cursor move pops the heap only until the cursor's pixel is settled.
+
+**Correction: the precision was stated here as 1.9 and 3.8 px, and those
+numbers are not the code's.** They are the unrounded ratios 7680/4096 = 1.875
+and 15520/4096 = 3.789; the integer step never reaches either, and the grid
+sizes the rest of this note reports were the standing evidence against them.
+The conclusion the original drew survives and is worth restating with the real
+figures. At the masker's default `dilate_ratio` 0.05, `sam::dilate_radius_px`
+(`src/sam/MaskDilate.cpp:34-46`) moves a detection's rim by 2 px once the
+box's mean side reaches 80 px and by 4 px at 160 px, so a 2 or 4 px step sits
+inside the slack the mask boundary already carries for anything the size of a
+person, a vehicle or a monopod. It does **not** sit inside it for a detection
+a few tens of pixels across -- the original's unqualified "both under the
+masker's rim dilation" was claiming more than the numbers support, whichever
+pair of them you use.
 
 Keys mirror the polygon tool rather than the spec's first draft: a click
 drops an anchor, a click on the first anchor, Enter or a right click closes,
@@ -886,7 +963,7 @@ file in `app/gui/mask/` that includes imgui or calls GL", written before
 rather than trusted: `grep`-ing every `.h`/`.cpp` in the directory for
 `imgui` and for GL (`GlLoader.h`, the GL 1.1 calls, and `glx::`, the
 dynamically-loaded post-1.1 subset this tree namespaces to avoid colliding
-with the system header -- `GlLoader.h:1-6`) shows `imgui.h` in exactly
+with the system header -- `GlLoader.h:3-6`) shows `imgui.h` in exactly
 `MaskPanel.cpp` and `PathOverlay.cpp`; GL calls in exactly `MaskPanel.cpp`
 (`MaskSession.h` includes `GlLoader.h` only for the `GLuint` member type,
 calls nothing); every other file, neither. `glx::` itself has zero hits
@@ -1045,10 +1122,17 @@ step 2).
 sticky, so had the map *not* been rebuilt, the previous build's text would
 still be on screen and would read 96 again. Three identical readings is exactly
 what a stale status line looks like, and nothing about reading 2 or 3 can tell
-the two apart. Two checks settle it for the set. (a) Source: `pump()` clears
-`_status` and calls `_livewire.reset()` on every frame load
-(`MaskSession.cpp:200,240`), so the line can only come from a fresh
-`ensure_livewire()`. (b) Observed, and stronger because it needs no source
+the two apart. Two checks settle it for the set. (a) Source: every frame load
+clears `_status` and resets the livewire, so the line can only come from a
+fresh `ensure_livewire()`. The two halves are in different functions, which an
+earlier draft of this note put both in `pump()`: `load_frame`'s worker clears
+`_status` as it publishes the loaded frame (`MaskSession.cpp:247`, inside the
+`enqueue` lambda that starts at `:227`), and `pump()` calls
+`_livewire.reset()` when it installs that frame on the UI thread (`:287`).
+The argument is unchanged by the correction -- the clear still happens before
+the frame is published and the reset still happens as it is installed -- but
+an inheritor who went looking for both in `pump()` would have found one.
+(b) Observed, and stronger because it needs no source
 reading: with the **Brush** tool selected, changing to f0002 leaves **no
 `Edge map` line at all** on the strip, and pressing **I** makes it appear
 reading 88 ms. An appearance cannot be a persistence. Readings 2, 3 and 8 are
@@ -1187,7 +1271,7 @@ different things by construction.** The edge map's row above is +101,616 KB
 (99.2 MiB) against a `bytes()` of 21.6 MB, and an earlier draft of this note
 explained the 4.7x away as "allocator and first-touch" with nothing behind it.
 Most of the gap is not a mystery at all and falls out of
-`Livewire.h:80-85` and `Livewire.cpp:83-131,225-226`, counted for this grid
+`Livewire.h:80-90` and `Livewire.cpp:83-131,225-226`, counted for this grid
 (3880 x 1940, n = 7,527,200):
 
 | | bytes | what `bytes()` does with it |
@@ -1271,6 +1355,24 @@ it is why "count the lines and multiply" is not a safe way to predict this
 height -- which is the same reason the reserve is measured rather than
 computed.
 
+**That 192 px is the worst case the battery reached, not the worst case
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:318-352`), the eight
+items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
+`hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
+and the status-or-error line. Two more items exist: `status_base_regenerated`
+and `status_base_missing` (`MaskPanel.cpp:331-334`), one `TextDisabledWrapped`
+each and mutually exclusive, since `base_state()` returns one value. Neither
+was on screen for any row of the table above, and the exact arithmetic is how
+that is known rather than assumed -- 110, 132 and 176 are 5, 6 and 8 lines to
+the pixel, and a base-state line would have made them 6, 7 and 9. Open a
+frame whose mask a run has regenerated -- which is the case this whole feature
+exists for -- and every row above gains an item: **+22 px where it fits on one
+line and +38 where it wraps**, putting the real worst case at 900 px around
+214 rather than 192. **The rule below survives unchanged**, because it is
+parameterised on the measured `status_h` and not on any row of this table; it
+is the table's worst row that is not a bound. That is the third time in this
+section that measuring the strip has turned out to beat enumerating it.
+
 **The fix measures the strip instead of predicting it.** `draw()` records
 `ImGui::GetCursorPosY()` either side of `draw_status()` into `_status_h`, and
 `draw_canvas()` reserves that. **A constant is the wrong shape for this
@@ -1342,7 +1444,11 @@ off the bottom rather than whether it looks off.
 it is the 64 px canvas floor plus exactly 100 px of chrome above the canvas
 (title bar, tool strip, frame slider, window padding), and `avail_y = winh -
 100` held at every one of the fifteen readings taken, from 950 px down to
-202 px. The mechanism shows directly in the data -- at the pen tool, full
+202 px. The 100 decomposes: 24 px of title bar (`FontSize` 16 from
+`Fonts.cpp:33` plus twice `FramePadding.y` 4 from `Layout.cpp:33`), 8 px of
+`WindowPadding.y`, two 30 px button rows for the tool strip and the frame
+slider (16 + 2x4 + `ItemSpacing.y` 6, `Layout.cpp:34`), and 8 px of padding
+below. The mechanism shows directly in the data -- at the pen tool, full
 width:
 
 ```
@@ -1357,7 +1463,23 @@ its floor in every one of them: below the threshold the content height stops
 changing, so overflow tracks shrink one for one. The shape-tool rows give
 296.0 the same way, and the 900 px pen rows give 356.0. Two thresholds in that
 table are read straight off a clipping row, one more likewise, and only the
-empty-status shape row is the formula alone.
+empty-status shape row is the formula alone. The rows are the four states the
+battery reached and not the four highest possible: a frame whose mask a run
+regenerated adds a line to any of them (above), so the boundary goes up with
+it. That is a property of the rule working, not of the rule breaking --
+`status_h` is the input, and it moves.
+
+**Both halves of the 164 are quoted at `ui_scale() == 1.0`, and the rule
+scales with it.** `px()` is `unscaled * ui_scale()` (`Layout.h:26`), so the
+canvas floor is 64 px only at scale 1; and every term of the 100 above is a
+font size or a style padding, all of which `apply_style` scales together
+(`Layout.cpp:49-50`: `style.ScaleAllSizes(scale)` and
+`style.FontScaleMain = scale`). `status_h` needs no such correction because it
+is read out of the running layout and already carries the scale. So the
+general form is **`window height < status_h + 164 * ui_scale()`**. That is
+derived from those three lines, **not measured**: every one of the fifteen
+readings above was taken at scale 1.0, and nothing in this plan was run on a
+scaled display.
 
 For scale: 340 px is about a third of the height the window opens at, the
 canvas is a 64 px sliver by then, and the content is still reachable by
@@ -1411,7 +1533,50 @@ re-verify by hand**: open the mask editor, press **I**, and confirm the
 `Edge map:` line is readable with nothing scrolled; then provoke an error
 (`chmod 555` on the mask directory and save) and confirm it is readable under
 both a shape tool and the pen tool. That is the whole check and it takes a
-minute. The height boundary below is the other half of it.
+minute. The height boundary in the section above is the other half of it.
+
+#### UNCOVERED, the rest of it: what was read rather than run
+
+The section above is one gap, named in detail because it is the newest. These
+are the others, collected in one place so that an inheritor does not have to
+infer them from what is absent. None of this is a defect; all of it is the
+shape of the evidence behind every number in this note.
+
+**Nothing automated ever drives the GUI.** `mask_doc_test` links `MaskLayer`,
+`MaskDoc`, `MaskSession`, `MaskWindow`, `EditDoc`, `SelectShape`, `Selection`,
+`FrameMask`, `FrameLook`, `Livewire` and `PathTool`
+(`cmake/SsApps.cmake:412-425`) -- **`MaskPanel.cpp` and `PathOverlay.cpp` are
+in no test target at all**, which is the deliberate ImGui carve-out and is
+also the reason nothing in CI can catch a panel regression. Every in-app
+result in this note came from a hand-run `guictl.py` battery. It is
+reproducible and it is written down step by step, but it runs only when
+somebody remembers to run it, and the two files that hold the paint grammar,
+the canvas mapping and the whole status strip are the ones it is the only net
+under.
+
+**Concurrency was reviewed by reading, never stressed.** There is no
+ThreadSanitizer build and no harness that opens, navigates, saves and closes a
+session under contention. The worker-to-`pump()` handoff, `_error` and
+`_status` stickiness, and the save queue are argued from the source in this
+note; none has been run against a scheduler trying to break it. The one place
+the race is visible in the record is the `cmp`-mid-write caveat in the Task 10
+check, which was found by accident rather than by looking.
+
+**The livewire bench arms were run once.** The `SS_MASK_BENCH` figures under
+"Plan 2, Task 9" are three repeats of the test binary; the in-app criterion-6
+figures are a single pass. Where the two agree, that is one sample against
+three, not two measurements that could have disagreed independently.
+
+**One backend, one platform, one machine.** Everything here is an M5 Pro on
+macOS 26.6.2, built `-DSS_BACKEND=vulkan`. No CUDA build of this code has been
+run, no non-macOS build, and no display at a ui scale other than 1.0.
+
+**Trusted, not re-verified**: `app::load_stencil`, `app::load_rgb`,
+`app::image_size` and `app::group_frames_by_camera` (`src/app/FrameMask.h`),
+and `app::photo_turn` (`src/app/FrameLook.h`). All pre-date this work and all
+are assumed correct by every fixture in it. The EXIF turn in particular is
+never exercised for real in a session test, because `stbi_write_jpg` writes no
+EXIF, so `photo_turn` is the identity in every one of them.
 
 #### Three traps this feature has already paid for
 
