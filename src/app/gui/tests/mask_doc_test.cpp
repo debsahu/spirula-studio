@@ -1581,6 +1581,83 @@ void test_livewire_mapping() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan 2, Task 7: the search
+// ---------------------------------------------------------------------------
+
+void test_livewire_edge_path() {
+    const int W = 200, H = 120;
+    mk::Livewire lw;
+    lw.build(step_edge_rgb(W, H).data(), W, H);
+    lw.set_anchor(100, 10);
+    check(lw.has_anchor(), "anchor set");
+    std::vector<int> p;
+    check(lw.path_to(100, 110, p), "path found along the edge");
+    check(p.size() >= 2 * 101, "path has at least 101 points: " + std::to_string(p.size() / 2));
+    check(p.size() >= 4 && p[0] == 100 && p[1] == 10, "path starts at the anchor");
+    check(p.size() >= 4 && p[p.size() - 2] == 100 && p[p.size() - 1] == 110,
+          "path ends at the target");
+    // Criterion #7: every point within one working pixel of the edge at
+    // x = 99.5, and consecutive points 8-adjacent.
+    float worst = 0.0f;
+    bool adjacent = true;
+    for (size_t i = 0; i + 1 < p.size(); i += 2) {
+        worst = std::max(worst, std::fabs((float)p[i] - 99.5f));
+        if (i >= 2)
+            adjacent &= std::abs(p[i] - p[i - 2]) <= 1 && std::abs(p[i + 1] - p[i - 1]) <= 1 &&
+                        (p[i] != p[i - 2] || p[i + 1] != p[i - 1]);
+    }
+    check(worst <= 1.0f, "every path pixel within 1 px of the edge (worst " +
+                             std::to_string(worst) + ")");
+    check(adjacent, "consecutive path points are 8-adjacent and distinct");
+    const double cost = lw.path_cost(100, 110);
+    check(cost >= 0.0 && cost < 1.0, "the edge path is nearly free: " + std::to_string(cost));
+    check(lw.pops() < 2000, "lazy: settled far fewer nodes than the grid holds: " +
+                                std::to_string(lw.pops()));
+    // A target off the edge is reachable too, and costlier per pixel.
+    check(lw.path_to(150, 60, p) && p[p.size() - 2] == 150 && p[p.size() - 1] == 60,
+          "off-edge target reached");
+    check(lw.path_cost(150, 60) > 20.0, "leaving the edge costs about 0.86 per pixel");
+    check(!lw.path_to(-1, 5, p), "outside the grid: no path");
+    mk::Livewire empty;
+    check(!empty.path_to(0, 0, p) && empty.path_cost(0, 0) < 0.0, "no anchor: no path");
+}
+
+void test_livewire_reanchor() {
+    mk::Livewire lw;
+    lw.build(step_edge_rgb(200, 120).data(), 200, 120);
+    std::vector<int> p1, p2;
+    lw.set_anchor(20, 20);
+    check(lw.path_to(150, 60, p1) && p1[0] == 20 && p1[1] == 20, "first anchor's path");
+    lw.set_anchor(180, 100);
+    check(lw.pops() == 0, "set_anchor resets the pop count");
+    check(lw.path_to(150, 60, p2) && p2[0] == 180 && p2[1] == 100,
+          "second anchor's path starts at the second anchor");
+    check(lw.path_cost(180, 100) == 0.0, "the anchor itself costs nothing");
+}
+
+void test_livewire_diagonal() {
+    // Uniform image: every link costs 0.85667 per unit length, so the cost
+    // to (20, 10) is (10 sqrt2 + 10) * 0.85667 = 20.6818 (hand-checked), and
+    // to (20, 0) is 17.1333. A Chebyshev metric gives 17.13 for both.
+    mk::Livewire lw;
+    lw.build(flat_rgb(64, 32, 128).data(), 64, 32);
+    lw.set_anchor(0, 0);
+    const double d = lw.path_cost(20, 10);
+    check(std::fabs(d - 20.6818) < 0.02, "diagonal links weighted by sqrt2: " + std::to_string(d));
+    const double a = lw.path_cost(20, 0);
+    check(std::fabs(a - 17.1333) < 0.02, "axial run: " + std::to_string(a));
+}
+
+void test_livewire_once() {
+    mk::Livewire lw;
+    lw.build(step_edge_rgb(200, 120).data(), 200, 120);
+    lw.set_anchor(100, 10);
+    std::vector<int> p;
+    for (int i = 0; i < 100; i++) lw.path_to(100 + (i % 7) - 3, 20 + i, p);
+    check(lw.builds() == 1, "100 cursor moves, one build");
+}
+
+// ---------------------------------------------------------------------------
 // Task 9: floors at 8K. SS_MASK_BENCH=<dir> writes the fixture there and
 // prints medians of three repeats; nothing here fails on a number.
 // ---------------------------------------------------------------------------
@@ -1719,6 +1796,10 @@ int main() {
     test_path_fill_parity();
     test_livewire_features();
     test_livewire_mapping();
+    test_livewire_edge_path();
+    test_livewire_reanchor();
+    test_livewire_diagonal();
+    test_livewire_once();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;

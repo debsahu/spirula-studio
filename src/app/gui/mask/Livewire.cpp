@@ -216,10 +216,77 @@ float Livewire::link_cost(int px, int py, int qx, int qy) const {
 // The search (Task 7)
 // ---------------------------------------------------------------------------
 
-void Livewire::set_anchor(int, int) { _anchor = -1; }
-void Livewire::expand_until(size_t) {}
-bool Livewire::path_to(int, int, std::vector<int>& out) { out.clear(); return false; }
-double Livewire::path_cost(int, int) { return -1.0; }
+void Livewire::set_anchor(int gx, int gy) {
+    _anchor = -1;
+    _pops = 0;
+    _heap.clear();
+    if (!ready() || !in_grid(gx, gy)) return;
+    const size_t n = (size_t)_gw * _gh;
+    _dist.assign(n, std::numeric_limits<float>::infinity());
+    _parent.assign(n, kUnseen);
+    _anchor = (int64_t)gy * _gw + gx;
+    _dist[(size_t)_anchor] = 0.0f;
+    _parent[(size_t)_anchor] = kAnchor;
+    _heap.push_back(Node{0.0f, (uint32_t)_anchor});
+}
+
+void Livewire::expand_until(size_t target) {
+    auto later = [](const Node& a, const Node& b) { return a.d > b.d; };
+    while (!(_parent[target] & kSettled) && !_heap.empty()) {
+        std::pop_heap(_heap.begin(), _heap.end(), later);
+        const Node top = _heap.back();
+        _heap.pop_back();
+        const size_t i = top.i;
+        // Lazy deletion: a stale entry for a settled node is skipped.
+        if (_parent[i] & kSettled) continue;
+        _parent[i] |= kSettled;
+        _pops++;
+        const int x = (int)(i % (size_t)_gw), y = (int)(i / (size_t)_gw);
+        for (int k = 0; k < 8; k++) {
+            const int nx = x + kDx[k], ny = y + kDy[k];
+            if (!in_grid(nx, ny)) continue;
+            const size_t j = (size_t)ny * _gw + nx;
+            if (_parent[j] & kSettled) continue;
+            const float nd = top.d + link_cost_k(i, j, k);
+            if (nd < _dist[j]) {
+                _dist[j] = nd;
+                _parent[j] = (uint8_t)((k + 4) & 7);
+                _heap.push_back(Node{nd, (uint32_t)j});
+                std::push_heap(_heap.begin(), _heap.end(), later);
+            }
+        }
+    }
+}
+
+bool Livewire::path_to(int gx, int gy, std::vector<int>& out) {
+    out.clear();
+    if (_anchor < 0 || !in_grid(gx, gy)) return false;
+    const size_t t = (size_t)gy * _gw + gx;
+    expand_until(t);
+    if (!(_parent[t] & kSettled)) return false;
+    int x = gx, y = gy;
+    while (true) {
+        out.push_back(x);
+        out.push_back(y);
+        const uint8_t back = _parent[(size_t)y * _gw + x] & 0x0F;
+        if (back == kAnchor) break;
+        x += kDx[back];
+        y += kDy[back];
+    }
+    // Backtraced target first; the caller wants the anchor first.
+    for (size_t a = 0, b = out.size() / 2 - 1; a < b; a++, b--) {
+        std::swap(out[2 * a], out[2 * b]);
+        std::swap(out[2 * a + 1], out[2 * b + 1]);
+    }
+    return true;
+}
+
+double Livewire::path_cost(int gx, int gy) {
+    if (_anchor < 0 || !in_grid(gx, gy)) return -1.0;
+    const size_t t = (size_t)gy * _gw + gx;
+    expand_until(t);
+    return (_parent[t] & kSettled) ? (double)_dist[t] : -1.0;
+}
 
 }  // namespace mask
 }  // namespace gui
