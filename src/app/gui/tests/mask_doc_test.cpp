@@ -2918,8 +2918,23 @@ void test_mask_sam_clicks() {
           "sam clicks: the const prompt() reads the state the non-const one wrote");
 }
 
-// Each frame holds one click that must be sent beside one that must not, so a
-// dropped filter shows as a second point rather than as an empty result.
+// A "not this" click travels with its label, in click order among the "this"
+// clicks; filtering or relabelling either kind changes what SAM is told.
+void test_mask_sam_negative_clicks() {
+    mk::MaskSam sam;
+    sam.add_click(3, "cam0", 10.0f, 20.0f);
+    sam.add_click(3, "cam0", 30.0f, 40.0f, /*positive=*/false);
+    sam.add_click(3, "cam0", 50.0f, 60.0f);
+    const std::vector<mk::SamPoint> pts = sam.object_points(3, "cam0");
+    check(pts.size() == 3, "sam negative: a negative click is sent, not dropped");
+    check(pts.size() == 3 && pts[0].positive && !pts[1].positive && pts[2].positive &&
+              pts[1].x == 30.0f && pts[1].y == 40.0f,
+          "sam negative: each point keeps its own label, in click order");
+    check(!sam.prompt().clicks[1].positive, "sam negative: the stored click is negative");
+}
+
+// Frame 6 holds a click that must be sent beside one that must not, so a dropped
+// source filter shows as a second point; frame 5's "not this" is sent, labelled.
 void test_mask_sam_click_filters() {
     mk::MaskSam sam;
     gui::MaskSettings& p = sam.prompt();
@@ -2930,8 +2945,9 @@ void test_mask_sam_click_filters() {
     sam.add_click(6, "cam0", 4.0f, 4.0f);
     p.clicks.back().source = "/captures/a.mp4";
     const std::vector<mk::SamPoint> neg = sam.object_points(5, "cam0");
-    check(neg.size() == 1 && neg[0].x == 1.0f,
-          "sam clicks: a negative click is excluded from the positive set");
+    check(neg.size() == 2 && neg[0].x == 1.0f && neg[0].positive && neg[1].x == 2.0f &&
+              !neg[1].positive,
+          "sam clicks: a negative click is sent beside the positive one, labelled");
     const std::vector<mk::SamPoint> src = sam.object_points(6, "cam0");
     check(src.size() == 1 && src[0].x == 3.0f,
           "sam clicks: a click carrying a dataset source is excluded");
@@ -2995,6 +3011,7 @@ int main() {
     test_add_history_bytes();
     test_mask_sam_stub_refuses();
     test_mask_sam_clicks();
+    test_mask_sam_negative_clicks();
     test_mask_sam_click_filters();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);

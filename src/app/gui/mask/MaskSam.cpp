@@ -29,10 +29,12 @@ bool MaskSam::has_model() const { return !_s->model.empty(); }
 MaskSettings& MaskSam::prompt() { return _s->prompt; }
 const MaskSettings& MaskSam::prompt() const { return _s->prompt; }
 
-void MaskSam::add_click(long long frame, const std::string& camera, float x, float y) {
+void MaskSam::add_click(long long frame, const std::string& camera, float x, float y,
+                        bool positive) {
     MaskClick c;
     c.x = x;
     c.y = y;
+    c.positive = positive;
     c.object = _s->prompt.current_object;
     c.frame = frame;
     c.camera = camera;
@@ -44,9 +46,9 @@ void MaskSam::add_click(long long frame, const std::string& camera, float x, flo
 std::vector<SamPoint> MaskSam::object_points(long long frame, const std::string& camera) const {
     std::vector<SamPoint> out;
     for (const MaskClick& c : _s->prompt.clicks)
-        if (c.positive && c.source.empty() && c.object == _s->prompt.current_object &&
-            c.frame == frame && c.camera == camera)
-            out.push_back(SamPoint{c.x, c.y});
+        if (c.source.empty() && c.object == _s->prompt.current_object && c.frame == frame &&
+            c.camera == camera)
+            out.push_back(SamPoint{c.x, c.y, c.positive});
     return out;
 }
 

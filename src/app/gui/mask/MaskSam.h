@@ -19,6 +19,7 @@ namespace mask {
 
 struct SamPoint {
     float x = 0.0f, y = 0.0f;   // frame pixels
+    bool positive = true;       // false: "not this", as SegmentPanel's right click
 };
 
 class MaskSam {
@@ -52,7 +53,8 @@ public:
     const MaskSettings& prompt() const;
     // A click joins prompt().current_object on `frame` (a MaskSession frame
     // index) and `camera`; object_points() is what a prompt then sends.
-    void add_click(long long frame, const std::string& camera, float x, float y);
+    void add_click(long long frame, const std::string& camera, float x, float y,
+                   bool positive = true);
     std::vector<SamPoint> object_points(long long frame, const std::string& camera) const;
 
     // The job co-owns `rgb`, so the caller may replace or drop its own copy at
