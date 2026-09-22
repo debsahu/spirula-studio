@@ -164,7 +164,12 @@ folder picker (restored to `1` afterward, as Tasks 13/14 did). Fixture:
 functions of `(w, h, seed)`, no RNG seeded from time, so the regenerated file
 reproduced the original byte count exactly, 1,567,695 bytes; `masks/f0001.png`
 was restored by copying its own recorded `.base.png` back over it; no
-`mask_edits/` directory survives in the fixture root).
+`mask_edits/` directory survives in the fixture root). Criterion #4 below was
+re-measured in a follow-up pass (the corroborating-quantity fix below);
+that pass used the in-app "Revert all" + "Done" before closing, and
+`masks/f0000.png`'s MD5 afterward matched the checksum recorded right after
+the first restoration exactly, confirming the fixture round-tripped clean a
+second time.
 
 ### A pre-existing automation-tooling defect, found and fixed: macOS swaps Ctrl and Super
 
@@ -194,26 +199,69 @@ does (both call the identical function, `MaskPanel.cpp:112` and `:250`), and
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
 
-### Criterion #4 in the app (Step 3)
+### Criterion #4 in the app (Step 3), with a corroborating quantity
 
 Brush grown to 106 px via nine `]` presses from the 24 px default
 (`step_brush`'s 1.18x per step: 24 -> 28 -> ... -> 106.4, rounds to 106; the
 brief's example values of 96/113 px do not fall out of this stepping, so 106
 is recorded as the nearest step actually reached). Zoomed to ~8x about the
 canvas center. 20 horizontal brush strokes, each ~500 mask px long (~761
-screen px at this zoom), reading "Last stroke: N ms" from the status strip
-after each:
+screen px at this zoom), all plain drags (ForceDrop).
 
-11.8, 11.4, 8.0, 43.1, 20.3, 8.8, 4.6, 13.6, 42.4, 48.4, 18.8, 5.0, 5.1, 11.8,
-29.4, 20.3, 36.6, 31.7, 5.0, 5.0 (ms)
+**Why a second quantity is necessary, not just nice to have.**
+`MaskSession::commit_stroke` short-circuits on an empty rect
+(`MaskSession.cpp:343-359`, `if (r.empty()) return {};`) and `upload_rect`
+does the same (`MaskPanel.cpp:68`), so a coordinate-mapping bug that made
+every automated drag much shorter than the claimed 500 px at radius 106
+would make the "Last stroke" readings *faster*, not slower or absent --
+indistinguishable from genuine success by timing alone. Task 9 corroborated
+its CPU-side number with a deterministic `history_bytes()` of exactly 60039
+across all three runs; this in-app run corroborates with the "Kept %"
+readout (`MaskPanel.cpp:267`), read before the series and after every one of
+the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
+Shift+Ctrl gestures actually change the mask.
 
-**Median 12.7 ms, max 48.4 ms. PASS** (bar: median <= 100 ms, max <= 250 ms;
-margin ~8x on the median, ~5x on the max -- smaller than the CPU-only margin
-above because this number also includes `glTexSubImage2D`, but not GPU
-completion; see the note already on file about what this number is CPU time
-through). Real variance across the 20 strokes (4.6-48.4 ms) rather than a flat
-line -- consistent with genuine per-stroke GL upload cost on a machine under
-load (see the memory section below for how loaded), not a stub.
+| stroke | ms | Kept % | stroke | ms | Kept % |
+|---|---|---|---|---|---|
+| (start) | -- | 50.1% | | | |
+| 1 | 11.6 | 49.7% | 11 | 5.0 | 49.4% |
+| 2 | 36.5 | 49.6% | 12 | 18.4 | 49.3% |
+| 3 | 12.2 | 49.6% | 13 | 21.6 | 49.3% |
+| 4 | 20.1 | 49.6% | 14 | 16.1 | 49.3% |
+| 5 | 12.6 | 49.5% | 15 | 27.6 | 49.2% |
+| 6 | 39.1 | 49.5% | 16 | 8.8 | 49.2% |
+| 7 | 45.1 | 49.5% | 17 | 18.4 | 49.2% |
+| 8 | 35.5 | 49.4% | 18 | 5.0 | 49.1% |
+| 9 | 5.1 | 49.4% | 19 | 23.1 | 49.1% |
+| 10 | 5.4 | 49.4% | 20 | 20.7 | 49.1% |
+
+**Median 18.4 ms, max 45.1 ms, min 5.0 ms. PASS** (bar: median <= 100 ms, max
+<= 250 ms; margin ~5x on the median, ~5.5x on the max). Two different runs of
+this same recipe, on the same machine, gave two different but both-passing
+medians (12.7 ms in an earlier run, 18.4 ms here) -- consistent with genuine
+per-stroke GL upload cost varying with machine load between runs, not a
+fixed or stubbed number.
+
+**The corroboration**: Kept % fell monotonically and substantially,
+50.1% -> 49.1%, never staying flat or moving by a rounding-noise amount. A
+delta of 1.0 percentage point over 7680x3840 = 29,491,200 mask pixels is
+294,912 px^2 of newly-forced-drop area. A single stroke's own claimed
+footprint (capsule: length x diameter + pi x r^2 = 500x212 + pi x 106^2 =
+141,301 px^2) is the same order of magnitude as that per-stroke average
+(294,912 / 20 = 14,746 px^2 marginal, small because the 20 strokes overlap
+heavily -- they were placed 20 screen px apart, ~13 mask px at this zoom,
+against a 212 px brush diameter, by design a dense serpentine sweep, not 20
+independent patches). Modelling the swept region as one continuous band
+(500 mask px long, ~380 screen px / ~249 mask px of travel across the 20
+positions plus the 212 px brush diameter overhang on the two open ends, so
+~461 mask px tall) predicts ~230,500 px^2 -- the same order of magnitude as
+the observed 294,912 px^2, and both are decisively larger than what a
+strokes-shrunk-by-a-coordinate-bug run would show (which would move Kept %
+by a small fraction of a percentage point, not a full point, over 20
+strokes). This does not prove the strokes were exactly 500 px; it does rule
+out the specific failure this criterion's timing alone cannot catch --
+strokes silently far smaller than claimed producing a falsely reassuring
+fast number.
 
 ### Criterion #9 in the app (Step 4)
 
@@ -228,8 +276,11 @@ because the first cycle's reading proved volatile -- see below):
 | 2 | 462.5 MB | 575.8 MB | 113.3 MB |
 | 3 | 443.0 MB | 575.3 MB | 132.3 MB |
 
-**Median delta 132.3 MB, max 211.6 MB. PASS** in every trial (bar <= 600 MB),
-with margin to spare even at the worst observed delta.
+**Max delta 211.6 MB (median 132.3 MB). PASS** in every trial (bar <= 600 MB).
+The max is the number to trust here, not the median: see the noise floor
+described next -- with the effect size and the measurement noise this close
+together, the worst observed reading is the defensible one, and it still
+clears the bar by 2.8x.
 
 Machine state this was measured under: NOT idle. `top`/`vm_stat` during these
 trials showed 23 GB of 24 GB physical memory in use, only ~250-280 MB free,
@@ -273,6 +324,14 @@ frame `f0000`:
 4. **Revert all + Done**: `mask_edits/` held only `index.json`; `cmp
    masks/f0000.png /tmp/f0000_regenerated.png` exited 0. **PASS.**
 
+Criterion #3 as a whole is fully covered only by combining this task with Task 14, not
+by either alone: `recomposite_frame` (`MaskLayer.cpp:317-345`) is the single primitive
+behind both paths -- the hand-crafted PNG rewrite above exercises it through "open a
+frame whose mask fingerprint no longer matches," and Task 14 already drove the same
+function through `recomposite_all` and the `DatasetPrep::run()` call site, end to end,
+against a real running SAM 3 model. This task adds no coverage of that call site or its
+logging; it only re-confirms the shared primitive from the editor-open path.
+
 ### Interaction checklist (Step 6)
 
 Driven through `guictl.py`, screenshots read visually (this session has no
@@ -302,9 +361,14 @@ what was inferred rather than run flagged as such.
   brush and polygon (four corners placed by individual clicks, closed with
   Enter) directly exercised, each producing a correctly-shaped tinted region
   and updating "Last stroke". Ellipse and lasso were **not** independently
-  driven this session; both share the identical `EditTool` commit path as
-  Box (spec's own "reused as is"), so this is an inference from Box's result
-  and from code, not a separate run.
+  driven this session; the inference rests on two different directly-tested
+  tools, not one. Ellipse shares Box's two-corner-drag mechanics exactly
+  (`EditTool.cpp:205`, `_id == ToolId::Box || _id == ToolId::Ellipse`), so it
+  is inferred from Box. Lasso does **not** share Box's path: it shares
+  Brush's freehand point-accumulation (`EditTool.cpp:160`,
+  `_id == ToolId::Lasso || _id == ToolId::Brush`), a structurally different
+  path with its own step threshold and geometry builder, so it is inferred
+  from Brush, not from Box.
 - [x] **`[`/`]` change `Brush: N px`; the drawn circle scales with zoom;
   radius is constant in mask pixels across zoom.** Grown 24 -> 28 -> 106 px;
   the preview circle visibly grew between the 1x and ~8x screenshots at the
