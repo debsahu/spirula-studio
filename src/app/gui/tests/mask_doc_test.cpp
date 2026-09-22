@@ -2060,6 +2060,30 @@ void p95_max(std::vector<double>& v, double& p95, double& mx) {
     mx = v.empty() ? 0.0 : v.back();
 }
 
+// Pearson r between move index and its time, in call order: whether cost
+// trends with index (it does -- see docs/notes/mask-editor.md).
+double index_corr(const std::vector<double>& y) {
+    const size_t n = y.size();
+    double mi = 0.0, my = 0.0;
+    for (size_t i = 0; i < n; i++) { mi += (double)i; my += y[i]; }
+    mi /= (double)n; my /= (double)n;
+    double cov = 0.0, vi = 0.0, vy = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        const double di = (double)i - mi, dy = y[i] - my;
+        cov += di * dy; vi += di * di; vy += dy * dy;
+    }
+    return (vi > 0.0 && vy > 0.0) ? cov / std::sqrt(vi * vy) : 0.0;
+}
+
+// p95 of the last n moves in call order: what the warm-up filter would keep
+// if it admitted a fixed suffix instead of a cumulative-time threshold.
+double tail_p95(const std::vector<double>& all, size_t n) {
+    std::vector<double> tail(all.end() - (long)std::min(n, all.size()), all.end());
+    double p95, mx;
+    p95_max(tail, p95, mx);
+    return p95;
+}
+
 void bench_livewire_on(const char* label, const std::vector<uint8_t>& rgb, int fw, int fh) {
     mk::Livewire lw;
     // One direct call, not median_ms (repeats=3 would leave builds() at 3
@@ -2078,8 +2102,9 @@ void bench_livewire_on(const char* label, const std::vector<uint8_t>& rgb, int f
     lw.set_anchor(ax, ay);
     std::vector<int> path;
     std::vector<double> ms, ms_all;
+    std::vector<size_t> dpops;
     double elapsed = 0.0;
-    size_t skipped = 0, found = 0;
+    size_t skipped = 0, found = 0, prev_pops = lw.pops();
     for (int i = 1; i <= 200; i++) {
         const auto a = std::chrono::steady_clock::now();
         const bool ok = lw.path_to(std::min(lw.width() - 1, ax + 2 * i), ay + (i % 5) - 2, path);
@@ -2087,15 +2112,25 @@ void bench_livewire_on(const char* label, const std::vector<uint8_t>& rgb, int f
         if (ok && !path.empty()) found++;
         const double t = std::chrono::duration<double, std::milli>(b - a).count();
         ms_all.push_back(t);
+        dpops.push_back(lw.pops() - prev_pops);
+        prev_pops = lw.pops();
         elapsed += t;
         if (elapsed <= 200.0) { skipped++; continue; }
         ms.push_back(t);
     }
     double p95, mx, p95_all, mx_all;
     p95_max(ms, p95, mx);
-    p95_max(ms_all, p95_all, mx_all);
+    std::vector<double> ms_all_sorted = ms_all;
+    p95_max(ms_all_sorted, p95_all, mx_all);
     std::printf("bench livewire %-8s cursor moves: %zu timed (%zu in the first 200 ms), p95 %8.2f ms  max %8.2f ms  | all 200: p95 %8.2f ms  max %8.2f ms  pops %zu  builds %d  found %zu/200  [bar: p95 <= 16, builds == 1]\n",
                 label, ms.size(), skipped, p95, mx, p95_all, mx_all, lw.pops(), lw.builds(), found);
+    // Does cost trend with move index, and what would a suffix-based filter
+    // (rather than the cumulative-time one above) have reported.
+    std::vector<size_t> dp = dpops;
+    std::sort(dp.begin(), dp.end());
+    std::printf("bench livewire %-8s tail p95: last150 %7.3f  last100 %7.3f  last50 %7.3f ms  corr(idx,ms) %+.3f  elapsed_total %7.1f/200 ms  pops/move min/median/max %zu/%zu/%zu\n",
+                label, tail_p95(ms_all, 150), tail_p95(ms_all, 100), tail_p95(ms_all, 50),
+                index_corr(ms_all), elapsed, dp.front(), dp[dp.size() / 2], dp.back());
 }
 
 void bench_livewire(const char* dir) {
