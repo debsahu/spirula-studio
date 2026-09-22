@@ -2719,6 +2719,12 @@ void test_add_stencil_rejects_empty() {
     bad[0].mask.assign(3, 255);
     check(!mk::build_add_stencil(bad, 64, 48, st, b, set),
           "add stencil: a plane of the wrong length is skipped");
+    std::vector<mk::AddRegion> big(1);
+    big[0].w = 4;
+    big[0].h = 4;
+    big[0].mask.assign(20, 255);
+    check(!mk::build_add_stencil(big, 64, 48, st, b, set),
+          "add stencil: an oversized plane is skipped too");
     check(st.W == 7 && st.in.empty() && same_rect(b, mk::Rect{1, 2, 3, 4}) && set == 99,
           "add stencil: false leaves all three outputs untouched");
 }
