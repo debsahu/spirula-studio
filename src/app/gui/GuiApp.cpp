@@ -2673,6 +2673,15 @@ std::string GuiApp::state_json() {
     out += ",\"mask_editor_anchors\":" + std::to_string(_mask_editor.path_anchors());
     out += ",\"sam_margin\":" + std::to_string(_mask_editor.sam_margin());
     out += ",\"mask_dilate_ratio\":" + std::to_string(_mask.dilate_ratio);
+    // The dataset screen's clicked objects, which no editor click may reach,
+    // beside the editor's own, which a widget wired to nothing leaves at zero.
+    out += ",\"mask_clicks\":" + std::to_string(_mask.clicks.size());
+    out += ",\"mask_object_count\":" + std::to_string(_mask.object_count);
+    out += ",\"mask_current_object\":" + std::to_string(_mask.current_object);
+    out += ",\"mask_prompt\":" + quoted(_mask.prompt);
+    out += ",\"mask_editor_objects\":" + std::to_string(_mask_editor.sam_object_count());
+    out += ",\"sam_reapply_ms\":" + std::to_string(_mask_editor.sam_reapply_ms());
+    out += ",\"sam_held_bytes\":" + std::to_string(_mask_editor.sam_held_bytes());
     return out;
 }
 

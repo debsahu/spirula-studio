@@ -22,6 +22,7 @@
 // and a chip whose term is present is drawn highlighted, so the palette also
 // reads as a summary of what the prompt currently says.
 
+#include "app/gui/MaskSettings.h"
 #include "i18n/Message.h"
 
 #include <functional>
@@ -61,6 +62,15 @@ bool draw_subject_palette(std::string& prompt, std::string& negative,
 // label beside a `width` slider, else above it. True when it changed.
 bool draw_margin_slider(float& dilate_ratio, float& shrink_ratio, bool keep, float width,
                         bool inline_label);
+
+// One colour per object, IM_COL32-packed; red is left for "not this" clicks.
+unsigned int mask_object_color(int object);
+
+// The clicked-object list: a row per object with its click counts on `frame` /
+// `camera` and elsewhere, "Another object" and the clears. Only clicks from
+// `source` count and are cleared. Writes clicks, object_count, current_object.
+void draw_mask_objects(MaskSettings& settings, long long frame, const std::string& camera,
+                       const std::string& source, bool& edited);
 
 class FileDownload;   // app/gui/ModelCache.h
 

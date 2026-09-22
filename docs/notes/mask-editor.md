@@ -356,7 +356,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:177` and `:405`), and
+does (both call the identical function, `MaskPanel.cpp:177` and `:409`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -379,7 +379,7 @@ would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:452`), read before the series and after every one of
+readout (`MaskPanel.cpp:456`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -483,7 +483,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:177` (`ui::Button(msg::undo)`) and `:405`
+   worked. `MaskPanel.cpp:177` (`ui::Button(msg::undo)`) and `:409`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -529,7 +529,7 @@ what was inferred rather than run flagged as such.
   pre-stroke value and removed the tint. "The modifier read is the one held
   at release" is read from source (`MaskPanel.cpp:319-320` samples
   `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
-  and `:347` hands those to `paint_now` on the frame the stroke commits)
+  and `:351` hands those to `paint_now` on the frame the stroke commits)
   rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
@@ -1357,11 +1357,11 @@ height -- which is the same reason the reserve is measured rather than
 computed.
 
 **That 192 px is the worst case the battery reached, not the worst case
-`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:438-477`), the eight
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:442-481`), the eight
 items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
 `hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
 and the status-or-error line. Two more items exist: `status_base_regenerated`
-and `status_base_missing` (`MaskPanel.cpp:457-460`), one `TextDisabledWrapped`
+and `status_base_missing` (`MaskPanel.cpp:461-464`), one `TextDisabledWrapped`
 each and mutually exclusive, since `base_state()` returns one value. Neither
 was on screen for any row of the table above, and the exact arithmetic is how
 that is known rather than assumed -- 110, 132 and 176 are 5, 6 and 8 lines to
@@ -1421,7 +1421,7 @@ than wrong.
 
 **The fix above removes the defect at every window size a person would work
 at, and does not remove it at every window size.** `draw_canvas` floors the
-canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:438-477`) draws its
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:442-481`) draws its
 full content unconditionally with no cap and no truncation. Once the window is
 short enough that the canvas has pinned at its floor, every further pixel of
 shrink becomes a pixel of strip pushed past the window bottom. It is the same
@@ -1673,7 +1673,7 @@ keeps them apart. **The operator used it on a real 120 MP correction and asked
 for the opposite**: *"carry over eraser and brush size from each other, rather
 than keeping it independent."* Their experience of the task beats the
 generalisation, so `_eraser` is gone and `radius()` / `set_radius()`
-(`MaskSession.h:97-98`) address the one float. The slider, `[`/`]` and
+(`MaskSession.h:99-100`) address the one float. The slider, `[`/`]` and
 Alt+wheel all move it whichever tool is up.
 
 **The test was inverted, not deleted.** It guarded independence, which is now
@@ -2115,10 +2115,8 @@ removed changed the +-5% hashes and left ratio 0's alone.
 **Measured in the app** on one chair click: drop at 0% 412,176 px, at 5% 496,156, at
 12% 598,593; Ctrl-keep and Shift+Ctrl-clear at 12% both 412,176 (the exact outline).
 
-**A changed slider applies to the next click, not the last one.** Re-applying means
-holding the raw detection (a 120 MB plane at this size), undoing its add while it is
-still on top of the history, and rebuilding the stencil and margin (~150-300 ms) --
-the same "replace the object's add" machinery plan Task 6 builds for refining clicks.
+**A changed slider applies to the next click, not the last one.** (Superseded by
+Task 6, below: a release of the slider now re-applies it to the drop just made.)
 
 **A click off the picture is ignored.** `sam_prompt_point` refuses a point outside
 `[0, fw) x [0, fh)` before any job starts, quietly: clicking the dark margin at
@@ -2142,7 +2140,50 @@ The SAM button widens tool row 1 by one button: `Done`'s right edge is **1172 px
 always one line), SAM **258** with the margin slider, SAM with no cached checkpoint
 **288**. By the rule above SAM mode clips below **422 px** of window height, **452 px**
 with no checkpoint; the first line to go is the key hint at the bottom, the last the
-error line at the top.
+error line at the top. (Task 6's object box raises these to about 536 and 566 px.)
+
+### Task 6: the object list, refinement that replaces, and the margin re-applied
+
+**How to reach it.** In SAM mode the strip now carries the dataset screen's own
+object list ("Objects to click on"), moved verbatim into `draw_mask_objects`
+(`MaskPrompt.cpp`) and bound to the editor's MaskSettings. A click joins the
+current object; a **right click** is "not this" on it (red dot with a cross); the
+prompt is every click that object has on this frame. **A second click on the same
+object replaces its add** while that add is still the newest edit on the frame
+(stamped by `sam_frame_stamp()` and `MaskDoc::revision()`); another object, a text
+prompt, or any edit in between adds instead. The cost, stated in the hint: one
+Ctrl+Z after a refinement removes the whole object. A right click refines in the
+mode of the add it replaces (a kept object stays kept); with none to replace it
+takes the modifiers. **Releasing the margin slider re-applies it** to the drop just
+made, in place, under the same rule. The list sits in a fixed-height box (two
+objects, then it scrolls, to the end on a new one), so adding objects never moves
+the picture: the canvas read 474 px with 1 to 5 objects.
+
+**What is held for the re-apply.** The click's detections, cropped to their set
+pixels (`HeldRegion`), not the 120 MB plane: 3.1-3.3 MB for the monopod. A keep, a
+clear or a text prompt holds nothing, and the crop is let go on the first frame it
+can no longer re-apply.
+
+| check (M5 Pro, `sam3-q4_0`, 15520x7760, margin 0) | observed |
+|---|---|
+| CLI null, `P` 12261,6053 alone / with `N` 12400,6800 | 1,333,113 / 1,147,773 px, separation 13.9 % |
+| app, `P` then right-click `N` (landed 12262.1,6057.4 / 12393.1,6794.1) | 1,333,327 / 1,109,641 px; `\|APP_A - A\| / A` 0.016 % |
+| history over both prompts; clicks | 0 -> 1; 0 -> 2 |
+| saved drop layer after Ctrl+S | 1,109,641 == the refinement, not the union |
+| the same run on a build that drops negative points | 1,333,327 / 1,333,327: fails |
+| a lone right click on a new object | results 1 -> 1, clicks 1 -> 1 |
+| three clicks on one object, then a second object (frame 2) | history 1 after all three, 2 after the fourth |
+| slider re-apply, UI thread (`sam_reapply_ms`) | 270-330 ms on one session, 650-1020 ms on another; the stencil rebuild is ~280 ms of it |
+
+**The dataset screen is untouched (P13).** Its fields were set to a prompt, three
+objects and the second current, then an editor session made 9 clicks on 3 objects:
+`mask_clicks 0, object_count 3, current_object 1, prompt "person"` read identically
+before the editor, with it open, and after Done. The object list drawn by the
+dataset preview was pixel-identical (0 of 54,000 pixels) before and after the move.
+
+**The strip.** The object box adds 112 px: SAM mode now fits down to a window of
+about **536 px** (measured: canvas 73 px at 545, at its 64 px floor by 500), about
+566 px with no cached checkpoint (derived, +30, not measured).
 
 ### Misses and open items
 

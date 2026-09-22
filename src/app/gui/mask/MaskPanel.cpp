@@ -320,10 +320,14 @@ void MaskSession::draw_canvas() {
     in.ctrl = io.KeyCtrl;
     in.alt = io.KeyAlt;
     if (sam_mode()) {
+        // Left is "this", right "not this": the dataset screen's grammar.
         float fx = 0.0f, fy = 0.0f;
-        if (in.clicked && !sam_busy() && sam_has_model() &&
-            shown_to_frame(io.MousePos.x, io.MousePos.y, fx, fy))
-            sam_prompt_point(fx, fy, paint_now(io.KeyShift, io.KeyCtrl));
+        if ((in.clicked || in.right_clicked) && !sam_busy() && sam_has_model() &&
+            shown_to_frame(io.MousePos.x, io.MousePos.y, fx, fy)) {
+            const Paint mode = paint_now(io.KeyShift, io.KeyCtrl);
+            sam_prompt_point(fx, fy, in.clicked ? mode : sam_refine_mode(mode), in.clicked);
+        }
+        draw_sam_clicks(dl, m, origin.x, origin.y);
     } else if (path_mode()) {
         ensure_livewire();
         _path.set_space(path_space(m));
@@ -476,16 +480,44 @@ void MaskSession::draw_status() {
     ui::TextDisabledWrapped(msg::hint_view);
 }
 
+// The editor's clicks on this frame, as SegmentPanel draws them: the object's
+// colour, and red with a cross for "not this" so colour is not the only cue.
+void MaskSession::draw_sam_clicks(ImDrawList* dl, const Mapping& m, float ox, float oy) {
+    if (!_sam || _idx < 0 || _idx >= frame_count()) return;
+    const PathSpace ps = path_space(m);
+    const std::string& camera = _frames[(size_t)_idx].camera;
+    const float r = px(6.0f), k = px(3.0f);
+    for (const MaskClick& c : sam_prompt().clicks) {
+        if (!c.source.empty() || c.frame != _idx || c.camera != camera) continue;
+        float x = 0.0f, y = 0.0f;
+        ps.from_frame(c.x, c.y, x, y);
+        const ImVec2 p(ox + x, oy + y);
+        dl->AddCircleFilled(p, r, c.positive ? (ImU32)mask_object_color(c.object)
+                                             : IM_COL32(240, 90, 90, 255));
+        dl->AddCircle(p, r, IM_COL32(20, 20, 20, 200), 0, 1.5f);
+        if (c.positive) continue;
+        dl->AddLine(ImVec2(p.x - k, p.y - k), ImVec2(p.x + k, p.y + k), IM_COL32(255, 255, 255, 255), 1.5f);
+        dl->AddLine(ImVec2(p.x - k, p.y + k), ImVec2(p.x + k, p.y - k), IM_COL32(255, 255, 255, 255), 1.5f);
+    }
+}
+
 // GuiApp's picker over the app's one model, the hint, then a two-line slot the
 // busy, error and result lines share: none of them may resize the canvas.
 void MaskSession::draw_sam_status() {
     if (_model_picker) _model_picker();
     if (!sam_has_model()) ui::TextDisabled(dmsg::mask_model_first);
-    // The editor's own margin, never the dataset's; a drop takes it (drop_margin).
+    // The editor's own margin, never the dataset's. A drop takes it, and a
+    // release re-applies it to the drop just made while that is still on top.
     MaskSettings& p = sam_prompt();
-    draw_margin_slider(p.dilate_ratio, p.shrink_ratio, /*keep=*/false, px(220.0f),
-                       /*inline_label=*/true);
+    if (draw_margin_slider(p.dilate_ratio, p.shrink_ratio, /*keep=*/false, px(220.0f),
+                           /*inline_label=*/true))
+        _sam_margin_moved = true;
+    if (_sam_margin_moved && !ImGui::IsAnyItemActive()) {
+        _sam_margin_moved = false;
+        upload_rect(sam_reapply_margin());
+    }
     ui::TextDisabledWrapped(msg::sam_hint);
+    draw_sam_objects();
     const float y0 = ImGui::GetCursorPosY();
     const std::string sam_err = sam_error();
     if (sam_busy()) {
@@ -503,6 +535,26 @@ void MaskSession::draw_sam_status() {
     const float used = ImGui::GetCursorPosY() - y0;
     const float pad = slot - used - ImGui::GetStyle().ItemSpacing.y;
     if (pad > 0.0f) ImGui::Dummy(ImVec2(0.0f, pad));
+}
+
+// The dataset screen's object list over the editor's clicks, in a fixed-height
+// box (two objects, then it scrolls, to the end on a new one) so the picture
+// never moves. Disabled with no checkpoint: the line above says why.
+void MaskSession::draw_sam_objects() {
+    if (_idx < 0 || _idx >= frame_count()) return;
+    const float h = ImGui::GetTextLineHeightWithSpacing() + 3.0f * ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginDisabled(!sam_has_model());
+    if (ImGui::BeginChild("##samobjects", ImVec2(0.0f, h))) {
+        MaskSettings& p = sam_prompt();
+        bool edited = false;
+        draw_mask_objects(p, (long long)_idx, _frames[(size_t)_idx].camera, std::string(), edited);
+        // Twice: the first frame clamps to the content size before the new row.
+        if (p.object_count != _sam_objects_drawn) _sam_scroll_frames = 2;
+        if (_sam_scroll_frames > 0 && _sam_scroll_frames--) ImGui::SetScrollHereY(1.0f);
+        _sam_objects_drawn = p.object_count;
+    }
+    ImGui::EndChild();
+    ImGui::EndDisabled();
 }
 
 }  // namespace mask

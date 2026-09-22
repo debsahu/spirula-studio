@@ -82,6 +82,13 @@ std::vector<SamPoint> MaskSam::object_points(long long frame, const std::string&
     return out;
 }
 
+std::vector<SamPoint> MaskSam::prompt_points(long long frame, const std::string& camera,
+                                             SamPoint click) const {
+    std::vector<SamPoint> out = object_points(frame, camera);
+    out.push_back(click);
+    return out;
+}
+
 std::string MaskSam::status() const {
     std::lock_guard<std::mutex> lk(_s->mu);
     return _s->status;
@@ -111,8 +118,10 @@ bool MaskSam::clear_error_if(const std::string& reason) {
 }
 
 SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                           int doc_h, Paint mode, float margin, float score) {
+                           int doc_h, Paint mode, float margin, float score, bool hold) {
     SamResult r;
+    if (hold && mode == Paint::ForceDrop)
+        for (const AddRegion& g : regions) r.held.push_back(hold_region(g));
     r.frame_key = std::move(frame_key);
     r.mode = mode;
     r.score = score;
@@ -132,7 +141,7 @@ void MaskSam::publish(State& s, SamResult r) {
 void MaskSam::post_result(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
                           int doc_h, Paint mode, float margin, float score, double ms) {
     SamResult r =
-        prepare(std::move(frame_key), std::move(regions), doc_w, doc_h, mode, margin, score);
+        prepare(std::move(frame_key), std::move(regions), doc_w, doc_h, mode, margin, score, true);
     r.ms = ms;
     publish(*_s, std::move(r));
 }
@@ -402,7 +411,8 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         std::lock_guard<std::mutex> lk(s.mu);
         s.vram_mib = mib;
     }
-    SamResult res = prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode, j.margin, best);
+    SamResult res =
+        prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode, j.margin, best, !j.text);
     res.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
                  .count();
     // The stencil takes ~150 ms at 15520x7760; an Esc during it must still win.

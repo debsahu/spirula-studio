@@ -8,6 +8,7 @@
 
 #include "app/gui/GlLoader.h"
 #include "app/gui/edit/EditTool.h"
+#include "app/gui/mask/MaskAdd.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/MaskWindow.h"
 #include "app/gui/mask/Livewire.h"
@@ -37,6 +38,7 @@ struct FrameRef {
 };
 
 class MaskSam;
+struct SamResult;
 
 // What a left click on the canvas does. One value rather than a flag per tool,
 // so no two can be on at once, whichever picker forgets what.
@@ -133,6 +135,19 @@ public:
     bool sam_prompt_text(const std::string& phrases);
     // Paints a finished result onto the open frame; the DISPLAYED rect changed.
     Rect sam_pump();
+    // The paint half of sam_pump(): a re-prompt of the object whose add is still
+    // this frame's newest edit replaces it; anything else adds. -1 = text.
+    Rect apply_sam_add(SamResult res, int object);
+    // A "not this" refines in the mode of the current object's add, if that add
+    // is still on top; `fallback` (the modifiers) otherwise.
+    Paint sam_refine_mode(Paint fallback) const;
+    // The margin slider moved: rebuild the last drop at the editor's margin, in
+    // place, while it is still on top. The DISPLAYED rect changed, or empty.
+    bool sam_margin_reapplies() const;
+    Rect sam_reapply_margin();
+    double sam_reapply_ms() const { return _sam_reapply_ms; }
+    // What the held detections take, bytes; 0 once they cannot re-apply.
+    size_t sam_held_bytes() const;
     std::string sam_status() const;
     std::string sam_error() const;
     double sam_vram_mib() const;
@@ -213,6 +228,7 @@ private:
     void post_error(const std::string& s, bool sticky);
     void set_corrected(int n);
     Rect shown_rect(const Rect& stored) const;
+    bool sam_add_on_top(int object) const;
     // MaskPanel.cpp
     // How a tool is chosen, so the toolbar and the key handler cannot drift
     // apart over what else a switch cancels. The mode itself is one value.
@@ -224,6 +240,8 @@ private:
     void draw_canvas();
     void draw_status();
     void draw_sam_status();
+    void draw_sam_objects();
+    void draw_sam_clicks(ImDrawList* dl, const Mapping& m, float ox, float oy);
     void draw_revert_all_modal();
     void handle_keys(const Mapping& m);
     void ensure_window(const Mapping& m, float pane_w, float pane_h);
@@ -275,6 +293,18 @@ private:
     double _sam_ui_ms = 0.0;
     float _sam_click_x = -1.0f, _sam_click_y = -1.0f;
     float _canvas_h = 0.0f;
+    // The last SAM add: the document stamp and revision it left, its object and
+    // mode, and its detections while it is a re-appliable drop.
+    int _sam_job_object = -1;        // the running job's object; -1 for text
+    std::string _sam_add_key;
+    uint64_t _sam_add_rev = 0;
+    int _sam_add_object = -1;
+    Paint _sam_add_mode = Paint::ForceDrop;
+    std::vector<HeldRegion> _sam_held;
+    double _sam_reapply_ms = 0.0;
+    bool _sam_margin_moved = false;  // MaskPanel.cpp: re-apply once the slider lets go
+    int _sam_objects_drawn = 0;      // MaskPanel.cpp: the object count the list last drew
+    int _sam_scroll_frames = 0;      // frames left to hold that list at its end
     Mapping _shown;
     float _shown_x = 0.0f, _shown_y = 0.0f;
     bool _shown_valid = false;       // cleared wherever a new document arrives

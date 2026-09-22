@@ -25,6 +25,7 @@ void run_guarded(const std::function<void()>& body,
 
 // A finished job, its stencil built at the document's size on the thread that
 // finished it, so the UI thread only paints. `landed` false: no pixel landed.
+// A click's drop also holds its detections, so the margin can be re-applied.
 struct SamResult {
     std::string frame_key;
     Paint mode = Paint::ForceDrop;
@@ -35,6 +36,7 @@ struct SamResult {
     Stencil stencil;
     Rect bounds;
     int64_t set_px = 0;
+    std::vector<HeldRegion> held;
 };
 
 struct SamPoint {
@@ -77,6 +79,9 @@ public:
     void add_click(long long frame, const std::string& camera, float x, float y,
                    bool positive = true);
     std::vector<SamPoint> object_points(long long frame, const std::string& camera) const;
+    // What a click sends: object_points(), then the click itself.
+    std::vector<SamPoint> prompt_points(long long frame, const std::string& camera,
+                                        SamPoint click) const;
 
     // The job co-owns `rgb`, so the caller may drop its copy at once. `points`
     // are frame pixels, `phrases` semicolon separated; the stencil is doc_w x
@@ -108,7 +113,7 @@ private:
     bool launch(Job job);
     void release_device();   // the SAM-only half of release()
     static SamResult prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                             int doc_h, Paint mode, float margin, float score);
+                             int doc_h, Paint mode, float margin, float score, bool hold);
     static void publish(State& s, SamResult r);
     static void run(State& s, Job job);
     static void run_stages(State& s, Job job,

@@ -617,11 +617,11 @@ float MaskSession::sam_margin() const { return _sam ? _sam->prompt().dilate_rati
 
 double MaskSession::sam_vram_mib() const { return _sam ? _sam->vram_mib() : -1.0; }
 
-// Slice 1: one click is one prompt, and a lone "not this" has nothing to refine.
-// A point off the frame is ignored quietly: SAM answers it with speckle.
+// A click joins the current object on this frame, and the prompt is every click
+// that object has here, "not this" ones included. It is recorded only once its
+// job starts. A point off the frame is ignored quietly: SAM answers it with speckle.
 bool MaskSession::sam_prompt_point(float frame_x, float frame_y, Paint mode, bool positive) {
-    if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending || !positive)
-        return false;
+    if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending) return false;
     if (!(frame_x >= 0.0f && frame_y >= 0.0f && frame_x < (float)_fw && frame_y < (float)_fh))
         return false;
     if (!_sam_blocker.empty()) {
@@ -630,10 +630,15 @@ bool MaskSession::sam_prompt_point(float frame_x, float frame_y, Paint mode, boo
     }
     _sam_click_x = frame_x;
     _sam_click_y = frame_y;
-    std::vector<SamPoint> points{SamPoint{frame_x, frame_y, true}};
-    if (!sam().start_points(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
-                            std::move(points), mode, sam_prompt().dilate_ratio))
+    MaskSam& sam = this->sam();
+    const std::string& camera = _frames[(size_t)_idx].camera;
+    std::vector<SamPoint> points =
+        sam.prompt_points(_idx, camera, SamPoint{frame_x, frame_y, positive});
+    if (!sam.start_points(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
+                          std::move(points), mode, sam_prompt().dilate_ratio))
         return false;
+    sam.add_click(_idx, camera, frame_x, frame_y, positive);
+    _sam_job_object = sam.prompt().current_object;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;
 }
@@ -647,12 +652,15 @@ bool MaskSession::sam_prompt_text(const std::string& phrases) {
     if (!sam().start_text(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
                           phrases, sam_prompt().dilate_ratio))
         return false;
+    _sam_job_object = -1;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;
 }
 
 Rect MaskSession::sam_pump() {
     if (!_sam) return {};
+    // The held detections are only worth their memory while they can re-apply.
+    if (!_sam_held.empty() && !sam_margin_reapplies()) _sam_held.clear();
     SamResult res;
     // A model change: the old model's answer, if any, is counted and dropped.
     if (_sam_release_pending) {
@@ -674,16 +682,73 @@ Rect MaskSession::sam_pump() {
     _sam_last_job_ms = res.ms;
     _sam_last_score = res.score;
     _sam_last_detections = res.detections;
-    _sam_last_area = 0;
-    Rect shown;
-    if (res.landed) {
-        _sam_last_area = res.set_px;
-        _doc->paint(res.mode, std::move(res.stencil), res.bounds);
-        shown = shown_rect(_doc->last_change());
-    }
+    const Rect shown = apply_sam_add(std::move(res), _sam_job_object);
     _sam_last_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - _sam_t0)
             .count();
+    return shown;
+}
+
+// The stamp names the document (a reload moves it) and the revision every paint,
+// undo and redo moves; so "on top" means nothing has happened since the add.
+bool MaskSession::sam_add_on_top(int object) const {
+    return object >= 0 && object == _sam_add_object && _doc && _doc->can_undo() &&
+           sam_frame_stamp() == _sam_add_key && _doc->revision() == _sam_add_rev;
+}
+
+Rect MaskSession::apply_sam_add(SamResult res, int object) {
+    _sam_last_area = 0;
+    if (!_doc || !res.landed) return {};
+    Rect changed;
+    if (sam_add_on_top(object)) {
+        _doc->undo();
+        changed = _doc->last_change();
+    }
+    const uint64_t before = _doc->revision();
+    _doc->paint(res.mode, std::move(res.stencil), res.bounds);
+    // A paint that changed nothing records no step, so nothing of ours is on top.
+    const bool painted = _doc->revision() != before;
+    if (painted) changed = join(changed, _doc->last_change());
+    _sam_add_key = painted ? sam_frame_stamp() : std::string();
+    _sam_add_rev = _doc->revision();
+    _sam_add_object = painted ? object : -1;
+    _sam_add_mode = res.mode;
+    _sam_held = painted && object >= 0 ? std::move(res.held) : std::vector<HeldRegion>();
+    _sam_last_area = res.set_px;
+    return shown_rect(changed);
+}
+
+Paint MaskSession::sam_refine_mode(Paint fallback) const {
+    return _sam && sam_add_on_top(_sam->prompt().current_object) ? _sam_add_mode : fallback;
+}
+
+bool MaskSession::sam_margin_reapplies() const {
+    return !_sam_held.empty() && _sam_add_mode == Paint::ForceDrop &&
+           sam_add_on_top(_sam_add_object);
+}
+
+size_t MaskSession::sam_held_bytes() const {
+    size_t n = 0;
+    for (const HeldRegion& h : _sam_held) n += h.mask.size();
+    return n;
+}
+
+// On the UI thread, once per slider release: the held crops are rebuilt at the
+// frame's size and grown again, the one full-plane pass this costs.
+Rect MaskSession::sam_reapply_margin() {
+    if (!sam_margin_reapplies()) return {};
+    const auto t0 = std::chrono::steady_clock::now();
+    std::vector<AddRegion> regions;
+    for (const HeldRegion& h : _sam_held) regions.push_back(expand_region(h));
+    SamResult r;
+    r.mode = Paint::ForceDrop;
+    r.landed = build_add_stencil(regions, _doc->width(), _doc->height(), r.stencil, r.bounds,
+                                 r.set_px, drop_margin(r.mode, sam_prompt().dilate_ratio));
+    if (!r.landed) return {};
+    r.held = std::move(_sam_held);
+    const Rect shown = apply_sam_add(std::move(r), _sam_add_object);
+    _sam_reapply_ms = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - t0).count();
     return shown;
 }
 

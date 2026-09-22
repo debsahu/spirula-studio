@@ -56,16 +56,16 @@ row src/app/gui/mask/Livewire.h 84 "std::vector<uint8_t> _parent;"
 row _deps/imgui-src/imgui.cpp 1850-1856 "ImGuiKey_LeftCtrl)  { key = ImGuiKey_LeftSuper; }"
 row _deps/imgui-src/imgui.cpp 1957-1967 "Convert Ctrl(Super)+Left click into Right-click"
 row src/app/gui/mask/MaskPanel.cpp 177 "ui::Button(msg::undo)"
-row src/app/gui/mask/MaskPanel.cpp 405 "io.KeyShift ? redo() : undo()"
+row src/app/gui/mask/MaskPanel.cpp 409 "io.KeyShift ? redo() : undo()"
 row src/app/gui/mask/MaskSession.cpp 389-400 "MaskSession::commit_stroke" 389
 row src/app/gui/mask/MaskSession.cpp 389-400 "if (r.empty()) return {};" 400
 row src/app/gui/mask/MaskPanel.cpp 76 "shown.empty()) return;"
-row src/app/gui/mask/MaskPanel.cpp 452 "msg::status_kept"
+row src/app/gui/mask/MaskPanel.cpp 456 "msg::status_kept"
 row src/app/gui/mask/MaskLayer.cpp 341-375 "bool recomposite_frame" 341
 row src/app/gui/mask/MaskLayer.cpp 341-375 "}" 375
 row src/app/gui/mask/MaskPanel.cpp 319-320 "in.shift = io.KeyShift;"
 row src/app/gui/mask/MaskPanel.cpp 319-320 "in.ctrl = io.KeyCtrl;"
-row src/app/gui/mask/MaskPanel.cpp 347 "paint_now(in.shift, in.ctrl)"
+row src/app/gui/mask/MaskPanel.cpp 351 "paint_now(in.shift, in.ctrl)"
 row src/app/gui/edit/EditTool.cpp 205 "ToolId::Box || _id == ToolId::Ellipse"
 row src/app/gui/edit/EditTool.cpp 160 "ToolId::Lasso || _id == ToolId::Brush"
 row src/app/gui/mask/MaskPanel.cpp 207 'go_to(_idx - 1)'
@@ -84,10 +84,10 @@ row src/app/gui/mask/Livewire.h 80-90 "_acos_abs[256][8]"
 row src/app/gui/mask/Livewire.h 80-90 "std::vector<uint8_t> _fg;"
 row src/app/gui/mask/Livewire.cpp 83-131 "std::vector<uint8_t> luma(n);"
 row src/app/gui/mask/Livewire.cpp 225-226 "_parent.assign(n, kUnseen);"
-row src/app/gui/mask/MaskPanel.cpp 438-477 "void MaskSession::draw_status()" 438
-row src/app/gui/mask/MaskPanel.cpp 438-477 "}" 477
-row src/app/gui/mask/MaskPanel.cpp 457-460 "status_base_regenerated"
-row src/app/gui/mask/MaskPanel.cpp 457-460 "status_base_missing"
+row src/app/gui/mask/MaskPanel.cpp 442-481 "void MaskSession::draw_status()" 442
+row src/app/gui/mask/MaskPanel.cpp 442-481 "}" 481
+row src/app/gui/mask/MaskPanel.cpp 461-464 "status_base_regenerated"
+row src/app/gui/mask/MaskPanel.cpp 461-464 "status_base_missing"
 row src/app/gui/mask/MaskPanel.cpp 1-5 "ImGui is permitted here"
 row src/app/gui/Fonts.cpp 33 "kBaseSize = 16.0f"
 row src/app/gui/Layout.cpp 33 "FramePadding = ImVec2(6, 4)"
@@ -106,8 +106,8 @@ row src/app/gui/mask/MaskSession.cpp 407-432 "const bool keep = ctrl != erasing;
 row src/app/gui/mask/MaskSession.cpp 407-432 "if (!(r > kMinBrush)) return kMinBrush;"
 row src/app/gui/mask/MaskSession.cpp 407-432 "std::pow(1.18f, wheel)"
 row src/app/gui/mask/MaskSession.cpp 407-432 "}" 432
-row src/app/gui/mask/MaskSession.h 97-98 "float radius() const { return _brush; }"
-row src/app/gui/mask/MaskSession.h 97-98 "set_radius(float r) { _brush = clamp_brush(r); }"
+row src/app/gui/mask/MaskSession.h 99-100 "float radius() const { return _brush; }"
+row src/app/gui/mask/MaskSession.h 99-100 "set_radius(float r) { _brush = clamp_brush(r); }"
 row src/app/gui/mask/MaskDoc.cpp 176-180 "case Paint::ForceKeep: _keep[i] = 255; _drop[i] = 0; break;"
 row src/app/gui/mask/MaskLayer.h 47-48 "final = keep ? 255 : drop ? 0 : base"
 row src/app/gui/edit/EditTool.h 27-32 "enum class ToolId"

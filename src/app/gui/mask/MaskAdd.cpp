@@ -43,6 +43,34 @@ Rect extent(const std::vector<uint8_t>& p, int w, const Rect& within, int64_t& n
 
 }  // namespace
 
+HeldRegion hold_region(const AddRegion& g) {
+    HeldRegion out;
+    if (g.w <= 0 || g.h <= 0 || g.mask.size() != (size_t)g.w * (size_t)g.h) return out;
+    int64_t n = 0;
+    out.box = extent(g.mask, g.w, Rect{0, 0, g.w, g.h}, n);
+    if (out.box.empty()) return out;
+    out.w = g.w;
+    out.h = g.h;
+    out.mask.resize((size_t)out.box.w() * (size_t)out.box.h());
+    for (int y = out.box.y0; y < out.box.y1; y++)
+        std::copy_n(g.mask.data() + (size_t)y * g.w + out.box.x0, out.box.w(),
+                    out.mask.data() + (size_t)(y - out.box.y0) * out.box.w());
+    return out;
+}
+
+AddRegion expand_region(const HeldRegion& held) {
+    AddRegion g;
+    if (held.box.empty() || held.mask.size() != (size_t)held.box.w() * (size_t)held.box.h())
+        return g;
+    g.w = held.w;
+    g.h = held.h;
+    g.mask.assign((size_t)g.w * (size_t)g.h, 0);
+    for (int y = held.box.y0; y < held.box.y1; y++)
+        std::copy_n(held.mask.data() + (size_t)(y - held.box.y0) * held.box.w(), held.box.w(),
+                    g.mask.data() + (size_t)y * g.w + held.box.x0);
+    return g;
+}
+
 // Filling and the final scan cover only the destination box each region can
 // reach, not the whole W x H plane; this runs on the SAM job thread.
 bool build_add_stencil(std::vector<AddRegion>& regions, int W, int H,

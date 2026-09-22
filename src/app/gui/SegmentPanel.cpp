@@ -34,22 +34,6 @@ namespace mmsg = spirula::i18n::msg::maskedit;
 
 namespace gui {
 
-namespace {
-
-// One colour per object, so a dot on the image and a row in the list are
-// obviously the same thing. Red is reserved for negative clicks.
-ImU32 object_color(int object) {
-    static const ImU32 kColors[] = {
-        IM_COL32(80, 220, 110, 255),  IM_COL32(90, 170, 245, 255),
-        IM_COL32(245, 200, 70, 255),  IM_COL32(200, 130, 245, 255),
-        IM_COL32(80, 225, 220, 255),  IM_COL32(245, 150, 90, 255),
-    };
-    const int n = (int)(sizeof(kColors) / sizeof(kColors[0]));
-    return kColors[((object % n) + n) % n];
-}
-
-}  // namespace
-
 // One frame in the panel's own hands. Not nn::Image: the shape editor works
 // with no inference layer built, and this is the only picture it needs.
 struct SegmentPanel::Rgb {
@@ -891,7 +875,7 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
         if (!mine(c) || c.frame != frame.index || c.camera != camera) continue;
         const ImVec2 p(origin.x + c.x / (float)_tex_w * size.x,
                        origin.y + c.y / (float)_tex_h * size.y);
-        const ImU32 col = c.positive ? object_color(c.object)
+        const ImU32 col = c.positive ? (ImU32)mask_object_color(c.object)
                                      : IM_COL32(240, 90, 90, 255);
         dl->AddCircleFilled(p, 6.0f, col);
         dl->AddCircle(p, 6.0f, IM_COL32(20, 20, 20, 200), 0, 1.5f);
@@ -1028,64 +1012,8 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
 // ---------------------------------------------------------------------------
 
 void SegmentPanel::draw_objects(MaskSettings& settings, bool& edited) {
-    ui::Text(dmsg::objects_to_click);
-    ui::help_on_hover(dmsg::objects_to_click_help);
-
-    for (int o = 0; o < settings.object_count; ++o) {
-        ImGui::PushID(o);
-        int here = 0, elsewhere = 0;
-        const long long cur = _frames.empty() ? 0 : _frames[(size_t)_frame_idx].index;
-        const std::string camera = shown_camera();
-        for (const MaskClick& c : settings.clicks)
-            if (mine(c) && c.object == o)
-                (c.frame == cur && c.camera == camera ? here : elsewhere)++;
-
-        const ImU32 col = object_color(o);
-        ImGui::ColorButton("##col", ImGui::ColorConvertU32ToFloat4(col),
-                           ImGuiColorEditFlags_NoTooltip |
-                               ImGuiColorEditFlags_NoDragDrop,
-                           ImVec2(12, 12));
-        ImGui::SameLine();
-        const std::string label =
-            (here || elsewhere)
-                ? spirula::i18n::format(dmsg::object_with_clicks,
-                                        {o + 1, here, elsewhere})
-                : spirula::i18n::format(dmsg::object_no_clicks, {o + 1});
-        // PushID(o) above already separates the rows, so the label carries no
-        // ID of its own.
-        if (ui::RadioButtonRaw(label.c_str(), settings.current_object == o))
-            settings.current_object = o;
-        if (here || elsewhere) {
-            ImGui::SameLine();
-            if (ui::SmallButton(dmsg::object_clear)) {
-                auto& v = settings.clicks;
-                v.erase(std::remove_if(v.begin(), v.end(),
-                                       [&](const MaskClick& c) {
-                                           return mine(c) && c.object == o;
-                                       }),
-                        v.end());
-                edited = true;
-            }
-        }
-        ImGui::PopID();
-    }
-
-    if (ui::SmallButton(dmsg::object_another)) {
-        settings.current_object = settings.object_count++;
-    }
-    ui::help_on_hover(dmsg::object_another_help);
-    if (settings.object_count > 1) {
-        ImGui::SameLine();
-        if (ui::SmallButton(dmsg::object_clear_all)) {
-            auto& v = settings.clicks;
-            v.erase(std::remove_if(v.begin(), v.end(),
-                                   [&](const MaskClick& c) { return mine(c); }),
-                    v.end());
-            settings.object_count = 1;
-            settings.current_object = 0;
-            edited = true;
-        }
-    }
+    const long long cur = _frames.empty() ? 0 : _frames[(size_t)_frame_idx].index;
+    draw_mask_objects(settings, cur, shown_camera(), _src.input, edited);
 }
 
 void SegmentPanel::draw(MaskSettings& settings, app::FrameStencil& stencil) {

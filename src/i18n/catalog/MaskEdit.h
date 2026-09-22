@@ -913,19 +913,33 @@ SS_MSG(tool_sam,
     NL("SAM"),        RU("SAM"),        TR("SAM"));
 
 SS_MSG(sam_hint,
-    EN("Click an object to drop it; Ctrl+click keeps it; Shift+Ctrl+click clears its corrections. Esc cancels."),
-    JA("オブジェクトをクリックすると除外します。Ctrl+クリックで保持、Shift+Ctrl+クリックで修正を消去します。Esc で中止します。"),
-    ZH_HANS("点击物体将其丢弃；Ctrl+点击保留；Shift+Ctrl+点击清除其修正。Esc 取消。"),
-    ZH_HANT("點擊物件將其捨棄；Ctrl+點擊保留；Shift+Ctrl+點擊清除其修正。Esc 取消。"),
-    KO("개체를 클릭하면 제외합니다. Ctrl+클릭은 유지, Shift+Ctrl+클릭은 수정을 지웁니다. Esc로 취소합니다."),
-    DE("Klicken Sie auf ein Objekt, um es zu verwerfen; Ctrl+Klick behält es; Shift+Ctrl+Klick löscht seine Korrekturen. Esc bricht ab."),
-    FR("Cliquez sur un objet pour l'exclure ; Ctrl+clic le conserve ; Shift+Ctrl+clic efface ses corrections. Esc annule."),
-    ES("Haga clic en un objeto para descartarlo; Ctrl+clic lo conserva; Shift+Ctrl+clic borra sus correcciones. Esc cancela."),
-    PT("Clique em um objeto para descartá-lo; Ctrl+clique o mantém; Shift+Ctrl+clique apaga suas correções. Esc cancela."),
-    IT("Fai clic su un oggetto per scartarlo; Ctrl+clic lo mantiene; Shift+Ctrl+clic ne cancella le correzioni. Esc annulla."),
-    NL("Klik op een object om het weg te laten; Ctrl+klik behoudt het; Shift+Ctrl+klik wist de correcties ervan. Esc annuleert."),
-    RU("Щёлкните объект, чтобы убрать его; Ctrl+щелчок оставляет его; Shift+Ctrl+щелчок стирает его исправления. Esc отменяет."),
-    TR("Atmak için bir nesneye tıklayın; Ctrl+tık onu tutar; Shift+Ctrl+tık düzeltmelerini siler. Esc iptal eder."));
+    EN("Click an object to drop it; Ctrl+click keeps it; Shift+Ctrl+click clears its corrections; "
+       "right-click a part to leave it out. Undo removes the whole object. Esc cancels."),
+    JA("オブジェクトをクリックすると除外します。Ctrl+クリックで保持、Shift+Ctrl+クリックで修正を消去します。"
+       "右クリックでその部分を対象から外します。元に戻すとオブジェクト全体が取り消されます。Esc で中止します。"),
+    ZH_HANS("点击物体将其丢弃；Ctrl+点击保留；Shift+Ctrl+点击清除其修正；右键点击某一部分可将其排除。"
+            "撤销会移除整个物体。Esc 取消。"),
+    ZH_HANT("點擊物件將其捨棄；Ctrl+點擊保留；Shift+Ctrl+點擊清除其修正；在某一部分按右鍵可將其排除。"
+            "復原會移除整個物件。Esc 取消。"),
+    KO("개체를 클릭하면 제외합니다. Ctrl+클릭은 유지, Shift+Ctrl+클릭은 수정을 지웁니다. 일부를 오른쪽 "
+       "클릭하면 대상에서 뺍니다. 실행 취소하면 개체 전체가 사라집니다. Esc로 취소합니다."),
+    DE("Klicken Sie auf ein Objekt, um es zu verwerfen; Ctrl+Klick behält es; Shift+Ctrl+Klick löscht "
+       "seine Korrekturen; ein Rechtsklick auf einen Teil nimmt ihn aus. Rückgängig entfernt das ganze "
+       "Objekt. Esc bricht ab."),
+    FR("Cliquez sur un objet pour l'exclure ; Ctrl+clic le conserve ; Shift+Ctrl+clic efface ses "
+       "corrections ; un clic droit sur une partie l'en retire. Annuler retire l'objet entier. Esc annule."),
+    ES("Haga clic en un objeto para descartarlo; Ctrl+clic lo conserva; Shift+Ctrl+clic borra sus "
+       "correcciones; un clic derecho en una parte la excluye. Deshacer quita el objeto entero. Esc cancela."),
+    PT("Clique em um objeto para descartá-lo; Ctrl+clique o mantém; Shift+Ctrl+clique apaga suas "
+       "correções; um clique direito em uma parte a exclui. Desfazer remove o objeto inteiro. Esc cancela."),
+    IT("Fai clic su un oggetto per scartarlo; Ctrl+clic lo mantiene; Shift+Ctrl+clic ne cancella le "
+       "correzioni; il clic destro su una parte la esclude. Annulla rimuove l'intero oggetto. Esc annulla."),
+    NL("Klik op een object om het weg te laten; Ctrl+klik behoudt het; Shift+Ctrl+klik wist de correcties "
+       "ervan; rechtsklik op een deel sluit het uit. Ongedaan maken verwijdert het hele object. Esc annuleert."),
+    RU("Щёлкните объект, чтобы убрать его; Ctrl+щелчок оставляет его; Shift+Ctrl+щелчок стирает его "
+       "исправления; правый щелчок по части исключает её. Отмена убирает объект целиком. Esc отменяет."),
+    TR("Atmak için bir nesneye tıklayın; Ctrl+tık onu tutar; Shift+Ctrl+tık düzeltmelerini siler; bir "
+       "parçaya sağ tık onu hariç tutar. Geri alma nesnenin tamamını kaldırır. Esc iptal eder."));
 
 SS_MSG(sam_cancel_slow,
     EN("Esc cancels once the step already running finishes: loading the model, reading the frame, or finding the object."),

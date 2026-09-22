@@ -27,6 +27,16 @@ struct AddRegion {
 bool build_add_stencil(std::vector<AddRegion>& regions, int W, int H,
                        Stencil& out, Rect& bounds, int64_t& set_px, float margin = 0.0f);
 
+// A detection cut down to its set pixels' extent `box`, so the last add can be
+// rebuilt at another margin without keeping the whole plane.
+struct HeldRegion {
+    int w = 0, h = 0;
+    Rect box;
+    std::vector<uint8_t> mask;   // box.w() x box.h()
+};
+HeldRegion hold_region(const AddRegion& g);
+AddRegion expand_region(const HeldRegion& held);
+
 // The margin grows what is thrown away, as on the dataset screen: a drop takes
 // the editor's ratio, a keep or a clear SAM's exact outline. Never signed.
 inline float drop_margin(Paint mode, float ratio) {

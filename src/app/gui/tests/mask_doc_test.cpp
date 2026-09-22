@@ -3579,6 +3579,235 @@ void test_prompt_point_off_frame() {
     check(!s.sam_error().empty(), "off frame: the last pixel inside still reaches the job (the stub refuses it)");
 }
 
+// ---------------------------------------------------------------------------
+// SAM assist: a re-prompt of the same object replaces its add (plan Task 6)
+// ---------------------------------------------------------------------------
+
+// One job's result for the open frame, built as the job builds it (prepare()).
+mk::SamResult sam_result(mk::MaskSession& s, mk::AddRegion g, mk::Paint mode, float margin) {
+    s.sam().post_result(s.sam_frame_stamp(), {std::move(g)}, s.doc()->width(),
+                        s.doc()->height(), mode, margin, 0.9f, 1.0);
+    mk::SamResult r;
+    s.sam().take_result(r);
+    return r;
+}
+
+mk::Rect sam_add(mk::MaskSession& s, const mk::AddRegion& g, int object,
+                 mk::Paint mode = mk::Paint::ForceDrop, float margin = 0.0f) {
+    return s.apply_sam_add(sam_result(s, g, mode, margin), object);
+}
+
+// A re-prompt of the object on top of this frame's history replaces its add;
+// an edit in between, another object's add, or a frame change makes it add.
+void test_session_sam_add_replaces() {
+    Fixture f = make_dataset("sam_replace", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam replace: open: " + err);
+    settle(s);
+    const int h0 = s.doc()->history_size();
+    const std::vector<uint8_t> comp0 = s.doc()->composite(), drop0 = s.doc()->drop();
+    const mk::AddRegion big = disc_region(64, 48, 20.0f, 20.0f, 10.0f);
+    // Not a subset of `big`: an additive re-prompt would change pixels and
+    // record a step of its own, so every count below separates the two rules.
+    const mk::AddRegion small = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
+    auto drop_is = [&](const std::vector<uint8_t>& plane) {   // drop0 | plane, exactly
+        const std::vector<uint8_t>& d = s.doc()->drop();
+        for (size_t i = 0; i < d.size(); i++)
+            if ((d[i] != 0) != (drop0[i] != 0 || plane[i] != 0)) return false;
+        return true;
+    };
+    std::vector<uint8_t> both = big.mask;
+    for (size_t i = 0; i < both.size(); i++) both[i] |= small.mask[i];
+    check(!drop_is(big.mask) && !drop_is(small.mask) && both != big.mask && both != small.mask,
+          "sam replace: neither disc is already dropped, and neither holds the other");
+    sam_add(s, big, 0);
+    sam_add(s, small, 0);
+    check(s.doc()->history_size() == h0 + 1, "sam replace: refining the top object is one step");
+    check(drop_is(small.mask), "sam replace: the refinement replaced the first add, pixel for pixel");
+    s.doc()->undo();
+    check(s.doc()->composite() == comp0, "sam replace: one undo removes the object's add entirely");
+
+    sam_add(s, big, 0);
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 50, 5, 60, 15), mk::Rect{50, 5, 60, 15});
+    const int h1 = s.doc()->history_size();
+    sam_add(s, small, 0);
+    check(s.doc()->history_size() == h1 + 1 && s.doc()->keep()[(size_t)10 * 64 + 55] == 255,
+          "sam replace: an edit in between makes a re-prompt add, and the edit survives");
+    sam_add(s, disc_region(64, 48, 44.0f, 30.0f, 4.0f), 1);
+    const int h2 = s.doc()->history_size();
+    sam_add(s, disc_region(64, 48, 47.0f, 30.0f, 3.0f), 0);
+    check(s.doc()->history_size() == h2 + 1, "sam replace: another object's add on top means an add");
+    const int h3 = s.doc()->history_size();
+    sam_add(s, disc_region(64, 48, 8.0f, 40.0f, 3.0f), -1);
+    sam_add(s, disc_region(64, 48, 11.0f, 40.0f, 3.0f), -1);
+    check(s.doc()->history_size() == h3 + 2, "sam replace: a text prompt (-1) never replaces");
+
+    // A fresh session so the stamp's revision is 1, which a reload plus one
+    // edit reproduces exactly: only the document's own stamp tells them apart.
+    mk::MaskSession r;
+    check(r.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam replace: reopen: " + err);
+    settle(r);
+    sam_add(r, big, 0);
+    check(r.doc()->revision() == 1, "sam replace: the first add is revision 1");
+    r.go_to(1);
+    settle(r);
+    r.go_to(0);
+    settle(r);
+    r.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 50, 30, 60, 40), mk::Rect{50, 30, 60, 40});
+    const int h4 = r.doc()->history_size();
+    check(r.doc()->revision() == 1, "sam replace: the reloaded frame's edit is revision 1 too");
+    sam_add(r, small, 0);
+    check(r.doc()->history_size() == h4 + 1 && r.doc()->keep()[(size_t)35 * 64 + 55] == 255,
+          "sam replace: a frame change forgets the stamp, so a reload cannot collide with it");
+}
+
+// A "not this" refines the object's add in that add's own mode; with no add of
+// this object on top it takes the modifiers like any other click.
+void test_session_sam_negative_mode() {
+    Fixture f = make_dataset("sam_negative_mode", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam not-this: open: " + err);
+    settle(s);
+    const mk::Paint fb = mk::Paint::ForceDrop;
+    check(s.sam_refine_mode(fb) == fb, "sam not-this: nothing added yet takes the modifiers");
+    sam_add(s, disc_region(64, 48, 20.0f, 20.0f, 6.0f), 0, mk::Paint::ForceKeep);
+    check(s.sam_refine_mode(fb) == mk::Paint::ForceKeep,
+          "sam not-this: refining a kept object keeps keeping it");
+    s.sam_prompt().current_object = s.sam_prompt().object_count++;
+    check(s.sam_refine_mode(fb) == fb, "sam not-this: another current object takes the modifiers");
+    s.sam_prompt().current_object = 0;
+    s.doc()->paint(mk::Paint::ForceDrop, box_stencil(64, 48, 50, 5, 60, 15), mk::Rect{50, 5, 60, 15});
+    check(s.sam_refine_mode(fb) == fb, "sam not-this: an edit in between takes the modifiers");
+}
+
+// What a click sends: the object's clicks on this frame, then the new one,
+// each with its own label -- "not this" included.
+void test_mask_sam_prompt_points() {
+    mk::MaskSam sam;
+    sam.add_click(3, "cam0", 10.0f, 20.0f);
+    const std::vector<mk::SamPoint> neg =
+        sam.prompt_points(3, "cam0", mk::SamPoint{30.0f, 40.0f, false});
+    check(neg.size() == 2 && neg[0].positive && neg[0].x == 10.0f && !neg[1].positive &&
+              neg[1].x == 30.0f && neg[1].y == 40.0f,
+          "sam prompt: a right click is sent after the object's clicks, as \"not this\"");
+    sam.add_click(3, "cam0", 30.0f, 40.0f, /*positive=*/false);
+    const std::vector<mk::SamPoint> pos =
+        sam.prompt_points(3, "cam0", mk::SamPoint{50.0f, 60.0f, true});
+    check(pos.size() == 3 && pos[0].positive && !pos[1].positive && pos[2].positive,
+          "sam prompt: a stored \"not this\" rides along with the next click");
+    check(sam.prompt_points(4, "cam0", mk::SamPoint{1.0f, 1.0f, true}).size() == 1,
+          "sam prompt: another frame's clicks are not sent");
+}
+
+// A click is recorded only once its job starts: the stub refuses every start,
+// so a click here must leave no dot that drove nothing.
+void test_session_refused_click_leaves_no_dot() {
+    Fixture f = make_dataset("sam_refused_click", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam refused: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    const bool started = s.sam_prompt_point(10.0f, 10.0f, mk::Paint::ForceDrop);
+    const bool started_neg = s.sam_prompt_point(12.0f, 12.0f, mk::Paint::ForceDrop, false);
+    check(!started && !started_neg && !s.sam_error().empty(),
+          "sam refused: the stub refused both starts, with a reason");
+    check(s.sam_click_count() == 0, "sam refused: a refused click is not recorded");
+}
+
+// A detection held as its cropped set pixels rebuilds to the same plane.
+void test_held_region_roundtrip() {
+    const mk::AddRegion g = disc_region(64, 48, 20.0f, 30.0f, 6.0f);
+    const mk::HeldRegion h = mk::hold_region(g);
+    check(h.w == 64 && h.h == 48 && same_rect(h.box, extent(g.mask, 64, 48)) &&
+              h.mask.size() == (size_t)h.box.w() * h.box.h() && h.mask.size() < g.mask.size(),
+          "held region: cropped to the set pixels' extent");
+    const mk::AddRegion back = mk::expand_region(h);
+    check(back.w == 64 && back.h == 48 && back.mask == g.mask,
+          "held region: expanding it gives back the plane, byte for byte");
+    const mk::HeldRegion none = mk::hold_region(disc_region(64, 48, 20.0f, 30.0f, 0.0f));
+    check(none.box.empty() && none.mask.empty(), "held region: nothing set holds nothing");
+}
+
+// Moving the margin re-applies it to the object just clicked, in place, while
+// that add is still on top; after any other edit it waits for the next click.
+void test_session_sam_margin_reapply() {
+    Fixture f = make_dataset("sam_margin_reapply", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "margin reapply: open: " + err);
+    settle(s);
+    const mk::AddRegion g = disc_region(64, 48, 30.0f, 24.0f, 6.0f);
+    check(!s.sam_margin_reapplies(), "margin reapply: nothing to re-apply before an add");
+    s.sam_prompt().dilate_ratio = 0.0f;
+    sam_add(s, g, 0);
+    const int h0 = s.doc()->history_size();
+    const int64_t tight = s.sam_last_area();
+    s.sam_prompt().dilate_ratio = 0.4f;
+    check(s.sam_margin_reapplies(), "margin reapply: the add on top can be re-applied");
+    s.sam_reapply_margin();
+    std::vector<mk::AddRegion> want{g};
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t grown = 0;
+    mk::build_add_stencil(want, 64, 48, st, b, grown, 0.4f);
+    check(grown > tight && s.doc()->history_size() == h0 && s.sam_last_area() == grown,
+          "margin reapply: the add is replaced in place at the new margin");
+    int64_t dropped_in = 0;
+    for (size_t i = 0; i < st.in.size(); i++)
+        dropped_in += (st.in[i] && s.doc()->drop()[i]) ? 1 : 0;
+    check(dropped_in == grown, "margin reapply: every pixel of the grown outline is dropped");
+    s.sam_prompt().dilate_ratio = 0.0f;
+    s.sam_reapply_margin();
+    check(s.sam_last_area() == tight && s.doc()->history_size() == h0,
+          "margin reapply: moving it back shrinks the add again");
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 0, 0, 4, 4), mk::Rect{0, 0, 4, 4});
+    s.sam_prompt().dilate_ratio = 0.4f;
+    const int h1 = s.doc()->history_size();
+    check(!s.sam_margin_reapplies(), "margin reapply: an edit in between ends it");
+    s.sam_reapply_margin();
+    check(s.doc()->history_size() == h1 && s.doc()->keep()[0] == 255,
+          "margin reapply: ... and the edit survives");
+    check(s.sam_held_bytes() > 0, "margin reapply: the stale add's detection is still held");
+    s.sam_pump();
+    check(s.sam_held_bytes() == 0, "margin reapply: the next frame lets go of a detection that cannot re-apply");
+    check(sam_result(s, g, mk::Paint::ForceKeep, 0.4f).held.empty() &&
+              sam_result(s, g, mk::Paint::Clear, 0.4f).held.empty() &&
+              sam_result(s, g, mk::Paint::ForceDrop, 0.4f).held.size() == 1,
+          "margin reapply: a job holds its detection only for a drop");
+    mk::SamResult keep = sam_result(s, g, mk::Paint::ForceKeep, 0.0f);
+    keep.held.push_back(mk::hold_region(g));
+    s.apply_sam_add(std::move(keep), 0);
+    check(!s.sam_margin_reapplies(), "margin reapply: a keep takes no margin, so nothing to re-apply");
+}
+
+// A re-prompt whose mask lands on pixels already dropped records no step: the
+// add it replaced is gone, and nothing of ours is on top to be replaced next.
+void test_session_sam_noop_replace() {
+    Fixture f = make_dataset("sam_noop_replace", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam no-op: open: " + err);
+    settle(s);
+    s.doc()->paint(mk::Paint::ForceDrop, box_stencil(64, 48, 40, 10, 60, 40), mk::Rect{40, 10, 60, 40});
+    const int h0 = s.doc()->history_size();
+    sam_add(s, disc_region(64, 48, 15.0f, 20.0f, 6.0f), 0);
+    sam_add(s, disc_region(64, 48, 50.0f, 25.0f, 4.0f), 0);
+    check(s.doc()->drop()[(size_t)20 * 64 + 15] == 0 && s.doc()->can_redo(),
+          "sam no-op: the replaced add is undone (left to redo) and the refinement changed nothing");
+    sam_add(s, disc_region(64, 48, 15.0f, 36.0f, 5.0f), 0);
+    check(s.doc()->history_size() == h0 + 1 && s.doc()->drop()[(size_t)12 * 64 + 42] == 255,
+          "sam no-op: the next re-prompt adds, and the hand edit beneath survives");
+}
+
 }  // namespace
 
 int main() {
@@ -3661,6 +3890,13 @@ int main() {
     test_drop_margin_modes();
     test_editor_margin_is_its_own();
     test_prompt_point_off_frame();
+    test_session_sam_add_replaces();
+    test_session_sam_negative_mode();
+    test_mask_sam_prompt_points();
+    test_session_refused_click_leaves_no_dot();
+    test_held_region_roundtrip();
+    test_session_sam_margin_reapply();
+    test_session_sam_noop_replace();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

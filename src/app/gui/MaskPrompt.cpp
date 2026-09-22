@@ -197,6 +197,78 @@ bool draw_margin_slider(float& dilate_ratio, float& shrink_ratio, bool keep, flo
     return changed;
 }
 
+// One colour per object, so a dot on the image and a row in the list are
+// obviously the same thing. Red is reserved for negative clicks.
+unsigned int mask_object_color(int object) {
+    static const ImU32 kColors[] = {
+        IM_COL32(80, 220, 110, 255),  IM_COL32(90, 170, 245, 255),
+        IM_COL32(245, 200, 70, 255),  IM_COL32(200, 130, 245, 255),
+        IM_COL32(80, 225, 220, 255),  IM_COL32(245, 150, 90, 255),
+    };
+    const int n = (int)(sizeof(kColors) / sizeof(kColors[0]));
+    return kColors[((object % n) + n) % n];
+}
+
+void draw_mask_objects(MaskSettings& settings, long long frame, const std::string& camera,
+                       const std::string& source, bool& edited) {
+    ui::Text(dmsg::objects_to_click);
+    ui::help_on_hover(dmsg::objects_to_click_help);
+
+    for (int o = 0; o < settings.object_count; ++o) {
+        ImGui::PushID(o);
+        int here = 0, elsewhere = 0;
+        for (const MaskClick& c : settings.clicks)
+            if (c.source == source && c.object == o)
+                (c.frame == frame && c.camera == camera ? here : elsewhere)++;
+
+        const ImU32 col = mask_object_color(o);
+        ImGui::ColorButton("##col", ImGui::ColorConvertU32ToFloat4(col),
+                           ImGuiColorEditFlags_NoTooltip |
+                               ImGuiColorEditFlags_NoDragDrop,
+                           ImVec2(12, 12));
+        ImGui::SameLine();
+        const std::string label =
+            (here || elsewhere)
+                ? spirula::i18n::format(dmsg::object_with_clicks,
+                                        {o + 1, here, elsewhere})
+                : spirula::i18n::format(dmsg::object_no_clicks, {o + 1});
+        // PushID(o) above already separates the rows, so the label carries no
+        // ID of its own.
+        if (ui::RadioButtonRaw(label.c_str(), settings.current_object == o))
+            settings.current_object = o;
+        if (here || elsewhere) {
+            ImGui::SameLine();
+            if (ui::SmallButton(dmsg::object_clear)) {
+                auto& v = settings.clicks;
+                v.erase(std::remove_if(v.begin(), v.end(),
+                                       [&](const MaskClick& c) {
+                                           return c.source == source && c.object == o;
+                                       }),
+                        v.end());
+                edited = true;
+            }
+        }
+        ImGui::PopID();
+    }
+
+    if (ui::SmallButton(dmsg::object_another)) {
+        settings.current_object = settings.object_count++;
+    }
+    ui::help_on_hover(dmsg::object_another_help);
+    if (settings.object_count > 1) {
+        ImGui::SameLine();
+        if (ui::SmallButton(dmsg::object_clear_all)) {
+            auto& v = settings.clicks;
+            v.erase(std::remove_if(v.begin(), v.end(),
+                                   [&](const MaskClick& c) { return c.source == source; }),
+                    v.end());
+            settings.object_count = 1;
+            settings.current_object = 0;
+            edited = true;
+        }
+    }
+}
+
 void draw_mask_model_picker(std::string& model_id, FileDownload& download,
                             const std::function<void()>& request_download) {
     int model_idx = 0;
