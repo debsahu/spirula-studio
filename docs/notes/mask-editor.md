@@ -2282,9 +2282,10 @@ the logical Ctrl, as `key` already did.
 
 ## SAM assist, Task 8: lifetime and teardown (2026-09-22)
 
-**Closing the editor hands the checkpoint back.** `close()` yields SAM first (cancel,
-join the job, `sam::Session::unload()`), then joins the load/save worker, so the weights
-go back before a pending save lands. It then forgets all SAM state: the `MaskSam` object
+**Closing the editor hands the checkpoint back.** With no job running, `close()`
+releases SAM first (join, `sam::Session::unload()`), then joins the load/save worker, so
+the weights go back before a pending save lands. With a job running it cancels the job
+and parks the `MaskSam` in a retiring slot (below). Either way it then forgets all SAM state: the `MaskSam` object
 with its clicks (their frame indices name a session that is gone), the model path, the
 result counters, the replace stamp and the held detections. The model picker callback is
 kept; `GuiApp::frame()` pushes the model again on the first frame of the next open. The
@@ -2302,8 +2303,14 @@ editor never builds a `sam::Tracker`, whose memory bank `unload()` does not rele
 
 The pool fell 1895.1 MiB (at least the 1652.2 MiB of weights) and ended equal to its
 pre-open value, 0.0 against 0.0, inside the 1 MiB bar. On reopen the next click showed
-`sam_first_load` in the strip and its job took 12,532 ms, above P1b's 5716 ms floor: the
-upload was paid again. `session -1` after close is expected and proves nothing. Nothing
+`sam_first_load` in the strip. Its job took 12,532 ms in the first run, but **4971 ms in
+fix round 1, under P1b's 5716 ms floor: that half FAILS as written.** The same process's
+first cold load took 5274 ms, so cold loads are faster than the four P1b samples. The
+warm reload in the no-release mutant took 4014 ms. Job time therefore separates a paid
+upload from a skipped one by under a second, and the P1b floor is not a usable bar for
+it. The strip line is the better discriminator, because it is decided by whether a
+session with that model exists (`MaskSam::launch`). It showed `sam_first_load` in both
+runs, and `Segmenting...` under the mutant. `session -1` after close is expected and proves nothing. Nothing
 else allocated from the pool across the close: opening the editor closes the native
 previews, and a run bars it.
 
@@ -2322,29 +2329,43 @@ weights" half.
 PASS. Beside it, `ps -o rss=` read 1,605,280 KiB (1567.7 MiB). **`ps` does not measure
 device memory**, so that figure is recorded but judged against nothing.
 
-**P7**, Esc during a first click's encode on frame f1: idle 3303 ms after Esc (this
-includes about 0.1 s of polling per round). Kept, history and results were all unchanged,
-and nothing dropped.
+**P7**, Esc during a first click's encode on frame f1. **The bar is re-baselined from
+2000 ms to 4000 ms.** The 2000 ms bar was set before the encode was measured, and it
+assumed a ~1.5 s `encode_image` + `sync()`. That call is one opaque stage that cancellation
+cannot enter, and it measured 1.9-3.3 s (Task 4), so 2000 ms was never reachable. 4000 ms is
+the worst encode seen (3.3 s) plus headroom for the pump and the polling. Two runs:
+
+| run | idle after Esc | at 2000 ms | at 4000 ms | kept, history, results |
+|---|---|---|---|---|
+| first (hand-read, reported PASS in error) | 3303 ms | **FAIL** | PASS | unchanged |
+| fix round 1 (asserted) | 1733 ms | PASS | PASS | unchanged |
+
+Both figures include about 0.1 s of polling per round.
 
 **P8b**, leaving a frame mid-encode: `sam_dropped` 0 -> 1, `sam_results` 1 -> 1, and on the
 next frame history 0 and kept 112,176,393, which equals its untouched count. `state` still
 answered.
 
-**Closing during a job freezes the UI for the whole stage.** `sam_close_ms` is the time
-`close()` spends joining and unloading on the UI thread:
+**A close during a job no longer freezes the UI.** Joining the job in `close()` cost the
+whole stage it was in, because a load cannot be cancelled and the flag is read only
+between stages. Now a busy `MaskSam` is cancelled and parked in `_sam_retiring`, and
+`GuiApp::frame()` polls it every frame (`sam_poll_retiring()`). Once the job is idle the
+poll releases it: the join is then instant and the unload runs on the UI thread, never
+beside another user. `sam_yield()` (so every `stop_inference_users()` caller), `open()`,
+the destructor and `shutdown()` drain the slot first, blocking. So when any of them returns,
+no `MaskSam`, live or parked, is busy or holds a session. `busy` and `release` go through
+injectable `SamOps`, and unit tests pin all of this, release order included.
 
-| Done clicked while | `sam_close_ms` | Done -> next frame, wall |
-|---|---|---|
-| idle, loaded | 152 | -- |
-| an encode runs | **2887** | 3263 |
-| the first load runs | **7805** | 8186 |
+`sam_close_ms` is the UI-thread time `close()` spent on SAM, and 0 when it had none:
 
-A load cannot be cancelled, and the stages check the flag only between them. **Proposed,
-not built:** `close()` sets the cancel flag and moves the `MaskSam` into a GuiApp-owned
-retiring slot, whose own thread joins and unloads. Until that slot is empty, every other
-inference user would wait on it, as it does on `sam_yield()` today: a reopened editor,
-`stop_inference_users()`'s callers, and shutdown before `nn::shutdown()`. P12 would then
-read the pool once the slot empties rather than on the next frame.
+| Done clicked while | before (joined) | after (parked) | Done -> next frame, wall | `sam_retire_ms` |
+|---|---|---|---|---|
+| idle, loaded | 152 | 24 | -- | -- |
+| an encode runs | **2887** | **0.0001** | 366 ms | 3.8 |
+| the first load runs | **7805** | **0.0006** | 355 ms | 3.3 |
+
+The wall figures include the harness, whose `move` + one-frame `wait` alone costs
+244-282 ms. The pool read 0.0 once the slot had emptied, in both cases.
 
 **Carried fixes.**
 - The cancel check after building the stencil now lives in one helper,
@@ -2355,10 +2376,10 @@ read the pool once the slot empties rather than on the next frame.
   the margin slider re-applies after an undo and a redo. An edit in the undone add's
   place drops the redo stack, and with it the detection.
 - A text prompt whose matches the exception chips cleared entirely now reads
-  `sam_vetoed_all` ("The prompt matched, but the exceptions removed everything.") instead
+  `sam_vetoed_all` ("Every match is covered by an exception, so nothing was dropped.") instead
   of "matched nothing". The choice lives in `MaskSession::sam_empty_note()` so it can be
-  unit-tested. The 12 translations borrow each language's existing word for the chips'
-  exceptions, and no fluent speaker has read them.
+  unit-tested. The 12 translations borrow the dataset screen's own words for an exception
+  and for removing, and no fluent speaker has read them.
 - `RegionBox`'s comment now says what a text box is: the detector's continuous box, not
   an inclusive pixel extent.
 
