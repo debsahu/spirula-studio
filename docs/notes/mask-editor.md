@@ -1176,8 +1176,40 @@ and the editor then reported **Kept: 84.1%** on open.
 
 `ps -o rss= -p "$(pgrep -n spirula)"`. No bar applies (spec §8.1, "it works or
 it does not"); **it worked.** The grid and step are exactly what the task
-predicted. The +102 MB the edge map cost against `Livewire::bytes()` = 21.6 MB
-at this grid is allocator and first-touch, not the structure.
+predicted.
+
+**Do not compare that RSS delta with `Livewire::bytes()`; they measure
+different things by construction.** The edge map's row above is +101,616 KB
+(99.2 MiB) against a `bytes()` of 21.6 MB, and an earlier draft of this note
+explained the 4.7x away as "allocator and first-touch" with nothing behind it.
+Most of the gap is not a mystery at all and falls out of
+`Livewire.h:80-85` and `Livewire.cpp:83-131,225-226`, counted for this grid
+(3880 x 1940, n = 7,527,200):
+
+| | bytes | what `bytes()` does with it |
+|---|---|---|
+| `_fg` + `_dir` + `_zc`, 1 byte each | 3n = 22,581,600 | counted |
+| the three 256x8 link tables | 18,432 | counted |
+| **`bytes()` after `build()`** | **22,600,032 = 21.55 MiB** | = the 21.6 MB printed |
+| `luma` (n), `mag` + `lap` (4n each) | 67,744,800 = 64.61 MiB | **not counted** -- local to `build()`, freed on return |
+| `_dist` (4n) + `_parent` (n) | 37,636,000 = 35.89 MiB | counted, but **`set_anchor` allocates them**, not `build()` |
+
+So `bytes()` is the surviving cost image and nothing else, and it is read in
+`bench_livewire_on` immediately after `build()` and before any `set_anchor`,
+which is why it prints 21.1 MB at the 8K grid (3n + tables = 21.11 MiB
+computed) and 21.6 MB here. Peak *inside* `build()` is 21.55 + 64.61 =
+**86.2 MiB**, four times what `bytes()` reports, and the first anchor click
+adds another 35.9 MiB that a `bytes()` call before it cannot see.
+
+**What is left over after that arithmetic is not measured, and is hedged
+accordingly.** How much of the 64.6 MiB of transient the allocator hands back
+to the OS was not traced -- no allocator instrumentation, no page-fault count.
+The evidence that an RSS delta around a live GUI is a poor instrument here is
+that **the same operation measured twice gave 99.2 MiB and 57.8 MiB** (the
+second, on the fixed build, is in the re-take list below): a 41 MiB spread for
+an identical build on an identical frame. Treat the RSS rows as evidence the
+tool fits in memory at 120 MP, which is what spec §8.1 asks, and not as a
+measurement of anything smaller.
 
 **Saved, and the save was checked rather than assumed.** `mask_edits/` holds
 `f0066.base.png`, `f0066.drop.png`, `f0066.keep.png` and `index.json`; the
@@ -1221,6 +1253,20 @@ tool (`hint_path`, `path_anchors`, and `path_straight` when the livewire is
 absent), nine with both, and more again whenever a hint or a long error path
 wraps.
 
+**Three of those rows are line count x pitch and the fourth is not, which is
+the point.** Read back from the running app: `GetFontSize()` = **16.0**,
+`ItemSpacing.y` = **6.0**, `GetTextLineHeightWithSpacing()` = **22.0**. So
+110 = 5 x 22, 132 = 6 x 22 and 176 = 8 x 22 exactly. The 192 row does **not**
+reduce that way, and a naive 9 x 22 = 198 is 6 px over. A wrapped
+`TextDisabledWrapped` is **one item two lines tall**, not two items: it costs
+`2 x FontSize + ItemSpacing.y` = 2 x 16 + 6 = **38**, where two separate lines
+would cost 44. The strip at 900 px is therefore seven single-line items plus
+that one wrapped item: 7 x 22 + 38 = **192**, to the pixel. The six-pixel
+discrepancy is exactly the one `ItemSpacing` the two wrapped lines share, and
+it is why "count the lines and multiply" is not a safe way to predict this
+height -- which is the same reason the reserve is measured rather than
+computed.
+
 **The fix measures the strip instead of predicting it.** `draw()` records
 `ImGui::GetCursorPosY()` either side of `draw_status()` into `_status_h`, and
 `draw_canvas()` reserves that. **A constant is the wrong shape for this
@@ -1261,6 +1307,107 @@ present between readings of the same quantity.
 raise. Plan 3's Task 9 proposed 154, which is below what the pen tool needed
 even unwrapped; the measured strip makes that adjustment unnecessary rather
 than wrong.
+
+#### KNOWN LIMITATION: below a window height the strip clips again, and here it is
+
+**The fix above removes the defect at every window size a person would work
+at, and does not remove it at every window size.** `draw_canvas` floors the
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:318-352`) draws its
+full content unconditionally with no cap and no truncation. Once the window is
+short enough that the canvas has pinned at its floor, every further pixel of
+shrink becomes a pixel of strip pushed past the window bottom. It is the same
+failure the fix cured, re-triggered by **height** instead of by the old 118 px
+constant -- **not a regression**, since the old code failed the same way at a
+different threshold, but a boundary that was previously undisclosed because
+the manual battery varied width (1600 -> 900) and never height.
+
+Measured, by reading `GetContentRegionAvail().y`, the reserve, the canvas
+height and **`ImGui::GetScrollMaxY()`** out of the running app while dragging
+the window's bottom edge. `GetScrollMaxY() > 0` is the exact criterion: it is
+content height minus window height, so it says by how many pixels the strip is
+off the bottom rather than whether it looks off.
+
+| tool / state | `status_h` | window height at which it clips | how |
+|---|---|---|---|
+| shape, empty status | 110 | **274 px** | formula |
+| shape, status or error present | 132 | **296 px** | **measured** |
+| pen, full width | 176 | **340 px** | **measured** |
+| pen, 900 px wide, `hint_path` wrapped | 192 | **356 px** | **measured** |
+
+**The rule is `window height < status_h + 164`**, and the 164 is not fitted:
+it is the 64 px canvas floor plus exactly 100 px of chrome above the canvas
+(title bar, tool strip, frame slider, window padding), and `avail_y = winh -
+100` held at every one of the fifteen readings taken, from 950 px down to
+202 px. The mechanism shows directly in the data -- at the pen tool, full
+width:
+
+```
+winh 342  avail_y 242  status_h 176  canvas 66 (floor 64)  scrollmax   0   fits
+winh 302  avail_y 202  status_h 176  canvas 64 (floor 64)  scrollmax  38   CLIPS
+winh 252  avail_y 152  status_h 176  canvas 64 (floor 64)  scrollmax  88   CLIPS
+winh 202  avail_y 102  status_h 176  canvas 64 (floor 64)  scrollmax 138   CLIPS
+```
+
+`winh + scrollmax` is **340.0 in every clipping row** and the canvas sits on
+its floor in every one of them: below the threshold the content height stops
+changing, so overflow tracks shrink one for one. The shape-tool rows give
+296.0 the same way, and the 900 px pen rows give 356.0. Two thresholds in that
+table are read straight off a clipping row, one more likewise, and only the
+empty-status shape row is the formula alone.
+
+For scale: 340 px is about a third of the height the window opens at, the
+canvas is a 64 px sliver by then, and the content is still reachable by
+scrolling. **Left unfixed on purpose this round.** The cheap and obviously safe
+cap, if someone wants it, is to make the canvas floor yield to the strip rather
+than the other way round --
+
+```cpp
+const float floor = std::min(px(64.0f), std::max(0.0f, avail.y - status_h));
+const ImVec2 size(std::max(avail.x, px(64.0f)), std::max(avail.y - status_h, floor));
+```
+
+-- which is identical above the threshold (there `avail.y - status_h >= 64`, so
+`floor` is 64 and the outer `max` picks the same value it picks today) and
+below it lets the canvas shrink to nothing before any text is pushed off. That
+would move the boundary from `status_h + 164` down to `status_h + 100`, i.e. to
+the point where the window cannot hold the strip at all and no arrangement
+helps. **Not implemented here**, and it is untested.
+
+#### UNCOVERED: the status strip has no automated test, and cannot have one here
+
+**The strip fix rests entirely on the live verification above. Nothing in the
+test tree can fail if it regresses.** `_status_h` and `status_h` appear nowhere
+under `src/app/gui/tests/`, and the only test change in this task is the
+deletion of the flaky timing assertion.
+
+That is a consequence of the architecture rather than an oversight.
+`MaskPanel.cpp:1-5` carves ImGui out of this directory on purpose so that
+`mask_doc_test` links `MaskDoc`, `MaskSession`, `Livewire` and `PathTool` with
+no ImGui at all, which is what makes those 749 checks cheap and headless. The
+reserve is `ImGui::GetCursorPosY()` either side of a function that calls
+`ImGui::Text` -- there is no seam to test it through without either pulling
+ImGui into the test binary or introducing an ImGui test-engine harness, and
+neither is worth it for one layout quantity. **The position is defensible; it
+is being written down so that it is a known gap and not an assumed
+guarantee.**
+
+What has nothing to catch it:
+
+- a refactor that reintroduces a constant reserve, or moves `draw_status`
+  above `draw_canvas`, or drops the measurement;
+- a **translation** whose text grows the strip past what fits -- the strip is
+  measured, so it would adapt, but the height boundary above moves up with it
+  and nothing announces that;
+- a new status or hint line, which is the likeliest of the three, since the pen
+  tool added three;
+- any change to the `px(64.0f)` canvas floor, which sets the boundary.
+
+**After touching `draw_status`, `draw_canvas` or the catalog lines they draw,
+re-verify by hand**: open the mask editor, press **I**, and confirm the
+`Edge map:` line is readable with nothing scrolled; then provoke an error
+(`chmod 555` on the mask directory and save) and confirm it is readable under
+both a shape tool and the pen tool. That is the whole check and it takes a
+minute. The height boundary below is the other half of it.
 
 #### Three traps this feature has already paid for
 
