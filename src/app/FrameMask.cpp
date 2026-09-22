@@ -4,6 +4,7 @@
 
 #include "app/FrameLook.h"
 #include "core/ExrImage.h"
+#include "core/PolygonFill.h"
 
 #include "external/stb_image.h"
 #include "external/stb_image_write.h"
@@ -442,6 +443,22 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
     }
     const bool base = m.shapes.empty() || m.shapes.front().remove;
 
+    // A path is filled once into its own plane; the pixel loop then reads it
+    // like any other inside test, so the ordering rule is untouched.
+    std::vector<std::vector<uint8_t>> paths(m.shapes.size());
+    std::vector<float> px;
+    for (size_t k = 0; k < m.shapes.size(); k++) {
+        const MaskShape& s = m.shapes[k];
+        if (s.kind != MaskShape::Kind::Path) continue;
+        paths[k].assign((size_t)width * height, 0);
+        px.resize(s.pts.size());
+        for (size_t i = 0; i + 1 < s.pts.size(); i += 2) {
+            px[i] = s.pts[i] * (float)width;
+            px[i + 1] = s.pts[i + 1] * (float)height;
+        }
+        polyfill::fill_even_odd(px.data(), px.size() / 2, width, height, paths[k].data(), 1);
+    }
+
     out.assign((size_t)width * height, 255);
     for (int y = 0; y < height; y++) {
         const float v = ((float)y + 0.5f) / (float)height;
@@ -449,9 +466,12 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
         for (int x = 0; x < width; x++) {
             const float u = ((float)x + 0.5f) / (float)width;
             bool keep = base;
-            for (const MaskShape& s : m.shapes) {
+            for (size_t k = 0; k < m.shapes.size(); k++) {
+                const MaskShape& s = m.shapes[k];
                 bool inside;
-                if (s.kind == MaskShape::Kind::Ellipse) {
+                if (s.kind == MaskShape::Kind::Path) {
+                    inside = paths[k][(size_t)y * width + x] != 0;
+                } else if (s.kind == MaskShape::Kind::Ellipse) {
                     if (s.rx <= 0.0f || s.ry <= 0.0f) continue;
                     const float du = (u - s.cx) / s.rx, dv = (v - s.cy) / s.ry;
                     inside = du * du + dv * dv <= 1.0f;

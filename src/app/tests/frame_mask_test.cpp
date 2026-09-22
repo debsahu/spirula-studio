@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -141,11 +142,118 @@ void test_path_spelling() {
     check(all, "every corner within the %.4f rounding");
 }
 
+// ---------------------------------------------------------------------------
+// Task 3: the fill inside rasterize_frame_mask
+// ---------------------------------------------------------------------------
+
+app::MaskShape path_shape(std::vector<float> pts, bool remove) {
+    app::MaskShape s;
+    s.kind = app::MaskShape::Kind::Path;
+    s.remove = remove;
+    s.pts = std::move(pts);
+    return s;
+}
+
+app::MaskShape rect_shape(float x0, float y0, float x1, float y1, bool remove) {
+    app::MaskShape s;
+    s.kind = app::MaskShape::Kind::Rect;
+    s.remove = remove;
+    s.cx = x0; s.cy = y0; s.rx = x1; s.ry = y1;
+    return s;
+}
+
+// The polygon in pixels of a W x H frame, for the reference test.
+std::vector<float> in_pixels(const std::vector<float>& norm, int W, int H) {
+    std::vector<float> px(norm.size());
+    for (size_t i = 0; i + 1 < norm.size(); i += 2) {
+        px[i] = norm[i] * (float)W;
+        px[i + 1] = norm[i + 1] * (float)H;
+    }
+    return px;
+}
+
+void test_path_fill() {
+    // 64 x 48: a triangle whose normalised corners give different pixel
+    // polygons depending on which dimension scales which axis.
+    const int W = 64, H = 48;
+    const std::vector<float> tri = {0.13f, 0.11f, 0.87f, 0.21f, 0.47f, 0.93f};
+    app::FrameMask m;
+    m.shapes.push_back(path_shape(tri, true));
+    std::vector<uint8_t> out;
+    std::string err;
+    check(app::rasterize_frame_mask(m, W, H, out, err), "rasterizes a -path");
+    const std::vector<float> px = in_pixels(tri, W, H);
+    size_t compared = 0, mismatched = 0, dropped = 0;
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            bool tie;
+            const bool inside = ray_inside(px, (float)x + 0.5f, (float)y + 0.5f, tie);
+            if (tie) continue;
+            compared++;
+            dropped += out[(size_t)y * W + x] == 0;
+            if ((out[(size_t)y * W + x] == 0) != inside) mismatched++;
+        }
+    check(mismatched == 0, "-path drops exactly the ray-cast inside on 64x48");
+    check(dropped > 400 && dropped < 1400, "the triangle is about a third of the frame: " +
+                                             std::to_string(dropped));
+
+    // Transposed frame: the same normalised corners on 48 x 64 give a
+    // different pixel polygon, and the scaling must follow the axes.
+    check(app::rasterize_frame_mask(m, H, W, out, err), "rasterizes on 48x64");
+    const std::vector<float> px2 = in_pixels(tri, H, W);
+    mismatched = 0;
+    for (int y = 0; y < W; y++)
+        for (int x = 0; x < H; x++) {
+            bool tie;
+            const bool inside = ray_inside(px2, (float)x + 0.5f, (float)y + 0.5f, tie);
+            if (tie) continue;
+            if ((out[(size_t)y * H + x] == 0) != inside) mismatched++;
+        }
+    check(mismatched == 0, "-path on the transposed frame still matches");
+
+    // A keep path as the only shape: outside is 0, inside 255.
+    app::FrameMask k;
+    k.shapes.push_back(path_shape(tri, false));
+    check(app::rasterize_frame_mask(k, W, H, out, err), "rasterizes a keep path");
+    check(out[0] == 0, "outside a lone keep path is dropped");
+    check(out[(size_t)(H / 2) * W + W / 2] == 255, "inside a lone keep path is kept");
+}
+
+void test_path_order() {
+    // -rect over the whole frame, then a keep path: the path's inside comes
+    // back (last shape wins), the rest stays dropped.
+    const int W = 64, H = 48;
+    app::FrameMask m;
+    m.shapes.push_back(rect_shape(0.0f, 0.0f, 1.0f, 1.0f, true));
+    m.shapes.push_back(path_shape({0.2f, 0.2f, 0.8f, 0.2f, 0.8f, 0.8f, 0.2f, 0.8f}, false));
+    std::vector<uint8_t> out;
+    std::string err;
+    check(app::rasterize_frame_mask(m, W, H, out, err), "rasterizes rect then path");
+    check(out[0] == 0 && out[(size_t)(H / 2) * W + W / 2] == 255,
+          "keep path restores its inside over a remove rect");
+    // Reverse order: the rect wins everywhere.
+    std::swap(m.shapes[0], m.shapes[1]);
+    check(app::rasterize_frame_mask(m, W, H, out, err), "rasterizes path then rect");
+    size_t kept = 0;
+    for (uint8_t v : out) kept += v != 0;
+    check(kept == 0, "a remove rect after a keep path drops everything");
+    // Two paths: a keep path with a -path hole.
+    app::FrameMask h;
+    h.shapes.push_back(path_shape({0.1f, 0.1f, 0.9f, 0.1f, 0.9f, 0.9f, 0.1f, 0.9f}, false));
+    h.shapes.push_back(path_shape({0.4f, 0.4f, 0.6f, 0.4f, 0.6f, 0.6f, 0.4f, 0.6f}, true));
+    check(app::rasterize_frame_mask(h, W, H, out, err), "rasterizes two paths");
+    check(out[(size_t)(H / 2) * W + W / 2] == 0 && out[(size_t)(H / 4) * W + W / 4] == 255 &&
+              out[0] == 0,
+          "hole dropped, ring kept, outside dropped");
+}
+
 }  // namespace
 
 int main() {
     test_fill_matches_ray_cast();
     test_path_spelling();
+    test_path_fill();
+    test_path_order();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
