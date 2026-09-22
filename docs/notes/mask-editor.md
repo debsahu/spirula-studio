@@ -29,7 +29,7 @@ Polarity is the app's everywhere: 255 = keep.
 
 | file | holds |
 |---|---|
-| `<key>.base.png` | a BYTE COPY of `masks/<key>.png` as the run wrote it, made on the first save, never edited |
+| `<key>.base.png` | a BYTE COPY of `masks/<key>.png` as the run wrote it, made on the first save and replaced only when a re-mask writes a DIFFERENT PICTURE (below) |
 | `<key>.drop.png` | 255 where the user forced drop |
 | `<key>.keep.png` | 255 where the user forced keep |
 
@@ -62,7 +62,11 @@ Five sites write masks. Instead of five hooks there is one pass at the end of
 whose fingerprint differs from the recorded composite fingerprint is a new
 base, copied to `.base.png`, and the layers are re-composed over it. A mask
 whose fingerprint matches is the composite written last time and is left
-alone. A missing mask (a cancelled re-run) leaves the layers in place. A
+alone. The fingerprint is over file bytes, so a re-encode that preserves
+every pixel -- oxipng, another libpng, a metadata strip -- also differs; the
+pass therefore compares the decoded picture against the composite of the
+recorded base before it replaces `.base.png`, which is the only copy of what
+the run wrote. A missing mask (a cancelled re-run) leaves the layers in place. A
 frame the pass cannot re-base -- its layers no longer match the mask's size
 -- does not stop the rest of the pass: every other frame `index.json` lists
 is still attempted, and the ones that failed are named, not folded into the

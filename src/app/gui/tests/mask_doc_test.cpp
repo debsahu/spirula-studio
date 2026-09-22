@@ -543,7 +543,8 @@ void test_revert_reports_removal_failure() {
 
     check(!mk::revert_frame(layer_root, mask_root, "a", idx, err) && !err.empty(),
           "revert_frame reports the removal failure: " + err);
-    check(err.find("a.drop.png") != std::string::npos, "the failing path is named");
+    check(err == drop_path.string(),
+          "the error is the path list and nothing else -- err_write supplies the sentence");
     // The invariant that matters: no layer files on disk with no entry.
     check(idx.frames.count("a") == 1, "index entry kept -- an orphan file must keep its owner");
     mk::LayerIndex disk;
@@ -1472,6 +1473,60 @@ void test_session_other_mask_root_refused() {
           "the refusal names the root the corrections were made against");
     check(file_bytes(f.layer / "a.base.png") == original_a,
           "the first root's base survived the attempt");
+}
+
+// A re-encode of our own composite -- oxipng, another libpng, a metadata
+// strip -- changes the bytes and not the picture, and must not rebase.
+void test_session_reencoded_mask_is_not_regenerated() {
+    Fixture f = make_dataset("session_reencode", 64, 48, {"a"});
+    const std::vector<uint8_t> original = file_bytes(f.masks / "a.png");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "open: " + err);
+    settle(s);
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.save();
+    settle(s);
+    s.close();
+
+    int w = 0, h = 0;
+    std::vector<uint8_t> px;
+    check(app::load_stencil((f.masks / "a.png").string(), w, h, px), "composite decodes");
+    const std::vector<uint8_t> before = file_bytes(f.masks / "a.png");
+    const int level = stbi_write_png_compression_level;
+    stbi_write_png_compression_level = level == 1 ? 9 : 1;
+    check(write_png_gray(f.masks / "a.png", w, h, px), "re-encoded at another level");
+    stbi_write_png_compression_level = level;
+    const std::vector<uint8_t> after = file_bytes(f.masks / "a.png");
+    std::vector<uint8_t> px2;
+    int w2 = 0, h2 = 0;
+    app::load_stencil((f.masks / "a.png").string(), w2, h2, px2);
+    check(after != before && px2 == px,
+          "fixture: the rewrite changed the bytes and not one pixel");
+
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "reopen: " + err);
+    settle(s);
+    check(s.doc() && s.doc()->base_state() == mk::BaseState::Unchanged,
+          "a byte-different, pixel-identical mask is NOT a regeneration");
+    check(file_bytes(f.layer / "a.base.png") == original,
+          ".base.png is still the run's original, not the correction");
+    s.close();
+
+    // And revert still restores the original rather than reporting success
+    // over a base that had become the correction.
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "reopen 2");
+    settle(s);
+    s.revert_open_frame();
+    settle(s);
+    check(file_bytes(f.masks / "a.png") == original, "revert restored the run's own mask");
+    s.close();
 }
 
 // A corrupt index is every recorded correction; replacing it with an empty
@@ -2423,6 +2478,7 @@ int main() {
     test_session_size_mismatch();
     test_session_flipped_polarity();
     test_session_other_mask_root_refused();
+    test_session_reencoded_mask_is_not_regenerated();
     test_session_corrupt_index_refuses();
     test_session_close_reports_a_failed_save();
     test_session_close_resets_paths();

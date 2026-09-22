@@ -256,6 +256,22 @@ bool read_layer_or_zero(const std::string& path, int w, int h,
     return true;
 }
 
+// Is `mask` (app polarity) the composite of the recorded base under `layers`,
+// i.e. our own last write re-encoded rather than somebody else's mask?
+bool same_picture_as_composite(const std::string& base_path, const FrameLayers& layers,
+                               const std::vector<uint8_t>& mask, bool flipped) {
+    std::error_code ec;
+    if (!fs::exists(base_path, ec)) return false;
+    int bw = 0, bh = 0;
+    std::vector<uint8_t> base;
+    if (!app::load_stencil(base_path, bw, bh, base)) return false;
+    if (bw != layers.w || bh != layers.h || base.size() != mask.size()) return false;
+    if (flipped) flip_polarity(base.data(), base.size());
+    std::vector<uint8_t> out(base.size());
+    composite(base.data(), layers.drop.data(), layers.keep.data(), out.size(), out.data());
+    return out == mask;
+}
+
 }  // namespace
 
 bool read_layers(const std::string& layer_root, const std::string& key, int w,
@@ -341,6 +357,14 @@ bool recomposite_frame(const std::string& layer_root, const std::string& mask_ro
         return false;
     }
     const std::string base_path = layer_file(layer_root, key, Layer::Base);
+    // The fingerprint is over FILE BYTES, so oxipng, a different libpng or a
+    // metadata strip all read as regenerated. Only a different PICTURE may
+    // rebase: .base.png is the only copy of what the run wrote.
+    if (same_picture_as_composite(base_path, layers, base, idx.mask_flipped)) {
+        idx.frames[key].composite_fp = fnv1a64(bytes.data(), bytes.size());
+        found = BaseState::Unchanged;
+        return idx.save(layer_root, error);
+    }
     if (!write_file_atomic(base_path, bytes.data(), bytes.size())) {
         error = base_path;
         return false;
@@ -400,7 +424,7 @@ bool revert_frame(const std::string& layer_root, const std::string& mask_root,
         }
     }
     if (!failed.empty()) {
-        error = "could not remove: " + failed;
+        error = failed;
         return false;
     }
     idx.frames.erase(key);
