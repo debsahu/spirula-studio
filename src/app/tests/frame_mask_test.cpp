@@ -77,10 +77,75 @@ void test_fill_matches_ray_cast() {
     check(true, "zero points does not crash");
 }
 
+// ---------------------------------------------------------------------------
+// Task 2: the spelling
+// ---------------------------------------------------------------------------
+
+bool close_to(float a, float b) { return std::fabs(a - b) < 1e-6f; }
+
+void test_path_spelling() {
+    std::vector<app::MaskShape> s;
+    std::string err;
+    check(app::parse_mask_shapes("path 0.1,0.1,0.9,0.1,0.5,0.9", s, err), "parses a path");
+    check(s.size() == 1 && s[0].kind == app::MaskShape::Kind::Path && !s[0].remove,
+          "one keep path");
+    check(s[0].pts.size() == 6 && close_to(s[0].pts[0], 0.1f) && close_to(s[0].pts[5], 0.9f),
+          "six numbers in order");
+    check(app::parse_mask_shapes("-path 0.1, 0.1, 0.9,0.1, 0.5,0.9", s, err) &&
+              s[0].remove && s[0].pts.size() == 6,
+          "-path removes, spaces after commas tolerated");
+    check(app::parse_mask_shapes("!path 0,0,1,0,1,1,0,1", s, err) && s[0].remove &&
+              s[0].pts.size() == 8,
+          "! spelling and four corners");
+    check(!app::parse_mask_shapes("path 0.1,0.1,0.9,0.1", s, err), "two points rejected");
+    check(!app::parse_mask_shapes("path 0.1,0.1,0.9,0.1,0.5", s, err), "odd count rejected");
+    check(!app::parse_mask_shapes("path", s, err), "no numbers rejected");
+    check(!app::parse_mask_shapes("path 0.1,0.1,0.9,0.1,0.5,x", s, err), "junk rejected");
+    check(!app::parse_mask_shapes("path 0.1,0.1,0.9,0.1,0.5,0.9,", s, err),
+          "trailing comma rejected");
+
+    // Mixed list, order kept, and the old kinds still spell the same.
+    check(app::parse_mask_shapes(
+              "ellipse 0.5,0.5,0.49,0.49; -rect 0.2,0.9,0.8,1; -path 0.1,0.1,0.3,0.1,0.2,0.3",
+              s, err),
+          "mixed list parses");
+    check(s.size() == 3 && s[0].kind == app::MaskShape::Kind::Ellipse &&
+              s[1].kind == app::MaskShape::Kind::Rect && s[2].kind == app::MaskShape::Kind::Path,
+          "kinds in order");
+    const std::string back = app::format_mask_shapes(s);
+    check(back == "ellipse 0.5000,0.5000,0.4900,0.4900; -rect 0.2000,0.9000,0.8000,1.0000; "
+                  "-path 0.1000,0.1000,0.3000,0.1000,0.2000,0.3000",
+          "format spells all three: " + back);
+    std::vector<app::MaskShape> again;
+    check(app::parse_mask_shapes(back, again, err) && again.size() == 3 &&
+              again[2].kind == app::MaskShape::Kind::Path && again[2].remove &&
+              again[2].pts.size() == 6 && close_to(again[2].pts[4], 0.2f) &&
+              close_to(again[2].pts[5], 0.3f),
+          "format -> parse is the identity on a path");
+
+    // A long path does not truncate: 40 corners is 80 numbers, past the 128
+    // bytes the old fixed buffer held.
+    app::MaskShape big;
+    big.kind = app::MaskShape::Kind::Path;
+    big.remove = true;
+    for (int i = 0; i < 40; i++) {
+        big.pts.push_back(0.5f + 0.4f * std::cos((float)i * 0.157f));
+        big.pts.push_back(0.5f + 0.4f * std::sin((float)i * 0.157f));
+    }
+    const std::string bigs = app::format_mask_shapes({big});
+    std::vector<app::MaskShape> bigp;
+    check(app::parse_mask_shapes(bigs, bigp, err) && bigp.size() == 1 && bigp[0].pts.size() == 80,
+          "40-corner path survives format -> parse");
+    bool all = true;
+    for (size_t i = 0; i < 80; i++) all &= std::fabs(bigp[0].pts[i] - big.pts[i]) < 6e-5f;
+    check(all, "every corner within the %.4f rounding");
+}
+
 }  // namespace
 
 int main() {
     test_fill_matches_ray_cast();
+    test_path_spelling();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }

@@ -48,6 +48,25 @@ bool parse_four(const std::string& s, float v[4]) {
     return trim(p).empty();
 }
 
+// Comma-separated floats, any count; false on junk, an empty list or a
+// trailing comma.
+bool parse_floats(const std::string& s, std::vector<float>& out) {
+    out.clear();
+    const char* p = s.c_str();
+    while (true) {
+        char* end = nullptr;
+        const float v = std::strtof(p, &end);
+        if (end == p) return false;
+        out.push_back(v);
+        p = end;
+        while (*p == ' ') p++;
+        if (*p != ',') break;
+        p++;
+        while (*p == ' ') p++;
+    }
+    return trim(p).empty();
+}
+
 // ---------------------------------------------------------------------------
 // Detection
 // ---------------------------------------------------------------------------
@@ -320,8 +339,18 @@ bool parse_mask_shapes(const std::string& spec, std::vector<MaskShape>& out,
             return false;
         }
         const std::string kind = piece.substr(0, sp);
+        const std::string nums = trim(piece.substr(sp + 1));
+        if (kind == "path") {
+            s.kind = MaskShape::Kind::Path;
+            if (!parse_floats(nums, s.pts) || s.pts.size() < 6 || s.pts.size() % 2) {
+                error = piece;
+                return false;
+            }
+            out.push_back(s);
+            continue;
+        }
         float v[4];
-        if (!parse_four(trim(piece.substr(sp + 1)), v)) {
+        if (!parse_four(nums, v)) {
             error = piece;
             return false;
         }
@@ -344,14 +373,23 @@ bool parse_mask_shapes(const std::string& spec, std::vector<MaskShape>& out,
 
 std::string format_mask_shapes(const std::vector<MaskShape>& shapes) {
     std::string out;
+    char buf[96];
     for (const MaskShape& s : shapes) {
-        char buf[128];
-        std::snprintf(buf, sizeof buf, "%s%s %.4f,%.4f,%.4f,%.4f",
-                      s.remove ? "-" : "",
-                      s.kind == MaskShape::Kind::Rect ? "rect" : "ellipse",
-                      s.cx, s.cy, s.rx, s.ry);
+        std::string piece = s.remove ? "-" : "";
+        if (s.kind == MaskShape::Kind::Path) {
+            piece += "path ";
+            for (size_t i = 0; i < s.pts.size(); i++) {
+                std::snprintf(buf, sizeof buf, "%s%.4f", i ? "," : "", s.pts[i]);
+                piece += buf;
+            }
+        } else {
+            std::snprintf(buf, sizeof buf, "%s %.4f,%.4f,%.4f,%.4f",
+                          s.kind == MaskShape::Kind::Rect ? "rect" : "ellipse",
+                          s.cx, s.cy, s.rx, s.ry);
+            piece += buf;
+        }
         if (!out.empty()) out += "; ";
-        out += buf;
+        out += piece;
     }
     return out;
 }
