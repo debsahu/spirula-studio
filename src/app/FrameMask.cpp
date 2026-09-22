@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cctype>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -66,6 +67,23 @@ bool parse_floats(const std::string& s, std::vector<float>& out) {
         while (*p == ' ') p++;
     }
     return trim(p).empty();
+}
+
+// Appends exactly what vsnprintf would produce, at any length: measures the
+// needed size first, so no fixed buffer can truncate a huge float.
+void append_printf(std::string& out, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    va_list probe;
+    va_copy(probe, args);
+    const int n = std::vsnprintf(nullptr, 0, fmt, probe);
+    va_end(probe);
+    if (n > 0) {
+        std::vector<char> buf((size_t)n + 1);
+        std::vsnprintf(buf.data(), buf.size(), fmt, args);
+        out.append(buf.data(), (size_t)n);
+    }
+    va_end(args);
 }
 
 // ---------------------------------------------------------------------------
@@ -384,10 +402,9 @@ std::string format_mask_shapes(const std::vector<MaskShape>& shapes) {
                 piece += buf;
             }
         } else {
-            std::snprintf(buf, sizeof buf, "%s %.4f,%.4f,%.4f,%.4f",
+            append_printf(piece, "%s %.4f,%.4f,%.4f,%.4f",
                           s.kind == MaskShape::Kind::Rect ? "rect" : "ellipse",
                           s.cx, s.cy, s.rx, s.ry);
-            piece += buf;
         }
         if (!out.empty()) out += "; ";
         out += piece;

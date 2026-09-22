@@ -162,6 +162,14 @@ app::MaskShape rect_shape(float x0, float y0, float x1, float y1, bool remove) {
     return s;
 }
 
+app::MaskShape ellipse_shape(float cx, float cy, float rx, float ry, bool remove) {
+    app::MaskShape s;
+    s.kind = app::MaskShape::Kind::Ellipse;
+    s.remove = remove;
+    s.cx = cx; s.cy = cy; s.rx = rx; s.ry = ry;
+    return s;
+}
+
 // The polygon in pixels of a W x H frame, for the reference test.
 std::vector<float> in_pixels(const std::vector<float>& norm, int W, int H) {
     std::vector<float> px(norm.size());
@@ -245,6 +253,74 @@ void test_path_order() {
     check(out[(size_t)(H / 2) * W + W / 2] == 0 && out[(size_t)(H / 4) * W + W / 4] == 255 &&
               out[0] == 0,
           "hole dropped, ring kept, outside dropped");
+
+    // A remove-path over a keep rect: the rect keeps the frame, the path
+    // carves its hole out of it.
+    app::FrameMask rp;
+    rp.shapes.push_back(rect_shape(0.0f, 0.0f, 1.0f, 1.0f, false));
+    rp.shapes.push_back(path_shape({0.4f, 0.4f, 0.6f, 0.4f, 0.6f, 0.6f, 0.4f, 0.6f}, true));
+    check(app::rasterize_frame_mask(rp, W, H, out, err), "rasterizes rect then remove-path");
+    check(out[(size_t)(H / 2) * W + W / 2] == 0 && out[0] == 255,
+          "remove-path bites a hole out of a keep rect");
+
+    // A keep ellipse with a remove-path bite: outside the ellipse is already
+    // dropped by the base rule, so the path only matters where they overlap.
+    app::FrameMask ep;
+    ep.shapes.push_back(ellipse_shape(0.5f, 0.5f, 0.45f, 0.45f, false));
+    ep.shapes.push_back(path_shape({0.4f, 0.4f, 0.6f, 0.4f, 0.6f, 0.6f, 0.4f, 0.6f}, true));
+    check(app::rasterize_frame_mask(ep, W, H, out, err), "rasterizes ellipse then remove-path");
+    check(out[(size_t)(H / 2) * W + W / 2] == 0 && out[0] == 0 &&
+              out[(size_t)7 * W + 32] == 255,
+          "remove-path bite inside a keep ellipse, outside it stays dropped either way");
+
+    // A keep ellipse restoring over a fully removed path: inside the ellipse
+    // comes back, outside it stays gone.
+    app::FrameMask pe;
+    pe.shapes.push_back(path_shape({0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f}, true));
+    pe.shapes.push_back(ellipse_shape(0.5f, 0.5f, 0.45f, 0.45f, false));
+    check(app::rasterize_frame_mask(pe, W, H, out, err), "rasterizes remove-path then ellipse");
+    check(out[(size_t)(H / 2) * W + W / 2] == 255 && out[0] == 0,
+          "keep ellipse restores its interior over a fully removed path");
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 1: format_mask_shapes must not truncate at any magnitude
+// ---------------------------------------------------------------------------
+
+bool close_rel(float a, float b) { return std::fabs(a - b) <= std::fabs(a) * 1e-5f + 1e-3f; }
+
+void test_format_extreme_values_do_not_truncate() {
+    // "rect -123456789275539452985344.0000,...,1000000013848427855085568.0000"
+    // needs 127 characters with the remove prefix -- 31 past a 96-byte buffer.
+    app::MaskShape r;
+    r.kind = app::MaskShape::Kind::Rect;
+    r.remove = true;
+    r.cx = -1.23456789e23f;
+    r.cy = 9.87654321e22f;
+    r.rx = -5.55555555e23f;
+    r.ry = 1.0e24f;
+    app::MaskShape e;
+    e.kind = app::MaskShape::Kind::Ellipse;
+    e.cx = -2.5e22f;
+    e.cy = 3.5e22f;
+    e.rx = 4.0e22f;
+    e.ry = 6.0e22f;
+
+    const std::string out = app::format_mask_shapes({r, e});
+    std::vector<app::MaskShape> parsed;
+    std::string err;
+    check(app::parse_mask_shapes(out, parsed, err) && parsed.size() == 2,
+          "an extreme rect and ellipse both re-parse: " + err);
+    check(parsed.size() == 2 && parsed[0].kind == app::MaskShape::Kind::Rect &&
+              parsed[0].remove && close_rel(parsed[0].cx, r.cx) &&
+              close_rel(parsed[0].cy, r.cy) && close_rel(parsed[0].rx, r.rx) &&
+              close_rel(parsed[0].ry, r.ry),
+          "the rect's four extreme values survive whole, including the last one");
+    check(parsed.size() == 2 && parsed[1].kind == app::MaskShape::Kind::Ellipse &&
+              !parsed[1].remove && close_rel(parsed[1].cx, e.cx) &&
+              close_rel(parsed[1].cy, e.cy) && close_rel(parsed[1].rx, e.rx) &&
+              close_rel(parsed[1].ry, e.ry),
+          "the ellipse's four extreme values survive whole");
 }
 
 }  // namespace
@@ -254,6 +330,7 @@ int main() {
     test_path_spelling();
     test_path_fill();
     test_path_order();
+    test_format_extreme_values_do_not_truncate();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
