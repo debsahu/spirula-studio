@@ -2983,6 +2983,26 @@ void test_session_frame_pixels_outlive_navigation() {
     check(held && *held == frame0, "frame pixels: the held buffer is unchanged after close");
 }
 
+// GuiApp pushes its model every frame: only a changed path counts, and a change
+// drops the session but never the editor's own clicks, which are frame pixels.
+void test_session_model_sync() {
+    mk::MaskSession s;
+    for (int i = 0; i < 3; i++) s.set_sam_model("/m/a.ggml", true);
+    check(s.sam_model_changes() == 1 && s.sam_model_path() == "/m/a.ggml",
+          "model sync: the same path pushed every frame is one change");
+    gui::MaskClick c;
+    c.x = 5.0f;
+    s.sam_prompt().clicks.push_back(c);
+    s.set_sam_model("/m/b.ggml", false);
+    s.sam_pump();
+    check(s.sam_model_changes() == 2 && s.sam_model_path() == "/m/b.ggml",
+          "model sync: a different path is a second change");
+    check(s.sam_click_count() == 1, "model sync: a model change keeps the editor's clicks");
+    s.set_sam_model("", false);
+    check(s.sam_model_changes() == 3 && !s.sam_has_model(),
+          "model sync: an uncached pick leaves no model");
+}
+
 }  // namespace
 
 int main() {
@@ -3044,6 +3064,7 @@ int main() {
     test_mask_sam_negative_clicks();
     test_mask_sam_click_filters();
     test_session_frame_pixels_outlive_navigation();
+    test_session_model_sync();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

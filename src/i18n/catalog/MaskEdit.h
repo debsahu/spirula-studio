@@ -767,6 +767,40 @@ SS_MSG(path_anchors,
     RU("Точек контура: {0}"),
     TR("Yol çapaları: {0}"));
 
+// ===========================================================================
+// SAM assist
+// ===========================================================================
+
+SS_MSG(sam_first_load,
+    EN("Loading the checkpoint. The first prompt of a session takes a few seconds."),
+    JA("チェックポイントを読み込み中です。セッション最初のプロンプトは数秒かかります。"),
+    ZH_HANS("正在加载检查点。每次会话的第一个提示需要几秒钟。"),
+    ZH_HANT("正在載入檢查點。每次工作階段的第一個提示需要幾秒鐘。"),
+    KO("체크포인트를 불러오는 중입니다. 세션의 첫 프롬프트는 몇 초 걸립니다."),
+    DE("Checkpoint wird geladen. Der erste Prompt einer Sitzung dauert einige Sekunden."),
+    FR("Chargement du checkpoint. La première requête d'une session prend quelques secondes."),
+    ES("Cargando el checkpoint. La primera indicación de una sesión tarda unos segundos."),
+    PT("Carregando o checkpoint. O primeiro prompt de uma sessão leva alguns segundos."),
+    IT("Caricamento del checkpoint. Il primo prompt di una sessione richiede alcuni secondi."),
+    NL("Checkpoint wordt geladen. De eerste prompt van een sessie duurt een paar seconden."),
+    RU("Загрузка контрольной точки. Первый запрос за сеанс занимает несколько секунд."),
+    TR("Kontrol noktası yükleniyor. Bir oturumun ilk istemi birkaç saniye sürer."));
+
+SS_MSG(sam_working,
+    EN("Segmenting..."),
+    JA("セグメント化中…"),
+    ZH_HANS("正在分割…"),
+    ZH_HANT("正在分割…"),
+    KO("분할하는 중…"),
+    DE("Wird segmentiert …"),
+    FR("Segmentation…"),
+    ES("Segmentando…"),
+    PT("Segmentando…"),
+    IT("Segmentazione…"),
+    NL("Bezig met segmenteren…"),
+    RU("Сегментация…"),
+    TR("Bölütleniyor…"));
+
 }  // namespace maskedit
 }  // namespace msg
 }  // namespace i18n

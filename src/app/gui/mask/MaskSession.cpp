@@ -2,6 +2,7 @@
 
 #include "app/gui/mask/MaskSession.h"
 #include "app/gui/mask/MaskSam.h"
+#include "app/gui/MaskSettings.h"
 
 #include "app/FrameLook.h"
 #include "app/FrameMask.h"
@@ -508,6 +509,121 @@ PathSpace MaskSession::path_space(const Mapping& m) const {
         y = m.to_screen_y(dy);
     };
     return s;
+}
+
+// ---------------------------------------------------------------------------
+// SAM assist
+// ---------------------------------------------------------------------------
+
+bool MaskSession::sam_available() const { return MaskSam::available(); }
+
+double MaskSession::sam_pool_mib() { return MaskSam::pool_mib(); }
+
+// Idempotent: GuiApp calls it every frame. A changed path cancels the job and
+// defers the release to sam_pump(), so the UI thread never joins an encode.
+void MaskSession::set_sam_model(const std::string& path, bool text_prompts) {
+    _sam_text_hint = text_prompts;
+    if (path != _sam_model) {
+        _sam_model = path;
+        _sam_model_changes++;
+        if (_sam) {
+            _sam->cancel();
+            _sam_release_pending = true;
+        }
+    }
+    if (_sam) _sam->set_model(path, text_prompts);
+}
+
+MaskSam& MaskSession::sam() {
+    if (!_sam) {
+        _sam = std::make_unique<MaskSam>();
+        _sam->set_model(_sam_model, _sam_text_hint);
+    }
+    return *_sam;
+}
+
+bool MaskSession::sam_text_supported() const {
+    return _sam ? _sam->text_supported() : MaskSam::available() && _sam_text_hint;
+}
+
+bool MaskSession::sam_busy() const { return _sam && _sam->busy(); }
+
+void MaskSession::sam_cancel() {
+    if (_sam) _sam->cancel();
+}
+
+MaskSettings& MaskSession::sam_prompt() { return sam().prompt(); }
+
+int MaskSession::sam_click_count() const {
+    return _sam ? (int)_sam->prompt().clicks.size() : 0;
+}
+
+int MaskSession::sam_object_count() const { return _sam ? _sam->prompt().object_count : 0; }
+
+std::string MaskSession::sam_status() const { return _sam ? _sam->status() : std::string(); }
+
+std::string MaskSession::sam_error() const { return _sam ? _sam->error() : std::string(); }
+
+double MaskSession::sam_vram_mib() const { return _sam ? _sam->vram_mib() : -1.0; }
+
+// Slice 1: one click is one prompt, and a lone "not this" has nothing to refine.
+bool MaskSession::sam_prompt_point(float frame_x, float frame_y, bool keep, bool positive) {
+    if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending || !positive)
+        return false;
+    std::vector<SamPoint> points{SamPoint{frame_x, frame_y, true}};
+    if (!sam().start_points(_doc->key(), _rgb, _fw, _fh, std::move(points), keep)) return false;
+    _sam_t0 = std::chrono::steady_clock::now();
+    return true;
+}
+
+bool MaskSession::sam_prompt_text(const std::string& phrases) {
+    if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending) return false;
+    if (!sam().start_text(_doc->key(), _rgb, _fw, _fh, phrases)) return false;
+    _sam_t0 = std::chrono::steady_clock::now();
+    return true;
+}
+
+Rect MaskSession::sam_pump() {
+    if (!_sam) return {};
+    std::string key;
+    std::vector<AddRegion> regions;
+    bool keep = false;
+    float score = 0.0f;
+    double job_ms = 0.0;
+    // A model change: the old model's answer, if any, is counted and dropped.
+    if (_sam_release_pending) {
+        if (_sam->busy()) return {};
+        if (_sam->take_result(key, regions, keep, score, job_ms)) _sam_dropped++;
+        _sam->release();
+        _sam_release_pending = false;
+        return {};
+    }
+    if (!_doc) return {};
+    if (!_sam->take_result(key, regions, keep, score, job_ms)) return {};
+    // A result that outlived its frame is counted and dropped, never painted
+    // onto whatever is open now.
+    if (key != _doc->key()) {
+        _sam_dropped++;
+        return {};
+    }
+    _sam_results++;
+    _sam_last_job_ms = job_ms;
+    _sam_last_score = score;
+    _sam_last_detections = (int)regions.size();
+    _sam_last_area = 0;
+    Stencil st;
+    Rect bounds;
+    int64_t set_px = 0;
+    Rect shown;
+    if (build_add_stencil(regions, _doc->width(), _doc->height(), st, bounds, set_px)) {
+        _sam_last_area = set_px;
+        _doc->paint(keep ? Paint::ForceKeep : Paint::ForceDrop, std::move(st), bounds);
+        shown = shown_rect(_doc->last_change());
+    }
+    _sam_last_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - _sam_t0)
+            .count();
+    return shown;
 }
 
 }  // namespace mask

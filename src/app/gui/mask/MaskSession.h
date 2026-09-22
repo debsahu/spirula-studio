@@ -14,6 +14,7 @@
 #include "app/gui/mask/PathTool.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -24,6 +25,9 @@
 #include <vector>
 
 namespace gui {
+
+struct MaskSettings;
+
 namespace mask {
 
 struct FrameRef {
@@ -88,6 +92,43 @@ public:
     // The open frame's pixels, co-owned: a holder keeps them past a frame change.
     std::shared_ptr<const std::vector<uint8_t>> frame_pixels() const { return _rgb; }
 
+    // ---- SAM assist (MaskSam.h); every call is safe with no checkpoint ----
+    bool sam_available() const;
+    // The process-wide inference pool, MiB -- readable with the editor closed.
+    static double sam_pool_mib();
+    // GuiApp's checkpoint, every frame; "" = not cached. A NEW path drops the
+    // warm session (released once any job stops) and keeps the clicks.
+    void set_sam_model(const std::string& path, bool text_prompts);
+    const std::string& sam_model_path() const { return _sam_model; }
+    int sam_model_changes() const { return _sam_model_changes; }
+    // Draws GuiApp's model picker into the SAM strip; GuiApp owns the state.
+    void set_model_picker(std::function<void()> draw) { _model_picker = std::move(draw); }
+    bool sam_has_model() const { return !_sam_model.empty(); }
+    bool sam_text_supported() const;
+    bool sam_busy() const;
+    void sam_cancel();
+    // The editor's own prompt state, created on first use; never the dataset's.
+    MaskSettings& sam_prompt();
+    int sam_click_count() const;
+    int sam_object_count() const;
+    // Frame pixels of the open frame. False when nothing started.
+    bool sam_prompt_point(float frame_x, float frame_y, bool keep, bool positive = true);
+    bool sam_prompt_text(const std::string& phrases);
+    // Paints a finished result onto the open frame; the DISPLAYED rect changed.
+    Rect sam_pump();
+    std::string sam_status() const;
+    std::string sam_error() const;
+    double sam_vram_mib() const;
+    // `last_ms` is prompt -> painted, stamped on this thread; `last_job_ms` is
+    // the job's own time. Both cover a result that painted nothing.
+    int sam_results() const { return _sam_results; }
+    int sam_dropped() const { return _sam_dropped; }
+    double sam_last_ms() const { return _sam_last_ms; }
+    double sam_last_job_ms() const { return _sam_last_job_ms; }
+    float sam_last_score() const { return _sam_last_score; }
+    int64_t sam_last_area() const { return _sam_last_area; }
+    int sam_last_detections() const { return _sam_last_detections; }
+
     // ---- actions ----
     void go_to(int i);
     void pump();
@@ -147,6 +188,7 @@ private:
     // The pen tool (MaskPanel.cpp drives it; these two have no ImGui).
     void ensure_livewire();
     PathSpace path_space(const Mapping& m) const;
+    MaskSam& sam();
 
     bool _open = false;
     // Set once in open() before the worker starts, read by both threads
@@ -176,7 +218,17 @@ private:
 
     PathTool _path;
     std::unique_ptr<Livewire> _livewire;   // the open frame's edge map, built on first use
-    std::unique_ptr<MaskSam> _sam;   // SAM assist; nothing creates it yet
+    std::unique_ptr<MaskSam> _sam;   // created on first use, dropped in close()
+    std::string _sam_model;
+    bool _sam_text_hint = false;
+    bool _sam_release_pending = false;   // a model change waiting for the job to stop
+    int _sam_model_changes = 0;
+    std::function<void()> _model_picker;
+    std::chrono::steady_clock::time_point _sam_t0{};
+    int _sam_results = 0, _sam_dropped = 0, _sam_last_detections = 0;
+    double _sam_last_ms = 0.0, _sam_last_job_ms = 0.0;
+    float _sam_last_score = 0.0f;
+    int64_t _sam_last_area = 0;
     bool _path_mode = false;
     double _livewire_ms = 0.0;
 
