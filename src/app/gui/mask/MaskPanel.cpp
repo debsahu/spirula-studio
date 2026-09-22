@@ -185,7 +185,9 @@ void MaskSession::draw_toolbar() {
     // height at which the strip clips (docs/notes/mask-editor.md).
     if (_erase || (!_path_mode && _tool.id() == ToolId::Brush)) {
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(px(260.0f));
+        // 340 rather than the frame slider's 260 so the corner hint below
+        // clears the centred value at its widest ("Eraser: 4096 px").
+        ImGui::SetNextItemWidth(px(340.0f));
         // Logarithmic because the steps are multiplicative over twelve
         // octaves: linear travel would put every usable size in the first 2%.
         const std::string fmt =
@@ -194,6 +196,11 @@ void MaskSession::draw_toolbar() {
         if (ui::SliderFloatRaw("##maskbrush", &r, kMinBrush, kMaxBrush, fmt.c_str(),
                                ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp))
             set_radius(r);
+        // The same corner the tool buttons carry their key in: the keys work
+        // and always did, and the strip's `hint_view` was the only place
+        // saying so, four lines down at the bottom of the window.
+        ui::corner_key(msg::radius_keys.get());
+        ui::help_on_hover(msg::radius_help);
     }
 }
 
