@@ -9,12 +9,15 @@
 #include "core/PolygonFill.h"
 
 #include "i18n/catalog/Dataset.h"
+#include "i18n/catalog/MaskEdit.h"
+#include "app/gui/mask/PathOverlay.h"
 
 #include "imgui.h"
 #include "imgui_stdlib.h"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -27,6 +30,7 @@
 namespace fs = std::filesystem;
 
 namespace dmsg = spirula::i18n::msg::dataset;
+namespace mmsg = spirula::i18n::msg::maskedit;
 
 namespace gui {
 
@@ -94,6 +98,11 @@ void SegmentPanel::open(const PreviewSource& src, const std::string& model_path)
     _shape_sel = -1;
     _drag_handle = -1;
     _stencil_key.clear();
+    _path_armed = false;
+    _path.cancel();
+    _path.set_livewire(nullptr);
+    _livewire.reset();
+    _livewire_key.clear();
     {
         std::lock_guard<std::mutex> lk(_mu);
         _kept_fraction = -1.0f;
@@ -112,6 +121,9 @@ void SegmentPanel::open(const PreviewSource& src, const std::string& model_path)
         _preview_dirty = false;
         _status = dmsg::preview_working.get();
         _error.clear();
+        _livewire_pending.reset();
+        _livewire_pending_key.clear();
+        _livewire_ready = false;
     }
     _tex_w = _tex_h = 0;
     _listing = true;
@@ -152,6 +164,12 @@ void SegmentPanel::close() {
     if (_worker.joinable()) _worker.join();
     _cancel = false;
     _listing = false;
+    _livewiring = false;
+    _path_armed = false;
+    _path.cancel();
+    _path.set_livewire(nullptr);
+    _livewire.reset();
+    _livewire_key.clear();
     {
         std::lock_guard<std::mutex> lk(_mu);
         _frames.clear();
@@ -167,6 +185,9 @@ void SegmentPanel::close() {
         _preview.clear();
         _preview_w = _preview_h = 0;
         _preview_dirty = false;
+        _livewire_pending.reset();
+        _livewire_pending_key.clear();
+        _livewire_ready = false;
     }
     _tex_w = _tex_h = 0;
     // Drop the model: the reconstruction that usually follows wants the VRAM,
@@ -224,7 +245,7 @@ std::string SegmentPanel::shown_camera() const {
 }
 
 void SegmentPanel::start_detect() {
-    if (_busy.load() || _detecting.load() || _listing.load()) return;
+    if (_busy.load() || _detecting.load() || _listing.load() || _livewiring.load()) return;
     if (_worker.joinable()) _worker.join();
     _detect_asked = true;
     _detecting = true;
@@ -269,13 +290,51 @@ void SegmentPanel::start_detect() {
     });
 }
 
+// The edge map for the shown frame, built on the worker because the decoded
+// frame lives in the Job, which only the worker touches. One build per frame
+// shown; the panel asks for it when the pen tool is armed.
+void SegmentPanel::start_livewire() {
+    if (_busy.load() || _detecting.load() || _listing.load() || _livewiring.load()) return;
+    if (_worker.joinable()) _worker.join();
+    if (!_job || _job->frame.empty()) return;
+    _livewiring = true;
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        _status = mmsg::path_building.get();
+    }
+    _worker = std::thread([this] {
+        struct Guard {
+            std::atomic<bool>& flag;
+            ~Guard() { flag = false; }
+        } guard{_livewiring};
+        const auto t0 = std::chrono::steady_clock::now();
+        auto lw = std::make_unique<mask::Livewire>();
+        lw->build(_job->frame.px.data(), _job->frame.w, _job->frame.h,
+                  mask::kLivewireMaxEdge, mask::LivewireWeights{}, &_cancel);
+        if (_cancel.load() || !lw->ready()) return;
+        std::lock_guard<std::mutex> lk(_mu);
+        _livewire_ms = std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - t0).count();
+        _livewire_pending = std::move(lw);
+        _livewire_pending_key = _job->frame_key;
+        _livewire_ready = true;
+        _status.clear();
+    });
+}
+
+std::string SegmentPanel::shown_frame_key() const {
+    if (_src.is_video)
+        return "#" + std::to_string(_folder_idx) + ":" + std::to_string(_frame_idx);
+    return _frames.empty() ? std::string() : _frames[(size_t)_frame_idx].path;
+}
+
 // ---------------------------------------------------------------------------
 // The worker
 // ---------------------------------------------------------------------------
 
 void SegmentPanel::start_job(const MaskSettings& s,
                              const app::FrameMask& stencil) {
-    if (_busy.load() || _detecting.load() || _listing.load()) return;
+    if (_busy.load() || _detecting.load() || _listing.load() || _livewiring.load()) return;
     if (_worker.joinable()) _worker.join();
 
     const int idx = _frame_idx;
@@ -672,6 +731,17 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
         _frames.empty() ? PreviewFrame{} : _frames[(size_t)_frame_idx];
     const bool hovered = ImGui::IsItemHovered();
 
+    // The edge map belongs to one frame; a frame change drops it, and the
+    // armed pen tool asks for this frame's.
+    const std::string frame_key = shown_frame_key();
+    if (_livewire && _livewire_key != frame_key) {
+        _livewire.reset();
+        _livewire_key.clear();
+        _path.set_livewire(nullptr);
+        _path.cancel();
+    }
+    if (_path_armed && !_livewire && !_livewiring.load()) start_livewire();
+
     // The selected shape owns the mouse over its handles and over its body:
     // dragging a circle and pointing at an object share this canvas, and the
     // shape being SELECTED is what tells the two apart -- no mode switch, and
@@ -720,8 +790,66 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
         }
     }
 
+    bool path_consumed = false;
+    if (_path_armed) {
+        mask::PathSpace sp;
+        const float tw = (float)_tex_w, th = (float)_tex_h;
+        sp.to_frame = [size, tw, th](float x, float y, float& fx, float& fy) {
+            fx = x / size.x * tw;
+            fy = y / size.y * th;
+        };
+        sp.from_frame = [size, tw, th](float fx, float fy, float& x, float& y) {
+            x = fx / tw * size.x;
+            y = fy / th * size.y;
+        };
+        _path.set_space(sp);
+        ViewportInput in;
+        in.hovered = hovered && !on_shape && _drag_handle == -1;
+        in.x = mouse.x - origin.x;
+        in.y = mouse.y - origin.y;
+        in.W = (int)size.x;
+        in.H = (int)size.y;
+        in.down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        in.clicked = in.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        in.released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+        in.right_clicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+        std::vector<float> poly;
+        bool closed = _path.update(in, poly, path_consumed);
+        const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        if (focused && !closed &&
+            (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+             ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)))
+            closed = _path.commit_pending(poly);
+        if (focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            _path.cancel();
+            _path_armed = false;
+        }
+        if (focused && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))
+            _path.pop_anchor();
+        if (closed) {
+            app::MaskShape n;
+            n.kind = app::MaskShape::Kind::Path;
+            n.remove = true;
+            n.pts.resize(poly.size());
+            for (size_t i = 0; i + 1 < poly.size(); i += 2) {
+                n.pts[i] = poly[i] / size.x;
+                n.pts[i + 1] = poly[i + 1] / size.y;
+            }
+            stencil.mask.shapes.push_back(n);
+            _shape_sel = (int)stencil.mask.shapes.size() - 1;
+            _drag_handle = -1;
+            _stencil_key.clear();
+            _path_armed = false;
+            edited = true;
+        }
+        mask::draw_path_overlay(dl, origin, _path);
+    }
+
     // Clicks land in source-image pixels, which is what the model wants.
-    const bool canvas_free = hovered && !on_shape && _drag_handle == -1;
+    // !path_consumed: a click that just closed a path (clearing _path_armed
+    // above) must not also fall through as an object-prompt click.
+    const bool canvas_free =
+        hovered && !on_shape && _drag_handle == -1 && !_path_armed && !path_consumed;
     if (!_listing.load() && !_frames.empty() && canvas_free &&
         (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
          ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
@@ -843,6 +971,19 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
     ImGui::SameLine();
     if (ui::SmallButton(dmsg::stencil_add_circle))
         add(app::MaskShape::Kind::Ellipse, true);
+    ImGui::SameLine();
+    if (ui::SmallButton(dmsg::stencil_add_path)) {
+        _path_armed = !_path_armed;
+        _path.cancel();
+        _shape_sel = -1;
+        _drag_handle = -1;
+    }
+    ui::help_on_hover(dmsg::stencil_add_path_help);
+    if (_path_armed) {
+        ui::TextDisabled(dmsg::stencil_path_anchors, {_path.anchor_count()});
+        if (_livewiring.load()) ui::TextDisabled(mmsg::path_building);
+        else if (!_path.snapping()) ui::TextDisabled(mmsg::path_straight);
+    }
 
     for (size_t i = 0; i < s.mask.shapes.size(); i++) {
         app::MaskShape& sh = s.mask.shapes[i];
@@ -968,6 +1109,20 @@ void SegmentPanel::draw(MaskSettings& settings, app::FrameStencil& stencil) {
             _border = _border_pending;
             _stencil_key.clear();
             _needs_run = true;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        if (_livewire_ready) {
+            _livewire_ready = false;
+            _livewire = std::move(_livewire_pending);
+            _livewire_key = _livewire_pending_key;
+            _path.set_livewire(_livewire.get());
+            char ms[32];
+            std::snprintf(ms, sizeof ms, "%.0f", _livewire_ms);
+            _status = spirula::i18n::format(mmsg::path_edge_map,
+                                            {_livewire->width(), _livewire->height(),
+                                             _livewire->step(), std::string(ms)});
         }
     }
 

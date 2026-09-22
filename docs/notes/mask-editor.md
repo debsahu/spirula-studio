@@ -724,6 +724,62 @@ is no longer read for paint mode at all. Left unedited (out of Task 10's file
 list, and a 13-language catalog string is not a one-line fix to make under
 time pressure); flagged for the operator/reviewer rather than changed here.
 
+### Task 11 manual check, in the app and the CLI (2026-09-22)
+
+Fixture regenerated from Task 3's brief (`build/pathcli/fixture.py write build/pathcli/data`,
+three 96x64 gradient PNGs -- `build/` had been cleaned since Task 3 ran). Driven
+through `guictl.py` against `New dataset -> Add photos -> Remove moving or
+unwanted objects -> Try the mask`, `native_dialogs=0` temporarily as the other
+sessions in this file do.
+
+1. **The edge map built once, on the panel's worker.** Status read "Edge map:
+   96x64, step 1, built in 1 ms" immediately after **Draw a path** -- matches
+   the brief's expected string exactly, including the 96x64/step 1 the
+   fixture's size implies.
+2. **A left-click path snapped to the vertical gradient boundary, closed on the
+   first anchor, and landed in the shape list as `Path 1`.** Outline drawn
+   white, red stencil tint filling its inside, "78% of the frame is kept"
+   (below 100%, as expected). Dragging its body moved the outline and tint
+   together (screenshot diff). Toggling **removes the inside** <->
+   **keeps the inside** inverted the tint and the kept fraction to
+   `100 - 78 = 22%` and back to 78% exactly.
+3. **A second `Draw a path`, two anchors, Esc: no `Path 2` appeared, no
+   overlay left behind, and the kept fraction was unchanged** (still 78%,
+   `Path 1` still the only shape).
+4. **A REAL defect found and fixed by this check, not merely observed**: the
+   brief's Step 4 code computed `path_consumed` from `_path.update()` but
+   never read it. On the frame a path closes by a plain click, `_path_armed`
+   is cleared inside that same block, so the line below,
+   `canvas_free = hovered && !on_shape && _drag_handle == -1 && !_path_armed`,
+   evaluates with the NEW (false) `_path_armed` and the closing click's
+   `IsMouseClicked(Left)` is still true for the rest of that ImGui frame -- so
+   the SAME click that closed the path also fell through to the SAM
+   object-click handler below it. Reproduced directly: closing a path with a
+   plain click produced "Clicked objects: 1" and started loading the SAM
+   model, unprompted, in the unpatched build. Fixed by adding
+   `&& !path_consumed` to `canvas_free` (`SegmentPanel.cpp`, the line above);
+   re-ran the identical steps against the patched build and "Objects to click
+   on: Object 1 (no clicks yet)" stayed unchanged through a path close.
+   Confirmed by direct source reasoning (`PathTool::update` sets
+   `consumed = true` on exactly the branches that could otherwise leak a
+   click: anchor placement, the near-first close, and the right-click close)
+   as well as by the screenshot pair.
+5. **CLI spelling.** The brief's `--print-only` does not exist (`sam mask
+   --help` lists `--print`); with the correct flag,
+   `./build/spirula sam mask build/pathcli/data/frames --shape "-path
+   0.2,0.2,0.8,0.2,0.5,0.8" --print` printed back
+   `-path 0.2000,0.2000,0.8000,0.2000,0.5000,0.8000`, confirming plan 1's
+   `-path` round-trip is intact and this panel's in-memory stencil (Decision
+   10) would hand a run the same spelling.
+
+One harness note, not a product defect: reopening **Try the mask** immediately
+after closing it once, in the same offscreen session, produced "No frame could
+be read from this video" on one attempt and worked cleanly on the next and on
+a fresh process -- a rapid-reopen race in the automation harness or the
+panel's own open/close teardown timing, not reproduced with a normal pause
+between close and reopen. Not investigated further; noted so a future run
+does not mistake it for the pen tool being broken.
+
 ## Not in this phase
 
 Propagate, find-missing, slideshow, view modes and the peek key, session
