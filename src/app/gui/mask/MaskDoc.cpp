@@ -137,7 +137,9 @@ bool MaskDoc::load(const std::string& layer_root, const std::string& mask_root,
         flip_polarity(_base.data(), _base.size());
     }
     FrameLayers layers;
-    read_layers(layer_root, key, _w, _h, layers, warning);
+    // A layer that would not load reads as all zero, which is indistinguishable
+    // from no correction and would be saved back over the real one.
+    if (!read_layers(layer_root, key, _w, _h, layers, warning)) return false;
     _drop.swap(layers.drop);
     _keep.swap(layers.keep);
     _composite.resize(_base.size());

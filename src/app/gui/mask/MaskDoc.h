@@ -67,7 +67,8 @@ inline constexpr int kMaxHistoryOps = 96;
 class MaskDoc {
 public:
     // Decodes the base (.base.png, else masks/<key>.png, else all-keep at
-    // `w` x `h`) and the layers. A regenerated mask is re-based first.
+    // `w` x `h`) and the layers. A regenerated mask is re-based first. False
+    // with `warning` set, not `error`, when a layer file did not fit.
     bool load(const std::string& layer_root, const std::string& mask_root,
               const std::string& key, int w, int h, LayerIndex& idx,
               std::string& error, std::string& warning);

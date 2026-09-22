@@ -38,6 +38,21 @@ std::vector<std::string> split_paths(const std::string& joined) {
     }
 }
 
+// One sentence per mismatched file, each with its own size: a joined path list
+// with one file's dimensions used to name every file it is not is worse than
+// either a single file or an honest omission.
+std::string size_mismatch_text(const std::string& joined, const MaskDoc& doc) {
+    std::string text;
+    for (const std::string& path : split_paths(joined)) {
+        int lw = 0, lh = 0;
+        app::image_size(path, lw, lh);
+        if (!text.empty()) text += " ";
+        text += spirula::i18n::format(msg::err_size_mismatch,
+                                      {path, lw, lh, doc.width(), doc.height()});
+    }
+    return text;
+}
+
 }  // namespace
 
 MaskSession::MaskSession() = default;
@@ -99,6 +114,7 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
         _saved_ready = false;
         _status = msg::working.get();
         _error.clear();
+        _error_sticky = false;
         _corrected = (int)_index.frames.size();
     }
     _quit = false;
@@ -117,6 +133,16 @@ void MaskSession::close() {
     }
     _qcv.notify_all();
     if (_worker.joinable()) _worker.join();
+    // The status strip is gone by now, so a write that failed on the way out
+    // has nowhere else to be seen.
+    if (_log) {
+        std::string lost;
+        {
+            std::lock_guard<std::mutex> lk(_mu);
+            if (_error_sticky) lost = _error;
+        }
+        if (!lost.empty()) _log(lost);
+    }
     _quit = false;
     _open = false;
     _doc.reset();
@@ -168,6 +194,12 @@ void MaskSession::post_status(const std::string& s, bool error) {
     else _status = s;
 }
 
+void MaskSession::post_error(const std::string& s, bool sticky) {
+    std::lock_guard<std::mutex> lk(_mu);
+    _error = s;
+    _error_sticky = _error_sticky || sticky;
+}
+
 void MaskSession::set_corrected(int n) {
     std::lock_guard<std::mutex> lk(_mu);
     _corrected = n;
@@ -196,14 +228,16 @@ void MaskSession::load_frame(int i) {
         Loaded l;
         l.index = i;
         if (!app::load_rgb(f.file, l.fw, l.fh, l.rgb)) {
-            post_status(spirula::i18n::format(msg::err_read, {f.file}), true);
+            post_error(spirula::i18n::format(msg::err_read, {f.file}), false);
             return;
         }
         l.turn = app::photo_turn(f.file);
         l.doc = std::make_unique<MaskDoc>();
-        std::string err;
-        if (!l.doc->load(_layer_root, _mask_root, f.key, l.fw, l.fh, _index, err, l.warning)) {
-            post_status(spirula::i18n::format(msg::err_read, {err}), true);
+        std::string err, warning;
+        if (!l.doc->load(_layer_root, _mask_root, f.key, l.fw, l.fh, _index, err, warning)) {
+            post_error(warning.empty() ? spirula::i18n::format(msg::err_read, {err})
+                                       : size_mismatch_text(warning, *l.doc),
+                       false);
             return;
         }
         set_corrected((int)_index.frames.size());
@@ -211,7 +245,7 @@ void MaskSession::load_frame(int i) {
         _loaded = std::move(l);
         _loaded_ready = true;
         _status.clear();
-        _error.clear();
+        if (!_error_sticky) _error.clear();
     });
 }
 
@@ -254,20 +288,6 @@ void MaskSession::pump() {
     _path.set_livewire(nullptr);
     _path.cancel();
     _win_dirty = true;
-    if (!l.warning.empty()) {
-        // One sentence per mismatched file, each with its own size: a joined
-        // path list with one file's dimensions used to name every file it
-        // is not is worse than either a single file or an honest omission.
-        std::string text;
-        for (const std::string& path : split_paths(l.warning)) {
-            int lw = 0, lh = 0;
-            app::image_size(path, lw, lh);
-            if (!text.empty()) text += " ";
-            text += spirula::i18n::format(msg::err_size_mismatch,
-                                          {path, lw, lh, _doc->width(), _doc->height()});
-        }
-        post_status(text, true);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -307,7 +327,7 @@ void MaskSession::save() {
         std::string err;
         if (!save_frame(_layer_root, _mask_root, s->key, s->w, s->h, s->base.data(),
                         s->drop.data(), s->keep.data(), s->comp, _index, err)) {
-            post_status(spirula::i18n::format(msg::err_write, {err}), true);
+            post_error(spirula::i18n::format(msg::err_write, {err}), true);
             return;
         }
         set_corrected((int)_index.frames.size());
@@ -318,6 +338,7 @@ void MaskSession::save() {
         _saved_ready = true;
         _status = msg::status_saved.get();
         _error.clear();
+        _error_sticky = false;
     });
 }
 
@@ -330,7 +351,7 @@ void MaskSession::revert_open_frame() {
     enqueue([this, key] {
         std::string err;
         if (!mask::revert_frame(_layer_root, _mask_root, key, _index, err))
-            post_status(spirula::i18n::format(msg::err_write, {err}), true);
+            post_error(spirula::i18n::format(msg::err_write, {err}), true);
         set_corrected((int)_index.frames.size());
     });
     _idx = -1;
@@ -345,7 +366,7 @@ void MaskSession::revert_every_frame() {
         std::string err;
         const bool flipped = _index.mask_flipped;
         if (mask::revert_all(_layer_root, err) < 0)
-            post_status(spirula::i18n::format(msg::err_write, {err}), true);
+            post_error(spirula::i18n::format(msg::err_write, {err}), true);
         if (!_index.load(_layer_root, err)) _index = LayerIndex{};
         _index.mask_root = _mask_root;
         _index.mask_flipped = flipped;

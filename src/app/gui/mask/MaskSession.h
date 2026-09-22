@@ -49,6 +49,9 @@ public:
     // sentence) on any of the five refusals in open().
     bool open(const std::string& workspace, const std::string& image_dir,
               const std::string& mask_dir, bool mask_flipped, std::string& error);
+    // Where a failure that lands after the editor is gone goes -- a save that
+    // fails while closing has no status strip left to reach.
+    void set_log(std::function<void(const std::string&)> log) { _log = std::move(log); }
     bool is_open() const { return _open; }
     // Saves a dirty frame, then joins the worker.
     void close();
@@ -101,12 +104,14 @@ private:
         int fw = 0, fh = 0;
         sfm::ExifTransform turn;
         int index = -1;
-        std::string warning;
     };
     void enqueue(std::function<void()> job);
     void worker_main();
     void load_frame(int i);
     void post_status(const std::string& s, bool error);
+    // `sticky` marks a failed write, which a later successful load must not
+    // clear: the work it lost is still lost.
+    void post_error(const std::string& s, bool sticky);
     void set_corrected(int n);
     Rect shown_rect(const Rect& stored) const;
     // MaskPanel.cpp
@@ -176,7 +181,9 @@ private:
     bool _saved_comp = false;        // guarded by _mu
     bool _saved_ready = false;       // guarded by _mu
     std::string _status, _error;     // guarded by _mu
+    bool _error_sticky = false;      // guarded by _mu
     int _corrected = 0;              // guarded by _mu
+    std::function<void(const std::string&)> _log;
 };
 
 }  // namespace mask

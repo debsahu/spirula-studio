@@ -5379,6 +5379,7 @@ void GuiApp::open_mask_editor(const std::string& workspace, const std::string& i
                               const std::string& mask_dir, bool mask_flipped) {
     if (dataset_busy() || native_work_busy()) return;
     close_native_previews();
+    _mask_editor.set_log([this](const std::string& s) { log(s); });
     std::string err;
     if (!_mask_editor.open(workspace, image_dir, mask_dir, mask_flipped, err)) log(err);
 }

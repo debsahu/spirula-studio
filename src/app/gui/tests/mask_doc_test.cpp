@@ -1357,6 +1357,8 @@ void test_session_size_mismatch() {
     Fixture f = make_dataset("session_mismatch", 64, 48, {"a"});
     write_png_gray(f.layer / "a.drop.png", 32, 24, std::vector<uint8_t>(32 * 24, 255));
     write_png_gray(f.layer / "a.keep.png", 16, 12, std::vector<uint8_t>(16 * 12, 255));
+    const std::vector<uint8_t> drop_before = file_bytes(f.layer / "a.drop.png");
+    const std::vector<uint8_t> keep_before = file_bytes(f.layer / "a.keep.png");
     mk::MaskSession s;
     std::string err;
     check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
@@ -1367,6 +1369,14 @@ void test_session_size_mismatch() {
           "both mismatched files are named");
     check(e.find("32x24") != std::string::npos && e.find("16x12") != std::string::npos,
           "each file reports its own size, not the first file's for both");
+    // A layer that would not load reads as all zero. If the document opened on
+    // those zeros, the next save would encode them over the real correction.
+    check(s.doc() == nullptr, "no document, so nothing can be painted or saved over it");
+    s.save();
+    settle(s);
+    check(file_bytes(f.layer / "a.drop.png") == drop_before &&
+              file_bytes(f.layer / "a.keep.png") == keep_before,
+          "the mismatched layer files are byte-identical after a save attempt");
     s.close();
 }
 
@@ -1491,6 +1501,35 @@ void test_session_corrupt_index_refuses() {
           "not open, and the refusal names index.json");
     check(file_bytes(f.layer / "a.drop.png") == drop_before,
           "the corrections are untouched, so a repaired index still finds them");
+}
+
+// A save that fails on the way out has no status strip left to reach.
+void test_session_close_reports_a_failed_save() {
+    Fixture f = make_dataset("session_close_fail", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err, logged;
+    s.set_log([&logged](const std::string& t) { logged = t; });
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
+    settle(s);
+    // A regular file where the layer folder goes: every layer write fails.
+    std::error_code ec;
+    fs::create_directories(f.layer.parent_path(), ec);
+    const std::vector<uint8_t> one = {'x'};
+    check(mk::write_file_atomic(f.layer.string(), one.data(), one.size()) &&
+              fs::is_regular_file(f.layer, ec),
+          "fixture: the layer root is a file, so no layer can be written");
+
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    check(s.doc()->dirty(), "dirty going into close");
+    s.close();
+    check(!logged.empty(), "close reported the failed save through the log");
+    check(logged.find(f.layer.string()) != std::string::npos,
+          "and it names the file that could not be written: " + logged);
 }
 
 void test_session_close_resets_paths() {
@@ -2385,6 +2424,7 @@ int main() {
     test_session_flipped_polarity();
     test_session_other_mask_root_refused();
     test_session_corrupt_index_refuses();
+    test_session_close_reports_a_failed_save();
     test_session_close_resets_paths();
     test_path_fill_parity();
     test_livewire_features();
