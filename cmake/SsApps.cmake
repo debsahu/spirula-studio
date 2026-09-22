@@ -436,4 +436,20 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/mask/Livewire.cpp
         ${SS_SRC}/app/gui/mask/PathTool.cpp)
     ss_configure_app(mask_doc_test)
+
+    # DatasetPrep's two seams with the mask editor's layer folder, run for
+    # real. Built without SS_BUILD_SAM or the video decoder: no model.
+    add_executable(dataset_prep_test
+        ${SS_SRC}/app/gui/tests/dataset_prep_test.cpp
+        ${SS_SRC}/app/gui/DatasetPrep.cpp
+        ${SS_SRC}/app/gui/FrameSelect.cpp
+        ${SS_SRC}/app/gui/PrepProgress.cpp
+        ${SS_SRC}/app/gui/ReconStamp.cpp
+        ${SS_SRC}/app/gui/Subprocess.cpp
+        ${SS_SRC}/app/gui/mask/MaskLayer.cpp
+        ${SS_SRC}/app/FrameMask.cpp
+        ${SS_SRC}/app/FrameLook.cpp
+        ${SS_SRC}/app/FrameMotion.cpp
+        ${SS_SRC}/app/Pano360.cpp)
+    ss_configure_app(dataset_prep_test)
 endif()

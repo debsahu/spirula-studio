@@ -53,6 +53,10 @@ bash tools/check_comments.sh >/dev/null || { bash tools/check_comments.sh; exit 
 # sam/ include there is invisible to mask_doc_test's link-level symbol gate.
 bash tools/check_sam_guard.sh >/dev/null || { bash tools/check_sam_guard.sh; exit 1; }
 
+# The mask editor's note cites file:line; a commit that moves a cited line
+# fails here until the note and tools/check_note_cites.sh are updated.
+bash tools/check_note_cites.sh >/dev/null || { bash tools/check_note_cites.sh; exit 1; }
+
 # Comment blocks in uncommitted work must fit the AGENTS.md budget. Also wired
 # into CMake (cmake/SsChecks.cmake), which covers a bare cmake/ninja build;
 # running it here fails before the configure step rather than after it.
