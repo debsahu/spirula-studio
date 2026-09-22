@@ -6,6 +6,7 @@
 #include "app/gui/Layout.h"
 #include "app/gui/MaskPrompt.h"
 #include "app/gui/Ui.h"
+#include "core/PolygonFill.h"
 
 #include "i18n/catalog/Dataset.h"
 
@@ -588,17 +589,8 @@ int shape_handles(const app::MaskShape& s, ImVec2 out[3]) {
 }
 
 bool shape_contains(const app::MaskShape& s, float u, float v) {
-    if (s.kind == app::MaskShape::Kind::Path) {
-        const size_t n = s.pts.size() / 2;
-        bool in = false;
-        for (size_t i = 0, j = n - 1; i < n; j = i++) {
-            const float ay = s.pts[2 * i + 1], by = s.pts[2 * j + 1];
-            if ((ay > v) == (by > v)) continue;
-            const float x = s.pts[2 * i] + (v - ay) / (by - ay) * (s.pts[2 * j] - s.pts[2 * i]);
-            if (u < x) in = !in;
-        }
-        return in;
-    }
+    if (s.kind == app::MaskShape::Kind::Path)
+        return polyfill::contains(s.pts.data(), s.pts.size() / 2, u, v);
     if (s.kind == app::MaskShape::Kind::Ellipse) {
         if (s.rx <= 0.0f || s.ry <= 0.0f) return false;
         const float du = (u - s.cx) / s.rx, dv = (v - s.cy) / s.ry;

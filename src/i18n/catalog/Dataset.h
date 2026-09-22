@@ -6025,6 +6025,8 @@ SS_MSG(stencil_shape_path,
     ES("Trazado {0}"),    PT("Traçado {0}"),    IT("Tracciato {0}"),
     NL("Pad {0}"),        RU("Контур {0}"),     TR("Yol {0}"));
 
+// Keeps a verb in every language, unlike stencil_add_box/circle -- a bare
+// noun ("Pfad", "chemin") reads as a file path in a UI, not a draw action.
 SS_MSG(stencil_add_path,
     EN("Draw a path"),
     JA("パスを描く"),

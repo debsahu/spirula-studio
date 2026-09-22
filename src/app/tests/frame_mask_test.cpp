@@ -323,6 +323,40 @@ void test_format_extreme_values_do_not_truncate() {
           "the ellipse's four extreme values survive whole");
 }
 
+// ---------------------------------------------------------------------------
+// Fix round 2: polyfill::contains must share fill_even_odd's boundary rule
+// ---------------------------------------------------------------------------
+
+// Unlike test_fill_matches_ray_cast's vertices (deliberately off the pixel
+// grid, so no crossing lands on a sample point), these sit exactly on it --
+// the case a strict ray cast and the fill's closed pixel span disagree on.
+void compare_contains(const std::vector<float>& poly, int W, int H, const std::string& name) {
+    std::vector<uint8_t> out((size_t)W * H, 0);
+    polyfill::fill_even_odd(poly.data(), poly.size() / 2, W, H, out.data(), 1);
+    size_t mismatched = 0, inside = 0;
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            const bool ref = out[(size_t)y * W + x] != 0;
+            const bool q = polyfill::contains(poly.data(), poly.size() / 2, (float)x + 0.5f,
+                                              (float)y + 0.5f);
+            inside += ref;
+            if (ref != q) mismatched++;
+        }
+    check(mismatched == 0, name + ": point query matches the fill on all " +
+                               std::to_string((size_t)W * H) + " pixels, " +
+                               std::to_string(mismatched) + " mismatched");
+    check(inside > 0, name + ": the polygon covers something");
+}
+
+void test_path_point_matches_fill_boundary() {
+    // A concave pentagon and a bow tie, vertices on the pixel-centre grid,
+    // on a non-square frame.
+    compare_contains({10.5f, 10.5f, 90.5f, 10.5f, 90.5f, 70.5f, 50.5f, 40.5f, 10.5f, 70.5f},
+                     101, 81, "concave, grid-aligned");
+    compare_contains({10.5f, 10.5f, 90.5f, 70.5f, 90.5f, 10.5f, 10.5f, 70.5f}, 101, 81,
+                     "bow tie, grid-aligned");
+}
+
 }  // namespace
 
 int main() {
@@ -331,6 +365,7 @@ int main() {
     test_path_fill();
     test_path_order();
     test_format_extreme_values_do_not_truncate();
+    test_path_point_matches_fill_boundary();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
