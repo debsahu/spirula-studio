@@ -48,6 +48,13 @@ public:
     bool near_first() const;
     double last_segment_ms() const { return _last_ms; }
 
+    // A pen has no drag to read a held modifier off at release: call every
+    // frame with the live modifiers. They mirror while idle and freeze on
+    // the first anchor, however the path later closes or cancels.
+    void note_modifiers(bool shift, bool ctrl);
+    bool mode_shift() const { return _mode_shift; }
+    bool mode_ctrl() const { return _mode_ctrl; }
+
 private:
     void to_frame(float x, float y, float& fx, float& fy) const;
     void from_frame(float fx, float fy, float& x, float& y) const;
@@ -65,6 +72,7 @@ private:
     int _live_gx = -1, _live_gy = -1;
     float _cur[2] = {0.0f, 0.0f};     // fed px
     double _last_ms = 0.0;
+    bool _mode_shift = false, _mode_ctrl = false;
 };
 
 }  // namespace mask

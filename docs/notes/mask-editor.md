@@ -872,6 +872,106 @@ panel's own open/close teardown timing, not reproduced with a normal pause
 between close and reopen. Not investigated further; noted so a future run
 does not mistake it for the pen tool being broken.
 
+### Fix round 2 (2026-09-22)
+
+Review returned spec FAIL / quality PASS. Four items.
+
+**1. `MaskPanel.cpp`'s header comment was false.** It claimed to be "the only
+file in `app/gui/mask/` that includes imgui or calls GL", written before
+`PathOverlay.cpp` existed and never updated once it did. Verified directly
+rather than trusted: `grep`-ing every `.h`/`.cpp` in the directory for
+`imgui` and for GL (`GlLoader.h`, the GL 1.1 calls, and `glx::`, the
+dynamically-loaded post-1.1 subset this tree namespaces to avoid colliding
+with the system header -- `GlLoader.h:1-6`) shows `imgui.h` in exactly
+`MaskPanel.cpp` and `PathOverlay.cpp`; GL calls in exactly `MaskPanel.cpp`
+(`MaskSession.h` includes `GlLoader.h` only for the `GLuint` member type,
+calls nothing); every other file, neither. `glx::` itself has zero hits
+anywhere in the directory -- the GL this file calls is all GL 1.1
+(`glGenTextures`, `glTexImage2D`, ...), which comes from the system library,
+never `glx::`. Rewrote the header to say what is actually true: ImGui
+permitted in `MaskPanel.cpp` and `PathOverlay.cpp` (named as the deliberate
+exception), GL only in `MaskPanel.cpp`, neither anywhere else.
+`PathOverlay.h`'s own comment ("The ImGui half of the pen tool") was already
+consistent and needed no change.
+
+**2. The report's test-count arithmetic did not reconcile, and was wrong.**
+"656 -> 662 (+6)" was an unfounded guess -- there is no operation in this
+plan that produces 6 of anything relevant. Re-derived both real numbers by
+execution rather than by re-reading the diff:
+
+- **Source `check(` call sites**: `grep -c "check("` on the current file vs.
+  `git show fe47dc8b:....cpp` (the commit immediately before Task 10) gives
+  436 vs. 433, **+3** -- the two `check()` lines inside `test_to_displayed_float`'s
+  nested loop plus the one hand-derived orientation-6 check, matching the
+  review's own re-derivation exactly.
+- **Runtime executed checks** (`./build/mask_doc_test | grep -c "^ok"`):
+  built and ran the `fe47dc8b` commit itself in a throwaway `git worktree`
+  (not inferred) to get the true baseline, **656**, matching the figure this
+  plan's task prompt started from; the current binary prints **737**, so the
+  delta is **+81** = 8 orientations x 5 points x 2 checks (160... no: 8 x 5 x
+  2 = 80) + 1 hand check = 81, which is exactly `737 - 656`.
+
+**656 -> 737 (+81) is the number to report as of Task 10 alone** for "how many
+checks ran"; **433 -> 436 (+3) is the number for "how many lines of `check()`
+code were added"**. They measure different things and neither is "662" --
+that figure is retracted. Item 3 below adds a further `test_path_tool_mode_latch`
+(13 checks) in this same round, bringing the running total to 750; see
+item 3's own numbers rather than re-deriving from this paragraph.
+
+**3. The paint-mode bug fix round 1 shipped had no regression test, and
+review named the seam.** The bug lived entirely in `MaskPanel.cpp` (ImGui,
+therefore outside `mask_doc_test`'s reach by the same convention item 1 is
+about), so the only net under it was the hand-driven live pass in fix round
+1 -- not CI, not repeatable without someone remembering to redo it by hand.
+Factored the latch into `PathTool` itself, which `mask_doc_test` already
+links with zero ImGui: `note_modifiers(bool shift, bool ctrl)` mirrors while
+idle (`!in_progress()`) and freezes on the first anchor; `mode_shift()` /
+`mode_ctrl()` read the frozen (or live-idle) state. `MaskSession` lost its
+`_path_paint` member entirely -- both `MaskPanel.cpp` commit sites now call
+`paint_for(_path.mode_shift(), _path.mode_ctrl())` at read time, so there is
+nothing left to go stale. `MaskPanel.cpp` is the "thin adapter" the ruling
+asked for: one line, `_path.note_modifiers(io.KeyShift, io.KeyCtrl);`, called
+once per frame before `_path.update(...)`.
+
+New test `test_path_tool_mode_latch` (13 checks) pins the exact regression:
+idle mirrors live modifiers; the first anchor's modifiers freeze the mode;
+changing modifiers mid-path, and again on the very click that closes the
+path, does not move it; a fresh idle period after close (or after cancel)
+resumes mirroring. **Mutation-tested before trusting it**: temporarily
+removed the `if (in_progress()) return;` guard (i.e. always re-capture,
+reproducing the exact bug review caught), rebuilt, and 5 of the 13 checks
+failed **by name** -- all and only the "frozen" ones (`frozen while in
+progress...`, `still frozen with no modifiers held`, `still frozen with both
+modifiers held...`, `closed mode is still the first anchor's...`, `frozen
+through cancel's setup`); the "idle mirrors" and "closes" checks correctly
+kept passing, since the mutant does not touch idle behaviour or closing
+mechanics. Reverted the mutation (`diff` against the pre-mutation copy: `ok`)
+and confirmed 0 failures again before moving on.
+
+Re-verified live in the app after the refactor (one gesture, not the full
+fix-round-1 sweep, since the logic moved without changing and is now
+unit-tested): Ctrl+click-first-anchor on `/tmp/spirula_mask_bench` still
+painted keep and raised Kept to 52.1% -- the identical figure fix round 1
+measured for the identical gesture before the refactor. Restored pristine
+afterward.
+
+**4. `_path_paint` staleness -- dissolved by item 3, not patched.** There is
+no longer a `_path_paint` member for `_path.cancel()` sites to forget to
+reset; the frozen state lives inside `PathTool` and is governed solely by
+`in_progress()`, the same invariant `cancel()` already maintains for
+everything else it owns. Nothing to do here beyond what item 3 already did.
+
+**`hint_buttons`'s "Right click closes a polygon" was left as a stale
+generalisation, on purpose.** It is incomplete (two tools share the
+mechanism now) but not wrong, and `hint_path` already documents the pen's
+own right-click-close and its first-anchor convention. Flagged as
+optional by the ruling; a 13-language edit for a completeness-only gain
+was judged not worth the translation risk this round.
+
+Rebuilt clean; `mask_doc_test` 750/0 (737 + 13 for the new latch test),
+`frame_mask_test` 54/0, `check_i18n.sh` 3155/3155 with 0 stubs, both comment
+lints and font coverage clean.
+
 ## Not in this phase
 
 Propagate, find-missing, slideshow, view modes and the peek key, session

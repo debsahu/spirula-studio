@@ -1792,6 +1792,58 @@ void test_path_tool_basic() {
     check(!t.in_progress(), "cancel empties the path");
 }
 
+// Regression test: a commit site once read modifiers at close time instead
+// of at the first anchor. The captured mode must survive modifiers changing
+// mid-path and at the close click itself.
+void test_path_tool_mode_latch() {
+    mk::PathTool t;
+    std::vector<float> out;
+    bool consumed = false;
+
+    t.note_modifiers(false, true);
+    check(!t.mode_shift() && t.mode_ctrl(), "idle mirrors ctrl held");
+    t.note_modifiers(true, false);
+    check(t.mode_shift() && !t.mode_ctrl(), "idle mirrors shift held instead");
+    t.note_modifiers(false, false);
+    check(!t.mode_shift() && !t.mode_ctrl(), "idle mirrors neither held");
+
+    // Ctrl held on the click that plants the first anchor: captured.
+    t.note_modifiers(false, true);
+    t.update(click_at(10, 10), out, consumed);
+    check(t.in_progress(), "first anchor placed");
+    check(!t.mode_shift() && t.mode_ctrl(), "captured ctrl at the first anchor");
+
+    // The exact mutant: modifiers change mid-path and again at the close
+    // click. The captured mode must not move.
+    t.note_modifiers(true, false);
+    check(!t.mode_shift() && t.mode_ctrl(),
+          "frozen while in progress despite shift now held instead");
+    t.update(click_at(50, 10), out, consumed);
+    t.note_modifiers(false, false);
+    check(!t.mode_shift() && t.mode_ctrl(), "still frozen with no modifiers held");
+    t.update(click_at(50, 40), out, consumed);
+    t.note_modifiers(true, true);
+    check(!t.mode_shift() && t.mode_ctrl(),
+          "still frozen with both modifiers held, right before the close click");
+    check(t.update(click_at(12, 11), out, consumed) && out.size() >= 6,
+          "closes on the first anchor");
+    check(!t.mode_shift() && t.mode_ctrl(),
+          "closed mode is still the first anchor's, not the close click's");
+
+    // Idle again after closing: mirrors live modifiers, not stuck frozen.
+    t.note_modifiers(true, true);
+    check(t.mode_shift() && t.mode_ctrl(), "idle again after close, mirrors live state");
+
+    // Cancel mid-path: the frozen mode is abandoned, idle mirroring resumes.
+    t.note_modifiers(false, false);
+    t.update(click_at(10, 10), out, consumed);
+    t.note_modifiers(true, true);
+    check(!t.mode_shift() && !t.mode_ctrl(), "frozen through cancel's setup");
+    t.cancel();
+    t.note_modifiers(true, false);
+    check(t.mode_shift() && !t.mode_ctrl(), "idle mirroring resumes after cancel");
+}
+
 void test_path_tool_livewire() {
     const int W = 200, H = 120;
     mk::Livewire lw;
@@ -2215,6 +2267,7 @@ int main() {
     test_livewire_diagonal();
     test_livewire_once();
     test_path_tool_basic();
+    test_path_tool_mode_latch();
     test_path_tool_livewire();
     test_path_tool_space();
     test_to_displayed_float();

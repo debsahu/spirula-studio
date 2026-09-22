@@ -182,5 +182,11 @@ bool PathTool::near_first() const {
     return dx * dx + dy * dy <= kPathCloseRadius * kPathCloseRadius;
 }
 
+void PathTool::note_modifiers(bool shift, bool ctrl) {
+    if (in_progress()) return;
+    _mode_shift = shift;
+    _mode_ctrl = ctrl;
+}
+
 }  // namespace mask
 }  // namespace gui

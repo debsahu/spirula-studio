@@ -1,6 +1,8 @@
 // MaskPanel.cpp -- the mask editor's window: tool strip, canvas, status
-// strip, navigation, and the window texture with its dirty-rect upload. The
-// only file in app/gui/mask/ that includes imgui or calls GL.
+// strip, navigation, and the window texture with its dirty-rect upload.
+// ImGui is permitted here and in PathOverlay.cpp (the pen tool's overlay,
+// carved out on purpose so mask_doc_test stays imgui-free); GL is called
+// only here. Every other file in this directory has neither.
 
 #include "app/gui/mask/MaskSession.h"
 
@@ -227,10 +229,7 @@ void MaskSession::draw_canvas() {
     if (_path_mode) {
         ensure_livewire();
         _path.set_space(path_space(m));
-        // A pen has no drag to read a held modifier off at release: the mode
-        // is fixed by whatever is held on the click that plants the first
-        // anchor, and stays that way however the path later closes.
-        if (!_path.in_progress()) _path_paint = paint_for(io.KeyShift, io.KeyCtrl);
+        _path.note_modifiers(io.KeyShift, io.KeyCtrl);
         std::vector<float> poly;
         bool consumed = false;
         if (_path.update(in, poly, consumed)) {
@@ -238,7 +237,7 @@ void MaskSession::draw_canvas() {
             ShapeStroke stroke;
             stroke.kind = ShapeKind::Polygon;
             stroke.pts = std::move(poly);
-            upload_rect(commit_stroke(stroke, _path_paint, m));
+            upload_rect(commit_stroke(stroke, paint_for(_path.mode_shift(), _path.mode_ctrl()), m));
             _last_commit_ms = now_ms() - t0;
         }
         draw_path_overlay(dl, origin, _path);
@@ -280,7 +279,8 @@ void MaskSession::handle_keys(const Mapping& m) {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
-        const Paint mode = _path_mode ? _path_paint : paint_for(io.KeyShift, io.KeyCtrl);
+        const Paint mode = _path_mode ? paint_for(_path.mode_shift(), _path.mode_ctrl())
+                                      : paint_for(io.KeyShift, io.KeyCtrl);
         ShapeStroke s;
         bool pending = false;
         if (_path_mode) {

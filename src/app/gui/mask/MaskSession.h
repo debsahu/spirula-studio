@@ -146,10 +146,6 @@ private:
     std::unique_ptr<Livewire> _livewire;   // the open frame's edge map, built on first use
     bool _path_mode = false;
     double _livewire_ms = 0.0;
-    // paint_for(shift, ctrl) at the first anchor -- a pen has no drag to read
-    // a held modifier off at release, so it is captured once, at the click
-    // that starts the path, and used whichever way the path later closes.
-    Paint _path_paint = Paint::ForceDrop;
 
     // MaskPanel.cpp's texture and window.
     GLuint _tex = 0;
