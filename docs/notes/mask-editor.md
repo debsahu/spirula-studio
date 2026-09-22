@@ -1014,33 +1014,43 @@ src/sfm src/kernels` is empty.
 `/tmp/spirula_mask_bench` (three synthetic 7680x3840 frames), **I**, status
 line read off a screenshot:
 
-| reading | frame reached how | grid / step | build | stale-proof? |
+The "told apart" column asks only what an observer of the strip can conclude:
+a reading is told apart from a stale line if it **appeared where there was no
+`Edge map` line** or if its **value differs from the reading before it**. An
+identical repeat is not evidence of anything on its own, whatever the code
+does.
+
+| reading | frame reached how | grid / step | build | told apart |
 |---|---|---|---|---|
-| 1 | editor opened on f0000, **I** pressed | 3840x1920, step 2 | 96 ms | no |
-| 2 | `>` then `<`, back to f0000 | 3840x1920, step 2 | 96 ms | no |
-| 3 | `>` then `<`, back to f0000 | 3840x1920, step 2 | 96 ms | no |
-| **4** | `>` to **f0001**, pen tool already on | 3840x1920, step 2 | **108 ms** | **yes** |
-| **5** | `>` to **f0002** with the BRUSH tool, then **I** | 3840x1920, step 2 | **88 ms** | **yes** |
-| 6-8, after the strip fix below | editor reopened; then `>`/`<` x3 | 3840x1920, step 2 | 19, 83, 83, 87 ms | mixed |
-| 9 | 120 MP still, see below | 3880x1940, step 4 | 128-129 ms | yes |
+| 1 | editor opened on f0000, **I** pressed | 3840x1920, step 2 | 96 ms | appeared |
+| 2 | `>` then `<`, back to f0000 | 3840x1920, step 2 | 96 ms | **no** |
+| 3 | `>` then `<`, back to f0000 | 3840x1920, step 2 | 96 ms | **no** |
+| **4** | `>` to **f0001**, pen tool already on | 3840x1920, step 2 | **108 ms** | differs |
+| **5** | `>` to **f0002** with the BRUSH tool, then **I** | 3840x1920, step 2 | **88 ms** | **appeared** |
+| 6, after the strip fix below | editor reopened on f0000, **I** pressed | 3840x1920, step 2 | 19 ms | appeared |
+| 7 | `>` then `<` | 3840x1920, step 2 | 83 ms | differs |
+| 8 | `>` then `<` | 3840x1920, step 2 | 83 ms | **no** |
+| 9 | `>` then `<` | 3840x1920, step 2 | 87 ms | differs |
+| 10 | 120 MP still, see below | 3880x1940, step 4 | 129 ms; 128 after the fix | appeared |
 
 **PASS**, 2.8x inside the bar at the worst reading. The grid and step are what
 the design predicts for a 7680-wide frame (4096 px cap on the long edge ->
 step 2).
 
-**Readings 4 and 5 are the ones to quote. 1-3 cannot be told from a stale
-line and are kept only to show the trap.** `post_status` is sticky, so had the
-map *not* been rebuilt, the previous build's text would still be on screen and
-would read 96 again -- three identical readings is exactly what a stale status
-line looks like. Two independent checks settle it. (a) Source: `pump()` clears
+**Reading 5 is the one to quote, and reading 2 is why.** `post_status` is
+sticky, so had the map *not* been rebuilt, the previous build's text would
+still be on screen and would read 96 again. Three identical readings is exactly
+what a stale status line looks like, and nothing about reading 2 or 3 can tell
+the two apart. Two checks settle it for the set. (a) Source: `pump()` clears
 `_status` and calls `_livewire.reset()` on every frame load
 (`MaskSession.cpp:200,240`), so the line can only come from a fresh
-`ensure_livewire()`. (b) Observed: with the **Brush** tool selected, changing to
-f0002 leaves **no `Edge map` line at all** on the strip, and pressing **I**
-makes it appear reading 88 ms -- an appearance, not a persistence, so nothing
-stale could have produced it. Readings 1-3 are `>` then `<` back to the *same*
-frame, so identical input doing identical work is the expected answer and the
-repeat carries no information either way.
+`ensure_livewire()`. (b) Observed, and stronger because it needs no source
+reading: with the **Brush** tool selected, changing to f0002 leaves **no
+`Edge map` line at all** on the strip, and pressing **I** makes it appear
+reading 88 ms. An appearance cannot be a persistence. Readings 2, 3 and 8 are
+`>` then `<` back to the *same* frame, so identical input doing identical work
+is the expected answer and the repeat carries no information either way; they
+are kept in the table to show the trap, not as evidence.
 
 **The 19-108 ms spread is real and its cause was not isolated.** The low
 readings (18, 19 ms) were taken with the app otherwise idle and are close to
