@@ -17,6 +17,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -88,10 +89,17 @@ void MaskSession::draw() {
     // frame that requested it still reaches the screen before the block.
     if (_close_requested) { close(); return; }
     pump();
-    upload_rect(sam_pump());
+    {
+        const double t0 = now_ms();
+        const int before = _sam_results;
+        upload_rect(sam_pump());
+        if (_sam_results != before) _sam_ui_ms = now_ms() - t0;
+    }
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos, ImGuiCond_Appearing);
     ImGui::SetNextWindowSize(vp->WorkSize, ImGuiCond_Appearing);
+    // No narrower than the tool row measured last frame: Revert has no key.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(_toolbar_w, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
     bool open = true;
     if (ImGui::Begin(ui::detail::label(msg::window_title), &open,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
@@ -100,6 +108,7 @@ void MaskSession::draw() {
         const float status_y = ImGui::GetCursorPosY();
         draw_status();
         _status_h = ImGui::GetCursorPosY() - status_y;
+        _strip.update(_status_h, (int)_mode, ImGui::GetWindowWidth());
     }
     ImGui::End();
     if (!open) _close_requested = true;
@@ -188,6 +197,8 @@ void MaskSession::draw_toolbar() {
     draw_revert_all_modal();
     ImGui::SameLine();
     if (ui::Button(msg::done)) _close_requested = true;
+    _toolbar_w = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
+                 ImGui::GetStyle().WindowPadding.x;
 
     ImGui::BeginDisabled(!idle());
     if (ui::ButtonRaw("<")) go_to(_idx - 1);
@@ -228,17 +239,19 @@ void MaskSession::draw_canvas() {
     // What the strip actually took last frame. Its height is however many
     // lines the tool and the wrapped hints produce, which no constant can
     // know; frame one has no measurement, so seed the pen tool's eight.
-    const float status_h = _status_h > 0.0f ? _status_h
-                                            : 8.0f * ImGui::GetTextLineHeightWithSpacing();
+    const float status_h = _strip.h > 0.0f ? _strip.h
+                                           : 8.0f * ImGui::GetTextLineHeightWithSpacing();
     const ImVec2 size(std::max(avail.x, px(64.0f)), std::max(avail.y - status_h, px(64.0f)));
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 far(origin.x + size.x, origin.y + size.y);
+    _canvas_h = size.y;
     ui::InvisibleButtonRaw("##maskcanvas", size,
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
     const bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(origin, far, IM_COL32(24, 24, 24, 255));
     if (!_doc) {
+        _shown_valid = false;
         dl->AddText(ImVec2(origin.x + px(8.0f), origin.y + px(8.0f)),
                     IM_COL32(200, 200, 200, 255), msg::working.get());
         return;
@@ -304,11 +317,10 @@ void MaskSession::draw_canvas() {
     in.ctrl = io.KeyCtrl;
     in.alt = io.KeyAlt;
     if (sam_mode()) {
-        if (in.clicked && !sam_busy() && sam_has_model()) {
-            float fx = 0.0f, fy = 0.0f;
-            path_space(m).to_frame(in.x, in.y, fx, fy);
-            sam_prompt_point(fx, fy, io.KeyCtrl);
-        }
+        float fx = 0.0f, fy = 0.0f;
+        if (in.clicked && !sam_busy() && sam_has_model() &&
+            shown_to_frame(io.MousePos.x, io.MousePos.y, fx, fy))
+            sam_prompt_point(fx, fy, paint_now(io.KeyShift, io.KeyCtrl));
     } else if (path_mode()) {
         ensure_livewire();
         _path.set_space(path_space(m));
@@ -335,6 +347,7 @@ void MaskSession::draw_canvas() {
         _tool.draw_overlay(dl, origin);
     }
     dl->PopClipRect();
+    note_shown(m, origin.x, origin.y);
     handle_keys(m);
 }
 
@@ -404,6 +417,8 @@ void MaskSession::draw_revert_all_modal() {
     if (_doc && _doc->dirty()) ui::Text(msg::revert_all_unsaved);
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
+    // Esc is Cancel: the convention, and the direction that loses nothing.
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
     if (ui::Button(msg::revert_all_button, ImVec2(px(220.0f), 0)) && idle()) {
         revert_every_frame();
         ImGui::CloseCurrentPopup();
@@ -414,6 +429,12 @@ void MaskSession::draw_revert_all_modal() {
 }
 
 void MaskSession::draw_status() {
+    // First, where a short window clips it last: a failed save's error.
+    const std::string err = error();
+    const std::string st = err.empty() ? status() : std::string();
+    if (!err.empty()) ui::TextColoredRaw(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), err);
+    else if (!st.empty()) ui::TextDisabledRaw(st);
+    else ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
     if (_idx >= 0 && _idx < frame_count()) {
         const FrameRef& f = _frames[(size_t)_idx];
         ui::Text(msg::status_frame, {_idx + 1, frame_count(), f.key});
@@ -431,27 +452,14 @@ void MaskSession::draw_status() {
         if (_doc->base_state() == BaseState::Missing)
             ui::TextDisabledWrapped(msg::status_base_missing);
     }
-    ui::Text(erasing() ? msg::eraser_radius : msg::brush_radius, {(int)std::lround(radius())});
-    ImGui::SameLine();
-    ui::Text(msg::status_commit, {one_decimal(_last_commit_ms)});
-    if (!sam_mode()) ui::TextDisabledWrapped(erasing() ? msg::hint_eraser : msg::hint_buttons);
     if (sam_mode()) {
-        // GuiApp's picker over the app's one model: choose, fetch, watch it land.
-        if (_model_picker) _model_picker();
-        if (!sam_has_model()) ui::TextDisabled(dmsg::mask_model_first);
-        ui::TextDisabledWrapped(msg::sam_hint);
-        const std::string sam_err = sam_error();
-        if (sam_busy()) {
-            ui::TextDisabledRaw(sam_status());
-            ui::TextDisabledWrapped(msg::sam_cancel_slow);
-        } else if (!sam_err.empty()) {
-            ui::TextColoredRaw(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), sam_err);
-        } else if (sam_results() > 0) {
-            char score[16];
-            std::snprintf(score, sizeof score, "%.2f", sam_last_score());
-            ui::Text(msg::sam_result, {(long long)sam_last_area(), sam_last_detections(),
-                                       std::string(score), one_decimal(sam_last_ms())});
-        }
+        draw_sam_status();
+    } else {
+        ui::Text(erasing() ? msg::eraser_radius : msg::brush_radius,
+                 {(int)std::lround(radius())});
+        ImGui::SameLine();
+        ui::Text(msg::status_commit, {one_decimal(_last_commit_ms)});
+        ui::TextDisabledWrapped(erasing() ? msg::hint_eraser : msg::hint_buttons);
     }
     if (path_mode()) {
         ui::TextDisabledWrapped(msg::hint_path);
@@ -459,12 +467,31 @@ void MaskSession::draw_status() {
         if (!_path.snapping()) ui::TextDisabledWrapped(msg::path_straight);
     }
     ui::TextDisabledWrapped(msg::hint_view);
-    const std::string err = error();
-    if (!err.empty()) ui::TextColoredRaw(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), err);
-    else {
-        const std::string st = status();
-        if (!st.empty()) ui::TextDisabledRaw(st);
+}
+
+// GuiApp's picker over the app's one model, the hint, then a two-line slot the
+// busy, error and result lines share: none of them may resize the canvas.
+void MaskSession::draw_sam_status() {
+    if (_model_picker) _model_picker();
+    if (!sam_has_model()) ui::TextDisabled(dmsg::mask_model_first);
+    ui::TextDisabledWrapped(msg::sam_hint);
+    const float y0 = ImGui::GetCursorPosY();
+    const std::string sam_err = sam_error();
+    if (sam_busy()) {
+        ui::TextDisabledRaw(sam_status());
+        ui::TextDisabledWrapped(msg::sam_cancel_slow);
+    } else if (!sam_err.empty()) {
+        ui::TextColoredRaw(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), sam_err);
+    } else if (sam_results() > 0) {
+        char score[16];
+        std::snprintf(score, sizeof score, "%.2f", sam_last_score());
+        ui::Text(msg::sam_result, {(long long)sam_last_area(), sam_last_detections(),
+                                   std::string(score), one_decimal(sam_last_ms())});
     }
+    const float slot = 2.0f * ImGui::GetTextLineHeightWithSpacing();
+    const float used = ImGui::GetCursorPosY() - y0;
+    const float pad = slot - used - ImGui::GetStyle().ItemSpacing.y;
+    if (pad > 0.0f) ImGui::Dummy(ImVec2(0.0f, pad));
 }
 
 }  // namespace mask

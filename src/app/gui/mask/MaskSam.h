@@ -23,6 +23,20 @@ namespace mask {
 void run_guarded(const std::function<void()>& body,
                  const std::function<void(const std::string&)>& on_throw);
 
+// A finished job, its stencil built at the document's size on the thread that
+// finished it, so the UI thread only paints. `landed` false: no pixel landed.
+struct SamResult {
+    std::string frame_key;
+    Paint mode = Paint::ForceDrop;
+    float score = 0.0f;
+    double ms = 0.0;
+    int detections = 0;
+    bool landed = false;
+    Stencil stencil;
+    Rect bounds;
+    int64_t set_px = 0;
+};
+
 struct SamPoint {
     float x = 0.0f, y = 0.0f;   // frame pixels
     bool positive = true;       // false: "not this", as SegmentPanel's right click
@@ -65,16 +79,16 @@ public:
     std::vector<SamPoint> object_points(long long frame, const std::string& camera) const;
 
     // The job co-owns `rgb`, so the caller may replace or drop its own copy at
-    // once. `points` are frame pixels; `phrases` is semicolon separated.
+    // once. `points` are frame pixels; `phrases` is semicolon separated; the
+    // stencil is built at doc_w x doc_h, the open document's size.
     bool start_points(const std::string& frame_key,
                       std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
-                      std::vector<SamPoint> points, bool keep);
+                      int doc_w, int doc_h, std::vector<SamPoint> points, Paint mode);
     bool start_text(const std::string& frame_key,
                     std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
-                    const std::string& phrases);
-    // One finished job, or false. `frame_key` is the key it was started on.
-    bool take_result(std::string& frame_key, std::vector<AddRegion>& out, bool& keep,
-                     float& score, double& ms);
+                    int doc_w, int doc_h, const std::string& phrases);
+    // One finished job, or false with `out` untouched.
+    bool take_result(SamResult& out);
 
     std::string status() const;
     std::string error() const;
@@ -82,18 +96,19 @@ public:
     void refuse(const std::string& reason);
     // Clears error() only if it still reads `reason`, and says whether it did.
     bool clear_error_if(const std::string& reason);
-    // The job's hand-off of a finished result; public so a test can stand in
-    // for the job in a build without SAM.
-    void post_result(std::string frame_key, std::vector<AddRegion> regions, bool keep,
-                     float score, double ms);
+    // The job's hand-off of a finished result, stencil built on the calling
+    // thread; public so a test can stand in for the job in a build without SAM.
+    void post_result(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
+                     int doc_h, Paint mode, float score, double ms);
 
 private:
     struct State;
     struct Job;
     bool launch(Job job);
     void release_device();   // the SAM-only half of release()
-    static void publish(State& s, std::string frame_key, std::vector<AddRegion> regions,
-                        bool keep, float score, double ms);
+    static SamResult prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
+                             int doc_h, Paint mode, float score);
+    static void publish(State& s, SamResult r);
     static void run(State& s, Job job);
     static void run_stages(State& s, Job job,
                            const std::function<void(const std::string&)>& finish);

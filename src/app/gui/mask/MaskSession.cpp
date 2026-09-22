@@ -277,6 +277,7 @@ void MaskSession::pump() {
     if (!have_loaded) return;
     _doc = std::move(l.doc);
     _doc_gen++;   // by construction: every _doc arrives here
+    _shown_valid = false;
     _rgb = std::make_shared<const std::vector<uint8_t>>(std::move(l.rgb));
     _fw = l.fw;
     _fh = l.fh;
@@ -492,6 +493,19 @@ void MaskSession::ensure_livewire() {
 
 // Pane px -> displayed mask px (the mapping) -> stored mask px (the EXIF
 // turn) -> stored frame px (the mask-to-frame scale), and back.
+void MaskSession::note_shown(const Mapping& m, float origin_x, float origin_y) {
+    _shown = m;
+    _shown_x = origin_x;
+    _shown_y = origin_y;
+    _shown_valid = true;
+}
+
+bool MaskSession::shown_to_frame(float screen_x, float screen_y, float& fx, float& fy) const {
+    if (!_shown_valid || !_doc) return false;
+    path_space(_shown).to_frame(screen_x - _shown_x, screen_y - _shown_y, fx, fy);
+    return true;
+}
+
 PathSpace MaskSession::path_space(const Mapping& m) const {
     PathSpace s;
     const int W = _doc ? _doc->width() : 1, H = _doc ? _doc->height() : 1;
@@ -602,15 +616,19 @@ const std::string& MaskSession::sam_model_path() const {
 double MaskSession::sam_vram_mib() const { return _sam ? _sam->vram_mib() : -1.0; }
 
 // Slice 1: one click is one prompt, and a lone "not this" has nothing to refine.
-bool MaskSession::sam_prompt_point(float frame_x, float frame_y, bool keep, bool positive) {
+bool MaskSession::sam_prompt_point(float frame_x, float frame_y, Paint mode, bool positive) {
     if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending || !positive)
         return false;
     if (!_sam_blocker.empty()) {
         sam().refuse(_sam_blocker);
         return false;
     }
+    _sam_click_x = frame_x;
+    _sam_click_y = frame_y;
     std::vector<SamPoint> points{SamPoint{frame_x, frame_y, true}};
-    if (!sam().start_points(sam_frame_stamp(), _rgb, _fw, _fh, std::move(points), keep)) return false;
+    if (!sam().start_points(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
+                            std::move(points), mode))
+        return false;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;
 }
@@ -621,46 +639,41 @@ bool MaskSession::sam_prompt_text(const std::string& phrases) {
         sam().refuse(_sam_blocker);
         return false;
     }
-    if (!sam().start_text(sam_frame_stamp(), _rgb, _fw, _fh, phrases)) return false;
+    if (!sam().start_text(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
+                          phrases))
+        return false;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;
 }
 
 Rect MaskSession::sam_pump() {
     if (!_sam) return {};
-    std::string key;
-    std::vector<AddRegion> regions;
-    bool keep = false;
-    float score = 0.0f;
-    double job_ms = 0.0;
+    SamResult res;
     // A model change: the old model's answer, if any, is counted and dropped.
     if (_sam_release_pending) {
         if (_sam->busy()) return {};
-        if (_sam->take_result(key, regions, keep, score, job_ms)) _sam_dropped++;
+        if (_sam->take_result(res)) _sam_dropped++;
         _sam->release();
         _sam_release_pending = false;
         return {};
     }
     if (!_doc) return {};
-    if (!_sam->take_result(key, regions, keep, score, job_ms)) return {};
+    if (!_sam->take_result(res)) return {};
     // A result that outlived its document -- a frame change, a revert, another
     // dataset -- is counted and dropped, never painted onto what is open now.
-    if (key != sam_frame_stamp()) {
+    if (res.frame_key != sam_frame_stamp()) {
         _sam_dropped++;
         return {};
     }
     _sam_results++;
-    _sam_last_job_ms = job_ms;
-    _sam_last_score = score;
-    _sam_last_detections = (int)regions.size();
+    _sam_last_job_ms = res.ms;
+    _sam_last_score = res.score;
+    _sam_last_detections = res.detections;
     _sam_last_area = 0;
-    Stencil st;
-    Rect bounds;
-    int64_t set_px = 0;
     Rect shown;
-    if (build_add_stencil(regions, _doc->width(), _doc->height(), st, bounds, set_px)) {
-        _sam_last_area = set_px;
-        _doc->paint(keep ? Paint::ForceKeep : Paint::ForceDrop, std::move(st), bounds);
+    if (res.landed) {
+        _sam_last_area = res.set_px;
+        _doc->paint(res.mode, std::move(res.stencil), res.bounds);
         shown = shown_rect(_doc->last_change());
     }
     _sam_last_ms =

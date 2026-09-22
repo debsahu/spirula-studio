@@ -1561,6 +1561,14 @@ void test_session_eraser() {
     s.set_erasing(true);
     check(s.paint_now(false, false) == mk::Paint::ForceKeep, "paint_now, eraser selected: keep");
     check(s.paint_now(false, true) == mk::Paint::ForceDrop, "paint_now, eraser + Ctrl: drop");
+    // The pen and SAM paint with the brush's grammar, not the eraser's.
+    s.set_mode(mk::CanvasMode::Path);
+    check(s.paint_now(false, false) == mk::Paint::ForceDrop, "paint_now, pen selected: drop");
+    check(s.paint_now(false, true) == mk::Paint::ForceKeep, "paint_now, pen + Ctrl: keep");
+    s.set_mode(mk::CanvasMode::Sam);
+    check(s.paint_now(false, false) == mk::Paint::ForceDrop, "paint_now, SAM selected: drop");
+    check(s.paint_now(false, true) == mk::Paint::ForceKeep, "paint_now, SAM + Ctrl: keep");
+    check(s.paint_now(true, true) == mk::Paint::Clear, "paint_now, SAM + Shift+Ctrl: clear");
 
     // ONE radius, shared. The operator asked for the size to carry across a
     // tool switch, so the defect to guard is a SECOND copy surviving: a
@@ -3010,17 +3018,20 @@ void test_mask_sam_stub_refuses() {
     check(!sam.text_supported(), "sam stub: no text tower whatever the catalog says");
     check(!sam.busy(), "sam stub: never busy");
     check(sam.vram_mib() < 0.0, "sam stub: reports no device accounting");
-    check(!sam.start_points("f", px, 4, 4, {mk::SamPoint{1.0f, 1.0f}}, false),
+    check(!sam.start_points("f", px, 4, 4, 4, 4, {mk::SamPoint{1.0f, 1.0f}}, mk::Paint::ForceDrop),
           "sam stub: refuses a point");
-    check(!sam.start_text("f", px, 4, 4, "person"), "sam stub: refuses a phrase");
+    check(!sam.start_text("f", px, 4, 4, 4, 4, "person"), "sam stub: refuses a phrase");
     check(px.use_count() == 1, "sam stub: a refused start keeps no reference to the frame");
-    std::string key = "untouched";
-    std::vector<mk::AddRegion> out(1);
-    bool keep = true;
-    float score = -1.0f;
-    double ms = -1.0;
-    check(!sam.take_result(key, out, keep, score, ms), "sam stub: no result to take");
-    check(key == "untouched" && out.size() == 1 && keep && score == -1.0f && ms == -1.0,
+    mk::SamResult out;
+    out.frame_key = "untouched";
+    out.mode = mk::Paint::Clear;
+    out.score = -1.0f;
+    out.ms = -1.0;
+    out.detections = 7;
+    out.set_px = 5;
+    check(!sam.take_result(out), "sam stub: no result to take");
+    check(out.frame_key == "untouched" && out.mode == mk::Paint::Clear && out.score == -1.0f &&
+              out.ms == -1.0 && out.detections == 7 && out.set_px == 5,
           "sam stub: take_result left every output alone");
     check(sam.status().empty(), "sam stub: status is empty with no job run");
     check(sam.error() == spirula::i18n::msg::maskedit::sam_unavailable_build.get(),
@@ -3210,23 +3221,23 @@ void test_session_sam_blocker() {
     settle(s);
     s.set_sam_model("/m/a.ggml", true);
     s.set_sam_blocker(run);
-    check(!s.sam_prompt_point(1.0f, 1.0f, false) && s.sam_error() == run,
+    check(!s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop) && s.sam_error() == run,
           "sam blocker: a blocked click is refused, the reason in error");
     check(!s.sam_prompt_text("person") && s.sam_error() == run && s.sam_status().empty(),
           "sam blocker: a blocked phrase is refused, the reason in error");
     s.set_sam_blocker("");
     const std::string stub = em::sam_unavailable_build.get();
-    check(!s.sam_prompt_point(1.0f, 1.0f, false) && s.sam_error() == stub,
+    check(!s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop) && s.sam_error() == stub,
           "sam blocker: cleared, the prompt reaches the job and its own reason");
 
     s.set_sam_blocker(run);
-    s.sam_prompt_point(1.0f, 1.0f, false);
+    s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop);
     s.set_sam_blocker("");
     s.sam_prompt().clicks.push_back(gui::MaskClick{});
     s.set_sam_model("/m/b.ggml", true);
     s.sam_yield();
     check(s.sam_click_count() == 1, "sam yield: the editor's clicks survive a yield");
-    check(!s.sam_prompt_point(1.0f, 1.0f, false) && s.sam_error() == stub &&
+    check(!s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop) && s.sam_error() == stub &&
               s.sam_model_path() == "/m/b.ggml",
           "sam yield: a yield settles a pending model change");
 }
@@ -3236,16 +3247,11 @@ void test_session_sam_blocker() {
 void test_mask_sam_release_forgets() {
     mk::MaskSam sam;
     sam.refuse("the old checkpoint failed to load");
-    sam.post_result("k", std::vector<mk::AddRegion>(1), true, 0.5f, 1.0);
+    sam.post_result("k", std::vector<mk::AddRegion>(1), 4, 4, mk::Paint::ForceKeep, 0.5f, 1.0);
     sam.release();
     check(sam.error().empty(), "sam release: the last error is forgotten");
-    std::string key;
-    std::vector<mk::AddRegion> out;
-    bool keep = false;
-    float score = 0.0f;
-    double ms = 0.0;
-    check(!sam.take_result(key, out, keep, score, ms),
-          "sam release: an untaken result is forgotten");
+    mk::SamResult out;
+    check(!sam.take_result(out), "sam release: an untaken result is forgotten");
 }
 
 // The job body runs inside run_guarded(): a throw becomes a reported error,
@@ -3284,17 +3290,17 @@ void test_session_sam_result_stamp() {
     const std::string old = s.sam_frame_stamp();
     s.revert_open_frame();
     settle(s);
-    s.sam().post_result(old, {g}, false, 0.9f, 5.0);
+    s.sam().post_result(old, {g}, 64, 48, mk::Paint::ForceDrop, 0.9f, 5.0);
     const mk::Rect r0 = s.sam_pump();
     check(s.sam_dropped() == 1 && s.sam_results() == 0 && r0.empty() && s.doc() &&
               !s.doc()->dirty(),
           "sam result: a result stamped before a revert is dropped, the document clean");
-    s.sam().post_result(s.sam_frame_stamp(), {g}, false, 0.9f, 5.0);
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.9f, 5.0);
     const mk::Rect r1 = s.sam_pump();
     check(s.sam_results() == 1 && s.sam_dropped() == 1 && !r1.empty() && s.doc() &&
               s.doc()->dirty() && s.sam_last_area() == 200,
           "sam result: a result with the current stamp paints its 200 pixels");
-    s.sam().post_result(s.sam_frame_stamp(), {g}, false, 0.9f, 5.0);
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.9f, 5.0);
     s.sam_yield();
     check(s.sam_dropped() == 2 && s.sam_results() == 1,
           "sam yield: a finished result the yield throws away is counted as dropped");
@@ -3312,11 +3318,11 @@ void test_session_sam_blocker_clears_its_own_error() {
     settle(s);
     s.set_sam_model("/m/a.ggml", true);
     s.set_sam_blocker(run);
-    s.sam_prompt_point(1.0f, 1.0f, false);
+    s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop);
     check(s.sam_error() == run, "sam unpause: the paused prompt reported the pause");
     s.set_sam_blocker("");
     check(s.sam_error().empty(), "sam unpause: the pause message goes when the pause does");
-    s.sam_prompt_point(1.0f, 1.0f, false);
+    s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop);
     const std::string real = s.sam_error();
     s.set_sam_blocker(run);
     s.set_sam_blocker("");
@@ -3365,6 +3371,78 @@ void test_mask_picker_row() {
     for (int i = 0; i < 8; i++)
         all = all && gui::mask_picker_row(i & 4, i & 2, i & 1) == want[i];
     check(all, "picker row: the dataset screen's branch order, all eight inputs");
+}
+
+// ---------------------------------------------------------------------------
+// SAM assist: a stable canvas, and a click mapped by what was shown
+// ---------------------------------------------------------------------------
+
+// Within a mode at one width, a strip line that goes away keeps its space; a
+// change of mode or width is deliberate and starts over.
+void test_strip_reserve() {
+    mk::StripReserve r;
+    r.update(206.0f, 3, 1600.0f);
+    const float busy = r.update(228.0f, 3, 1600.0f);
+    const float done = r.update(206.0f, 3, 1600.0f);
+    check(busy == 228.0f && done == 228.0f,
+          "strip reserve: a transient line leaving keeps the canvas where it was");
+    check(r.update(110.0f, 0, 1600.0f) == 110.0f, "strip reserve: a mode change starts over");
+    check(r.update(90.0f, 0, 900.0f) == 90.0f, "strip reserve: a width change starts over");
+}
+
+// A click is mapped through the layout the last drawn frame used, never the one
+// this frame computed; and a newly arrived document has no layout to map by.
+void test_click_maps_by_shown_layout() {
+    Fixture f = make_dataset("shown_layout", 64, 32, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "shown layout: open: " + err);
+    settle(s);
+    float fx = -1.0f, fy = -1.0f;
+    check(!s.shown_to_frame(10.0f, 10.0f, fx, fy), "shown layout: nothing drawn, no click");
+    mk::View v;
+    const mk::Mapping seen = mk::mapping(v, 64, 32, 640.0f, 320.0f);
+    const mk::Mapping now = mk::mapping(v, 64, 32, 640.0f, 298.0f);
+    s.note_shown(seen, 100.0f, 50.0f);
+    float want_x = 0.0f, want_y = 0.0f, other_x = 0.0f, other_y = 0.0f;
+    s.path_space(seen).to_frame(40.0f, 30.0f, want_x, want_y);
+    s.path_space(now).to_frame(40.0f, 30.0f, other_x, other_y);
+    check(std::fabs(want_x - other_x) > 0.5f,
+          "shown layout: the two layouts send the point to different frame pixels");
+    check(s.shown_to_frame(140.0f, 80.0f, fx, fy) && fx == want_x && fy == want_y,
+          "shown layout: a click lands where the drawn picture had it");
+    s.revert_open_frame();
+    settle(s);
+    check(!s.shown_to_frame(140.0f, 80.0f, fx, fy),
+          "shown layout: a reloaded document forgets the old layout");
+}
+
+// A result paints in the mode its click asked for: plain drops, Ctrl keeps,
+// Shift+Ctrl clears back to the base -- the paint grammar, on SAM's region.
+void test_session_sam_paint_modes() {
+    Fixture f = make_dataset("sam_paint_modes", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam paint: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    const int64_t base = s.doc()->kept(), all = (int64_t)64 * 48;
+    check(base > 0 && base < all, "sam paint: the base keeps some pixels and drops others");
+    mk::AddRegion g;
+    g.w = 64;
+    g.h = 48;
+    g.mask.assign((size_t)all, 255);
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.doc()->kept() == 0, "sam paint: a plain click's result drops the object");
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::Clear, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.doc()->kept() == base, "sam paint: a Shift+Ctrl result clears back to the base");
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceKeep, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.doc()->kept() == all, "sam paint: a Ctrl result keeps the object");
 }
 
 }  // namespace
@@ -3440,6 +3518,9 @@ int main() {
     test_session_sam_blocker_clears_its_own_error();
     test_canvas_mode_is_exclusive();
     test_mask_picker_row();
+    test_strip_reserve();
+    test_click_maps_by_shown_layout();
+    test_session_sam_paint_modes();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

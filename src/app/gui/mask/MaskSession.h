@@ -100,6 +100,10 @@ public:
     WindowSource window_source() const;
     // Pane px <-> frame px: the view, the EXIF turn, the mask-to-frame scale.
     PathSpace path_space(const Mapping& m) const;
+    // The layout the last drawn frame used, pane origin in screen px. A click
+    // maps through it: that is the picture aimed at. False until one is drawn.
+    void note_shown(const Mapping& m, float origin_x, float origin_y);
+    bool shown_to_frame(float screen_x, float screen_y, float& fx, float& fy) const;
     // The open frame's pixels, co-owned: a holder keeps them past a frame change.
     std::shared_ptr<const std::vector<uint8_t>> frame_pixels() const { return _rgb; }
 
@@ -125,7 +129,7 @@ public:
     int sam_click_count() const;
     int sam_object_count() const;
     // Frame pixels of the open frame. False when nothing started.
-    bool sam_prompt_point(float frame_x, float frame_y, bool keep, bool positive = true);
+    bool sam_prompt_point(float frame_x, float frame_y, Paint mode, bool positive = true);
     bool sam_prompt_text(const std::string& phrases);
     // Paints a finished result onto the open frame; the DISPLAYED rect changed.
     Rect sam_pump();
@@ -155,6 +159,12 @@ public:
     // pixels already dropped reports its full area and changes nothing.
     int64_t sam_last_area() const { return _sam_last_area; }
     int sam_last_detections() const { return _sam_last_detections; }
+    // UI-thread ms of the last result's paint and upload; the frame pixel the
+    // last point prompt was sent at; the canvas height drawn last frame.
+    double sam_ui_ms() const { return _sam_ui_ms; }
+    float sam_click_x() const { return _sam_click_x; }
+    float sam_click_y() const { return _sam_click_y; }
+    float canvas_height() const { return _canvas_h; }
 
     // ---- actions ----
     void go_to(int i);
@@ -210,6 +220,7 @@ private:
     void draw_toolbar();
     void draw_canvas();
     void draw_status();
+    void draw_sam_status();
     void draw_revert_all_modal();
     void handle_keys(const Mapping& m);
     void ensure_window(const Mapping& m, float pane_w, float pane_h);
@@ -258,6 +269,13 @@ private:
     double _sam_last_ms = 0.0, _sam_last_job_ms = 0.0;
     float _sam_last_score = 0.0f;
     int64_t _sam_last_area = 0;
+    double _sam_ui_ms = 0.0;
+    float _sam_click_x = -1.0f, _sam_click_y = -1.0f;
+    float _canvas_h = 0.0f;
+    Mapping _shown;
+    float _shown_x = 0.0f, _shown_y = 0.0f;
+    bool _shown_valid = false;       // cleared wherever a new document arrives
+    StripReserve _strip;
     std::string _sam_blocker;
     uint64_t _doc_gen = 0;           // bumped where pump() installs a _doc; never reset
     double _livewire_ms = 0.0;
@@ -265,6 +283,7 @@ private:
     // What draw_status() took last frame, so draw_canvas() can reserve it
     // instead of a constant. 0 until the first frame has been drawn.
     float _status_h = 0.0f;
+    float _toolbar_w = 0.0f;         // the tool row's width last frame, window px
 
     // MaskPanel.cpp's texture and window.
     GLuint _tex = 0;

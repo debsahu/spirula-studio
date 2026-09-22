@@ -40,6 +40,16 @@ void zoom_about(View& v, float factor, float sx, float sy, int dw, int dh,
                 float pane_w, float pane_h);
 void pan(View& v, float dx_screen, float dy_screen, const Mapping& m, int dw, int dh);
 
+// The status strip height the canvas reserves: the tallest any frame measured
+// since the last deliberate change (the mode, the window width), so a line
+// that comes and goes never rescales the picture under the cursor.
+struct StripReserve {
+    float h = 0.0f;
+    int mode = -1;
+    float width = -1.0f;
+    float update(float measured, int now_mode, float now_width);
+};
+
 struct Window {
     Rect r;            // displayed mask pixels the texture covers
     int step = 1;      // mask px per texel

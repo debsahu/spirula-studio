@@ -60,6 +60,17 @@ Window window_for(const Mapping& m, int dw, int dh, float pane_w, float pane_h) 
     return w;
 }
 
+float StripReserve::update(float measured, int now_mode, float now_width) {
+    if (now_mode != mode || now_width != width) {
+        mode = now_mode;
+        width = now_width;
+        h = measured;
+    } else {
+        h = std::max(h, measured);
+    }
+    return h;
+}
+
 bool same_window(const Window& a, const Window& b) {
     return a.r.x0 == b.r.x0 && a.r.y0 == b.r.y0 && a.r.x1 == b.r.x1 &&
            a.r.y1 == b.r.y1 && a.step == b.step && a.tw == b.tw && a.th == b.th;

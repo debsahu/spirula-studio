@@ -360,6 +360,8 @@ std::string state_json() {
         out += ",\"framebuffer\":[" + std::to_string(s.fb_w) + "," +
                std::to_string(s.fb_h) + "]";
         out += ",\"fb_scale\":" + json_num(s.fb_scale);
+        // False until the first frame ends and the app's fields exist.
+        out += std::string(",\"app_ready\":") + (s.app_state.empty() ? "false" : "true");
         if (!s.app_state.empty()) out += "," + s.app_state;
     }
     out += "}";

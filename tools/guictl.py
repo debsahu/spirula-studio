@@ -109,9 +109,13 @@ def cmd_launch(args):
         try:
             base, token = endpoint()
             q = urllib.parse.urlencode({"token": token} if token else {})
-            with urllib.request.urlopen("%s/ui/state?%s" % (base, q), timeout=1):
-                print(json.dumps({"ok": True, "pid": p.pid}))
-                return
+            with urllib.request.urlopen("%s/ui/state?%s" % (base, q), timeout=1) as r:
+                # app_ready is false until the first frame has published the
+                # app's own fields; an older build has no such key.
+                if json.loads(r.read().decode("utf-8")).get("app_ready", True):
+                    print(json.dumps({"ok": True, "pid": p.pid}))
+                    return
+                time.sleep(0.1)
         except Exception:
             time.sleep(0.25)
     sys.exit("the GUI did not answer within %gs" % args.wait)

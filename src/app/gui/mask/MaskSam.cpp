@@ -33,11 +33,7 @@ struct MaskSam::State {
     mutable std::mutex mu;
     std::string status, error;       // guarded by mu, with the result below
     bool ready = false;
-    std::string result_key;
-    std::vector<AddRegion> result;
-    bool result_keep = false;
-    float result_score = 0.0f;
-    double result_ms = 0.0;
+    SamResult result;
 #ifdef SS_BUILD_SAM
     // The job thread's alone while `running`; the UI thread's after a join.
     std::unique_ptr<sam::Session> session;
@@ -114,33 +110,37 @@ bool MaskSam::clear_error_if(const std::string& reason) {
     return true;
 }
 
-void MaskSam::publish(State& s, std::string frame_key, std::vector<AddRegion> regions, bool keep,
-                      float score, double ms) {
+SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
+                           int doc_h, Paint mode, float score) {
+    SamResult r;
+    r.frame_key = std::move(frame_key);
+    r.mode = mode;
+    r.score = score;
+    r.detections = (int)regions.size();
+    r.landed = build_add_stencil(regions, doc_w, doc_h, r.stencil, r.bounds, r.set_px);
+    return r;
+}
+
+void MaskSam::publish(State& s, SamResult r) {
     std::lock_guard<std::mutex> lk(s.mu);
-    s.result_key = std::move(frame_key);
-    s.result = std::move(regions);
-    s.result_keep = keep;
-    s.result_score = score;
-    s.result_ms = ms;
+    s.result = std::move(r);
     s.ready = true;
     s.status.clear();
 }
 
-void MaskSam::post_result(std::string frame_key, std::vector<AddRegion> regions, bool keep,
-                          float score, double ms) {
-    publish(*_s, std::move(frame_key), std::move(regions), keep, score, ms);
+void MaskSam::post_result(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
+                          int doc_h, Paint mode, float score, double ms) {
+    SamResult r = prepare(std::move(frame_key), std::move(regions), doc_w, doc_h, mode, score);
+    r.ms = ms;
+    publish(*_s, std::move(r));
 }
 
-bool MaskSam::take_result(std::string& frame_key, std::vector<AddRegion>& out, bool& keep,
-                          float& score, double& ms) {
+bool MaskSam::take_result(SamResult& out) {
     std::lock_guard<std::mutex> lk(_s->mu);
     if (!_s->ready) return false;
     _s->ready = false;
-    frame_key = std::move(_s->result_key);
     out = std::move(_s->result);
-    keep = _s->result_keep;
-    score = _s->result_score;
-    ms = _s->result_ms;
+    _s->result = SamResult{};
     return true;
 }
 
@@ -150,7 +150,7 @@ bool MaskSam::release() {
     std::lock_guard<std::mutex> lk(_s->mu);
     const bool discarded = _s->ready;
     _s->ready = false;
-    _s->result.clear();
+    _s->result = SamResult{};
     _s->status.clear();
     _s->error.clear();
     return discarded;
@@ -167,9 +167,10 @@ void MaskSam::refuse(const std::string& reason) {
 struct MaskSam::Job {
     std::string model, frame_key, phrases;
     std::shared_ptr<const std::vector<uint8_t>> rgb;
-    int fw = 0, fh = 0;
+    int fw = 0, fh = 0, doc_w = 0, doc_h = 0;
     std::vector<SamPoint> points;
-    bool keep = false, text = false;
+    Paint mode = Paint::ForceDrop;
+    bool text = false;
     int max_size = 0;
     float score_threshold = 0.5f, nms_threshold = 0.1f;
 };
@@ -219,7 +220,7 @@ double MaskSam::vram_mib() const {
 
 bool MaskSam::start_points(const std::string& frame_key,
                            std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
-                           std::vector<SamPoint> points, bool keep) {
+                           int doc_w, int doc_h, std::vector<SamPoint> points, Paint mode) {
     // SAM needs a "this" to exclude a "not this" from.
     if (std::none_of(points.begin(), points.end(), [](const SamPoint& p) { return p.positive; }))
         return false;
@@ -228,8 +229,10 @@ bool MaskSam::start_points(const std::string& frame_key,
     j.rgb = std::move(rgb);
     j.fw = fw;
     j.fh = fh;
+    j.doc_w = doc_w;
+    j.doc_h = doc_h;
     j.points = std::move(points);
-    j.keep = keep;
+    j.mode = mode;
     return launch(std::move(j));
 }
 
@@ -237,13 +240,15 @@ bool MaskSam::start_points(const std::string& frame_key,
 // set the thresholds, read here on the UI thread so the job never touches them.
 bool MaskSam::start_text(const std::string& frame_key,
                          std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
-                         const std::string& phrases) {
+                         int doc_w, int doc_h, const std::string& phrases) {
     if (!text_supported()) return false;
     Job j;
     j.frame_key = frame_key;
     j.rgb = std::move(rgb);
     j.fw = fw;
     j.fh = fh;
+    j.doc_w = doc_w;
+    j.doc_h = doc_h;
     j.phrases = phrases;
     j.text = true;
     j.max_size = _s->prompt.max_image_size;
@@ -391,9 +396,10 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         std::lock_guard<std::mutex> lk(s.mu);
         s.vram_mib = mib;
     }
-    publish(s, j.frame_key, std::move(out), j.keep, best,
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
-                .count());
+    SamResult res = prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode, best);
+    res.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                 .count();
+    publish(s, std::move(res));
     s.running = false;
 }
 
@@ -410,12 +416,12 @@ void MaskSam::release_device() {}
 double MaskSam::vram_mib() const { return -1.0; }
 
 bool MaskSam::start_points(const std::string&, std::shared_ptr<const std::vector<uint8_t>>, int,
-                           int, std::vector<SamPoint>, bool) {
+                           int, int, int, std::vector<SamPoint>, Paint) {
     refuse(msg::sam_unavailable_build.get());
     return false;
 }
 bool MaskSam::start_text(const std::string&, std::shared_ptr<const std::vector<uint8_t>>, int,
-                         int, const std::string&) {
+                         int, int, int, const std::string&) {
     refuse(msg::sam_unavailable_build.get());
     return false;
 }

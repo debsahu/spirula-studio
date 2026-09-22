@@ -356,7 +356,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:165` and `:386`), and
+does (both call the identical function, `MaskPanel.cpp:174` and `:399`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -372,14 +372,14 @@ screen px at this zoom), all plain drags (ForceDrop).
 
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
-(`MaskSession.cpp:388-399`, `if (r.empty()) return {};`) and `upload_rect`
-does the same (`MaskPanel.cpp:73`), so a coordinate-mapping bug that made
+(`MaskSession.cpp:389-400`, `if (r.empty()) return {};`) and `upload_rect`
+does the same (`MaskPanel.cpp:74`), so a coordinate-mapping bug that made
 every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:424`), read before the series and after every one of
+readout (`MaskPanel.cpp:445`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -483,7 +483,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:165` (`ui::Button(msg::undo)`) and `:386`
+   worked. `MaskPanel.cpp:174` (`ui::Button(msg::undo)`) and `:399`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -527,9 +527,9 @@ what was inferred rather than run flagged as such.
   "Kept %" and painted a lighter/keep-tinted stroke inside a drop region;
   Shift+Ctrl+drag over that same stroke returned "Kept %" exactly to its
   pre-stroke value and removed the tint. "The modifier read is the one held
-  at release" is read from source (`MaskPanel.cpp:303-304` samples
+  at release" is read from source (`MaskPanel.cpp:316-317` samples
   `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
-  and `:332` hands those to `paint_now` on the frame the stroke commits)
+  and `:344` hands those to `paint_now` on the frame the stroke commits)
   rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
@@ -563,7 +563,7 @@ what was inferred rather than run flagged as such.
   switching from a dirty `f0000` to `f0001` autosaved `f0000`'s layers to
   disk and the new frame's status read "Saved". `<` and the slider were
   **not** independently exercised; `go_to()` is the single function behind
-  all three (`MaskPanel.cpp:193`, `:197`, `:199`), so this is inferred from
+  all three (`MaskPanel.cpp:204`, `:208`, `:210`), so this is inferred from
   the one call tested.
 - [x] **Closing the window with Done or its close box while dirty writes the
   files.** Both exercised independently: Done and the title-bar close box
@@ -1129,7 +1129,7 @@ fresh `ensure_livewire()`. The two halves are in different functions, which an
 earlier draft of this note put both in `pump()`: `load_frame`'s worker clears
 `_status` as it publishes the loaded frame (`MaskSession.cpp:250`, inside the
 `enqueue` lambda that starts at `:230`), and `pump()` calls
-`_livewire.reset()` when it installs that frame on the UI thread (`:291`).
+`_livewire.reset()` when it installs that frame on the UI thread (`:292`).
 The argument is unchanged by the correction -- the clear still happens before
 the frame is published and the reset still happens as it is installed -- but
 an inheritor who went looking for both in `pump()` would have found one.
@@ -1357,11 +1357,11 @@ height -- which is the same reason the reserve is measured rather than
 computed.
 
 **That 192 px is the worst case the battery reached, not the worst case
-`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:416-468`), the eight
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:431-470`), the eight
 items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
 `hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
 and the status-or-error line. Two more items exist: `status_base_regenerated`
-and `status_base_missing` (`MaskPanel.cpp:429-432`), one `TextDisabledWrapped`
+and `status_base_missing` (`MaskPanel.cpp:450-453`), one `TextDisabledWrapped`
 each and mutually exclusive, since `base_state()` returns one value. Neither
 was on screen for any row of the table above, and the exact arithmetic is how
 that is known rather than assumed -- 110, 132 and 176 are 5, 6 and 8 lines to
@@ -1421,7 +1421,7 @@ than wrong.
 
 **The fix above removes the defect at every window size a person would work
 at, and does not remove it at every window size.** `draw_canvas` floors the
-canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:416-468`) draws its
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:431-470`) draws its
 full content unconditionally with no cap and no truncation. Once the window is
 short enough that the canvas has pinned at its floor, every further pixel of
 shrink becomes a pixel of strip pushed past the window bottom. It is the same
@@ -1700,7 +1700,7 @@ self-evident the moment you switch and the number does not change.
 
 ### The slider
 
-`MaskPanel.cpp:205-219`, on the **frame-navigation row**, shown only under the
+`MaskPanel.cpp:216-230`, on the **frame-navigation row**, shown only under the
 brush or the eraser, `ImGuiSliderFlags_Logarithmic | AlwaysClamp` over
 `[kMinBrush, kMaxBrush]` = [1, 4096]. The range is twelve octaves and `[`/`]`
 are multiplicative, so a linear slider would put every usable size in the
@@ -1744,7 +1744,7 @@ changed.
 takes `ImGui::GetItemRectMin()` / `GetItemRectMax()`, so it draws over the **last
 item**, not specifically over a button. The slider therefore carries
 `[ ] Alt+wheel` in the same corner `Q B E L P C F T K`, `I` and `X` sit in
-(`MaskPanel.cpp:220-226`), plus a `help_on_hover` sentence of the kind `save` /
+(`MaskPanel.cpp:231-237`), plus a `help_on_hover` sentence of the kind `save` /
 `revert_frame` / `revert_all` already have.
 
 **The hint is a `Msg`, not a raw key string.** The brackets are identifiers and
@@ -1793,7 +1793,7 @@ eraser ever does move into `ToolId`, the key comes with it.
 
 ### Alt+wheel over the canvas
 
-`MaskPanel.cpp:257-265`. The bare wheel is already the zoom, and Shift/Ctrl
+`MaskPanel.cpp:270-278`. The bare wheel is already the zoom, and Shift/Ctrl
 are the paint modes, so Alt is what was left; it is read by no mask tool and
 by no view gesture. The factor is `1.18^wheel` -- the **reciprocal** of the
 grow step, not the bracket's 0.85 -- so a notch back exactly undoes a notch,
@@ -1830,7 +1830,7 @@ and remains the only radius readout when the slider is hidden.
 Its arithmetic was re-inlined into `MaskPanel.cpp` at `6126a650`, leaving six
 tests pinning dead code -- the shape of defect this note keeps finding. `[`
 and `]` route through it again, and `clamp_brush` / `scale_brush` /
-`wheel_brush` join it in `MaskSession.cpp:406-431`, the file
+`wheel_brush` join it in `MaskSession.cpp:407-432`, the file
 `mask_doc_test` links, so every radius arithmetic both tools use is tested in
 one place. `clamp_brush` is a rejection test rather than `std::clamp` because
 `std::clamp` **propagates a NaN**, and a NaN radius rasterizes nothing while
@@ -1867,7 +1867,7 @@ A synthetic three-frame workspace whose base mask drops one 200x200 block, so
 
 ### `/ui/scroll` grew `shift=`, `ctrl=` and `alt=`
 
-`Automation.cpp:507-530`, the way `/ui/drag` already had them, plus the
+`Automation.cpp:509-532`, the way `/ui/drag` already had them, plus the
 matching flags in `guictl.py`. Without it a modified wheel cannot be driven
 from a script at all, and this binding would have shipped unexercised. This is
 a change to test infrastructure outside the feature's file list, flagged here
@@ -1992,9 +1992,10 @@ dataset path; or the dataset screen, under Update Dataset, when the workspace's
 `masks/` is not itself an input). Press **G** or the **SAM** button at the right of
 the tool row. The status strip then shows the checkpoint picker (the dataset screen's
 own, over the same model id and download), the hint, and the last result. A click on
-the canvas drops the object under it; **Ctrl+click** keeps it (on macOS the logical
-Ctrl is the Command key, as for every other Ctrl chord in the editor); **Esc** cancels
-a prompt in flight. With no cached checkpoint the button still arms, and the strip
+the canvas drops the object under it; **Ctrl+click** keeps it; **Shift+Ctrl+click**
+clears the corrections on it back to the base -- the brush's grammar (on macOS the
+logical Ctrl is the Command key, as for every other Ctrl chord in the editor); **Esc**
+cancels a prompt in flight once its current step ends. With no cached checkpoint the button still arms, and the strip
 offers **Get the model** and the licence prompt; the consent modal is drawn from
 `frame()`, so it appears over the editor on any screen.
 
@@ -2031,7 +2032,7 @@ automation port; the fixture was a copy of a 46-frame 360 photo dataset (images 
 | P1b, first prompt of a session (load + encode), job ms | 10455, 6001, 5716, 11118 across four loads; the upload alone logged 7172 ms once |
 | P1, first click on a new frame, warm (prompt -> painted / job) | 4096/3614, 4044/3577, 4063/3588, 4109/3595, 4194/3587 ms |
 | P2, further clicks on the same frame (prompt -> painted / job) | 648/105, 546/83, 564/97, 623/114 ms |
-| P3, three points, document at base before each | drop-layer pixels == `sam_last_area` exactly (1,819,873 / 327,044 / 520,960); pairwise IoU 0.0000; areas differ 82.0 / 71.4 / 37.2 %; PASS |
+| P3, three points, document at base before each (re-taken after fix round 1, points read off a fresh screenshot) | drop-layer pixels == `sam_last_area` exactly (2,054,286 / 328,023 / 537,570); pairwise IoU 0.0000; areas differ 84.0 / 73.8 / 39.0 %; PASS |
 | Ctrl+click on a dropped person | kept +901,028 px == `sam_last_area` (force-keep) |
 | Esc during a first click on a new frame | idle 3372 ms after Esc; results, dropped and history unchanged |
 
@@ -2044,35 +2045,68 @@ cleared that message; the next editor click showed `sam_first_load` and took 11,
 editor yielded (2407.1 -> -1); a click during the run was refused with
 `sam_blocked_run`; the message cleared when the run ended; the next click reloaded
 (11,335 ms). (d) The strip draws `sam_error()` in red (the bad-magic run above).
-(e) Revert all's confirmation: **Esc does not close it** (a modal with no close box);
-it stays open and deletes nothing. Cancel closes it; the `mask_edits/` listing and an
-MD5 over every file in `masks/` and `mask_edits/` were identical before and after.
+(e) Revert all's confirmation: before fix round 1 **Esc did not close it** and it
+deleted nothing (the `mask_edits/` listing and an MD5 over every file in `masks/` and
+`mask_edits/` identical before and after). Esc now acts as Cancel: the modal closes and
+`mask_edits/` is untouched.
 
-### The strip and the tool row
+### Fix round 1: the picture no longer moves under the cursor
 
-The SAM button widens tool row 1 by one button: `Done`'s right edge is now **1172 px**
-(was 1068), so the row needs a window about **1180 px** wide at `ui_scale()` 1.0.
-`status_h` in SAM mode, read as `942 - canvas.y1`: ready with a result **206**, busy
-**228**, no cached checkpoint **236** (the pen tool is 176). By the rule above, SAM mode
-with no checkpoint clips below **400 px** of window height. Checked by resizing the
-editor: at 420 px the last line fits, at 380 px it is cut. A session status line or a
-failed-download line adds a line to any of these.
+**The defect (found in review).** `draw_canvas` sized the canvas as the window minus
+last frame's strip height, and a 2:1 frame is height-limited, so every line the strip
+gained or lost rescaled the whole picture about its centre. Measured before the fix,
+the same screen point (330, 470) over three click cycles: canvas 666 idle, 622 busy,
+644 done, and the click reached frame pixel (2283.7, 4404.3) the first time and
+(2096.6, 4554.8) after -- 240 px apart.
+
+**The fix, two halves.** The canvas reserves `StripReserve::h` (`MaskWindow.h`): the
+tallest strip measured since the mode or the window width last changed, so a line that
+leaves keeps its space. In SAM mode the busy / error / result lines share a fixed
+two-line slot and the session's status-or-error line always holds its one line, so they
+never grow the strip at all. And a click is mapped through the layout the previous frame
+drew (`note_shown` / `shown_to_frame`), cleared wherever a new document arrives, so a
+resize can never misplace one.
+
+**Measured after.** The same cycle on a frame never encoded, idle -> busy -> done:
+canvas **622 / 622 / 622**, and both clicks reached (6512.4, 4466.4). Three warm cycles
+at (330, 470): 622 throughout, (1896.3, 4715.9) every time. Against a build with the
+slot padding removed, the same fresh-frame cycle read 666 / 622 / 622 and the two clicks
+reached (6594.8, 4171.3) and (6512.4, 4466.4).
+
+**Also in this round.**
+- The stencil is built on the SAM job thread, limited to the box each region can reach.
+  UI-thread time from result to uploaded texture (`sam_ui_ms`): **110, 135, 121 ms**
+  before, **46 cold, 29, 28 ms** after on the same clicks (and 6-18 ms on others). The
+  job absorbs it: warm job 45-48 ms before, 190-200 ms after. Prompt to painted on the
+  P3 clicks: 234 and 278 ms (was 546-648).
+- Shift+Ctrl+click clears (measured: a kept person back to exactly the base count, a
+  dropped door back to the base count); `paint_now` is pinned in all four modes.
+- `sam_cancel_slow` no longer promises a time: the flag is read between stages, and on
+  this machine a load is ~2.5 s, an encode 1.9-3.6 s, a first load 5.7-11.1 s.
+- The window cannot be made narrower than its tool row as measured last frame: dragged
+  to 700 px it stops at 1180 with `Done` at 1172. Without the constraint `Done` falls
+  out of the item table entirely.
+- The session's status-or-error line is the strip's FIRST line, so a short window clips
+  it last: at 386 px the red "Could not write ..." line is fully visible.
+- SAM mode no longer shows "Brush: N px / Last stroke".
+- `/ui/state` carries `app_ready`, false until the first frame has published the app's
+  fields; `guictl.py launch` waits for it.
+
+### The strip and the tool row (after fix round 1)
+
+The SAM button widens tool row 1 by one button: `Done`'s right edge is **1172 px** (was
+1068), and the window now refuses to be narrower than that row. `status_h`, read as
+`942 - canvas.y1`: brush **132**, pen **198** (each +22 for the status slot, which is
+now always one line), SAM **228**, SAM with no cached checkpoint **258**. By the rule
+above SAM mode clips below **392 px** of window height, **422 px** with no checkpoint;
+the first line to go is the key hint at the bottom, the last the error line at the top.
 
 ### Misses and open items
 
-- **`sam_cancel_slow` says "up to 1.5 s"; this machine took 3.4 s** from Esc to idle on
-  a first click (the encode is not interruptible and runs about 3.6 s here). The text
-  understates the wait.
 - **Closing the editor keeps the session** (`close()` does not release it; plan Task 8),
-  so a close and reopen does not make P1b's "first prompt of a session". Three reopen
-  samples read 4.06 s, 4.06 s and 4.08 s against 11.6 s for the one that really loaded.
-  The P1b row above is from model switches, which do release.
-- **Prompt -> painted exceeds the job by 450-540 ms** on every warm click (P2): that time
-  is on the UI thread, painting the 15520x7760 add and uploading it.
-- **Revert all ignores Esc** (above). Whether it should dismiss is a design call.
-- **The same point on the same frame gave 1,494,660 px once and 1,819,873 px later.**
-  Probably the canvas moved between the two clicks (the strip's height changes with
-  its content, and the click is in pane pixels); not verified.
+  so a close and reopen does not make P1b's "first prompt of a session". The P1b row is
+  from model switches, which do release. Its samples split into 5.7-6.0 s and
+  10.5-11.1 s with no explanation, so no P1b threshold should be judged on them.
 - **The automation layer read the app mid-frame.** `/ui/state` called
   `GuiApp::state_json()` on the HTTP thread; one read returned a new job time beside an
   old prompt time and a zeroed area. `Automation.cpp` now samples it at the end of each
