@@ -1869,6 +1869,55 @@ from a script at all, and this binding would have shipped unexercised. This is
 a change to test infrastructure outside the feature's file list, flagged here
 rather than folded in silently -- the same call the pen tool's fix round made.
 
+## SAM assist, Task 1: the seam, and what one add costs the history (2026-09-22)
+
+`app/gui/mask/MaskAdd.{h,cpp}` turns one SAM prompt's detections into the
+`Stencil` + `Rect` pair `MaskDoc::paint` takes, with no ImGui, GL, `sam::` or
+`nn::` in it, so `mask_doc_test` compiles it. The bounds are the extent of the
+resampled plane itself, never the detections' boxes: a box one pixel tight
+would leave set pixels outside the rect, which `paint_rect` never writes.
+`set_px` is the plane's own set-pixel count, the quantity P3's area null is
+built from.
+
+**Resampling follows `sam::Masker`'s `upscale_nearest` exactly**
+(`floor(d * src / dst)`, `sam/Masking.cpp:85-87`), not a pixel-centre mapping.
+The two agree at integer ratios and part at any other: on a 2x2 -> 3x3 upscale
+source pixel (1,1) lands on (2,2) alone under Masker's rule and on a 2x2 block
+under the centre rule. A region the seam resamples therefore covers the pixels
+the model's own overlay drew. `add stencil: a 3:2 resample follows
+sam::Masker's floor mapping` pins it.
+
+### P5: bytes one add costs the undo history
+
+Measured by `test_add_history_bytes` (1552x776) and `bench_add_history`
+(`SS_MASK_BENCH`, 15520x7760). One `ForceDrop` add of a disc of radius H/5
+centred at (0.6W, 0.55H). "Earlier edit" = a speckled edit already painted
+into the top-left tenth of the frame; "whole frame" = the same stencil handed
+to `paint` with the full-frame rect instead of its own bounds (P5's mutant).
+
+| arm | bytes | paint ms |
+|---|---|---|
+| 1552x776, earlier edit, own bounds | 1,472 | -- |
+| 1552x776, earlier edit, whole frame | 25,882 (17.6x) | -- |
+| 1552x776, fresh, own / whole | 1,472 / 1,850 | -- |
+| 15520x7760, fresh, own / whole | 17,377 / 18,644 | 24.0 / 267.6 |
+| 15520x7760, earlier edit, own / whole | 17,377 / 2,427,914 (139.7x) | 23.6 / 258.6 |
+| **`kP5Bar` = 2 x the measured 1552x776 own** | **2,944** | -- |
+
+The 1552x776 figures matched the plan's emulation of `rle_encode` to the byte.
+M5 Pro, one run; paint times are single samples, bytes are deterministic.
+
+**Why the fixture carries an earlier edit.** On a fresh document the layers
+are uniform outside the disc, so the whole-frame rect RLE-encodes to nearly
+the same size as the region's own box (1,850 vs 1,472; 18,644 vs 17,377 at
+full size) and `history_bytes` cannot tell the mutant from the fix. The
+whole-frame rect only costs once it re-encodes an edit that lies elsewhere.
+`add bytes: on a fresh document the whole-frame rect is invisible to
+history_bytes` asserts that, so the fixture cannot be simplified back to a
+fresh document without the byte checks going blind. The paint time separates
+the two arms on either document (~11x at full size), but it is not asserted:
+it is a timing.
+
 ## Not in this phase
 
 Propagate, find-missing, slideshow, view modes and the peek key, session

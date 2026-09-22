@@ -424,6 +424,7 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/tests/mask_doc_test.cpp
         ${SS_SRC}/app/gui/mask/MaskLayer.cpp
         ${SS_SRC}/app/gui/mask/MaskDoc.cpp
+        ${SS_SRC}/app/gui/mask/MaskAdd.cpp
         ${SS_SRC}/app/gui/mask/MaskSession.cpp
         ${SS_SRC}/app/gui/mask/MaskWindow.cpp
         ${SS_SRC}/app/gui/edit/EditDoc.cpp

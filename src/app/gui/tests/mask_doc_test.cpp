@@ -7,6 +7,7 @@
 #include "app/FrameMask.h"
 #include "app/gui/edit/Selection.h"
 #include "app/gui/mask/Livewire.h"
+#include "app/gui/mask/MaskAdd.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/PathTool.h"
 #include "app/gui/mask/MaskLayer.h"
@@ -2595,6 +2596,254 @@ void bench_livewire(const char* dir) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SAM assist: the seam (MaskAdd.h)
+// ---------------------------------------------------------------------------
+
+// A w x h plane holding one filled disc; every seam fixture is built from these
+// so the expected counts are computed, not typed.
+mk::AddRegion disc_region(int w, int h, float cx, float cy, float r) {
+    mk::AddRegion g;
+    g.w = w;
+    g.h = h;
+    g.mask.assign((size_t)w * h, 0);
+    g.score = 0.9f;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+            if (dx * dx + dy * dy <= r * r) g.mask[(size_t)y * w + x] = 255;
+        }
+    return g;
+}
+
+size_t set_pixels(const std::vector<uint8_t>& v) {
+    size_t n = 0;
+    for (uint8_t b : v) n += b ? 1 : 0;
+    return n;
+}
+
+// The exact extent of a plane's set pixels; empty when none are set.
+mk::Rect extent(const std::vector<uint8_t>& v, int w, int h) {
+    mk::Rect r{w, h, 0, 0};
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+            if (v[(size_t)y * w + x]) {
+                r.x0 = std::min(r.x0, x);
+                r.y0 = std::min(r.y0, y);
+                r.x1 = std::max(r.x1, x + 1);
+                r.y1 = std::max(r.y1, y + 1);
+            }
+    return r;
+}
+
+bool same_rect(const mk::Rect& a, const mk::Rect& b) {
+    return a.x0 == b.x0 && a.y0 == b.y0 && a.x1 == b.x1 && a.y1 == b.y1;
+}
+
+void test_add_stencil_same_size() {
+    std::vector<mk::AddRegion> r{disc_region(64, 48, 20.0f, 20.0f, 6.0f)};
+    const std::vector<uint8_t> plane = r[0].mask;
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t set = -1;
+    check(mk::build_add_stencil(r, 64, 48, st, b, set), "add stencil: same size builds");
+    check(st.W == 64 && st.H == 48 && st.in == plane,
+          "add stencil: same size is the plane, pixel for pixel");
+    check(set == (int64_t)set_pixels(plane), "add stencil: set_px counts the plane's set pixels");
+    check(same_rect(b, extent(plane, 64, 48)),
+          "add stencil: bounds are the exact extent, not the frame");
+}
+
+void test_add_stencil_resamples() {
+    std::vector<mk::AddRegion> r{disc_region(64, 48, 20.0f, 20.0f, 6.0f)};
+    const size_t src = set_pixels(r[0].mask);
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t set = -1;
+    check(mk::build_add_stencil(r, 128, 96, st, b, set), "add stencil: resample builds");
+    check(st.W == 128 && st.H == 96 && st.in.size() == (size_t)128 * 96,
+          "add stencil: resampled to the document size");
+    const size_t n = set_pixels(st.in);
+    check(n == 4 * src, "add stencil: a 2x nearest resample quadruples the area exactly");
+    check(set == (int64_t)n, "add stencil: set_px counts the resampled plane");
+    check(same_rect(b, extent(st.in, 128, 96)),
+          "add stencil: bounds are the resampled plane's exact extent");
+}
+
+// The first two discs overlap, so a count summed per region is caught.
+// A 3:2 upscale, where floor(d * src / dst) and a pixel-centre mapping part:
+// sam::Masker's rule lands source (1,1) on (2,2) alone, the centre rule on 2x2.
+void test_add_stencil_resample_matches_masker() {
+    std::vector<mk::AddRegion> r(1);
+    r[0].w = 2;
+    r[0].h = 2;
+    r[0].mask = {0, 0, 0, 255};
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t set = -1;
+    check(mk::build_add_stencil(r, 3, 3, st, b, set), "add stencil: 3:2 resample builds");
+    const std::vector<uint8_t> want{0, 0, 0, 0, 0, 0, 0, 0, 255};
+    check(st.in == want && set == 1 && same_rect(b, mk::Rect{2, 2, 3, 3}),
+          "add stencil: a 3:2 resample follows sam::Masker's floor mapping");
+}
+
+void test_add_stencil_unions_three() {
+    std::vector<mk::AddRegion> r{disc_region(64, 48, 10.0f, 10.0f, 4.0f),
+                                 disc_region(64, 48, 14.0f, 12.0f, 4.0f),
+                                 disc_region(64, 48, 52.0f, 38.0f, 4.0f)};
+    std::vector<uint8_t> want((size_t)64 * 48, 0);
+    for (const mk::AddRegion& g : r)
+        for (size_t i = 0; i < want.size(); i++)
+            if (g.mask[i]) want[i] = 255;
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t set = -1;
+    check(mk::build_add_stencil(r, 64, 48, st, b, set), "add stencil: three regions build");
+    check(st.in == want, "add stencil: three regions union pixel for pixel");
+    check(set == (int64_t)set_pixels(want), "add stencil: set_px counts an overlap once");
+    check(same_rect(b, extent(want, 64, 48)), "add stencil: bounds span exactly all three");
+}
+
+void test_add_stencil_rejects_empty() {
+    gui::Stencil st;
+    st.W = 7;
+    mk::Rect b{1, 2, 3, 4};
+    int64_t set = 99;
+    std::vector<mk::AddRegion> none;
+    check(!mk::build_add_stencil(none, 64, 48, st, b, set), "add stencil: no regions is false");
+    std::vector<mk::AddRegion> blank{disc_region(64, 48, 10.0f, 10.0f, 0.0f)};
+    check(!mk::build_add_stencil(blank, 64, 48, st, b, set), "add stencil: an empty plane is false");
+    std::vector<mk::AddRegion> bad(1);
+    bad[0].w = 4;
+    bad[0].h = 4;
+    bad[0].mask.assign(3, 255);
+    check(!mk::build_add_stencil(bad, 64, 48, st, b, set),
+          "add stencil: a plane of the wrong length is skipped");
+    check(st.W == 7 && st.in.empty() && same_rect(b, mk::Rect{1, 2, 3, 4}) && set == 99,
+          "add stencil: false leaves all three outputs untouched");
+}
+
+// P4: one prompt is one undo step, for one region and a three-region union,
+// each at the document's size and at half of it. The half-size cases are what
+// a std::move implementation fails: MaskDoc::paint returns silently there.
+void test_add_stencil_is_one_undo_step() {
+    const char* names[] = {"add_undo_1r_1x", "add_undo_1r_2x", "add_undo_3r_1x",
+                           "add_undo_3r_2x"};
+    int case_no = 0;
+    for (int regions = 1; regions <= 3; regions += 2)
+        for (int scale = 1; scale <= 2; scale++) {
+            const std::string tag = "add undo, " + std::to_string(regions) +
+                                    " region(s) at 1/" + std::to_string(scale) + ": ";
+            mk::MaskDoc doc;
+            mk::LayerIndex idx;
+            const fs::path d = scratch(names[case_no++]);
+            idx.mask_root = (d / "masks").string();
+            std::string err, warn;
+            check(doc.load((d / "layers").string(), (d / "masks").string(), "f", 64, 48, idx,
+                           err, warn),
+                  tag + "document loads");
+            const std::vector<uint8_t> before = doc.composite();
+            const int64_t kept_before = doc.kept();
+            const int w = 64 / scale, h = 48 / scale;
+            const float k = 1.0f / (float)scale;
+            std::vector<mk::AddRegion> r{disc_region(w, h, 20.0f * k, 20.0f * k, 6.0f * k)};
+            if (regions == 3) {
+                r.push_back(disc_region(w, h, 40.0f * k, 30.0f * k, 5.0f * k));
+                r.push_back(disc_region(w, h, 10.0f * k, 38.0f * k, 4.0f * k));
+            }
+            gui::Stencil st;
+            mk::Rect b;
+            int64_t set = 0;
+            check(mk::build_add_stencil(r, 64, 48, st, b, set), tag + "stencil builds");
+            doc.paint(mk::Paint::ForceDrop, std::move(st), b);
+            check(doc.history_size() == 1, tag + "ONE history entry");
+            check(same_rect(doc.last_change(), b), tag + "the entry touched exactly the bounds");
+            check(doc.kept() == kept_before - set, tag + "the add dropped exactly set_px pixels");
+            doc.undo();
+            check(doc.composite() == before, tag + "undo restores every pixel");
+            check(doc.kept() == kept_before, tag + "undo restores the kept count");
+        }
+}
+
+// What one ForceDrop add of a disc well inside a W x H document costs.
+struct AddCost {
+    size_t bytes = 0;        // history growth from the one add; 0 = the arm failed
+    double paint_ms = 0.0;   // MaskDoc::paint alone
+};
+
+// `prior` first paints a speckled edit into the top-left tenth -- the only
+// thing a whole-frame rect re-encodes. `whole_frame` is P5's mutant: the same
+// stencil handed to paint with the full-frame rect instead of the bounds.
+AddCost add_cost(const char* name, int W, int H, bool prior, bool whole_frame) {
+    AddCost c;
+    mk::MaskDoc doc;
+    mk::LayerIndex idx;
+    const fs::path d = scratch(name);
+    idx.mask_root = (d / "masks").string();
+    std::string err, warn;
+    if (!doc.load((d / "layers").string(), (d / "masks").string(), "f", W, H, idx, err, warn))
+        return c;
+    if (prior) {
+        gui::Stencil sp;
+        sp.W = W;
+        sp.H = H;
+        sp.in.assign((size_t)W * H, 0);
+        uint32_t s = 1;
+        for (int y = 0; y < H / 10; y++)
+            for (int x = 0; x < W / 10; x++) {
+                s = s * 1664525u + 1013904223u;
+                if ((s >> 24) & 1u) sp.in[(size_t)y * W + x] = 255;
+            }
+        doc.paint(mk::Paint::ForceDrop, std::move(sp), mk::Rect{0, 0, W / 10, H / 10});
+    }
+    const int ops_before = doc.history_size();
+    const size_t bytes_before = doc.history_bytes();
+    std::vector<mk::AddRegion> r{disc_region(W, H, 0.6f * W, 0.55f * H, H / 5.0f)};
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t n = 0;
+    if (!mk::build_add_stencil(r, W, H, st, b, n)) return c;
+    const auto t0 = std::chrono::steady_clock::now();
+    doc.paint(mk::Paint::ForceDrop, std::move(st), whole_frame ? mk::Rect{0, 0, W, H} : b);
+    c.paint_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                     .count();
+    if (doc.history_size() != ops_before + 1) return AddCost{};
+    c.bytes = doc.history_bytes() - bytes_before;
+    return c;
+}
+
+// P5. The fresh-document pair records why the fixture carries an earlier edit:
+// without one, history_bytes cannot tell the whole-frame rect from the bounds.
+void test_add_history_bytes() {
+    const AddCost own = add_cost("add_bytes_own", 1552, 776, true, false);
+    const AddCost whole = add_cost("add_bytes_whole", 1552, 776, true, true);
+    const AddCost fresh_own = add_cost("add_bytes_fresh_own", 1552, 776, false, false);
+    const AddCost fresh_whole = add_cost("add_bytes_fresh_whole", 1552, 776, false, true);
+    std::printf("P5 1552x776: own %zu, whole %zu, fresh own %zu, fresh whole %zu bytes\n",
+                own.bytes, whole.bytes, fresh_own.bytes, fresh_whole.bytes);
+    check(own.bytes > 0 && whole.bytes > 0 && fresh_own.bytes > 0 && fresh_whole.bytes > 0,
+          "add bytes: every arm painted exactly one add");
+    check(whole.bytes >= 10 * own.bytes,
+          "add bytes: after an earlier edit the whole-frame rect costs 10x the bounds");
+    check(fresh_whole.bytes < 2 * fresh_own.bytes,
+          "add bytes: on a fresh document the whole-frame rect is invisible to history_bytes");
+    constexpr size_t kP5Bar = 2 * 1472;
+    check(own.bytes <= kP5Bar && whole.bytes > kP5Bar,
+          "add bytes: one add is within P5's bar, and the whole-frame rect is not");
+}
+
+// P5 at the size that matters, four arms, one document at a time: ~1 GB peak
+// (four 120 MB planes, the 120 MB disc and stencil, and the mutant's read_rect).
+void bench_add_history() {
+    const int W = 15520, H = 7760;
+    for (int prior = 0; prior <= 1; prior++)
+        for (int whole = 0; whole <= 1; whole++) {
+            const AddCost c = add_cost("bench_add_history", W, H, prior != 0, whole != 0);
+            std::printf("P5 bench %dx%d earlier_edit=%d whole_frame=%d: %zu bytes, paint %.1f ms\n",
+                        W, H, prior, whole, c.bytes, c.paint_ms);
+        }
+}
+
 }  // namespace
 
 int main() {
@@ -2644,8 +2893,16 @@ int main() {
     test_to_displayed_float();
     test_livewire_corner_path();
     test_livewire_sign_alignment();
+    test_add_stencil_same_size();
+    test_add_stencil_resamples();
+    test_add_stencil_resample_matches_masker();
+    test_add_stencil_unions_three();
+    test_add_stencil_rejects_empty();
+    test_add_stencil_is_one_undo_step();
+    test_add_history_bytes();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
+    if (std::getenv("SS_MASK_BENCH")) bench_add_history();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }
