@@ -2269,10 +2269,9 @@ the logical Ctrl, as `key` already did.
 
 ### Misses and open items
 
-- **Closing the editor keeps the session** (`close()` does not release it; plan Task 8),
-  so a close and reopen does not make P1b's "first prompt of a session". The P1b row is
-  from model switches, which do release. Its samples split into 5.7-6.0 s and
-  10.5-11.1 s with no explanation, so no P1b threshold should be judged on them.
+- **The P1b row is from model switches**, taken before closing the editor released the
+  session (Task 8 below). Its samples split into 5.7-6.0 s and 10.5-11.1 s with no
+  explanation, so no P1b threshold should be judged on them.
 - **The automation layer read the app mid-frame.** `/ui/state` called
   `GuiApp::state_json()` on the HTTP thread; one read returned a new job time beside an
   old prompt time and a zeroed area. `Automation.cpp` now samples it at the end of each
@@ -2280,6 +2279,88 @@ the logical Ctrl, as `key` already did.
 - ImGui's `BeginCombo` reports no label to the automation hook, so `tree` cannot name
   the checkpoint combo; the harness finds it as the one unnamed on-screen item px(260)
   wide.
+
+## SAM assist, Task 8: lifetime and teardown (2026-09-22)
+
+**Closing the editor hands the checkpoint back.** `close()` yields SAM first (cancel,
+join the job, `sam::Session::unload()`), then joins the load/save worker, so the weights
+go back before a pending save lands. It then forgets all SAM state: the `MaskSam` object
+with its clicks (their frame indices name a session that is gone), the model path, the
+result counters, the replace stamp and the held detections. The model picker callback is
+kept; `GuiApp::frame()` pushes the model again on the first frame of the next open. The
+editor never builds a `sam::Tracker`, whose memory bank `unload()` does not release.
+
+**P12** (`sam_pool_mib`, the process-wide pool; one fresh process, SAM 3 q4_0, a
+15520x7760 frame, M5 Pro):
+
+| stage | pool MiB | `sam_vram_mib` | OS: "Owned physical footprint (unmapped) (graphics)" |
+|---|---|---|---|
+| fresh, before open | 0.0 | -1 | 100 MB |
+| one click, loaded and encoded | 1895.1 | 2407.1 | 2507 MB |
+| 10 frames after **Done** | **0.0** | -1 | -- |
+| 3 s after **Done** | 0.0 | -1 | **100 MB** |
+
+The pool fell 1895.1 MiB (at least the 1652.2 MiB of weights) and ended equal to its
+pre-open value, 0.0 against 0.0, inside the 1 MiB bar. On reopen the next click showed
+`sam_first_load` in the strip and its job took 12,532 ms, above P1b's 5716 ms floor: the
+upload was paid again. `session -1` after close is expected and proves nothing. Nothing
+else allocated from the pool across the close: opening the editor closes the native
+previews, and a run bars it.
+
+**P12 catches both wrong releases, in the app.** Each was built, run in a fresh process,
+and reverted:
+
+| mutant | pool after close | drop >= weights? | equals pre-open? | reload |
+|---|---|---|---|---|
+| frees only `Weights`, leaks the session | 236.7 | yes (1658.5) | **no** | -- |
+| `close()` neither yields nor forgets (the pre-Task 8 code) | 1895.1 | **no** | **no** | `Segmenting...`, 4014 ms: **no** upload |
+
+The first shows why the equality bar matters: a weights-only release passes the "drop >=
+weights" half.
+
+**P6.** `sam_vram_mib` 2407.1 MiB loaded and encoded, under the 2500 MiB bar for q4_0:
+PASS. Beside it, `ps -o rss=` read 1,605,280 KiB (1567.7 MiB). **`ps` does not measure
+device memory**, so that figure is recorded but judged against nothing.
+
+**P7**, Esc during a first click's encode on frame f1: idle 3303 ms after Esc (this
+includes about 0.1 s of polling per round). Kept, history and results were all unchanged,
+and nothing dropped.
+
+**P8b**, leaving a frame mid-encode: `sam_dropped` 0 -> 1, `sam_results` 1 -> 1, and on the
+next frame history 0 and kept 112,176,393, which equals its untouched count. `state` still
+answered.
+
+**Closing during a job freezes the UI for the whole stage.** `sam_close_ms` is the time
+`close()` spends joining and unloading on the UI thread:
+
+| Done clicked while | `sam_close_ms` | Done -> next frame, wall |
+|---|---|---|
+| idle, loaded | 152 | -- |
+| an encode runs | **2887** | 3263 |
+| the first load runs | **7805** | 8186 |
+
+A load cannot be cancelled, and the stages check the flag only between them. **Proposed,
+not built:** `close()` sets the cancel flag and moves the `MaskSam` into a GuiApp-owned
+retiring slot, whose own thread joins and unloads. Until that slot is empty, every other
+inference user would wait on it, as it does on `sam_yield()` today: a reopened editor,
+`stop_inference_users()`'s callers, and shutdown before `nn::shutdown()`. P12 would then
+read the pool once the slot empties rather than on the next frame.
+
+**Carried fixes.**
+- The cancel check after building the stencil now lives in one helper,
+  `publish_unless_cancelled()`, which both job tails use. It builds, *then* reads the
+  flag, then publishes. A unit test pins that an Esc during the build wins.
+- A held detection now survives an undo while a redo can still bring its add back
+  (`MaskDoc::redo_reaches`: the add's step is on top, or waiting on the redo stack), so
+  the margin slider re-applies after an undo and a redo. An edit in the undone add's
+  place drops the redo stack, and with it the detection.
+- A text prompt whose matches the exception chips cleared entirely now reads
+  `sam_vetoed_all` ("The prompt matched, but the exceptions removed everything.") instead
+  of "matched nothing". The choice lives in `MaskSession::sam_empty_note()` so it can be
+  unit-tested. The 12 translations borrow each language's existing word for the chips'
+  exceptions, and no fluent speaker has read them.
+- `RegionBox`'s comment now says what a text box is: the detector's continuous box, not
+  an inclusive pixel extent.
 
 ## Not in this phase
 
