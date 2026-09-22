@@ -10,6 +10,7 @@
 
 #include "app/gui/Layout.h"
 #include "app/gui/Ui.h"
+#include "i18n/catalog/Dataset.h"
 #include "i18n/catalog/MaskEdit.h"
 
 #include "imgui.h"
@@ -21,6 +22,7 @@
 #include <string>
 
 namespace msg = spirula::i18n::msg::maskedit;
+namespace dmsg = spirula::i18n::msg::dataset;
 
 namespace gui {
 namespace mask {
@@ -163,10 +165,13 @@ void MaskSession::draw_toolbar() {
     ImGui::EndDisabled();
     ui::help_on_hover(msg::revert_frame_help);
     ImGui::SameLine();
-    ImGui::BeginDisabled(!idle());
-    if (ui::Button(msg::revert_all)) revert_every_frame();
+    // Only when there is something to lose, and never in one click: it
+    // deletes every hand correction in the dataset.
+    ImGui::BeginDisabled(!idle() || (corrected_count() == 0 && !(_doc && _doc->dirty())));
+    if (ui::Button(msg::revert_all)) _revert_all_ask = true;
     ImGui::EndDisabled();
     ui::help_on_hover(msg::revert_all_help);
+    draw_revert_all_modal();
     ImGui::SameLine();
     if (ui::Button(msg::done)) _close_requested = true;
 
@@ -359,6 +364,31 @@ void MaskSession::handle_keys(const Mapping& m) {
         upload_rect(io.KeyShift ? redo() : undo());
     }
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) save();
+}
+
+// Names what goes -- the corrected-frame count, and the open frame's unsaved
+// strokes -- and needs a second, explicit click. Cancel is the safe default.
+void MaskSession::draw_revert_all_modal() {
+    if (_revert_all_ask) {
+        ui::OpenPopup(msg::revert_all_title);
+        _revert_all_ask = false;
+    }
+    if (!ui::BeginPopupModal(msg::revert_all_title, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    ImGui::PushTextWrapPos(px(460.0f));
+    ui::Text(msg::revert_all_confirm);
+    ImGui::Spacing();
+    ui::Text(msg::corrected_count, {corrected_count()});
+    if (_doc && _doc->dirty()) ui::Text(msg::revert_all_unsaved);
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ui::Button(msg::revert_all_button, ImVec2(px(220.0f), 0)) && idle()) {
+        revert_every_frame();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ui::Button(dmsg::cancel, ImVec2(px(150.0f), 0))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
 }
 
 void MaskSession::draw_status() {

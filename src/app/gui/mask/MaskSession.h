@@ -184,6 +184,7 @@ private:
     void draw_toolbar();
     void draw_canvas();
     void draw_status();
+    void draw_revert_all_modal();
     void handle_keys(const Mapping& m);
     void ensure_window(const Mapping& m, float pane_w, float pane_h);
     void upload_rect(const Rect& shown);
@@ -244,6 +245,7 @@ private:
     std::vector<uint8_t> _rgba;
     int _slider_idx = 0;
     bool _close_requested = false;
+    bool _revert_all_ask = false;    // Revert all was clicked; open its confirmation
 
     // The worker and what it hands back.
     std::thread _worker;
