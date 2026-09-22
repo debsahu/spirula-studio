@@ -1453,6 +1453,25 @@ std::vector<uint8_t> flat_rgb(int w, int h, uint8_t v) {
     return gray_rgb(w, h, [v](int, int) { return v; });
 }
 
+// Dark for x < 100, or x >= 100 and y < 60; light otherwise: a right-angle
+// edge (vertical at 99/100 for y >= 60, horizontal at 59/60 for x >= 100).
+// The straight line between a point on each arm misses the edge.
+std::vector<uint8_t> l_corner_rgb(int w, int h) {
+    return gray_rgb(w, h, [](int x, int y) {
+        return (uint8_t)((x < 100 || y < 60) ? 40 : 200);
+    });
+}
+
+// Vertical edge flipping polarity at row 60: (100,59)/(100,60) are then
+// 8-adjacent with differing codes and opposite sign vs the vertical link
+// -- a corner's diagonal transition always bisects, so hand-built here.
+std::vector<uint8_t> bowtie_rgb(int w, int h) {
+    return gray_rgb(w, h, [](int x, int y) {
+        const bool right = x >= 100;
+        return (uint8_t)((y < 60) == right ? 40 : 200);
+    });
+}
+
 size_t count_zero_crossings(const mk::Livewire& lw) {
     size_t n = 0;
     for (int y = 0; y < lw.height(); y++)
@@ -1467,7 +1486,11 @@ void test_livewire_features() {
     check(lw.ready() && lw.step() == 1 && lw.width() == W && lw.height() == H,
           "step edge: grid is the frame at step 1");
     check(lw.builds() == 1, "one build counted");
-    check(lw.bytes() > (size_t)W * H * 3, "bytes accounts for the feature planes");
+    // Exact lower bound: three per-pixel planes plus the three 256x8 tables
+    // -- capacity() >= size() always, so this can't pass on an under-count.
+    const size_t min_bytes = (size_t)W * H * 3 + sizeof(float) * 256 * 8 * 2 + 256 * 8;
+    check(lw.bytes() >= min_bytes,
+          "bytes accounts for the feature planes and tables: " + std::to_string(lw.bytes()));
 
     // fG: 0 on the two ridge columns (G = Gmax), 255 off them.
     check(lw.magnitude_cost(99, 60) == 0 && lw.magnitude_cost(100, 60) == 0,
@@ -1657,6 +1680,61 @@ void test_livewire_once() {
     check(lw.builds() == 1, "100 cursor moves, one build");
 }
 
+// Anchor on the vertical arm, target on the horizontal: the straight line
+// between them is off both edges, so this is the case criterion #7 needs
+// -- the true minimum curves around the corner.
+void test_livewire_corner_path() {
+    const int W = 200, H = 120;
+    mk::Livewire lw;
+    lw.build(l_corner_rgb(W, H).data(), W, H);
+    lw.set_anchor(100, 100);
+    std::vector<int> p;
+    check(lw.path_to(150, 60, p), "corner path found");
+    check(p.size() >= 4 && p[0] == 100 && p[1] == 100, "corner path starts at the anchor");
+    check(p.size() >= 4 && p[p.size() - 2] == 150 && p[p.size() - 1] == 60,
+          "corner path ends at the target");
+    // Distance to the nearer arm; also flags a link crossing two
+    // non-degenerate, different direction codes -- the pair link_cost_k
+    // takes through the search that no prior fixture reached.
+    float worst = 0.0f;
+    bool asymmetric_pair = false;
+    for (size_t i = 0; i + 1 < p.size(); i += 2) {
+        const float px = (float)p[i], py = (float)p[i + 1];
+        worst = std::max(worst, std::min(std::fabs(px - 99.5f), std::fabs(py - 59.5f)));
+        if (i + 3 < p.size()) {
+            float dpx, dpy, dqx, dqy;
+            lw.direction(p[i], p[i + 1], dpx, dpy);
+            lw.direction(p[i + 2], p[i + 3], dqx, dqy);
+            const bool both_gradient = (dpx != 0.0f || dpy != 0.0f) && (dqx != 0.0f || dqy != 0.0f);
+            if (both_gradient && dpx * dqx + dpy * dqy < 0.5f) asymmetric_pair = true;
+        }
+    }
+    check(worst <= 1.0f, "corner path within 1 px of the nearer arm (worst " +
+                             std::to_string(worst) + ")");
+    check(asymmetric_pair,
+          "the search crosses a genuinely different, non-degenerate direction code pair");
+    const double cost = lw.path_cost(150, 60);
+    check(cost >= 0.0 && cost < 5.0,
+          "the corner path is cheap, not the straight diagonal: " + std::to_string(cost));
+}
+
+// Pins link_cost_k's sign source directly: 0.327843 hand-derived (fd 2/3,
+// fz 0 on the zero crossing, fg 75/255, all axial) against the bowtie
+// pair. The sign[cq] mutant gives 0.186196 -- fails at this tolerance.
+void test_livewire_sign_alignment() {
+    mk::Livewire lw;
+    lw.build(bowtie_rgb(200, 120).data(), 200, 120);
+    float dpx, dpy, dqx, dqy;
+    lw.direction(100, 59, dpx, dpy);
+    lw.direction(100, 60, dqx, dqy);
+    check((dpx != 0.0f || dpy != 0.0f) && (dqx != 0.0f || dqy != 0.0f),
+          "both sides of the bowtie have a gradient");
+    check(dpx * dqx + dpy * dqy < 0.5f, "the bowtie pair's codes genuinely differ");
+    const float lc = lw.link_cost(100, 59, 100, 60);
+    check(std::fabs(lc - 0.327843f) < 0.001f,
+          "link_cost_k sign-aligns to D'(p), not D'(q): " + std::to_string(lc));
+}
+
 // ---------------------------------------------------------------------------
 // Task 9: floors at 8K. SS_MASK_BENCH=<dir> writes the fixture there and
 // prints medians of three repeats; nothing here fails on a number.
@@ -1800,6 +1878,8 @@ int main() {
     test_livewire_reanchor();
     test_livewire_diagonal();
     test_livewire_once();
+    test_livewire_corner_path();
+    test_livewire_sign_alignment();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;

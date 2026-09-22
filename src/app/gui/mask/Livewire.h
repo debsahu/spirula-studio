@@ -70,6 +70,7 @@ private:
     };
     bool in_grid(int x, int y) const { return x >= 0 && y >= 0 && x < _gw && y < _gh; }
     int link_index(int dx, int dy) const;
+    float fd_cost(uint8_t cp, uint8_t cq, int k) const;
     float link_cost_k(size_t p, size_t q, int k) const;
     void expand_until(size_t target);
     void build_tables();

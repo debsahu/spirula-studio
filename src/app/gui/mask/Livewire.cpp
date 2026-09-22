@@ -187,11 +187,14 @@ int Livewire::link_index(int dx, int dy) const {
     return -1;
 }
 
-float Livewire::link_cost_k(size_t p, size_t q, int k) const {
-    const uint8_t cp = _dir[p], cq = _dir[q];
+float Livewire::fd_cost(uint8_t cp, uint8_t cq, int k) const {
     const float a = _acos_abs[cp][k];
     const float c = _sign[cp][k] > 0 ? _acos_dot[cq][k] : kPi - _acos_dot[cq][k];
-    const float fd = (2.0f / (3.0f * kPi)) * (a + c);
+    return (2.0f / (3.0f * kPi)) * (a + c);
+}
+
+float Livewire::link_cost_k(size_t p, size_t q, int k) const {
+    const float fd = fd_cost(_dir[p], _dir[q], k);
     const float fz = _zc[q] ? 0.0f : 1.0f;
     const float fg = (float)_fg[q] / 255.0f;
     return (_w.zero_cross * fz + _w.direction * fd + _w.magnitude * fg) * kLen[k];
@@ -200,10 +203,7 @@ float Livewire::link_cost_k(size_t p, size_t q, int k) const {
 float Livewire::direction_cost(int px, int py, int qx, int qy) const {
     const int k = link_index(qx - px, qy - py);
     if (k < 0 || !in_grid(px, py) || !in_grid(qx, qy)) return -1.0f;
-    const uint8_t cp = _dir[(size_t)py * _gw + px], cq = _dir[(size_t)qy * _gw + qx];
-    const float a = _acos_abs[cp][k];
-    const float c = _sign[cp][k] > 0 ? _acos_dot[cq][k] : kPi - _acos_dot[cq][k];
-    return (2.0f / (3.0f * kPi)) * (a + c);
+    return fd_cost(_dir[(size_t)py * _gw + px], _dir[(size_t)qy * _gw + qx], k);
 }
 
 float Livewire::link_cost(int px, int py, int qx, int qy) const {
