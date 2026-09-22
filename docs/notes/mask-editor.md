@@ -2302,15 +2302,20 @@ editor never builds a `sam::Tracker`, whose memory bank `unload()` does not rele
 | 3 s after **Done** | 0.0 | -1 | **100 MB** |
 
 The pool fell 1895.1 MiB (at least the 1652.2 MiB of weights) and ended equal to its
-pre-open value, 0.0 against 0.0, inside the 1 MiB bar. On reopen the next click showed
-`sam_first_load` in the strip. Its job took 12,532 ms in the first run, but **4971 ms in
-fix round 1, under P1b's 5716 ms floor: that half FAILS as written.** The same process's
-first cold load took 5274 ms, so cold loads are faster than the four P1b samples. The
-warm reload in the no-release mutant took 4014 ms. Job time therefore separates a paid
-upload from a skipped one by under a second, and the P1b floor is not a usable bar for
-it. The strip line is the better discriminator, because it is decided by whether a
-session with that model exists (`MaskSam::launch`). It showed `sam_first_load` in both
-runs, and `Segmenting...` under the mutant. `session -1` after close is expected and proves nothing. Nothing
+pre-open value, 0.0 against 0.0, inside the 1 MiB bar.
+
+**The reload half counts loads, not milliseconds** (instrument replaced in fix round 2).
+`sam_loads` is `MaskSam::load_count()`, the process's `loadModel` calls. The check is that
+the first prompt after a reopen raises it by exactly 1. The old half read the job time
+against P1b's 5716 ms floor, and it failed with a real reload: jobs of 12,532, 4971, 6169
+and 4732 ms across four runs, against 4014 ms for the no-release mutant's warm reuse. No
+bar on job time separates those. The strip's `sam_first_load` line is logged beside the
+counter as a second witness, and agreed in every run.
+
+| build | `sam_loads` across the reload | strip | battery |
+|---|---|---|---|
+| fix round 2 | 1 -> 2 | `sam_first_load` | exit 0 |
+| no-release mutant (`close()` neither releases nor forgets) | **1 -> 1** | `Segmenting...` | exit 5: "P12 reload pays a real model load", both pool halves and both retired-pool checks FAIL | `session -1` after close is expected and proves nothing. Nothing
 else allocated from the pool across the close: opening the editor closes the native
 previews, and a run bars it.
 
@@ -2339,6 +2344,7 @@ the worst encode seen (3.3 s) plus headroom for the pump and the polling. Two ru
 |---|---|---|---|---|
 | first (hand-read, reported PASS in error) | 3303 ms | **FAIL** | PASS | unchanged |
 | fix round 1 (asserted) | 1733 ms | PASS | PASS | unchanged |
+| fix round 2 (asserted), two runs | 3244 / 1773 ms | FAIL / PASS | PASS | unchanged |
 
 Both figures include about 0.1 s of polling per round.
 
@@ -2354,7 +2360,10 @@ poll releases it: the join is then instant and the unload runs on the UI thread,
 beside another user. `sam_yield()` (so every `stop_inference_users()` caller), `open()`,
 the destructor and `shutdown()` drain the slot first, blocking. So when any of them returns,
 no `MaskSam`, live or parked, is busy or holds a session. `busy` and `release` go through
-injectable `SamOps`, and unit tests pin all of this, release order included.
+injectable `SamOps`, and unit tests pin all of this. **The order of the idle release
+against the worker join is not load-bearing:** the save worker never touches SAM or the
+device, and `release_device` joins the SAM thread before `unload`. The test pins that
+`close()` itself releases, not where in `close()`.
 
 `sam_close_ms` is the UI-thread time `close()` spent on SAM, and 0 when it had none:
 
