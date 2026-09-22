@@ -106,6 +106,7 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
     _index = std::move(idx);
     _idx = -1;
     _doc.reset();
+    _doc_gen++;
     _rgb.reset();
     _win_dirty = true;
     _close_requested = false;
@@ -301,6 +302,7 @@ void MaskSession::go_to(int i) {
     if (i < 0 || i >= frame_count() || i == _idx) return;
     if (_doc && _doc->dirty()) save();
     _doc.reset();
+    _doc_gen++;
     _rgb.reset();
     load_frame(i);
 }
@@ -350,6 +352,7 @@ void MaskSession::revert_open_frame() {
     const std::string key = _doc->key();
     const int i = _idx;
     _doc.reset();
+    _doc_gen++;
     _rgb.reset();
     enqueue([this, key] {
         std::string err;
@@ -364,6 +367,7 @@ void MaskSession::revert_open_frame() {
 void MaskSession::revert_every_frame() {
     const int i = _idx;
     _doc.reset();
+    _doc_gen++;
     _rgb.reset();
     enqueue([this] {
         std::string err;
@@ -564,21 +568,56 @@ std::string MaskSession::sam_status() const { return _sam ? _sam->status() : std
 
 std::string MaskSession::sam_error() const { return _sam ? _sam->error() : std::string(); }
 
+std::string MaskSession::sam_blocker(bool mask_preview, bool depth_preview, bool run_active) {
+    if (run_active) return msg::sam_blocked_run.get();
+    if (mask_preview || depth_preview) return msg::sam_blocked_preview.get();
+    return {};
+}
+
+// Joins on the UI thread, up to one stage of a running job: the price of the
+// other user never sharing the device's unsynchronised stream with this one.
+double MaskSession::sam_yield() {
+    if (!_sam) return 0.0;
+    const auto t0 = std::chrono::steady_clock::now();
+    _sam->cancel();
+    _sam->release();
+    _sam_release_pending = false;
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+        .count();
+}
+
+std::string MaskSession::sam_frame_stamp() const {
+    return _doc ? std::to_string(_doc_gen) + "|" + _doc->key() : std::string();
+}
+
+const std::string& MaskSession::sam_model_path() const {
+    return _sam ? _sam->model_path() : _sam_model;
+}
+
+
 double MaskSession::sam_vram_mib() const { return _sam ? _sam->vram_mib() : -1.0; }
 
 // Slice 1: one click is one prompt, and a lone "not this" has nothing to refine.
 bool MaskSession::sam_prompt_point(float frame_x, float frame_y, bool keep, bool positive) {
     if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending || !positive)
         return false;
+    if (!_sam_blocker.empty()) {
+        sam().refuse(_sam_blocker);
+        return false;
+    }
     std::vector<SamPoint> points{SamPoint{frame_x, frame_y, true}};
-    if (!sam().start_points(_doc->key(), _rgb, _fw, _fh, std::move(points), keep)) return false;
+    if (!sam().start_points(sam_frame_stamp(), _rgb, _fw, _fh, std::move(points), keep)) return false;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;
 }
 
 bool MaskSession::sam_prompt_text(const std::string& phrases) {
     if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending) return false;
-    if (!sam().start_text(_doc->key(), _rgb, _fw, _fh, phrases)) return false;
+    if (!_sam_blocker.empty()) {
+        sam().refuse(_sam_blocker);
+        return false;
+    }
+    if (!sam().start_text(sam_frame_stamp(), _rgb, _fw, _fh, phrases)) return false;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;
 }
@@ -600,9 +639,9 @@ Rect MaskSession::sam_pump() {
     }
     if (!_doc) return {};
     if (!_sam->take_result(key, regions, keep, score, job_ms)) return {};
-    // A result that outlived its frame is counted and dropped, never painted
-    // onto whatever is open now.
-    if (key != _doc->key()) {
+    // A result that outlived its document -- a frame change, a revert, another
+    // dataset -- is counted and dropped, never painted onto what is open now.
+    if (key != sam_frame_stamp()) {
         _sam_dropped++;
         return {};
     }

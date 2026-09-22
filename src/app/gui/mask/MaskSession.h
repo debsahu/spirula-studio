@@ -99,11 +99,11 @@ public:
     // GuiApp's checkpoint, every frame; "" = not cached. A NEW path drops the
     // warm session (released once any job stops) and keeps the clicks.
     void set_sam_model(const std::string& path, bool text_prompts);
-    const std::string& sam_model_path() const { return _sam_model; }
+    const std::string& sam_model_path() const;
     int sam_model_changes() const { return _sam_model_changes; }
     // Draws GuiApp's model picker into the SAM strip; GuiApp owns the state.
     void set_model_picker(std::function<void()> draw) { _model_picker = std::move(draw); }
-    bool sam_has_model() const { return !_sam_model.empty(); }
+    bool sam_has_model() const { return !sam_model_path().empty(); }
     bool sam_text_supported() const;
     bool sam_busy() const;
     void sam_cancel();
@@ -119,6 +119,18 @@ public:
     std::string sam_status() const;
     std::string sam_error() const;
     double sam_vram_mib() const;
+    // Why another inference user bars SAM here, "" when none does: every
+    // sam::Session shares the pool's slots and one unsynchronised stream.
+    static std::string sam_blocker(bool mask_preview, bool depth_preview, bool run_active);
+    // GuiApp's sam_blocker() answer, every frame before draw(); a blocked
+    // prompt is refused with it in sam_error().
+    void set_sam_blocker(const std::string& reason) { _sam_blocker = reason; }
+    // Cancels, joins and unloads, before another inference user starts. Keeps
+    // the clicks; the next prompt reloads. Returns the milliseconds joined.
+    double sam_yield();
+    // What a job is stamped with and a result must still match: the frame's
+    // key AND the document generation, since a revert reopens the same key.
+    std::string sam_frame_stamp() const;
     // `last_ms` is prompt -> painted, stamped on this thread; `last_job_ms` is
     // the job's own time. Both cover a result that painted nothing.
     int sam_results() const { return _sam_results; }
@@ -126,6 +138,8 @@ public:
     double sam_last_ms() const { return _sam_last_ms; }
     double sam_last_job_ms() const { return _sam_last_job_ms; }
     float sam_last_score() const { return _sam_last_score; }
+    // The stencil's pixel count, NOT the pixels that changed: a paint over
+    // pixels already dropped reports its full area and changes nothing.
     int64_t sam_last_area() const { return _sam_last_area; }
     int sam_last_detections() const { return _sam_last_detections; }
 
@@ -218,7 +232,9 @@ private:
 
     PathTool _path;
     std::unique_ptr<Livewire> _livewire;   // the open frame's edge map, built on first use
-    std::unique_ptr<MaskSam> _sam;   // created on first use, dropped in close()
+    // Created on first use; its session is released by sam_yield() and a model
+    // change, and the object (clicks included) outlives close().
+    std::unique_ptr<MaskSam> _sam;
     std::string _sam_model;
     bool _sam_text_hint = false;
     bool _sam_release_pending = false;   // a model change waiting for the job to stop
@@ -229,6 +245,8 @@ private:
     double _sam_last_ms = 0.0, _sam_last_job_ms = 0.0;
     float _sam_last_score = 0.0f;
     int64_t _sam_last_area = 0;
+    std::string _sam_blocker;
+    uint64_t _doc_gen = 0;           // bumped by open, go_to and the reverts; never reset
     bool _path_mode = false;
     double _livewire_ms = 0.0;
 

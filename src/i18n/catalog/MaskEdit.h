@@ -801,6 +801,51 @@ SS_MSG(sam_working,
     RU("Сегментация…"),
     TR("Bölütleniyor…"));
 
+SS_MSG(sam_unavailable_build,
+    EN("This build has no segmentation module, so SAM assist is unavailable."),
+    JA("このビルドには分割モジュールがないため、SAM アシストは使えません。"),
+    ZH_HANS("此版本不含分割模块，无法使用 SAM 辅助。"),
+    ZH_HANT("此版本不含分割模組，無法使用 SAM 輔助。"),
+    KO("이 빌드에는 분할 모듈이 없어 SAM 보조를 사용할 수 없습니다."),
+    DE("Dieser Build enthält kein Segmentierungsmodul; die SAM-Hilfe ist nicht verfügbar."),
+    FR("Cette version n'inclut pas le module de segmentation ; l'assistance SAM est indisponible."),
+    ES("Esta compilación no incluye el módulo de segmentación; la ayuda de SAM no está disponible."),
+    PT("Esta versão não inclui o módulo de segmentação; a assistência SAM não está disponível."),
+    IT("Questa build non include il modulo di segmentazione; l'assistenza SAM non è disponibile."),
+    NL("Deze build bevat geen segmentatiemodule; SAM-hulp is niet beschikbaar."),
+    RU("В этой сборке нет модуля сегментации, поэтому помощь SAM недоступна."),
+    TR("Bu sürümde bölütleme modülü yok; SAM yardımı kullanılamıyor."));
+
+SS_MSG(sam_blocked_preview,
+    EN("SAM assist is paused while the mask or depth preview is open. Close it to prompt here."),
+    JA("マスクまたは深度のプレビューが開いている間、SAM アシストは停止します。ここで使うにはプレビューを閉じてください。"),
+    ZH_HANS("遮罩或深度预览打开时，SAM 辅助暂停。关闭预览后即可在此使用。"),
+    ZH_HANT("遮罩或深度預覽開啟時，SAM 輔助暫停。關閉預覽後即可在此使用。"),
+    KO("마스크 또는 깊이 미리보기가 열려 있는 동안 SAM 보조가 일시 중지됩니다. 여기서 사용하려면 미리보기를 닫으세요."),
+    DE("Die SAM-Hilfe pausiert, solange die Masken- oder Tiefenvorschau geöffnet ist. Schließen Sie sie, um hier zu arbeiten."),
+    FR("L'assistance SAM est en pause tant que l'aperçu des masques ou de la profondeur est ouvert. Fermez-le pour l'utiliser ici."),
+    ES("La ayuda de SAM se pausa mientras la vista previa de máscaras o de profundidad está abierta. Ciérrela para usarla aquí."),
+    PT("A assistência SAM fica pausada enquanto a prévia de máscaras ou de profundidade está aberta. Feche-a para usá-la aqui."),
+    IT("L'assistenza SAM è in pausa mentre l'anteprima delle maschere o della profondità è aperta. Chiudila per usarla qui."),
+    NL("SAM-hulp is gepauzeerd zolang het masker- of dieptevoorbeeld open is. Sluit het om hier te werken."),
+    RU("Помощь SAM приостановлена, пока открыт предпросмотр масок или глубины. Закройте его, чтобы работать здесь."),
+    TR("Maske veya derinlik önizlemesi açıkken SAM yardımı duraklatılır. Burada kullanmak için önizlemeyi kapatın."));
+
+SS_MSG(sam_blocked_run,
+    EN("SAM assist is paused while a run is using the GPU."),
+    JA("実行中の処理が GPU を使っている間、SAM アシストは停止します。"),
+    ZH_HANS("有任务正在使用 GPU，SAM 辅助暂停。"),
+    ZH_HANT("有工作正在使用 GPU，SAM 輔助暫停。"),
+    KO("작업이 GPU를 사용하는 동안 SAM 보조가 일시 중지됩니다."),
+    DE("Die SAM-Hilfe pausiert, solange ein Lauf die GPU nutzt."),
+    FR("L'assistance SAM est en pause tant qu'une tâche utilise le GPU."),
+    ES("La ayuda de SAM se pausa mientras una tarea usa la GPU."),
+    PT("A assistência SAM fica pausada enquanto uma tarefa usa a GPU."),
+    IT("L'assistenza SAM è in pausa mentre un'elaborazione usa la GPU."),
+    NL("SAM-hulp is gepauzeerd zolang een taak de GPU gebruikt."),
+    RU("Помощь SAM приостановлена, пока задача использует GPU."),
+    TR("Bir iş GPU'yu kullanırken SAM yardımı duraklatılır."));
+
 }  // namespace maskedit
 }  // namespace msg
 }  // namespace i18n

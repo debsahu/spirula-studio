@@ -3,11 +3,12 @@
 #include "app/gui/mask/MaskSam.h"
 
 #include "app/gui/MaskSettings.h"
+#include "i18n/catalog/MaskEdit.h"
 
 #include <mutex>
 
 #ifdef SS_BUILD_SAM
-#include "i18n/catalog/MaskEdit.h"
+#include "i18n/catalog/Dataset.h"
 #include "nn/vk/Memory.h"
 #include "sam/Masking.h"   // split_phrases, downscale_to_fit -- never sam::Masker
 #include "sam/Sam.h"
@@ -16,11 +17,14 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <thread>
 #endif
 
 namespace gui {
 namespace mask {
+
+namespace msg = spirula::i18n::msg::maskedit;
 
 struct MaskSam::State {
     std::string model;
@@ -54,6 +58,7 @@ void MaskSam::set_model(const std::string& path, bool text_prompts) {
     _s->text_hint = text_prompts;
 }
 
+const std::string& MaskSam::model_path() const { return _s->model; }
 bool MaskSam::has_model() const { return !_s->model.empty(); }
 MaskSettings& MaskSam::prompt() { return _s->prompt; }
 const MaskSettings& MaskSam::prompt() const { return _s->prompt; }
@@ -91,9 +96,13 @@ std::string MaskSam::error() const {
     return _s->error;
 }
 
-#ifdef SS_BUILD_SAM
+void MaskSam::refuse(const std::string& reason) {
+    std::lock_guard<std::mutex> lk(_s->mu);
+    _s->status.clear();
+    _s->error = reason;
+}
 
-namespace msg = spirula::i18n::msg::maskedit;
+#ifdef SS_BUILD_SAM
 
 struct MaskSam::Job {
     std::string model, frame_key, phrases;
@@ -144,6 +153,7 @@ void MaskSam::release() {
     _s->ready = false;
     _s->result.clear();
     _s->status.clear();
+    _s->error.clear();
 }
 
 double MaskSam::vram_mib() const {
@@ -216,14 +226,19 @@ bool MaskSam::launch(Job j) {
     _s->cancel = false;
     _s->running = true;
     State* s = _s.get();
-    _s->worker = std::thread([s, j = std::move(j)]() mutable { run(*s, std::move(j)); });
+    try {
+        _s->worker = std::thread([s, j = std::move(j)]() mutable { run(*s, std::move(j)); });
+    } catch (const std::exception& e) {
+        _s->running = false;
+        refuse(e.what());
+        return false;
+    }
     return true;
 }
 
-// The job thread. `cancel` is read between every stage; encodeImage is one
-// opaque call, so a cancel issued in it waits it out: up to 1.9 s at 15520x7760.
+// The job thread. A throw, the 361 MB frame copy's bad_alloc among them, ends
+// the job with the reason in error rather than in std::terminate.
 void MaskSam::run(State& s, Job j) {
-    const auto t0 = std::chrono::steady_clock::now();
     auto finish = [&s](const std::string& error) {
         {
             std::lock_guard<std::mutex> lk(s.mu);
@@ -232,6 +247,20 @@ void MaskSam::run(State& s, Job j) {
         }
         s.running = false;
     };
+    try {
+        run_stages(s, std::move(j), finish);
+    } catch (const std::exception& e) {
+        finish(e.what());
+    } catch (...) {
+        finish("unknown error");
+    }
+}
+
+// `cancel` is read between stages, never inside one. Measured at 15520x7760
+// (M5 Pro, q4_0): a load is ~2.5 s, an encode 1.9 s with its upload, and three
+// unexplained runs took 3.3 s; a cancel waits out whichever stage it lands in.
+void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::string&)>& finish) {
+    const auto t0 = std::chrono::steady_clock::now();
     if (!s.session || s.loaded_model != j.model) {
         if (s.session) s.session->unload();
         s.session = std::make_unique<sam::Session>();
@@ -253,8 +282,12 @@ void MaskSam::run(State& s, Job j) {
         s.vram_mib = mib;
         s.status = msg::sam_working.get();
     }
-    if (s.cancel || (j.text && !s.session->supportsTextPrompts())) {
+    if (s.cancel) {
         finish(std::string());
+        return;
+    }
+    if (j.text && !s.session->supportsTextPrompts()) {
+        finish(spirula::i18n::msg::dataset::mask_no_text_prompts.get());
         return;
     }
     // Masks come back at the ENCODED size, so a capped text encode and a full
@@ -347,10 +380,12 @@ double MaskSam::vram_mib() const { return -1.0; }
 
 bool MaskSam::start_points(const std::string&, std::shared_ptr<const std::vector<uint8_t>>, int,
                            int, std::vector<SamPoint>, bool) {
+    refuse(msg::sam_unavailable_build.get());
     return false;
 }
 bool MaskSam::start_text(const std::string&, std::shared_ptr<const std::vector<uint8_t>>, int,
                          int, const std::string&) {
+    refuse(msg::sam_unavailable_build.get());
     return false;
 }
 bool MaskSam::take_result(std::string&, std::vector<AddRegion>&, bool&, float&, double&) {

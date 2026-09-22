@@ -1255,9 +1255,13 @@ void GuiApp::close_splat() {
     _compare.close();
     _mesh_preview_open = false;
 }
+// Every inference user starts through here, so the mask editor's SAM session
+// gives way here too: one sam::Session in the process, on one unsynchronised
+// stream, and a dataset run ends in nn::shutdown().
 void GuiApp::close_native_previews() {
     _segment.close();
     _geometry_panel.close();
+    _mask_editor.sam_yield();
 }
 
 void GuiApp::launch_training(const TrainConfig& cfg, const std::string& preset) {
@@ -2711,7 +2715,13 @@ void GuiApp::frame() {
         case Screen::Mesh:   draw_mesh();   break;
     }
 
-    if (_mask_editor.is_open()) _mask_editor.draw();
+    if (_mask_editor.is_open()) {
+        // Read now, not at the top of the frame: a preview opened above has
+        // already taken the device.
+        _mask_editor.set_sam_blocker(mask::MaskSession::sam_blocker(
+            _segment.is_open(), _geometry_panel.is_open(), native_work_busy()));
+        _mask_editor.draw();
+    }
 
     if (_dialog.draw()) handle_dialog_result(_dialog.results());
     // The save dialog steps aside while the folder picker is up; bring it

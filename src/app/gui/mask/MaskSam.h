@@ -7,6 +7,7 @@
 
 #include "app/gui/mask/MaskAdd.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ public:
     // `text_prompts` is the catalog's word for the checkpoint, trusted until a
     // load answers for itself.
     void set_model(const std::string& path, bool text_prompts);
+    const std::string& model_path() const;
     bool has_model() const;
     bool text_supported() const;
     bool busy() const;
@@ -71,12 +73,16 @@ public:
 
     std::string status() const;
     std::string error() const;
+    // A prompt refused before it reached the job: `reason` becomes error().
+    void refuse(const std::string& reason);
 
 private:
     struct State;
     struct Job;
     bool launch(Job job);
     static void run(State& s, Job job);
+    static void run_stages(State& s, Job job,
+                           const std::function<void(const std::string&)>& finish);
     std::unique_ptr<State> _s;
 };
 

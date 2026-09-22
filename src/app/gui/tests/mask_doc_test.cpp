@@ -2881,7 +2881,8 @@ void test_mask_sam_stub_refuses() {
     check(key == "untouched" && out.size() == 1 && keep && score == -1.0f && ms == -1.0,
           "sam stub: take_result left every output alone");
     check(sam.status().empty(), "sam stub: status is empty with no job run");
-    check(sam.error().empty(), "sam stub: error is empty with no job run");
+    check(sam.error() == spirula::i18n::msg::maskedit::sam_unavailable_build.get(),
+          "sam stub: a refused start puts its reason in error, not in status");
     sam.cancel();
     sam.release();
     check(!sam.busy() && sam.vram_mib() < 0.0 && sam.has_model(),
@@ -3003,6 +3004,91 @@ void test_session_model_sync() {
           "model sync: an uncached pick leaves no model");
 }
 
+// A job's stamp names the document it started on, not only the frame's key: a
+// revert reopens the same key, and so can another dataset, and a result from
+// before either must not land on what is open after it.
+void test_session_sam_stamp() {
+    Fixture f = make_dataset("sam_stamp", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam stamp: open: " + err);
+    settle(s);
+    const std::string key0 = s.doc() ? s.doc()->key() : std::string();
+    const std::string first = s.sam_frame_stamp();
+    s.revert_open_frame();
+    settle(s);
+    check(s.doc() && !key0.empty() && s.doc()->key() == key0,
+          "sam stamp: a revert reopens the same key");
+    check(s.sam_frame_stamp() != first, "sam stamp: a revert moves the stamp");
+    const std::string reverted = s.sam_frame_stamp();
+    s.go_to(1);
+    settle(s);
+    s.go_to(0);
+    settle(s);
+    check(s.sam_frame_stamp() != reverted && s.sam_frame_stamp() != first,
+          "sam stamp: leaving a frame and coming back moves the stamp");
+    const std::string back = s.sam_frame_stamp();
+    s.revert_every_frame();
+    settle(s);
+    check(s.sam_frame_stamp() != back, "sam stamp: revert all moves the stamp");
+    const std::string last = s.sam_frame_stamp();
+    s.close();
+    Fixture g = make_dataset("sam_stamp_other", 64, 48, {"a", "b"});
+    check(s.open(g.root.string(), g.images.string(), g.masks.string(), false, err),
+          "sam stamp: reopen: " + err);
+    settle(s);
+    check(s.doc() && s.doc()->key() == key0 && s.sam_frame_stamp() != first &&
+              s.sam_frame_stamp() != last,
+          "sam stamp: another dataset with the same keys never repeats a stamp");
+}
+
+// Another inference user holds the device: the editor names it and refuses,
+// and a yield hands the device back without costing the operator's clicks.
+void test_session_sam_blocker() {
+    namespace em = spirula::i18n::msg::maskedit;
+    const std::string preview = em::sam_blocked_preview.get();
+    const std::string run = em::sam_blocked_run.get();
+    check(mk::MaskSession::sam_blocker(false, false, false).empty(),
+          "sam blocker: nothing open and nothing running leaves SAM free");
+    check(mk::MaskSession::sam_blocker(true, false, false) == preview,
+          "sam blocker: the mask preview blocks");
+    check(mk::MaskSession::sam_blocker(false, true, false) == preview,
+          "sam blocker: the depth preview blocks");
+    check(mk::MaskSession::sam_blocker(false, false, true) == run,
+          "sam blocker: a run blocks");
+    check(preview != run && !preview.empty() && !run.empty(),
+          "sam blocker: the two reasons are distinct sentences");
+
+    Fixture f = make_dataset("sam_blocker", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam blocker: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    s.set_sam_blocker(run);
+    check(!s.sam_prompt_point(1.0f, 1.0f, false) && s.sam_error() == run,
+          "sam blocker: a blocked click is refused, the reason in error");
+    check(!s.sam_prompt_text("person") && s.sam_error() == run && s.sam_status().empty(),
+          "sam blocker: a blocked phrase is refused, the reason in error");
+    s.set_sam_blocker("");
+    const std::string stub = em::sam_unavailable_build.get();
+    check(!s.sam_prompt_point(1.0f, 1.0f, false) && s.sam_error() == stub,
+          "sam blocker: cleared, the prompt reaches the job and its own reason");
+
+    s.set_sam_blocker(run);
+    s.sam_prompt_point(1.0f, 1.0f, false);
+    s.set_sam_blocker("");
+    s.sam_prompt().clicks.push_back(gui::MaskClick{});
+    s.set_sam_model("/m/b.ggml", true);
+    s.sam_yield();
+    check(s.sam_click_count() == 1, "sam yield: the editor's clicks survive a yield");
+    check(!s.sam_prompt_point(1.0f, 1.0f, false) && s.sam_error() == stub &&
+              s.sam_model_path() == "/m/b.ggml",
+          "sam yield: a yield settles a pending model change");
+}
+
 }  // namespace
 
 int main() {
@@ -3065,6 +3151,8 @@ int main() {
     test_mask_sam_click_filters();
     test_session_frame_pixels_outlive_navigation();
     test_session_model_sync();
+    test_session_sam_stamp();
+    test_session_sam_blocker();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

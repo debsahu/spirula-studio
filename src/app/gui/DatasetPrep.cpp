@@ -1170,14 +1170,9 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
                       const RefreshFn& refresh_masks) {
     PrepJob job = job_in;
 #ifdef SS_BUILD_SAM
-    // Hand the GPU back on the way out, by whichever of the dozen exits is
-    // taken. A SAM 3 checkpoint is about 2 GB of VRAM and the inference layer's
-    // pool is process-wide and grow-only, so without this it stays resident
-    // for the life of the GUI -- through the reconstruction and the training
-    // run that follow, which are exactly what wants the memory back.
-    //
-    // Safe because the mask preview owns the only other Session, and the
-    // dataset screen closes it before starting a job.
+    // Hand the GPU back on any exit: a ~2 GB SAM 3 pool would outlive the run.
+    // Safe: close_native_previews() freed every other Session before launch --
+    // both previews' and the mask editor's -- and the editor refuses during a run.
     struct ReleaseDevice {
         ~ReleaseDevice() { nn::shutdown(); }
     } release_device;
