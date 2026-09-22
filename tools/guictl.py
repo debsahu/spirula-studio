@@ -153,7 +153,11 @@ def cmd_move(args):
 def cmd_drag(args):
     print(json.dumps(call("/ui/drag", {"from": args.start, "to": args.end,
                                        "button": args.button,
-                                       "steps": args.steps})))
+                                       "steps": args.steps,
+                                       "shift": "1" if args.shift else "0",
+                                       "ctrl": "1" if args.ctrl else "0",
+                                       "space": "1" if args.space else "0",
+                                       "esc_mid": "1" if args.esc_mid else "0"})))
 
 
 def cmd_scroll(args):
@@ -245,6 +249,11 @@ def build_parser():
     p.add_argument("end", help="x,y")
     p.add_argument("--button", type=int, default=0)
     p.add_argument("--steps", type=int, default=8)
+    p.add_argument("--shift", action="store_true", help="hold Shift for the gesture")
+    p.add_argument("--ctrl", action="store_true", help="hold Ctrl for the gesture")
+    p.add_argument("--space", action="store_true", help="hold Space for the gesture")
+    p.add_argument("--esc-mid", dest="esc_mid", action="store_true",
+                   help="press Escape halfway through, to test cancel")
     p.set_defaults(func=cmd_drag)
 
     p = sub.add_parser("scroll")

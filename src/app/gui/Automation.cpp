@@ -152,11 +152,19 @@ const KeyName kKeys[] = {
     {"comma", ImGuiKey_Comma}, {"period", ImGuiKey_Period},
     {"slash", ImGuiKey_Slash}, {"kpdecimal", ImGuiKey_KeypadDecimal},
     {"kpenter", ImGuiKey_KeypadEnter},
+    {"bracketleft", ImGuiKey_LeftBracket}, {"bracketright", ImGuiKey_RightBracket},
 };
 
 std::string lower(std::string s) {
     for (char& c : s) c = (char)std::tolower((unsigned char)c);
     return s;
+}
+
+// ImGui swaps Ctrl<->Super under ConfigMacOSXBehaviors, so the physical
+// key driving logical io.KeyCtrl here is LeftSuper, not LeftCtrl -- the
+// latter silently becomes a held Super, i.e. macOS's right-click modifier.
+ImGuiKey logical_ctrl_key() {
+    return ImGui::GetIO().ConfigMacOSXBehaviors ? ImGuiKey_LeftSuper : ImGuiKey_LeftCtrl;
 }
 
 // "Ctrl+Shift+A" -> the key events to hold, innermost last. Empty on a name
@@ -172,6 +180,7 @@ bool parse_chord(const std::string& spec, std::vector<int>& out) {
         ImGuiKey k = ImGuiKey_None;
         for (const KeyName& kn : kKeys)
             if (part == kn.name) { k = kn.key; break; }
+        if (k == ImGuiKey_LeftCtrl) k = logical_ctrl_key();
         if (k == ImGuiKey_None && part.size() == 1) {
             char c = part[0];
             if (c >= 'a' && c <= 'z') k = (ImGuiKey)(ImGuiKey_A + (c - 'a'));
@@ -439,6 +448,9 @@ HttpResponse handle_move(const HttpRequest& r) {
     return finish(r, enqueue({m, Step{}}));
 }
 
+// shift=1 / ctrl=1 hold that modifier down before the press and up after
+// the release, so it reads on the completing frame like a real held key
+// (a bare /ui/key pairs its own down+up and can't stay held across this).
 HttpResponse handle_drag(const HttpRequest& r) {
     float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
     if (std::sscanf(r.get("from").c_str(), "%f,%f", &x0, &y0) != 2 ||
@@ -446,7 +458,17 @@ HttpResponse handle_drag(const HttpRequest& r) {
         return err_json(400, "drag wants from=x,y and to=x,y");
     const int n = std::max(1, std::min(256, r.get_int("steps", 8)));
     const int button = r.get_int("button", 0);
+    const bool hold_shift = r.get_bool("shift", false);
+    const bool hold_ctrl = r.get_bool("ctrl", false);
+    const bool hold_space = r.get_bool("space", false);
+    const bool esc_mid = r.get_bool("esc_mid", false);
+    Step mod;
+    mod.kind = Step::Kind::Key;
+    if (hold_shift) mod.keys.push_back((int)ImGuiKey_LeftShift);
+    if (hold_ctrl) mod.keys.push_back((int)logical_ctrl_key());
+    if (hold_space) mod.keys.push_back((int)ImGuiKey_Space);
     std::vector<Step> steps;
+    if (!mod.keys.empty()) { mod.down = true; steps.push_back(mod); }
     Step m;
     m.kind = Step::Kind::MousePos;
     m.x = x0; m.y = y0;
@@ -463,9 +485,18 @@ HttpResponse handle_drag(const HttpRequest& r) {
         p.x = x0 + (x1 - x0) * (float)i / (float)n;
         p.y = y0 + (y1 - y0) * (float)i / (float)n;
         steps.push_back(p);
+        if (esc_mid && i == n / 2) {
+            Step esc_down; esc_down.kind = Step::Kind::Key;
+            esc_down.keys = {(int)ImGuiKey_Escape}; esc_down.down = true;
+            Step esc_up = esc_down; esc_up.down = false;
+            steps.push_back(esc_down);
+            steps.push_back(esc_up);
+        }
     }
     b.down = false;
     steps.push_back(b);
+    steps.push_back(Step{});
+    if (!mod.keys.empty()) { mod.down = false; steps.push_back(mod); }
     steps.push_back(Step{});
     return finish(r, enqueue(steps));
 }
