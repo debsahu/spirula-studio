@@ -362,7 +362,7 @@ private:
     void draw_dataset_rerun(const WorkspaceState& prior);
     void draw_mask_editor_entry(const WorkspaceState& prior);
     void open_mask_editor(const std::string& workspace, const std::string& image_dir,
-                          const std::string& mask_dir);
+                          const std::string& mask_dir, bool mask_flipped);
     // Throwing the whole project away rather than one step of it: the run's
     // own files, and the options, each on its own button.
     void draw_dataset_reset();

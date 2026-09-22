@@ -44,7 +44,8 @@ MaskSession::MaskSession() = default;
 MaskSession::~MaskSession() { close(); }
 
 bool MaskSession::open(const std::string& workspace, const std::string& image_dir,
-                       const std::string& mask_dir, std::string& error) {
+                       const std::string& mask_dir, bool mask_flipped,
+                       std::string& error) {
     close();
     std::error_code ec;
     _workspace = normalize_dir(fs::absolute(workspace, ec).string());
@@ -64,6 +65,27 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
         error = spirula::i18n::format(msg::err_no_frames, {_image_root});
         return false;
     }
+    // On this thread, before the worker: a corrupt index must refuse the
+    // session, and the recorded root and convention are what every .base.png
+    // means -- adopting different ones reinterprets all of them.
+    LayerIndex idx;
+    if (!idx.load(_layer_root, error)) {
+        error = spirula::i18n::format(msg::err_read, {error});
+        return false;
+    }
+    if (!idx.frames.empty()) {
+        if (!idx.mask_root.empty() && idx.mask_root != _mask_root) {
+            error = spirula::i18n::format(msg::err_other_mask_root, {idx.mask_root});
+            return false;
+        }
+        if (idx.mask_flipped != mask_flipped) {
+            error = msg::err_other_mask_polarity.get();
+            return false;
+        }
+    }
+    idx.mask_root = _mask_root;
+    idx.mask_flipped = mask_flipped;
+    _index = std::move(idx);
     _idx = -1;
     _doc.reset();
     _rgb.clear();
@@ -77,20 +99,11 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
         _saved_ready = false;
         _status = msg::working.get();
         _error.clear();
-        _corrected = 0;
+        _corrected = (int)_index.frames.size();
     }
     _quit = false;
     _worker = std::thread([this] { worker_main(); });
     _open = true;
-    enqueue([this] {
-        std::string err;
-        if (!_index.load(_layer_root, err)) {
-            post_status(spirula::i18n::format(msg::err_read, {err}), true);
-            _index = LayerIndex{};
-        }
-        _index.mask_root = _mask_root;
-        set_corrected((int)_index.frames.size());
-    });
     load_frame(0);
     return true;
 }
@@ -330,10 +343,12 @@ void MaskSession::revert_every_frame() {
     _rgb.clear();
     enqueue([this] {
         std::string err;
+        const bool flipped = _index.mask_flipped;
         if (mask::revert_all(_layer_root, err) < 0)
             post_status(spirula::i18n::format(msg::err_write, {err}), true);
         if (!_index.load(_layer_root, err)) _index = LayerIndex{};
         _index.mask_root = _mask_root;
+        _index.mask_flipped = flipped;
         set_corrected((int)_index.frames.size());
     });
     _idx = -1;

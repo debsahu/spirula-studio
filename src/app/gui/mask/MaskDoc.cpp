@@ -133,6 +133,8 @@ bool MaskDoc::load(const std::string& layer_root, const std::string& mask_root,
     } else if (!app::load_stencil(src, _w, _h, _base)) {
         error = src;
         return false;
+    } else if (idx.mask_flipped) {
+        flip_polarity(_base.data(), _base.size());
     }
     FrameLayers layers;
     read_layers(layer_root, key, _w, _h, layers, warning);

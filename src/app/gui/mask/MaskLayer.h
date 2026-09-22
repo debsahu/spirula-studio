@@ -3,8 +3,10 @@
 // The correction layer on disk: per edited frame a byte copy of the mask the
 // run wrote (.base.png), a forced-drop and a forced-keep stencil, composed as
 // keep ? 255 : drop ? 0 : base into masks/. An index of FNV-1a fingerprints
-// tells a regenerated mask from the composite written last time. Polarity is
-// the app's, 255 = keep. No ImGui, no GL. Design: docs/notes/mask-editor.md.
+// tells a regenerated mask from the composite written last time. In memory
+// polarity is the app's, 255 = keep; on disk it is the mask folder's, which
+// LayerIndex::mask_flipped records. No ImGui, no GL.
+// Design: docs/notes/mask-editor.md.
 
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +40,10 @@ enum class Layer { Base, Drop, Keep };
 std::string layer_file(const std::string& layer_root, const std::string& key,
                        Layer l);
 
+// In place, over the 0/255 load_stencil emits: the mask folder's convention
+// to the app's, and back. Its own inverse.
+void flip_polarity(uint8_t* px, size_t n);
+
 // final = keep ? 255 : drop ? 0 : base. Either layer may be null.
 void composite(const uint8_t* base, const uint8_t* drop, const uint8_t* keep,
                size_t n, uint8_t* out);
@@ -61,6 +67,9 @@ struct IndexEntry {
 
 struct LayerIndex {
     std::string mask_root;
+    // Does mask_root hold 255 = REMOVE (TrainConfig::flip_mask)? Every read of
+    // a file under mask_root, and every write into it, goes through it.
+    bool mask_flipped = false;
     std::map<std::string, IndexEntry> frames;
     // A missing file is an empty index and succeeds; a corrupt one fails.
     bool load(const std::string& layer_root, std::string& error);

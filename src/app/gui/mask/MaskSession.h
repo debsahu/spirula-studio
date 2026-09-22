@@ -44,10 +44,11 @@ public:
     MaskSession(const MaskSession&) = delete;
     MaskSession& operator=(const MaskSession&) = delete;
 
-    // `workspace` is where mask_edits/ goes. False with `error` (a sentence)
-    // when it sits inside `image_dir` or no frames are found.
+    // `workspace` is where mask_edits/ goes; `mask_flipped` is the convention
+    // `mask_dir` is in (TrainConfig::flip_mask). False with `error` (a
+    // sentence) on any of the five refusals in open().
     bool open(const std::string& workspace, const std::string& image_dir,
-              const std::string& mask_dir, std::string& error);
+              const std::string& mask_dir, bool mask_flipped, std::string& error);
     bool is_open() const { return _open; }
     // Saves a dirty frame, then joins the worker.
     void close();

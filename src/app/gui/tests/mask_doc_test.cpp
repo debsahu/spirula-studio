@@ -1214,19 +1214,19 @@ void test_session() {
     mk::MaskSession s;
     std::string err;
     // Refusals.
-    check(!s.open(f.images.string(), f.images.string(), f.masks.string(), err) &&
+    check(!s.open(f.images.string(), f.images.string(), f.masks.string(), false, err) &&
               err == spirula::i18n::msg::maskedit::err_workspace_inside_images.get(),
           "workspace inside images is refused with the message");
-    check(!s.open((f.images / "sub").string(), f.images.string(), f.masks.string(), err) &&
+    check(!s.open((f.images / "sub").string(), f.images.string(), f.masks.string(), false, err) &&
               err == spirula::i18n::msg::maskedit::err_workspace_inside_images.get(),
           "a workspace under the image root is refused");
     const fs::path empty = scratch("session_empty");
-    check(!s.open(f.root.string(), empty.string(), f.masks.string(), err) &&
+    check(!s.open(f.root.string(), empty.string(), f.masks.string(), false, err) &&
               err.find(mk::normalize_dir(empty.string())) != std::string::npos,
           "no frames is refused naming the folder");
     check(!s.is_open(), "not open after refusals");
 
-    check(s.open(f.root.string(), f.images.string(), f.masks.string(), err), "open: " + err);
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
     check(s.is_open() && s.frame_count() == 3, "three frames");
     check(s.frames()[0].key == "cam0/a" && s.frames()[0].camera == "cam0" &&
               s.frames()[2].key == "cam1/c" && s.frames()[2].camera == "cam1",
@@ -1343,7 +1343,7 @@ void test_session() {
     check(fs::exists(f.layer / "cam0" / "a.drop.png"), "layer file written by close");
 
     // revert_every_frame.
-    check(s.open(f.root.string(), f.images.string(), f.masks.string(), err), "reopen");
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "reopen");
     settle(s);
     s.revert_every_frame();
     settle(s);
@@ -1359,7 +1359,7 @@ void test_session_size_mismatch() {
     write_png_gray(f.layer / "a.keep.png", 16, 12, std::vector<uint8_t>(16 * 12, 255));
     mk::MaskSession s;
     std::string err;
-    check(s.open(f.root.string(), f.images.string(), f.masks.string(), err), "open: " + err);
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
     settle(s);
     const std::string e = s.error();
     check(e.find((f.layer / "a.drop.png").string()) != std::string::npos &&
@@ -1370,11 +1370,134 @@ void test_session_size_mismatch() {
     s.close();
 }
 
+// The mask folder holds 255 = REMOVE: what the editor shows, scores and
+// writes back must be the other way round from the file.
+void test_session_flipped_polarity() {
+    Fixture f = make_dataset("session_flipped", 64, 48, {"a"}, /*with_masks=*/false);
+    // Asymmetric on purpose: 25% remove / 75% keep, so the complement is a
+    // different number and a missing flip cannot pass.
+    std::vector<uint8_t> file_px = box_layer(64, 48, 0, 0, 32, 24);
+    const size_t white = (size_t)32 * 24, n = (size_t)64 * 48;
+    write_png_gray(f.masks / "a.png", 64, 48, file_px);
+    const std::vector<uint8_t> original = file_bytes(f.masks / "a.png");
+
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), true, err),
+          "flipped session opens: " + err);
+    settle(s);
+    check(s.doc() != nullptr, "flipped frame loaded");
+    const float kept = s.doc()->kept_fraction();
+    check(std::fabs(kept - (float)(n - white) / (float)n) < 1e-6f,
+          "kept is what the TRAINER keeps (0.75), not the file's white fraction");
+    check(s.doc()->base()[0] == 0 && s.doc()->base()[n - 1] == 255,
+          "the base in memory is the app's polarity, inverted from the file");
+
+    // A forced KEEP over a corner the file marks remove must come back as 0
+    // in the file, because 0 is keep there.
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {2.0f, 2.0f, 10.0f, 10.0f};
+    s.commit_stroke(box, mk::Paint::ForceKeep, m);
+    s.save();
+    settle(s);
+    check(s.error().empty(), "flipped save reported no error: " + s.error());
+    int w = 0, h = 0;
+    std::vector<uint8_t> written;
+    check(app::load_stencil((f.masks / "a.png").string(), w, h, written) && w == 64 && h == 48,
+          "the written mask decodes");
+    check(written[(size_t)5 * 64 + 5] == 0, "force-keep wrote 0 (keep) into a flipped file");
+    check(written[(size_t)20 * 64 + 20] == 255, "an untouched remove pixel is still 255");
+    check(file_bytes(f.layer / "a.base.png") == original,
+          ".base.png is the file's bytes, unconverted");
+
+    // Reopening reads the composite we just wrote and lands on the same number.
+    s.go_to(0);
+    s.close();
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), true, err),
+          "flipped session reopens: " + err);
+    settle(s);
+    check(s.doc() && s.doc()->base_state() == mk::BaseState::Unchanged,
+          "our own flipped composite reads back as Unchanged, not Regenerated");
+    check(s.doc()->kept_fraction() > kept, "the forced keep raised the kept fraction");
+    s.close();
+
+    // The same folder opened as if it were the app's convention is refused,
+    // rather than reinterpreting every recorded correction.
+    check(!s.open(f.root.string(), f.images.string(), f.masks.string(), false, err) &&
+              err == spirula::i18n::msg::maskedit::err_other_mask_polarity.get(),
+          "the other convention over recorded corrections is refused");
+}
+
+// One layer folder, two mask folders: the second must not reinterpret the
+// first's bases.
+void test_session_other_mask_root_refused() {
+    Fixture f = make_dataset("session_two_roots", 64, 48, {"a"});
+    const fs::path other = f.root / "masks_b";
+    write_png_gray(other / "a.png", 64, 48, synth_mask(64, 48, 99));
+    const std::vector<uint8_t> original_a = file_bytes(f.masks / "a.png");
+
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "open on the first root: " + err);
+    settle(s);
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.save();
+    settle(s);
+    check(s.error().empty() && file_bytes(f.layer / "a.base.png") == original_a,
+          "the first root's original is the base");
+
+    s.close();
+    check(!s.open(f.root.string(), f.images.string(), other.string(), false, err),
+          "a second mask root over recorded corrections is refused");
+    check(err.find(mk::normalize_dir(f.masks.string())) != std::string::npos,
+          "the refusal names the root the corrections were made against");
+    check(file_bytes(f.layer / "a.base.png") == original_a,
+          "the first root's base survived the attempt");
+}
+
+// A corrupt index is every recorded correction; replacing it with an empty
+// one loses them all while the layer files are still on disk.
+void test_session_corrupt_index_refuses() {
+    Fixture f = make_dataset("session_corrupt", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
+    settle(s);
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.save();
+    settle(s);
+    s.close();
+    const std::vector<uint8_t> drop_before = file_bytes(f.layer / "a.drop.png");
+
+    const std::vector<uint8_t> junk = {'{', 'x'};
+    mk::write_file_atomic((f.layer / mk::kIndexFileName).string(), junk.data(), junk.size());
+    check(!s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "a corrupt index refuses the session");
+    check(!s.is_open() && err.find(mk::kIndexFileName) != std::string::npos,
+          "not open, and the refusal names index.json");
+    check(file_bytes(f.layer / "a.drop.png") == drop_before,
+          "the corrections are untouched, so a repaired index still finds them");
+}
+
 void test_session_close_resets_paths() {
     Fixture f = make_dataset("session_close_reset", 64, 48, {"a"});
     mk::MaskSession s;
     std::string err;
-    check(s.open(f.root.string(), f.images.string(), f.masks.string(), err), "open: " + err);
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
     settle(s);
     s.close();
     check(s.layer_root().empty() && s.mask_root().empty(), "closed session reports no paths");
@@ -2259,6 +2382,9 @@ int main() {
     test_derive_window();
     test_session();
     test_session_size_mismatch();
+    test_session_flipped_polarity();
+    test_session_other_mask_root_refused();
+    test_session_corrupt_index_refuses();
     test_session_close_resets_paths();
     test_path_fill_parity();
     test_livewire_features();

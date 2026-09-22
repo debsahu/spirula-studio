@@ -99,6 +99,10 @@ std::string layer_file(const std::string& layer_root, const std::string& key,
     return (fs::path(layer_root) / (key + tag)).string();
 }
 
+void flip_polarity(uint8_t* px, size_t n) {
+    for (size_t i = 0; i < n; i++) px[i] = (uint8_t)(255 - px[i]);
+}
+
 void composite(const uint8_t* base, const uint8_t* drop, const uint8_t* keep,
                size_t n, uint8_t* out) {
     for (size_t i = 0; i < n; i++)
@@ -169,6 +173,7 @@ std::string utc_now_iso() {
 bool LayerIndex::load(const std::string& layer_root, std::string& error) {
     frames.clear();
     mask_root.clear();
+    mask_flipped = false;
     const std::string path = (fs::path(layer_root) / kIndexFileName).string();
     std::error_code ec;
     if (!fs::exists(path, ec)) return true;
@@ -180,6 +185,7 @@ bool LayerIndex::load(const std::string& layer_root, std::string& error) {
         return false;
     }
     if (const JsonValue* r = doc.find("mask_root")) mask_root = r->as_string();
+    if (const JsonValue* f = doc.find("mask_flipped")) mask_flipped = f->as_bool(false);
     const JsonValue* fr = doc.find("frames");
     if (!fr || !fr->is_object()) return true;
     for (const auto& [key, v] : fr->obj) {
@@ -198,6 +204,7 @@ bool LayerIndex::save(const std::string& layer_root, std::string& error) const {
     w.object();
     w.field("spirula_mask_edits", 1);
     w.field("mask_root", mask_root);
+    w.field("mask_flipped", mask_flipped);
     w.key("frames").object();
     for (const auto& [key, e] : frames) {
         w.key(key.c_str()).object();
@@ -301,6 +308,7 @@ bool save_frame(const std::string& layer_root, const std::string& mask_root,
         composite(base, drop, keep, n, out.data());
         size_t kept = 0;
         for (uint8_t v : out) kept += v ? 1 : 0;
+        if (idx.mask_flipped) flip_polarity(out.data(), out.size());
         if (!encode_gray_png(out.data(), w, h, png) ||
             !write_file_atomic(mask_path, png.data(), png.size())) {
             error = mask_path;
@@ -325,6 +333,7 @@ bool recomposite_frame(const std::string& layer_root, const std::string& mask_ro
     int w = 0, h = 0;
     std::vector<uint8_t> base;
     if (!app::load_stencil(mask_path, w, h, base)) { error = mask_path; return false; }
+    if (idx.mask_flipped) flip_polarity(base.data(), base.size());
     FrameLayers layers;
     std::string warning;
     if (!read_layers(layer_root, key, w, h, layers, warning)) {

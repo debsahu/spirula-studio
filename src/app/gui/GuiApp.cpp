@@ -5366,18 +5366,21 @@ void GuiApp::draw_mask_editor_entry(const WorkspaceState& prior) {
     ImGui::BeginDisabled(dataset_busy() || native_work_busy());
     if (ui::Button(mmsg::correct_masks)) {
         const fs::path ws(_workspace);
-        open_mask_editor(_workspace, (ws / "images").string(), (ws / "masks").string());
+        // The run's own masks/, which every branch of DatasetPrep writes in
+        // the app's convention -- only a bundled folder is ever left flipped.
+        open_mask_editor(_workspace, (ws / "images").string(), (ws / "masks").string(),
+                         /*mask_flipped=*/false);
     }
     ImGui::EndDisabled();
     ui::help_on_hover(mmsg::correct_masks_help);
 }
 
 void GuiApp::open_mask_editor(const std::string& workspace, const std::string& image_dir,
-                              const std::string& mask_dir) {
+                              const std::string& mask_dir, bool mask_flipped) {
     if (dataset_busy() || native_work_busy()) return;
     close_native_previews();
     std::string err;
-    if (!_mask_editor.open(workspace, image_dir, mask_dir, err)) log(err);
+    if (!_mask_editor.open(workspace, image_dir, mask_dir, mask_flipped, err)) log(err);
 }
 
 // ---------------------------------------------------------------------------
@@ -6353,7 +6356,7 @@ void GuiApp::draw_train() {
                 fs::path id(_cfg.image_dir), md(_cfg.mask_dir);
                 if (id.is_relative()) id = fs::path(_cfg.data) / id;
                 if (md.is_relative()) md = fs::path(_cfg.data) / md;
-                open_mask_editor(_cfg.data, id.string(), md.string());
+                open_mask_editor(_cfg.data, id.string(), md.string(), _cfg.flip_mask);
             }
             ImGui::EndDisabled();
             ui::help_on_hover(mmsg::correct_masks_help);
