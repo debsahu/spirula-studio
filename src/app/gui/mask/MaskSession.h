@@ -138,9 +138,11 @@ public:
     // The paint half of sam_pump(): a re-prompt of the object whose add is still
     // this frame's newest edit replaces it; anything else adds. -1 = text.
     Rect apply_sam_add(SamResult res, int object);
-    // A "not this" refines in the mode of the current object's add, if that add
-    // is still on top; `fallback` (the modifiers) otherwise.
+    // The mode of the current object's add while it is on top; `fallback` otherwise.
     Paint sam_refine_mode(Paint fallback) const;
+    // A click, either button: Shift or Ctrl held says the mode outright; a bare
+    // click on the object on top keeps its add's mode, else it drops.
+    Paint sam_click_mode(bool shift, bool ctrl) const;
     // The margin slider was released: once no job runs, sam_pump() rebuilds the
     // last drop at the editor's margin on the job thread and lands it in place,
     // unless something was edited meanwhile.
@@ -253,6 +255,7 @@ private:
     void draw_status();
     void draw_sam_status();
     void draw_sam_objects();
+    void draw_sam_text();
     void note_sam_ui(const int before[3], double ms);
     void draw_sam_clicks(ImDrawList* dl, const Mapping& m, float ox, float oy);
     void draw_revert_all_modal();
@@ -306,11 +309,11 @@ private:
     double _sam_ui_ms = 0.0;
     float _sam_click_x = -1.0f, _sam_click_y = -1.0f;
     float _canvas_h = 0.0f;
-    // The last SAM add: the document stamp and revision it left, its object and
+    // The last SAM add: the document stamp and step it left, its object and
     // mode, and its detections while it is a re-appliable drop.
     int _sam_job_object = -1;        // the running job's object; -1 for text
     std::string _sam_add_key;
-    uint64_t _sam_add_rev = 0;
+    uint64_t _sam_add_step = 0;       // MaskDoc::top_step() after the add
     int _sam_add_object = -1;
     Paint _sam_add_mode = Paint::ForceDrop;
     std::vector<HeldRegion> _sam_held;

@@ -91,6 +91,10 @@ public:
     void redo();
     bool can_undo() const { return _head > 0; }
     bool can_redo() const { return _head < (int)_ops.size(); }
+    // The step undo would take back next, as a serial unique to this document;
+    // 0 with none. Undo then redo gives it back, where the revision moves on.
+    uint64_t top_step() const { return _head > 0 ? _ids[(size_t)_head - 1] : 0; }
+    void drop_redo();
     size_t history_bytes() const { return _bytes; }
     int history_size() const { return (int)_ops.size(); }
     // Test-only: shrinks the byte budget so eviction is reachable without a
@@ -131,6 +135,8 @@ private:
     Rect _last;
     uint64_t _revision = 0, _saved = 0;
     std::vector<std::unique_ptr<MaskOp>> _ops;
+    std::vector<uint64_t> _ids;      // _ops' serials, from _next_id
+    uint64_t _next_id = 0;
     int _head = 0;
     size_t _bytes = 0;
     size_t _byte_cap = kMaxHistoryBytes;

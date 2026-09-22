@@ -553,7 +553,7 @@ HttpResponse handle_text(const HttpRequest& r) {
     if (!resolve_point(r, x, y, err)) return err_json(404, err);
     std::vector<Step> steps;
     push_click(steps, x, y, 0, false, 1);
-    std::vector<int> select_all{(int)ImGuiKey_LeftCtrl, (int)ImGuiKey_A};
+    std::vector<int> select_all{(int)logical_ctrl_key(), (int)ImGuiKey_A};
     Step down, up;
     down.kind = up.kind = Step::Kind::Key;
     down.keys = select_all;

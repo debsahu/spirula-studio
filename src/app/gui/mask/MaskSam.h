@@ -85,8 +85,8 @@ public:
                                         SamPoint click) const;
 
     // The job co-owns `rgb`, so the caller may drop its copy at once. `points`
-    // are frame pixels, `phrases` semicolon separated; the stencil is doc_w x
-    // doc_h, and `margin` the editor's ratio, applied through drop_margin().
+    // are frame pixels, `phrases` semicolon separated, and prompt().negative_prompt
+    // vetoes what they find; the stencil is doc_w x doc_h, `margin` via drop_margin().
     bool start_points(const std::string& frame_key,
                       std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
                       int doc_w, int doc_h, std::vector<SamPoint> points, Paint mode,
@@ -118,7 +118,8 @@ private:
     bool launch(Job job);
     void release_device();   // the SAM-only half of release()
     static SamResult prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                             int doc_h, Paint mode, float margin, float score, bool hold);
+                             int doc_h, Paint mode, float margin, float score, bool hold,
+                             const std::vector<AddRegion>& veto = {});
     static SamResult remargin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
                               int doc_h, float margin);
     static void publish(State& s, SamResult r);

@@ -51,6 +51,7 @@ HeldRegion hold_region(const AddRegion& g) {
     if (out.box.empty()) return out;
     out.w = g.w;
     out.h = g.h;
+    out.model_box = g.box;
     out.mask.resize((size_t)out.box.w() * (size_t)out.box.h());
     for (int y = out.box.y0; y < out.box.y1; y++)
         std::copy_n(g.mask.data() + (size_t)y * g.w + out.box.x0, out.box.w(),
@@ -64,6 +65,7 @@ AddRegion expand_region(const HeldRegion& held) {
         return g;
     g.w = held.w;
     g.h = held.h;
+    g.box = held.model_box;
     g.mask.assign((size_t)g.w * (size_t)g.h, 0);
     for (int y = held.box.y0; y < held.box.y1; y++)
         std::copy_n(held.mask.data() + (size_t)(y - held.box.y0) * held.box.w(), held.box.w(),
@@ -71,31 +73,58 @@ AddRegion expand_region(const HeldRegion& held) {
     return g;
 }
 
+int64_t veto_regions(std::vector<AddRegion>& regions, const std::vector<AddRegion>& veto) {
+    int64_t cleared = 0;
+    for (AddRegion& g : regions)
+        for (const AddRegion& v : veto) {
+            if (v.w != g.w || v.h != g.h || v.mask.size() != g.mask.size()) continue;
+            for (size_t i = 0; i < g.mask.size(); i++)
+                if (v.mask[i] && g.mask[i]) {
+                    g.mask[i] = 0;
+                    cleared++;
+                }
+        }
+    return cleared;
+}
+
 // Filling and the final scan cover only the destination box each region can
 // reach, not the whole W x H plane; this runs on the SAM job thread.
 bool build_add_stencil(std::vector<AddRegion>& regions, int W, int H,
-                       Stencil& out, Rect& bounds, int64_t& set_px, float margin) {
+                       Stencil& out, Rect& bounds, int64_t& set_px, float margin,
+                       const std::vector<AddRegion>& veto) {
     if (W <= 0 || H <= 0) return false;
+    // Where each region's set pixels can be once grown; empty = skip it.
+    std::vector<Rect> reach(regions.size());
+    for (size_t k = 0; k < regions.size(); k++) {
+        AddRegion& g = regions[k];
+        if (g.w <= 0 || g.h <= 0 || g.mask.size() != (size_t)g.w * (size_t)g.h) continue;
+        int64_t n = 0;
+        const Rect s = extent(g.mask, g.w, Rect{0, 0, g.w, g.h}, n);
+        if (s.empty()) continue;
+        reach[k] = s;
+        if (margin <= 0.0f) continue;
+        const RegionBox b = g.box.set ? g.box
+                                      : RegionBox{(float)s.x0, (float)s.y0, (float)(s.x1 - 1),
+                                                  (float)(s.y1 - 1), true};
+        const int r = margin::radius_px(b.x0, b.y0, b.x1, b.y1, margin);
+        std::vector<uint8_t> hit(g.mask.size(), 0);
+        margin::accumulate(g.mask.data(), g.w, g.h, r, hit);
+        for (uint8_t& v : hit) v = v ? 255 : 0;
+        g.mask = std::move(hit);
+        reach[k] = Rect{std::max(0, s.x0 - r), std::max(0, s.y0 - r), std::min(g.w, s.x1 + r),
+                        std::min(g.h, s.y1 + r)};
+    }
+    if (!veto.empty()) veto_regions(regions, veto);
     std::vector<uint8_t> plane;
     bool have = false;
     Rect box{W, H, 0, 0};
     std::vector<int> xs;
-    for (AddRegion& g : regions) {
-        if (g.w <= 0 || g.h <= 0 || g.mask.size() != (size_t)g.w * (size_t)g.h) continue;
+    for (size_t k = 0; k < regions.size(); k++) {
+        AddRegion& g = regions[k];
+        if (reach[k].empty()) continue;
         int64_t n = 0;
-        Rect s = extent(g.mask, g.w, Rect{0, 0, g.w, g.h}, n);
+        const Rect s = margin > 0.0f || !veto.empty() ? extent(g.mask, g.w, reach[k], n) : reach[k];
         if (s.empty()) continue;
-        if (margin > 0.0f) {
-            const int r = margin::radius_px((float)s.x0, (float)s.y0, (float)s.x1,
-                                            (float)s.y1, margin);
-            std::vector<uint8_t> hit(g.mask.size(), 0);
-            margin::accumulate(g.mask.data(), g.w, g.h, r, hit);
-            for (uint8_t& v : hit) v = v ? 255 : 0;
-            g.mask = std::move(hit);
-            const Rect grown{std::max(0, s.x0 - r), std::max(0, s.y0 - r),
-                             std::min(g.w, s.x1 + r), std::min(g.h, s.y1 + r)};
-            s = extent(g.mask, g.w, grown, n);
-        }
         const Rect d{first_dst(s.x0, g.w, W), first_dst(s.y0, g.h, H),
                      first_dst(s.x1, g.w, W), first_dst(s.y1, g.h, H)};
         box = Rect{std::min(box.x0, d.x0), std::min(box.y0, d.y0),

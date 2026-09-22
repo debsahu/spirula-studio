@@ -56,16 +56,16 @@ row src/app/gui/mask/Livewire.h 84 "std::vector<uint8_t> _parent;"
 row _deps/imgui-src/imgui.cpp 1850-1856 "ImGuiKey_LeftCtrl)  { key = ImGuiKey_LeftSuper; }"
 row _deps/imgui-src/imgui.cpp 1957-1967 "Convert Ctrl(Super)+Left click into Right-click"
 row src/app/gui/mask/MaskPanel.cpp 177 "ui::Button(msg::undo)"
-row src/app/gui/mask/MaskPanel.cpp 409 "io.KeyShift ? redo() : undo()"
+row src/app/gui/mask/MaskPanel.cpp 408 "io.KeyShift ? redo() : undo()"
 row src/app/gui/mask/MaskSession.cpp 389-400 "MaskSession::commit_stroke" 389
 row src/app/gui/mask/MaskSession.cpp 389-400 "if (r.empty()) return {};" 400
 row src/app/gui/mask/MaskPanel.cpp 76 "shown.empty()) return;"
-row src/app/gui/mask/MaskPanel.cpp 456 "msg::status_kept"
+row src/app/gui/mask/MaskPanel.cpp 455 "msg::status_kept"
 row src/app/gui/mask/MaskLayer.cpp 341-375 "bool recomposite_frame" 341
 row src/app/gui/mask/MaskLayer.cpp 341-375 "}" 375
 row src/app/gui/mask/MaskPanel.cpp 319-320 "in.shift = io.KeyShift;"
 row src/app/gui/mask/MaskPanel.cpp 319-320 "in.ctrl = io.KeyCtrl;"
-row src/app/gui/mask/MaskPanel.cpp 351 "paint_now(in.shift, in.ctrl)"
+row src/app/gui/mask/MaskPanel.cpp 350 "paint_now(in.shift, in.ctrl)"
 row src/app/gui/edit/EditTool.cpp 205 "ToolId::Box || _id == ToolId::Ellipse"
 row src/app/gui/edit/EditTool.cpp 160 "ToolId::Lasso || _id == ToolId::Brush"
 row src/app/gui/mask/MaskPanel.cpp 207 'go_to(_idx - 1)'
@@ -84,8 +84,8 @@ row src/app/gui/mask/Livewire.h 80-90 "_acos_abs[256][8]"
 row src/app/gui/mask/Livewire.h 80-90 "std::vector<uint8_t> _fg;"
 row src/app/gui/mask/Livewire.cpp 83-131 "std::vector<uint8_t> luma(n);"
 row src/app/gui/mask/Livewire.cpp 225-226 "_parent.assign(n, kUnseen);"
-row src/app/gui/mask/MaskPanel.cpp 442-481 "void MaskSession::draw_status()" 442
-row src/app/gui/mask/MaskPanel.cpp 442-481 "}" 481
+row src/app/gui/mask/MaskPanel.cpp 441-480 "void MaskSession::draw_status()" 441
+row src/app/gui/mask/MaskPanel.cpp 441-480 "}" 480
 row src/app/gui/mask/MaskPanel.cpp 461-464 "status_base_regenerated"
 row src/app/gui/mask/MaskPanel.cpp 461-464 "status_base_missing"
 row src/app/gui/mask/MaskPanel.cpp 1-5 "ImGui is permitted here"

@@ -3504,7 +3504,9 @@ void test_add_stencil_drop_margin() {
     r[0].mask.assign((size_t)W * H, 0);
     for (int y = 14; y < 34; y++)
         for (int x = 20; x < 40; x++) r[0].mask[(size_t)y * W + x] = 255;
-    const int rad = margin::radius_px(20, 14, 40, 34, 0.3f);
+    // With no model box the extent stands in, inclusive as sam::mask_bounding_box
+    // measures it: 19 x 19 here, radius 2, where the exclusive 20 x 20 gives 3.
+    const int rad = margin::radius_px(20, 14, 39, 33, 0.3f);
     std::vector<uint8_t> hit((size_t)W * H, 0);
     margin::accumulate(r[0].mask.data(), W, H, rad, hit);
     int64_t want = 0;
@@ -3512,10 +3514,11 @@ void test_add_stencil_drop_margin() {
     gui::Stencil st;
     mk::Rect b;
     int64_t set = -1;
-    check(rad == 3 && mk::build_add_stencil(r, W, H, st, b, set, 0.3f),
-          "drop margin: a 20 px square at 30% has radius 3 and builds");
-    check(same_rect(b, mk::Rect{17, 11, 43, 37}) && set == want && set > 400,
-          "drop margin: the square grows 3 px on every side, by the margin's own count");
+    check(rad == 2 && margin::radius_px(20, 14, 40, 34, 0.3f) == 3 &&
+              mk::build_add_stencil(r, W, H, st, b, set, 0.3f),
+          "drop margin: a 20 px square at 30% has radius 2 and builds");
+    check(same_rect(b, mk::Rect{18, 12, 42, 36}) && set == want && set > 400,
+          "drop margin: the square grows 2 px on every side, as Masker's box sizes it");
 }
 
 // Only a drop takes the margin; never signed, so no trim can reach the editor.
@@ -3734,6 +3737,12 @@ void test_held_region_roundtrip() {
     const mk::AddRegion back = mk::expand_region(h);
     check(back.w == 64 && back.h == 48 && back.mask == g.mask,
           "held region: expanding it gives back the plane, byte for byte");
+    mk::AddRegion boxed = g;
+    boxed.box = mk::RegionBox{2.0f, 3.0f, 50.0f, 40.0f, true};
+    const mk::AddRegion rebox = mk::expand_region(mk::hold_region(boxed));
+    check(rebox.box.set && rebox.box.x0 == 2.0f && rebox.box.y0 == 3.0f &&
+              rebox.box.x1 == 50.0f && rebox.box.y1 == 40.0f,
+          "held region: the model's box survives the hold, so a re-apply sizes from it too");
     const mk::HeldRegion none = mk::hold_region(disc_region(64, 48, 20.0f, 30.0f, 0.0f));
     check(none.box.empty() && none.mask.empty(), "held region: nothing set holds nothing");
 }
@@ -3810,8 +3819,9 @@ void test_session_sam_noop_replace() {
     const int h0 = s.doc()->history_size();
     sam_add(s, disc_region(64, 48, 15.0f, 20.0f, 6.0f), 0);
     sam_add(s, disc_region(64, 48, 50.0f, 25.0f, 4.0f), 0);
-    check(s.doc()->drop()[(size_t)20 * 64 + 15] == 0 && s.doc()->can_redo(),
-          "sam no-op: the replaced add is undone (left to redo) and the refinement changed nothing");
+    check(s.doc()->drop()[(size_t)20 * 64 + 15] == 0,
+          "sam no-op: the replaced add is undone and the refinement changed nothing");
+    check(!s.doc()->can_redo(), "sam no-op: the replaced add does not linger on the redo stack");
     sam_add(s, disc_region(64, 48, 15.0f, 36.0f, 5.0f), 0);
     check(s.doc()->history_size() == h0 + 1 && s.doc()->drop()[(size_t)12 * 64 + 42] == 255,
           "sam no-op: the next re-prompt adds, and the hand edit beneath survives");
@@ -3912,6 +3922,140 @@ void test_session_sam_margin_after_prompt() {
           "margin after prompt: a margin that lands after another edit is dropped, not stacked");
 }
 
+// ---------------------------------------------------------------------------
+// SAM assist: text prompts, the model's box, the exception chips (plan Task 7)
+// ---------------------------------------------------------------------------
+
+// A negative phrase's pixels leave the positive region they overlap, and only
+// those; a region the veto does not reach is untouched.
+void test_veto_regions() {
+    std::vector<mk::AddRegion> pos{disc_region(64, 48, 20.0f, 20.0f, 8.0f),
+                                   disc_region(64, 48, 44.0f, 24.0f, 6.0f)};
+    const std::vector<mk::AddRegion> veto{disc_region(64, 48, 26.0f, 20.0f, 8.0f)};
+    std::vector<uint8_t> want0 = pos[0].mask;
+    for (size_t i = 0; i < want0.size(); i++)
+        if (veto[0].mask[i]) want0[i] = 0;
+    const std::vector<uint8_t> want1 = pos[1].mask;
+    const size_t overlap = set_pixels(pos[0].mask) - set_pixels(want0);
+    check(overlap > 0 && overlap < set_pixels(pos[0].mask),
+          "veto: the fixture's veto overlaps part of region 0, not all of it");
+    const int64_t cleared = mk::veto_regions(pos, veto);
+    check(pos[0].mask == want0, "veto: region 0 loses exactly the vetoed pixels");
+    check(pos[1].mask == want1, "veto: region 1, which the veto does not reach, is untouched");
+    check(cleared == (int64_t)overlap, "veto: the count is the pixels cleared");
+}
+
+// The veto comes after the margin, as sam::compose_hit orders it: the grown rim
+// may not cover what a negative phrase said to keep.
+void test_add_stencil_veto_beats_margin() {
+    const int W = 64, H = 48;
+    const mk::AddRegion pos = disc_region(W, H, 24.0f, 24.0f, 8.0f);
+    const mk::AddRegion veto = disc_region(W, H, 36.0f, 24.0f, 6.0f);
+    const float ratio = 0.4f;
+    const mk::Rect e = extent(pos.mask, W, H);
+    const int rad = margin::radius_px((float)e.x0, (float)e.y0, (float)e.x1 - 1,
+                                      (float)e.y1 - 1, ratio);
+    std::vector<uint8_t> grown((size_t)W * H, 0), cut = pos.mask, regrown((size_t)W * H, 0);
+    margin::accumulate(pos.mask.data(), W, H, rad, grown);
+    for (size_t i = 0; i < cut.size(); i++)
+        if (veto.mask[i]) cut[i] = 0;
+    margin::accumulate(cut.data(), W, H, rad, regrown);
+    std::vector<uint8_t> want((size_t)W * H, 0);
+    int64_t n = 0, refilled = 0;
+    for (size_t i = 0; i < want.size(); i++) {
+        want[i] = grown[i] && !veto.mask[i] ? 255 : 0;
+        n += want[i] ? 1 : 0;
+        refilled += regrown[i] && veto.mask[i] ? 1 : 0;
+    }
+    check(rad > 0 && refilled > 0,
+          "veto margin: vetoing first, the margin would grow back over the vetoed pixels");
+    std::vector<mk::AddRegion> r{pos};
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t set = -1;
+    check(mk::build_add_stencil(r, W, H, st, b, set, ratio, {veto}),
+          "veto margin: the vetoed region still builds");
+    check(st.in == want && set == n,
+          "veto margin: every vetoed pixel stays clear of the grown outline");
+}
+
+// The margin is sized from the model's box when it has one: a text detection's
+// regressed box is not its mask's extent, and the dataset screen uses the box.
+void test_add_stencil_box_sizes_margin() {
+    const int W = 96, H = 64;
+    mk::AddRegion g = disc_region(W, H, 48.0f, 32.0f, 6.0f);
+    const mk::Rect e = extent(g.mask, W, H);
+    g.box = mk::RegionBox{20.0f, 8.0f, 76.0f, 56.0f, true};
+    const float ratio = 0.3f;
+    const int from_box = margin::radius_px(20.0f, 8.0f, 76.0f, 56.0f, ratio);
+    const int from_extent = margin::radius_px((float)e.x0, (float)e.y0, (float)e.x1 - 1,
+                                              (float)e.y1 - 1, ratio);
+    check(from_box > from_extent,
+          "box margin: the fixture's box and the mask's extent give different radii");
+    std::vector<uint8_t> hit((size_t)W * H, 0);
+    margin::accumulate(g.mask.data(), W, H, from_box, hit);
+    std::vector<mk::AddRegion> r{g};
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t set = -1;
+    check(mk::build_add_stencil(r, W, H, st, b, set, ratio), "box margin: builds");
+    bool same = st.in.size() == hit.size();
+    for (size_t i = 0; same && i < hit.size(); i++) same = (st.in[i] != 0) == (hit[i] != 0);
+    check(same, "box margin: the radius comes from the model's box, not the mask's extent");
+}
+
+// A click on the object whose add is on top inherits that add's mode unless a
+// modifier is held; with nothing of its on top the modifiers decide.
+void test_session_sam_click_mode() {
+    Fixture f = make_dataset("sam_click_mode", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "click mode: open: " + err);
+    settle(s);
+    using P = mk::Paint;
+    check(s.sam_click_mode(false, false) == P::ForceDrop && s.sam_click_mode(false, true) == P::ForceKeep,
+          "click mode: with nothing on top, plain drops and Ctrl keeps");
+    sam_add(s, disc_region(64, 48, 20.0f, 20.0f, 6.0f), 0, P::ForceKeep);
+    check(s.sam_click_mode(false, false) == P::ForceKeep,
+          "click mode: a plain click on a kept object keeps keeping it");
+    check(s.sam_click_mode(true, true) == P::Clear, "click mode: Shift+Ctrl on a kept object clears");
+    sam_add(s, disc_region(64, 48, 24.0f, 20.0f, 6.0f), 0, P::ForceDrop);
+    check(s.sam_click_mode(false, true) == P::ForceKeep,
+          "click mode: Ctrl on a dropped object is an explicit keep");
+    check(s.sam_click_mode(false, false) == P::ForceDrop,
+          "click mode: a plain click on a dropped object drops");
+}
+
+// Undo then redo puts the same add back on top, so a refinement replaces it;
+// an undo and a new edit in its place does not.
+void test_session_sam_redo_then_refine() {
+    Fixture f = make_dataset("sam_redo_refine", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "redo refine: open: " + err);
+    settle(s);
+    const int h0 = s.doc()->history_size();
+    const std::vector<uint8_t> comp0 = s.doc()->composite();
+    const mk::AddRegion big = disc_region(64, 48, 20.0f, 20.0f, 10.0f);
+    const mk::AddRegion small = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
+    sam_add(s, big, 0);
+    s.undo();
+    s.redo();
+    sam_add(s, small, 0);
+    check(s.doc()->history_size() == h0 + 1, "redo refine: after undo and redo a refinement replaces");
+    s.undo();
+    check(s.doc()->composite() == comp0, "redo refine: one undo removes the object entirely");
+    sam_add(s, big, 0);
+    s.undo();
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 50, 5, 60, 15), mk::Rect{50, 5, 60, 15});
+    const int h1 = s.doc()->history_size();
+    sam_add(s, small, 0);
+    check(s.doc()->history_size() == h1 + 1 && s.doc()->keep()[(size_t)10 * 64 + 55] == 255,
+          "redo refine: an undo and a new edit in its place makes a re-prompt add");
+}
+
 }  // namespace
 
 int main() {
@@ -4004,6 +4148,11 @@ int main() {
     test_session_sam_clear_forgets_add();
     test_session_sam_prompt_bookkeeping();
     test_session_sam_margin_after_prompt();
+    test_veto_regions();
+    test_add_stencil_veto_beats_margin();
+    test_add_stencil_box_sizes_margin();
+    test_session_sam_click_mode();
+    test_session_sam_redo_then_refine();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

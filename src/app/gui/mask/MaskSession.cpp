@@ -722,28 +722,31 @@ void MaskSession::sam_objects_edited() {
     _sam_held.clear();
 }
 
-// The stamp names the document (a reload moves it) and the revision every paint,
-// undo and redo moves; so "on top" means nothing has happened since the add.
+// The stamp names the document (a reload moves it) and the step names the add
+// itself, so "on top" means undo would take back exactly that add next.
 bool MaskSession::sam_add_on_top(int object) const {
     return object >= 0 && object == _sam_add_object && _doc && _doc->can_undo() &&
-           sam_frame_stamp() == _sam_add_key && _doc->revision() == _sam_add_rev;
+           sam_frame_stamp() == _sam_add_key && _doc->top_step() == _sam_add_step;
 }
 
 Rect MaskSession::apply_sam_add(SamResult res, int object) {
     _sam_last_area = 0;
     if (!_doc || !res.landed) return {};
     Rect changed;
-    if (sam_add_on_top(object)) {
+    const bool replacing = sam_add_on_top(object);
+    if (replacing) {
         _doc->undo();
         changed = _doc->last_change();
     }
     const uint64_t before = _doc->revision();
     _doc->paint(res.mode, std::move(res.stencil), res.bounds);
-    // A paint that changed nothing records no step, so nothing of ours is on top.
+    // A paint that changed nothing records no step, so nothing of ours is on top,
+    // and the add it replaced must not wait on the redo stack either.
     const bool painted = _doc->revision() != before;
     if (painted) changed = join(changed, _doc->last_change());
+    else if (replacing) _doc->drop_redo();
     _sam_add_key = painted ? sam_frame_stamp() : std::string();
-    _sam_add_rev = _doc->revision();
+    _sam_add_step = _doc->top_step();
     _sam_add_object = painted ? object : -1;
     _sam_add_mode = res.mode;
     _sam_held = painted && object >= 0 ? std::move(res.held) : std::vector<HeldRegion>();
@@ -753,6 +756,11 @@ Rect MaskSession::apply_sam_add(SamResult res, int object) {
 
 Paint MaskSession::sam_refine_mode(Paint fallback) const {
     return _sam && sam_add_on_top(_sam->prompt().current_object) ? _sam_add_mode : fallback;
+}
+
+Paint MaskSession::sam_click_mode(bool shift, bool ctrl) const {
+    const Paint held = paint_now(shift, ctrl);
+    return shift || ctrl ? held : sam_refine_mode(held);
 }
 
 bool MaskSession::sam_margin_reapplies() const {

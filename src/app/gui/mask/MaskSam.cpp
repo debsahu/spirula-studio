@@ -9,7 +9,6 @@
 #include <mutex>
 
 #ifdef SS_BUILD_SAM
-#include "i18n/catalog/Dataset.h"
 #include "nn/vk/Memory.h"
 #include "sam/Masking.h"   // split_phrases, downscale_to_fit -- never sam::Masker
 #include "sam/Sam.h"
@@ -118,7 +117,8 @@ bool MaskSam::clear_error_if(const std::string& reason) {
 }
 
 SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                           int doc_h, Paint mode, float margin, float score, bool hold) {
+                           int doc_h, Paint mode, float margin, float score, bool hold,
+                           const std::vector<AddRegion>& veto) {
     SamResult r;
     if (hold && mode == Paint::ForceDrop)
         for (const AddRegion& g : regions) r.held.push_back(hold_region(g));
@@ -127,7 +127,7 @@ SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions
     r.score = score;
     r.detections = (int)regions.size();
     r.landed = build_add_stencil(regions, doc_w, doc_h, r.stencil, r.bounds, r.set_px,
-                                 drop_margin(mode, margin));
+                                 drop_margin(mode, margin), veto);
     return r;
 }
 
@@ -187,7 +187,7 @@ void MaskSam::refuse(const std::string& reason) {
 #ifdef SS_BUILD_SAM
 
 struct MaskSam::Job {
-    std::string model, frame_key, phrases;
+    std::string model, frame_key, phrases, negative;
     std::shared_ptr<const std::vector<uint8_t>> rgb;
     int fw = 0, fh = 0, doc_w = 0, doc_h = 0;
     std::vector<SamPoint> points;
@@ -266,7 +266,10 @@ bool MaskSam::start_points(const std::string& frame_key,
 bool MaskSam::start_text(const std::string& frame_key,
                          std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
                          int doc_w, int doc_h, const std::string& phrases, float margin) {
-    if (!text_supported()) return false;
+    if (!text_supported()) {
+        refuse(msg::sam_text_unsupported.get());
+        return false;
+    }
     Job j;
     j.frame_key = frame_key;
     j.rgb = std::move(rgb);
@@ -275,6 +278,7 @@ bool MaskSam::start_text(const std::string& frame_key,
     j.doc_w = doc_w;
     j.doc_h = doc_h;
     j.phrases = phrases;
+    j.negative = _s->prompt.negative_prompt;
     j.margin = margin;
     j.text = true;
     j.max_size = _s->prompt.max_image_size;
@@ -400,7 +404,7 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         return;
     }
     if (j.text && !s.session->supportsTextPrompts()) {
-        finish(spirula::i18n::msg::dataset::mask_no_text_prompts.get());
+        finish(msg::sam_text_unsupported.get());
         return;
     }
     // Masks come back at the ENCODED size, so a capped text encode and a full
@@ -427,6 +431,7 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
     }
     j.rgb.reset();
     sam::Result r;
+    std::vector<AddRegion> veto;
     if (j.text) {
         for (const std::string& phrase : sam::split_phrases(j.phrases)) {
             if (s.cancel) break;
@@ -436,6 +441,22 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
             cp.nms_threshold = j.nms_threshold;
             sam::Result one = s.session->segmentConcept(cp);
             for (sam::Detection& d : one.detections) r.detections.push_back(std::move(d));
+        }
+        // The exception chips' phrases, off the same encode, so every plane matches.
+        for (const std::string& phrase : sam::split_phrases(j.negative)) {
+            if (s.cancel || r.detections.empty()) break;
+            sam::ConceptPrompt cp;
+            cp.text = phrase;
+            cp.score_threshold = j.score_threshold;
+            cp.nms_threshold = j.nms_threshold;
+            sam::Result neg = s.session->segmentConcept(cp);
+            for (sam::Detection& d : neg.detections) {
+                AddRegion v;
+                v.w = d.mask.width;
+                v.h = d.mask.height;
+                v.mask = std::move(d.mask.data);
+                veto.push_back(std::move(v));
+            }
         }
     } else if (!s.cancel) {
         sam::VisualPrompt vp;
@@ -459,6 +480,7 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         g.h = d.mask.height;
         g.mask = std::move(d.mask.data);
         g.score = d.score;
+        g.box = RegionBox{d.box.x0, d.box.y0, d.box.x1, d.box.y1, true};
         best = std::max(best, d.score);
         out.push_back(std::move(g));
     }
@@ -467,8 +489,8 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         std::lock_guard<std::mutex> lk(s.mu);
         s.vram_mib = mib;
     }
-    SamResult res =
-        prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode, j.margin, best, !j.text);
+    SamResult res = prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode, j.margin, best,
+                            !j.text, veto);
     res.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
                  .count();
     // The stencil takes ~150 ms at 15520x7760; an Esc during it must still win.

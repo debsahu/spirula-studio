@@ -115,6 +115,7 @@ bool MaskDoc::load(const std::string& layer_root, const std::string& mask_root,
                    std::string& error, std::string& warning) {
     _key = key;
     _ops.clear();
+    _ids.clear();
     _head = 0;
     _bytes = 0;
     _byte_cap = kMaxHistoryBytes;
@@ -274,20 +275,27 @@ void MaskDoc::paint(Paint mode, Stencil st, const Rect& bounds) {
 void MaskDoc::run(std::unique_ptr<MaskOp> op) {
     op->apply(*this);
     if (!op->changed()) return;
-    _ops.resize((size_t)_head);
-    _bytes = 0;
-    for (auto& o : _ops) _bytes += o->bytes();
+    drop_redo();
     _bytes += op->bytes();
     _last = op->touched();
     _ops.push_back(std::move(op));
+    _ids.push_back(++_next_id);
     _head = (int)_ops.size();
     while ((int)_ops.size() > kMaxHistoryOps ||
            (_bytes > _byte_cap && _ops.size() > 1)) {
         _bytes -= _ops.front()->bytes();
         _ops.erase(_ops.begin());
+        _ids.erase(_ids.begin());
         _head--;
     }
     _revision++;
+}
+
+void MaskDoc::drop_redo() {
+    _ops.resize((size_t)_head);
+    _ids.resize((size_t)_head);
+    _bytes = 0;
+    for (auto& o : _ops) _bytes += o->bytes();
 }
 
 void MaskDoc::undo() {

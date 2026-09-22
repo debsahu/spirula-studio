@@ -971,6 +971,51 @@ SS_MSG(sam_result,
     RU("Добавлено: {0} пкс, обнаружений: {1}, оценка {2}, {3} мс"),
     TR("Eklenen: {0} px, algılama: {1}, puan {2}, {3} ms"));
 
+SS_MSG(sam_text_label,
+    EN("Text prompt"),
+    JA("テキストプロンプト"),
+    ZH_HANS("文本提示"),
+    ZH_HANT("文字提示"),
+    KO("텍스트 프롬프트"),
+    DE("Text-Prompt"),
+    FR("Requête texte"),
+    ES("Indicación de texto"),
+    PT("Prompt de texto"),
+    IT("Prompt testuale"),
+    NL("Tekstprompt"),
+    RU("Текстовый запрос"),
+    TR("Metin istemi"));
+
+SS_MSG(sam_text_unsupported,
+    EN("This checkpoint has no text encoder. Use clicks instead."),
+    JA("このチェックポイントにはテキストエンコーダーがありません。クリックを使ってください。"),
+    ZH_HANS("此检查点没有文本编码器。请改用点击。"),
+    ZH_HANT("此檢查點沒有文字編碼器。請改用點擊。"),
+    KO("이 체크포인트에는 텍스트 인코더가 없습니다. 대신 클릭을 사용하세요."),
+    DE("Dieser Checkpoint hat keinen Text-Encoder. Verwenden Sie stattdessen Klicks."),
+    FR("Ce checkpoint n'a pas d'encodeur de texte. Utilisez plutôt des clics."),
+    ES("Este checkpoint no tiene codificador de texto. Use clics en su lugar."),
+    PT("Este checkpoint não tem codificador de texto. Use cliques em vez disso."),
+    IT("Questo checkpoint non ha un encoder di testo. Usa invece i clic."),
+    NL("Dit checkpoint heeft geen tekstencoder. Gebruik in plaats daarvan klikken."),
+    RU("У этой контрольной точки нет текстового кодировщика. Используйте щелчки."),
+    TR("Bu kontrol noktasında metin kodlayıcı yok. Bunun yerine tıklamaları kullanın."));
+
+SS_MSG(sam_empty,
+    EN("The prompt matched nothing on this frame."),
+    JA("このフレームではプロンプトに一致するものがありませんでした。"),
+    ZH_HANS("该提示在此帧中没有匹配到任何内容。"),
+    ZH_HANT("該提示在此影格中沒有符合任何內容。"),
+    KO("이 프레임에서 프롬프트와 일치하는 것이 없습니다."),
+    DE("Der Prompt hat in diesem Bild nichts gefunden."),
+    FR("La requête ne correspond à rien sur cette image."),
+    ES("La indicación no coincidió con nada en este fotograma."),
+    PT("O prompt não encontrou nada neste quadro."),
+    IT("Il prompt non ha trovato nulla in questo fotogramma."),
+    NL("De prompt vond niets in dit frame."),
+    RU("Запрос ничего не нашёл в этом кадре."),
+    TR("İstem bu karede hiçbir şeyle eşleşmedi."));
+
 }  // namespace maskedit
 }  // namespace msg
 }  // namespace i18n

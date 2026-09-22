@@ -13,19 +13,32 @@
 namespace gui {
 namespace mask {
 
+// sam::Detection's box, inclusive plane pixels. It sizes the margin, as on the
+// dataset screen; unset, the plane's set pixels stand in, measured the same way.
+struct RegionBox {
+    float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+    bool set = false;
+};
+
 // A detection as the seam takes it: a 0/255 plane at the size the model was
-// handed. No box: the bounds come from the plane, so they cannot disagree.
+// handed, and the box the model gave it.
 struct AddRegion {
     int w = 0, h = 0;
     std::vector<uint8_t> mask;
     float score = 0.0f;
+    RegionBox box;
 };
 
-// Unions `regions` (consumed), each grown first by `margin` of its own extent
-// (core/MaskMargin.h), into one W x H nearest-resampled stencil; `bounds` is its
-// extent, `set_px` its count. False, outputs untouched, when nothing landed.
+// Clears from each region every pixel a same-sized `veto` plane covers: a
+// negative phrase is an explicit keep. Returns how many pixels it cleared.
+int64_t veto_regions(std::vector<AddRegion>& regions, const std::vector<AddRegion>& veto);
+
+// Unions `regions` (consumed), each grown by `margin` of its box
+// (core/MaskMargin.h) and THEN vetoed, sam::compose_hit's order, into one W x H
+// nearest-resampled stencil. False, outputs untouched, when nothing landed.
 bool build_add_stencil(std::vector<AddRegion>& regions, int W, int H,
-                       Stencil& out, Rect& bounds, int64_t& set_px, float margin = 0.0f);
+                       Stencil& out, Rect& bounds, int64_t& set_px, float margin = 0.0f,
+                       const std::vector<AddRegion>& veto = {});
 
 // A detection cut down to its set pixels' extent `box`, so the last add can be
 // rebuilt at another margin without keeping the whole plane.
@@ -33,6 +46,7 @@ struct HeldRegion {
     int w = 0, h = 0;
     Rect box;
     std::vector<uint8_t> mask;   // box.w() x box.h()
+    RegionBox model_box;
 };
 HeldRegion hold_region(const AddRegion& g);
 AddRegion expand_region(const HeldRegion& held);

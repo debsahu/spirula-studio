@@ -356,7 +356,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:177` and `:409`), and
+does (both call the identical function, `MaskPanel.cpp:177` and `:408`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -379,7 +379,7 @@ would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:456`), read before the series and after every one of
+readout (`MaskPanel.cpp:455`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -483,7 +483,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:177` (`ui::Button(msg::undo)`) and `:409`
+   worked. `MaskPanel.cpp:177` (`ui::Button(msg::undo)`) and `:408`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -529,7 +529,7 @@ what was inferred rather than run flagged as such.
   pre-stroke value and removed the tint. "The modifier read is the one held
   at release" is read from source (`MaskPanel.cpp:319-320` samples
   `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
-  and `:351` hands those to `paint_now` on the frame the stroke commits)
+  and `:350` hands those to `paint_now` on the frame the stroke commits)
   rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
@@ -1357,7 +1357,7 @@ height -- which is the same reason the reserve is measured rather than
 computed.
 
 **That 192 px is the worst case the battery reached, not the worst case
-`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:442-481`), the eight
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:441-480`), the eight
 items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
 `hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
 and the status-or-error line. Two more items exist: `status_base_regenerated`
@@ -1421,7 +1421,7 @@ than wrong.
 
 **The fix above removes the defect at every window size a person would work
 at, and does not remove it at every window size.** `draw_canvas` floors the
-canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:442-481`) draws its
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:441-480`) draws its
 full content unconditionally with no cap and no truncation. Once the window is
 short enough that the canvas has pinned at its floor, every further pixel of
 shrink becomes a pixel of strip pushed past the window bottom. It is the same
@@ -2102,7 +2102,7 @@ default) so the rim of colour a tight outline leaves is covered; the editor call
 A **drop** grows by the editor's slider; a **keep** or a **clear** uses SAM's exact
 outline (`drop_margin()`), and the ratio is never signed, so no trim can reach the
 editor. The editor's radius is taken from the region's own pixel extent where Masker
-uses the model's box. The slider is the dataset screen's own
+uses the model's box. (Superseded by Task 7, below: the editor now takes the model's box.) The slider is the dataset screen's own
 (`draw_margin_slider` in `MaskPrompt.cpp`, now called by all three screens), bound to
 the editor's MaskSettings: moving it left the dataset screen's `dilate_ratio` at 0.05.
 
@@ -2140,7 +2140,8 @@ The SAM button widens tool row 1 by one button: `Done`'s right edge is **1172 px
 always one line), SAM **258** with the margin slider, SAM with no cached checkpoint
 **288**. By the rule above SAM mode clips below **422 px** of window height, **452 px**
 with no checkpoint; the first line to go is the key hint at the bottom, the last the
-error line at the top. (Task 6's object box raises these to about 536 and 566 px.)
+error line at the top. (Task 6's object box raises these to about 536 and 566 px; Task 7's
+text row to 570 and 600.)
 
 ### Task 6: the object list, refinement that replaces, and the margin re-applied
 
@@ -2150,11 +2151,12 @@ object list ("Objects to click on"), moved verbatim into `draw_mask_objects`
 current object; a **right click** is "not this" on it (red dot with a cross); the
 prompt is every click that object has on this frame. **A second click on the same
 object replaces its add** while that add is still the newest edit on the frame
-(stamped by `sam_frame_stamp()` and `MaskDoc::revision()`); another object, a text
+(stamped by `sam_frame_stamp()` and `MaskDoc::revision()`; Task 7 replaces the revision
+with `MaskDoc::top_step()`); another object, a text
 prompt, or any edit in between adds instead. The cost, stated in the hint: one
 Ctrl+Z after a refinement removes the whole object. A right click refines in the
 mode of the add it replaces (a kept object stays kept); with none to replace it
-takes the modifiers. **Releasing the margin slider re-applies it** to the drop just
+takes the modifiers. (Task 7 makes both buttons follow one rule; see below.) **Releasing the margin slider re-applies it** to the drop just
 made, in place, under the same rule. The list sits in a fixed-height box (two
 objects, then it scrolls, to the end on a new one), so adding objects never moves
 the picture: the canvas read 474 px with 1 to 5 objects.
@@ -2200,6 +2202,70 @@ about **536 px** (measured: canvas 73 px at 545, at its 64 px floor by 500), abo
   dropped, not stacked. In the app, a chair clicked on a fresh frame and the slider
   released at 11 % while the encode ran landed at 839,307 px (5 %), then 1,064,432 px,
   the same as a later re-apply to 11 %.
+
+### Task 7: text prompts, the exception chips, and the refinement rules
+
+**How the operator uses it.** In SAM mode (G), type what to drop into **Text prompt**, in
+English, several phrases separated by `;` ("door; chair"), and press **Enter**. Every match
+on the open frame is dropped as **one** undo step. **Common subjects** beside the field
+opens the dataset screen's palette in a popup: its first group writes the phrase, its
+second ("...but keep": person in a painting, statue, mannequin) writes exceptions, and an
+exception's pixels are taken back out of every match. The phrase stays in the field across
+frames and never runs on its own; Enter runs it on the frame that is open. With a SAM 2
+checkpoint the field is disabled and the row says why; with no checkpoint it says to
+fetch one first. A phrase that finds nothing says "The prompt matched nothing on this
+frame." in the result slot.
+
+**The margin now uses the model's box** (`AddRegion::box`, carried through `hold_region`).
+A text detection's box is the detector's regressed box, not its mask's extent; with no box
+the extent stands in, now measured inclusively as `sam::mask_bounding_box` does. The old
+exclusive extent was a pixel wider and taller than the click path's `Detection::box`, so
+"identical on the click path" was true to within that pixel, not exactly: on a 20 px square
+at 30% it gives radius 3 where the box gives 2.
+
+**The veto comes after the margin**, as `sam::compose_hit` orders it: the drop is grown
+first, then every exception pixel is cleared. The brief put the veto before
+`build_add_stencil`, which would have let the grown rim cover the exception again.
+
+| check (M5 Pro, `sam3-q4_0`, 15520x7760, text path capped at 1600) | observed |
+|---|---|
+| CLI count, full size, frame 0066 | wall 4, door 3, window 2, person 1, person in a painting 1 |
+| app, wall on frame 0067 (5 detections), 3 warm samples | job 689.2 / 596.6 / 592.9 ms, median **596.6**; prompt to painted 1342 / 1212 / 1209 ms |
+| app, door on 0066 (3) / wall on 0066 (3) / person (1) | medians 306.4 / 305.2 / 263.1 ms |
+| `segmentConcept` alone, from the log | 245-418 ms whatever the count: the decoder is ~170 ms of it, the segmentation head 0.3 ms |
+| region size logged in the job (then removed) | text 1600x800 every time; a click 15520x7760 |
+| person on 0066 without / with "person in a painting" / without again | 4,831,880 / 825,777 / 4,831,880 px |
+| wall on 0067, 5 detections | history 0 -> 1; one Ctrl+Z back to the base count, 112,243,211 |
+| Ctrl+click the person, then a plain click on it | kept 112,176,393 -> 113,395,324 -> 115,217,607, history 1, one undo back to the base |
+| SAM 2.1 Tiny selected, Enter in the field | results 20 -> 20, no job, the row reads the reason |
+
+**P2b's bar is 2386 ms**, 4x the worst median (596.6 ms, five detections). The detection
+count does not dominate at the capped size: a detection is 1.28 MB there, so
+`max_detections` is not needed. What grows with the count is the stencil built at the
+document's size (~270 ms of the five-detection job) and the paint on the UI thread (about
+620 ms for 25 M px over a frame-wide rectangle), which is the existing prompt-to-paint
+cost, not a text-path one.
+
+**Refinement follows one rule for both buttons** (`sam_click_mode`): Shift or Ctrl held
+says the mode outright; a bare click on the object whose add is on top keeps that add's
+mode; otherwise a bare click drops. A plain left click on a kept object used to replace the
+keep with a drop.
+
+**"On top" is now the step, not the revision.** `MaskDoc::top_step()` is a serial per
+recorded step, so an undo and a redo put the same add back on top and a refinement replaces
+it; an undo and a new edit in its place give a new serial, so it adds. A refinement that
+changes no pixel now also clears the redo stack (`MaskDoc::drop_redo`), so the add it
+replaced cannot come back by Redo.
+
+**The strip.** The text row adds 34 px: `status_h` 406 with SAM 3, 436 with no cached
+checkpoint, so SAM mode fits down to **570 px** of window height, **600 px** with no
+checkpoint. Measured by dragging the window: canvas 84 px at 590, 69 at 575, 64 at 570, and
+at 560 the key hint clips. The palette is a popup, not a section, so opening it does not
+move the picture (canvas 444 px before, with it open, and after).
+
+**`guictl text` could not replace a field's contents on macOS.** Its select-all sent the
+physical Ctrl, which ImGui reads as Super there, so a second `text` appended. It now sends
+the logical Ctrl, as `key` already did.
 
 ### Misses and open items
 

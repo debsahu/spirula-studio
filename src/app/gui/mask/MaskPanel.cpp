@@ -324,8 +324,7 @@ void MaskSession::draw_canvas() {
         float fx = 0.0f, fy = 0.0f;
         if ((in.clicked || in.right_clicked) && !sam_busy() && sam_has_model() &&
             shown_to_frame(io.MousePos.x, io.MousePos.y, fx, fy)) {
-            const Paint mode = paint_now(io.KeyShift, io.KeyCtrl);
-            sam_prompt_point(fx, fy, in.clicked ? mode : sam_refine_mode(mode), in.clicked);
+            sam_prompt_point(fx, fy, sam_click_mode(io.KeyShift, io.KeyCtrl), in.clicked);
         }
         draw_sam_clicks(dl, m, origin.x, origin.y);
     } else if (path_mode()) {
@@ -518,6 +517,7 @@ void MaskSession::draw_sam_status() {
     }
     ui::TextDisabledWrapped(msg::sam_hint);
     draw_sam_objects();
+    draw_sam_text();
     const float y0 = ImGui::GetCursorPosY();
     const std::string sam_err = sam_error();
     if (sam_busy()) {
@@ -525,6 +525,8 @@ void MaskSession::draw_sam_status() {
         ui::TextDisabledWrapped(msg::sam_cancel_slow);
     } else if (!sam_err.empty()) {
         ui::TextColoredRaw(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), sam_err);
+    } else if (sam_results() > 0 && sam_last_area() == 0) {
+        ui::TextDisabledWrapped(msg::sam_empty);
     } else if (sam_results() > 0) {
         char score[16];
         std::snprintf(score, sizeof score, "%.2f", sam_last_score());
@@ -535,6 +537,39 @@ void MaskSession::draw_sam_status() {
     const float used = ImGui::GetCursorPosY() - y0;
     const float pad = slot - used - ImGui::GetStyle().ItemSpacing.y;
     if (pad > 0.0f) ImGui::Dummy(ImVec2(0.0f, pad));
+}
+
+// The phrase field on one row with the palette's button, or the reason there is
+// none (SAM 2 has no text tower), so the strip never grows. Enter runs it.
+void MaskSession::draw_sam_text() {
+    MaskSettings& p = sam_prompt();
+    const bool no_text = !sam_has_model() || !sam_text_supported();
+    ImGui::BeginDisabled(no_text);
+    ImGui::SetNextItemWidth(px(420.0f));
+    if (ui::InputTextEnglish(msg::sam_text_label, "person; monopod", &p.prompt,
+                             ImGuiInputTextFlags_EnterReturnsTrue) &&
+        !sam_busy())
+        sam_prompt_text(p.prompt);
+    ImGui::EndDisabled();
+    if (no_text)
+        ui::help_on_hover_disabled(sam_has_model() ? msg::sam_text_unsupported
+                                                   : dmsg::mask_model_first);
+    if (!sam_has_model()) return;
+    ImGui::SameLine();
+    if (no_text) {
+        ui::TextDisabledWrapped(msg::sam_text_unsupported);
+        return;
+    }
+    if (ui::Button(dmsg::mask_subjects)) ImGui::OpenPopup("##samsubjects");
+    // A popup, not a section: open, the chips would push the picture up.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(px(560.0f), 0.0f), ImVec2(px(560.0f), FLT_MAX));
+    if (!ImGui::BeginPopup("##samsubjects")) return;
+    if (spirula::i18n::current() != spirula::i18n::Lang::en)
+        ui::TextDisabledWrapped(dmsg::mask_english_only);
+    ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
+    // `false`: the editor's phrase always names what to drop.
+    draw_subject_palette(p.prompt, p.negative_prompt, /*keep_subject=*/false);
+    ImGui::EndPopup();
 }
 
 // A frame's pump-and-upload time, credited to what it did: a prompt landing,
