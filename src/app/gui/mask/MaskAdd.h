@@ -13,8 +13,9 @@
 namespace gui {
 namespace mask {
 
-// sam::Detection's box, inclusive plane pixels. It sizes the margin, as on the
-// dataset screen; unset, the plane's set pixels stand in, measured the same way.
+// sam::Detection's box in plane pixels: a click's is its mask's inclusive extent,
+// a text match's the detector's continuous regressed box. It sizes the margin, as
+// on the dataset screen; unset, the set pixels' inclusive extent stands in.
 struct RegionBox {
     float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
     bool set = false;

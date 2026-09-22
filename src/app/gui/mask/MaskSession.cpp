@@ -130,6 +130,8 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
 void MaskSession::close() {
     if (!_open && !_worker.joinable()) return;
     if (_doc && _doc->dirty()) save();
+    // Before the worker's join, so the weights go back before a ~700 ms save lands.
+    if (_sam) _sam_close_ms = sam_yield();
     {
         std::lock_guard<std::mutex> lk(_qmu);
         _quit = true;
@@ -150,6 +152,7 @@ void MaskSession::close() {
     _open = false;
     _doc.reset();
     _rgb.reset();
+    sam_forget();
     _frames.clear();
     _idx = -1;
     _workspace.clear();
@@ -594,6 +597,32 @@ void MaskSession::set_sam_blocker(const std::string& reason) {
     _sam_blocker = reason;
 }
 
+// Everything but the picker, which draws GuiApp's own state, and the counter
+// of model changes. The clicks go too: their frame indices name this session.
+void MaskSession::sam_forget() {
+    _sam.reset();
+    _sam_model.clear();
+    _sam_text_hint = false;
+    _sam_release_pending = false;
+    _sam_results = _sam_dropped = _sam_last_detections = 0;
+    _sam_last_ms = _sam_last_job_ms = 0.0;
+    _sam_last_score = 0.0f;
+    _sam_last_area = 0;
+    _sam_last_vetoed = false;
+    _sam_ui_ms = 0.0;
+    _sam_click_x = _sam_click_y = -1.0f;
+    _sam_job_object = -1;
+    _sam_add_key.clear();
+    _sam_add_step = 0;
+    _sam_add_object = -1;
+    _sam_add_mode = Paint::ForceDrop;
+    _sam_held.clear();
+    _sam_reapply_ms = _sam_reapply_job_ms = _sam_margin_start_ms = 0.0;
+    _sam_reapplies = _sam_margin_starts = 0;
+    _sam_margin_pending = _sam_margin_moved = false;
+    _sam_blocker.clear();
+}
+
 double MaskSession::sam_yield() {
     if (!_sam) return 0.0;
     const auto t0 = std::chrono::steady_clock::now();
@@ -614,6 +643,11 @@ const std::string& MaskSession::sam_model_path() const {
 
 
 float MaskSession::sam_margin() const { return _sam ? _sam->prompt().dilate_ratio : -1.0f; }
+
+const spirula::i18n::Msg* MaskSession::sam_empty_note() const {
+    if (_sam_results == 0 || _sam_last_area != 0) return nullptr;
+    return _sam_last_vetoed ? &msg::sam_vetoed_all : &msg::sam_empty;
+}
 
 double MaskSession::sam_vram_mib() const { return _sam ? _sam->vram_mib() : -1.0; }
 
@@ -669,8 +703,8 @@ bool MaskSession::sam_prompt_text(const std::string& phrases) {
 
 Rect MaskSession::sam_pump() {
     if (!_sam) return {};
-    // The held detections are only worth their memory while they can re-apply.
-    if (!_sam_held.empty() && !sam_margin_reapplies()) _sam_held.clear();
+    // Held while the add is on top or a redo away; after that it never returns.
+    if (!_sam_held.empty() && !sam_add_redoable()) _sam_held.clear();
     SamResult res;
     // A model change: the old model's answer, if any, is counted and dropped.
     if (_sam_release_pending) {
@@ -729,6 +763,11 @@ void MaskSession::sam_objects_edited() {
 
 // The stamp names the document (a reload moves it) and the step names the add
 // itself, so "on top" means undo would take back exactly that add next.
+bool MaskSession::sam_add_redoable() const {
+    return _sam_add_object >= 0 && _doc && sam_frame_stamp() == _sam_add_key &&
+           _doc->redo_reaches(_sam_add_step);
+}
+
 bool MaskSession::sam_add_on_top(int object) const {
     return object >= 0 && object == _sam_add_object && _doc && _doc->can_undo() &&
            sam_frame_stamp() == _sam_add_key && _doc->top_step() == _sam_add_step;
@@ -736,6 +775,7 @@ bool MaskSession::sam_add_on_top(int object) const {
 
 Rect MaskSession::apply_sam_add(SamResult res, int object) {
     _sam_last_area = 0;
+    _sam_last_vetoed = res.vetoed_all;
     if (!_doc || !res.landed) return {};
     Rect changed;
     const bool replacing = sam_add_on_top(object);

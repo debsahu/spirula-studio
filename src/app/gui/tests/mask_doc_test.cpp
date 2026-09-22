@@ -4145,6 +4145,162 @@ void test_session_sam_empty_phrase() {
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// SAM assist: lifetime and teardown (plan Task 8)
+// ---------------------------------------------------------------------------
+
+// Build, then read the flag, then publish: an Esc landing while the stencil is
+// built must beat the result it would otherwise hand over.
+void test_publish_unless_cancelled() {
+    bool cancel = false;
+    int built = 0, published = 0;
+    std::string got;
+    auto build = [&] {
+        built++;
+        mk::SamResult r;
+        r.frame_key = "k";
+        return r;
+    };
+    auto publish = [&](mk::SamResult r) {
+        published++;
+        got = r.frame_key;
+    };
+    const bool ok = mk::publish_unless_cancelled(build, [&] { return cancel; }, publish);
+    check(ok && built == 1 && published == 1 && got == "k",
+          "publish tail: an uncancelled job builds and publishes once");
+    built = published = 0;
+    const bool late = mk::publish_unless_cancelled(
+        [&] {
+            cancel = true;
+            return build();
+        },
+        [&] { return cancel; }, publish);
+    check(!late && built == 1 && published == 0,
+          "publish tail: an Esc during the build wins over the result");
+}
+
+// Closing forgets every piece of SAM state: the clicks name frames of a session
+// that is gone, and the next open must start from nothing.
+void test_session_close_forgets_sam() {
+    Fixture f = make_dataset("sam_close_forgets", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "close sam: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    s.sam_prompt().dilate_ratio = 0.3f;
+    s.sam_prompt_started(20.0f, 20.0f, true);
+    s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 20.0f, 20.0f, 6.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 7.0);
+    s.sam_pump();
+    s.sam().refuse("a stale error");
+    s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 40.0f, 20.0f, 4.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 7.0);
+    check(s.sam_click_count() == 1 && s.sam_results() == 1 && s.sam_last_area() > 0 &&
+              s.sam_last_detections() == 1 && s.sam_last_job_ms() == 7.0 &&
+              s.sam_held_bytes() > 0 && s.sam_margin() == 0.3f && !s.sam_error().empty() &&
+              s.sam_model_path() == "/m/a.ggml",
+          "close sam: the fixture has clicks, a result, a held add, a margin and an error");
+    s.close();
+    check(s.sam_click_count() == 0 && s.sam_object_count() == 0,
+          "close sam: the editor's clicks go with it");
+    check(s.sam_margin() == -1.0f, "close sam: the editor's own prompt state goes with it");
+    check(s.sam_results() == 0 && s.sam_dropped() == 0 && s.sam_last_area() == 0 &&
+              s.sam_last_detections() == 0 && s.sam_last_ms() == 0.0 &&
+              s.sam_last_job_ms() == 0.0 && s.sam_last_score() == 0.0f &&
+              s.sam_empty_note() == nullptr,
+          "close sam: the result counters start again at zero");
+    check(s.sam_model_path().empty() && !s.sam_has_model(),
+          "close sam: the model is forgotten until the next open pushes it");
+    check(s.sam_error().empty() && s.sam_status().empty() && s.sam_vram_mib() == -1.0,
+          "close sam: no status, error or session survives");
+    check(!s.sam_margin_reapplies() && s.sam_held_bytes() == 0,
+          "close sam: nothing is left to re-apply the margin to");
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "close sam: reopen: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    check(s.sam_model_path() == "/m/a.ggml" && s.sam_click_count() == 0 && s.sam_results() == 0,
+          "close sam: a reopen takes the model again, with no clicks");
+}
+
+// Undo takes the add off the top and redo puts back the same step, so the
+// margin slider must reach it again; an edit in its place ends that for good.
+void test_session_sam_margin_after_undo_redo() {
+    Fixture f = make_dataset("sam_margin_undo_redo", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "undo redo margin: open: " + err);
+    settle(s);
+    const mk::AddRegion g = disc_region(64, 48, 30.0f, 24.0f, 6.0f);
+    s.sam_prompt().dilate_ratio = 0.0f;
+    sam_add(s, g, 0);
+    const int h0 = s.doc()->history_size();
+    const int64_t tight = s.sam_last_area();
+    s.undo();
+    s.sam_pump();
+    check(!s.sam_margin_reapplies() && s.sam_held_bytes() > 0,
+          "undo redo margin: an undone add takes no margin, but keeps its detection for a redo");
+    s.redo();
+    s.sam_pump();
+    s.sam_prompt().dilate_ratio = 0.4f;
+    check(s.sam_margin_reapplies(), "undo redo margin: the redone add can be re-applied");
+    reapply(s);
+    std::vector<mk::AddRegion> want{g};
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t grown = 0;
+    mk::build_add_stencil(want, 64, 48, st, b, grown, 0.4f);
+    check(grown > tight && s.sam_last_area() == grown && s.doc()->history_size() == h0,
+          "undo redo margin: the slider re-applies to the redone add, in place");
+    s.undo();
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 0, 0, 4, 4), mk::Rect{0, 0, 4, 4});
+    s.sam_pump();
+    check(s.sam_held_bytes() == 0,
+          "undo redo margin: an edit in the undone add's place lets go of its detection");
+}
+
+// "Matched nothing" is only true when nothing matched: a match the exception
+// chips cleared entirely says so instead.
+void test_session_sam_vetoed_all() {
+    namespace em = spirula::i18n::msg::maskedit;
+    Fixture f = make_dataset("sam_vetoed_all", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "vetoed: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    check(s.sam_empty_note() == nullptr, "vetoed: no note before any result");
+    mk::AddRegion all;
+    all.w = 64;
+    all.h = 48;
+    all.mask.assign((size_t)64 * 48, 255);
+    const mk::AddRegion none = disc_region(64, 48, 20.0f, 20.0f, 0.0f);
+    const std::string key = s.sam_frame_stamp();
+    s.sam().post_result(key, {disc_region(64, 48, 20.0f, 20.0f, 6.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0, {all});
+    s.sam_pump();
+    check(s.sam_results() == 1 && s.sam_last_area() == 0 && s.sam_last_detections() == 1,
+          "vetoed: the fixture matched once and the veto left nothing");
+    check(s.sam_empty_note() == &em::sam_vetoed_all,
+          "vetoed: a match the exceptions cleared entirely says the exceptions took it");
+    s.sam().post_result(key, {none}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.sam_empty_note() == &em::sam_empty, "vetoed: a prompt that matched nothing says so");
+    s.sam().post_result(key, {none}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0, {all});
+    s.sam_pump();
+    check(s.sam_empty_note() == &em::sam_empty,
+          "vetoed: an exception over an empty match is still nothing matched");
+    s.sam().post_result(key, {disc_region(64, 48, 20.0f, 20.0f, 6.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.sam_last_area() > 0 && s.sam_empty_note() == nullptr,
+          "vetoed: a result that painted takes no note");
+}
+
 int main() {
     test_fnv();
     test_composite_truth_table();
@@ -4245,6 +4401,10 @@ int main() {
     test_session_sam_click_mode_shift();
     test_session_sam_refine_at_cap();
     test_session_sam_empty_phrase();
+    test_publish_unless_cancelled();
+    test_session_close_forgets_sam();
+    test_session_sam_margin_after_undo_redo();
+    test_session_sam_vetoed_all();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

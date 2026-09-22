@@ -291,6 +291,11 @@ void MaskDoc::run(std::unique_ptr<MaskOp> op) {
     _revision++;
 }
 
+bool MaskDoc::redo_reaches(uint64_t step) const {
+    const auto it = std::find(_ids.begin(), _ids.end(), step);
+    return it != _ids.end() && it - _ids.begin() >= (ptrdiff_t)_head - 1;
+}
+
 void MaskDoc::drop_redo() {
     _ops.resize((size_t)_head);
     _ids.resize((size_t)_head);

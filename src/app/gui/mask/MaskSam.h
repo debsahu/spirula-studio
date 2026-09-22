@@ -38,7 +38,14 @@ struct SamResult {
     int64_t set_px = 0;
     std::vector<HeldRegion> held;
     bool margin_job = false;    // start_margin()'s, not a prompt's
+    bool vetoed_all = false;    // it matched, and the exceptions cleared every pixel
 };
+
+// A job's tail: `build` the result, THEN read `cancelled`, so an Esc during the
+// ~150 ms stencil build still wins; only then `publish`. True if it published.
+bool publish_unless_cancelled(const std::function<SamResult()>& build,
+                              const std::function<bool()>& cancelled,
+                              const std::function<void(SamResult)>& publish);
 
 struct SamPoint {
     float x = 0.0f, y = 0.0f;   // frame pixels
@@ -110,7 +117,8 @@ public:
     // The job's hand-off of a finished result, stencil built on the calling
     // thread; public so a test can stand in for the job in a build without SAM.
     void post_result(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                     int doc_h, Paint mode, float margin, float score, double ms);
+                     int doc_h, Paint mode, float margin, float score, double ms,
+                     const std::vector<AddRegion>& veto = {});
 
 private:
     struct State;

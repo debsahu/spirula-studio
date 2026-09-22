@@ -94,6 +94,8 @@ public:
     // The step undo would take back next, as a serial unique to this document;
     // 0 with none. Undo then redo gives it back, where the revision moves on.
     uint64_t top_step() const { return _head > 0 ? _ids[(size_t)_head - 1] : 0; }
+    // `step` is on top, or waits on the redo stack: redo alone can bring it back.
+    bool redo_reaches(uint64_t step) const;
     void drop_redo();
     size_t history_bytes() const { return _bytes; }
     int history_size() const { return (int)_ops.size(); }

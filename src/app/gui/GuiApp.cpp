@@ -2666,6 +2666,8 @@ std::string GuiApp::state_json() {
     out += ",\"sam_status\":" + quoted(_mask_editor.sam_status());
     out += ",\"sam_error\":" + quoted(_mask_editor.sam_error());
     out += ",\"sam_vram_mib\":" + std::to_string(_mask_editor.sam_vram_mib());
+    out += ",\"sam_pool_mib\":" + std::to_string(mask::MaskSession::sam_pool_mib());
+    out += ",\"sam_close_ms\":" + std::to_string(_mask_editor.sam_close_ms());
     out += ",\"sam_ui_ms\":" + std::to_string(_mask_editor.sam_ui_ms());
     out += ",\"sam_click\":[" + std::to_string(_mask_editor.sam_click_x()) + "," +
            std::to_string(_mask_editor.sam_click_y()) + "]";

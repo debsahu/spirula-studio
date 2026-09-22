@@ -65,7 +65,7 @@ public:
     // fails while closing has no status strip left to reach.
     void set_log(std::function<void(const std::string&)> log) { _log = std::move(log); }
     bool is_open() const { return _open; }
-    // Saves a dirty frame, then joins the worker.
+    // Saves a dirty frame, hands the SAM checkpoint back, then joins the worker.
     void close();
     void destroy_gl();
     void draw();
@@ -186,6 +186,10 @@ public:
     // pixels already dropped reports its full area and changes nothing.
     int64_t sam_last_area() const { return _sam_last_area; }
     int sam_last_detections() const { return _sam_last_detections; }
+    // Why the last result painted nothing, for the strip; null when it painted.
+    const spirula::i18n::Msg* sam_empty_note() const;
+    // UI-thread ms the last close() spent joining a SAM job and unloading.
+    double sam_close_ms() const { return _sam_close_ms; }
     // UI-thread ms of the last result's paint and upload; the frame pixel the
     // last point prompt was sent at; the canvas height drawn last frame.
     double sam_ui_ms() const { return _sam_ui_ms; }
@@ -241,6 +245,8 @@ private:
     void set_corrected(int n);
     Rect shown_rect(const Rect& stored) const;
     bool sam_add_on_top(int object) const;
+    bool sam_add_redoable() const;
+    void sam_forget();
     Rect sam_land(SamResult res);
     void sam_start_margin();
     // MaskPanel.cpp
@@ -294,7 +300,7 @@ private:
     PathTool _path;
     std::unique_ptr<Livewire> _livewire;   // the open frame's edge map, built on first use
     // Created on first use; its session is released by sam_yield() and a model
-    // change, and the object (clicks included) outlives close().
+    // change, and close() releases it and then drops the object, clicks included.
     std::unique_ptr<MaskSam> _sam;
     std::string _sam_model;
     bool _sam_text_hint = false;
@@ -306,6 +312,8 @@ private:
     double _sam_last_ms = 0.0, _sam_last_job_ms = 0.0;
     float _sam_last_score = 0.0f;
     int64_t _sam_last_area = 0;
+    bool _sam_last_vetoed = false;
+    double _sam_close_ms = 0.0;
     double _sam_ui_ms = 0.0;
     float _sam_click_x = -1.0f, _sam_click_y = -1.0f;
     float _canvas_h = 0.0f;

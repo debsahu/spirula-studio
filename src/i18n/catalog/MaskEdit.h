@@ -1016,6 +1016,21 @@ SS_MSG(sam_empty,
     RU("Запрос ничего не нашёл в этом кадре."),
     TR("İstem bu karede hiçbir şeyle eşleşmedi."));
 
+SS_MSG(sam_vetoed_all,
+    EN("The prompt matched, but the exceptions removed everything."),
+    JA("プロンプトに一致しましたが、例外ですべて除かれました。"),
+    ZH_HANS("提示有匹配，但例外把它们全部排除了。"),
+    ZH_HANT("提示有符合，但例外把它們全部排除了。"),
+    KO("프롬프트와 일치했지만 예외가 모두 제외했습니다."),
+    DE("Der Prompt hat etwas gefunden, aber die Ausnahmen haben alles wieder entfernt."),
+    FR("La requête a trouvé quelque chose, mais les exceptions ont tout retiré."),
+    ES("La indicación encontró algo, pero las excepciones lo quitaron todo."),
+    PT("O prompt encontrou algo, mas as exceções removeram tudo."),
+    IT("Il prompt ha trovato qualcosa, ma le eccezioni hanno tolto tutto."),
+    NL("De prompt vond iets, maar de uitzonderingen hebben alles weggehaald."),
+    RU("Запрос что-то нашёл, но исключения убрали всё."),
+    TR("İstem bir şey buldu ama istisnalar hepsini çıkardı."));
+
 }  // namespace maskedit
 }  // namespace msg
 }  // namespace i18n

@@ -5,6 +5,7 @@
 #include "app/gui/MaskSettings.h"
 #include "i18n/catalog/MaskEdit.h"
 
+#include <algorithm>
 #include <exception>
 #include <mutex>
 
@@ -13,7 +14,6 @@
 #include "sam/Masking.h"   // split_phrases, downscale_to_fit -- never sam::Masker
 #include "sam/Sam.h"
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -109,6 +109,15 @@ void run_guarded(const std::function<void()>& body,
     }
 }
 
+bool publish_unless_cancelled(const std::function<SamResult()>& build,
+                              const std::function<bool()>& cancelled,
+                              const std::function<void(SamResult)>& publish) {
+    SamResult r = build();
+    if (cancelled()) return false;
+    publish(std::move(r));
+    return true;
+}
+
 bool MaskSam::clear_error_if(const std::string& reason) {
     std::lock_guard<std::mutex> lk(_s->mu);
     if (_s->error != reason) return false;
@@ -126,8 +135,13 @@ SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions
     r.mode = mode;
     r.score = score;
     r.detections = (int)regions.size();
+    const auto any_set = [](const AddRegion& g) {
+        return std::any_of(g.mask.begin(), g.mask.end(), [](uint8_t v) { return v != 0; });
+    };
+    const bool matched = !veto.empty() && std::any_of(regions.begin(), regions.end(), any_set);
     r.landed = build_add_stencil(regions, doc_w, doc_h, r.stencil, r.bounds, r.set_px,
                                  drop_margin(mode, margin), veto);
+    r.vetoed_all = matched && !r.landed;
     return r;
 }
 
@@ -150,9 +164,10 @@ void MaskSam::publish(State& s, SamResult r) {
 }
 
 void MaskSam::post_result(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                          int doc_h, Paint mode, float margin, float score, double ms) {
-    SamResult r =
-        prepare(std::move(frame_key), std::move(regions), doc_w, doc_h, mode, margin, score, true);
+                          int doc_h, Paint mode, float margin, float score, double ms,
+                          const std::vector<AddRegion>& veto) {
+    SamResult r = prepare(std::move(frame_key), std::move(regions), doc_w, doc_h, mode, margin,
+                          score, true, veto);
     r.ms = ms;
     publish(*_s, std::move(r));
 }
@@ -315,12 +330,18 @@ bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, 
             run_guarded(
                 [&] {
                     const auto t0 = std::chrono::steady_clock::now();
-                    SamResult r = remargin(std::move(key), std::move(held), doc_w, doc_h, margin);
-                    r.ms = std::chrono::duration<double, std::milli>(
-                               std::chrono::steady_clock::now() - t0).count();
-                    if (s->cancel) return finish(std::string());
-                    publish(*s, std::move(r));
-                    s->running = false;
+                    const bool published = publish_unless_cancelled(
+                        [&] {
+                            SamResult r =
+                                remargin(std::move(key), std::move(held), doc_w, doc_h, margin);
+                            r.ms = std::chrono::duration<double, std::milli>(
+                                       std::chrono::steady_clock::now() - t0).count();
+                            return r;
+                        },
+                        [s] { return s->cancel.load(); },
+                        [s](SamResult r) { publish(*s, std::move(r)); });
+                    if (published) s->running = false;
+                    else finish(std::string());
                 },
                 finish);
         });
@@ -489,17 +510,18 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         std::lock_guard<std::mutex> lk(s.mu);
         s.vram_mib = mib;
     }
-    SamResult res = prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode, j.margin, best,
-                            !j.text, veto);
-    res.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
-                 .count();
     // The stencil takes ~150 ms at 15520x7760; an Esc during it must still win.
-    if (s.cancel) {
-        finish(std::string());
-        return;
-    }
-    publish(s, std::move(res));
-    s.running = false;
+    const bool published = publish_unless_cancelled(
+        [&] {
+            SamResult res = prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode,
+                                    j.margin, best, !j.text, veto);
+            res.ms = std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - t0).count();
+            return res;
+        },
+        [&s] { return s.cancel.load(); }, [&s](SamResult res) { publish(s, std::move(res)); });
+    if (published) s.running = false;
+    else finish(std::string());
 }
 
 #endif  // SS_BUILD_SAM

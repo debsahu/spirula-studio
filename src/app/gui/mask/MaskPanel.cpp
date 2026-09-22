@@ -525,8 +525,8 @@ void MaskSession::draw_sam_status() {
         ui::TextDisabledWrapped(msg::sam_cancel_slow);
     } else if (!sam_err.empty()) {
         ui::TextColoredRaw(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), sam_err);
-    } else if (sam_results() > 0 && sam_last_area() == 0) {
-        ui::TextDisabledWrapped(msg::sam_empty);
+    } else if (const spirula::i18n::Msg* note = sam_empty_note()) {
+        ui::TextDisabledWrapped(*note);
     } else if (sam_results() > 0) {
         char score[16];
         std::snprintf(score, sizeof score, "%.2f", sam_last_score());
