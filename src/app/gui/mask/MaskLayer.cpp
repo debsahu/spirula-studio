@@ -401,6 +401,7 @@ bool revert_frame(const std::string& layer_root, const std::string& mask_root,
 int revert_all(const std::string& layer_root, std::string& error) {
     LayerIndex idx;
     if (!idx.load(layer_root, error)) return -1;
+    if (idx.mask_root.empty()) return 0;
     std::vector<std::string> keys;
     for (const auto& [k, e] : idx.frames) keys.push_back(k);
     int reverted = 0;

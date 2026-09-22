@@ -636,6 +636,47 @@ void test_revert_all_continues_past_failure() {
     check(fs::exists(drop_b), "b's undeletable layer path is still there");
 }
 
+// revert_all lacked recomposite_all's empty-mask_root guard: a hand-edited or
+// downgraded index.json without mask_root resolves mask_file("", key) to a
+// bare "<key>.png", writing outside the dataset relative to the process cwd.
+void test_revert_all_guards_empty_mask_root() {
+    Fixture f = make_dataset("revert_empty_root", 64, 48, {"a"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> drop = box_layer(64, 48, 4, 4, 14, 14);
+    const std::vector<uint8_t> keep = box_layer(64, 48, 40, 20, 50, 30);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    int w, h;
+    std::vector<uint8_t> base;
+    app::load_stencil((f.masks / "a.png").string(), w, h, base);
+    check(mk::save_frame(layer_root, mask_root, "a", 64, 48, base.data(), drop.data(),
+                         keep.data(), true, idx, err), "save a: " + err);
+    check(fs::exists(f.layer / "a.base.png"), "fixture: a.base.png exists to revert from");
+    // save_frame already composited over masks/a.png; that composite, not the
+    // pre-save original, is what a no-op revert_all must leave standing.
+    const std::vector<uint8_t> composited_a = file_bytes(f.masks / "a.png");
+
+    // What a hand-edited or downgraded index.json leaves: LayerIndex::load
+    // clears mask_root before parsing, so a document missing that field (or
+    // set to "") loads with the frame entries intact but mask_root empty.
+    idx.mask_root.clear();
+    check(idx.save(layer_root, err), "persist an index with empty mask_root: " + err);
+
+    const fs::path stray = fs::current_path() / "a.png";
+    std::error_code ec;
+    fs::remove(stray, ec);
+
+    const int reverted = mk::revert_all(layer_root, err);
+    check(reverted == 0, "revert_all on an empty mask_root writes nothing, got " +
+                             std::to_string(reverted));
+    check(!fs::exists(stray),
+          "revert_all did not write a bare '<key>.png' into the working directory");
+    check(file_bytes(f.masks / "a.png") == composited_a, "masks/a.png left untouched");
+    check(fs::exists(f.layer / "a.base.png"), "layer files untouched -- the guard returns early");
+    fs::remove(stray, ec);
+}
+
 // ---------------------------------------------------------------------------
 // Task 5: the document
 // ---------------------------------------------------------------------------
@@ -1461,6 +1502,7 @@ int main() {
     test_revert_reports_removal_failure();
     test_recomposite_all_continues_past_failure();
     test_revert_all_continues_past_failure();
+    test_revert_all_guards_empty_mask_root();
     test_doc_load_and_paint();
     test_doc_without_mask();
     test_read_write_rect_roundtrip();

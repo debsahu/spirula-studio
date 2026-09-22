@@ -1459,8 +1459,10 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     if (fs::exists(layer_root / gui::mask::kIndexFileName, mec)) {
         std::string rerr;
         const int n = gui::mask::recomposite_all(layer_root.string(), rerr);
-        if (n < 0) log(fmt(mmsg::log_recomposite_failed, {rerr}), /*detail=*/false);
-        else if (n > 0) log(fmt(mmsg::log_recomposited, {(long long)n}), /*detail=*/false);
+        // Success and failure are independent: a partial batch, or every frame
+        // failing (n == 0 with rerr non-empty), must still say so.
+        if (n > 0) log(fmt(mmsg::log_recomposited, {(long long)n}), /*detail=*/false);
+        if (!rerr.empty()) log(fmt(mmsg::log_recomposite_failed, {rerr}), /*detail=*/false);
     }
     return true;
 }
