@@ -211,7 +211,7 @@ screen px at this zoom), all plain drags (ForceDrop).
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
 (`MaskSession.cpp:343-359`, `if (r.empty()) return {};`) and `upload_rect`
-does the same (`MaskPanel.cpp:68`), so a coordinate-mapping bug that made
+does the same (`MaskPanel.cpp:65`), so a coordinate-mapping bug that made
 every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
@@ -242,26 +242,37 @@ medians (12.7 ms in an earlier run, 18.4 ms here) -- consistent with genuine
 per-stroke GL upload cost varying with machine load between runs, not a
 fixed or stubbed number.
 
-**The corroboration**: Kept % fell monotonically and substantially,
-50.1% -> 49.1%, never staying flat or moving by a rounding-noise amount. A
-delta of 1.0 percentage point over 7680x3840 = 29,491,200 mask pixels is
-294,912 px^2 of newly-forced-drop area. A single stroke's own claimed
-footprint (capsule: length x diameter + pi x r^2 = 500x212 + pi x 106^2 =
-141,301 px^2) is the same order of magnitude as that per-stroke average
-(294,912 / 20 = 14,746 px^2 marginal, small because the 20 strokes overlap
+**The corroboration**: Kept % fell monotonically, 50.1% -> 49.1%, but read
+the table as what it actually shows, not as a smooth ramp. Differenced,
+13 of the 20 per-stroke transitions are exactly 0.0pp (three in a row at
+49.6%, four in a row at 49.4%, three in a row at each of 49.3%, 49.2% and
+49.1%); only 7 show a visible 0.1pp move, one of them the first stroke's
+0.4pp drop off the pristine baseline. **Individual per-stroke deltas mostly
+sit at or below the readout's 0.1pp quantisation floor and carry no signal
+on their own.** What does the corroborating work is the **cumulative**
+20-stroke delta: 1.0 percentage point is exactly 10 quantisation steps,
+well clear of the floor a single stroke's reading sits at. Over
+7680x3840 = 29,491,200 mask pixels, 1.0pp is 294,912 px^2 of newly-forced-
+drop area. A single stroke's own claimed footprint (capsule: length x
+diameter + pi x r^2 = 500x212 + pi x 106^2 = 141,298.94 px^2) is the same
+order of magnitude as that cumulative delta's per-stroke average
+(294,912 / 20 ~ 14,746 px^2 marginal, small because the 20 strokes overlap
 heavily -- they were placed 20 screen px apart, ~13 mask px at this zoom,
 against a 212 px brush diameter, by design a dense serpentine sweep, not 20
 independent patches). Modelling the swept region as one continuous band
 (500 mask px long, ~380 screen px / ~249 mask px of travel across the 20
 positions plus the 212 px brush diameter overhang on the two open ends, so
 ~461 mask px tall) predicts ~230,500 px^2 -- the same order of magnitude as
-the observed 294,912 px^2, and both are decisively larger than what a
-strokes-shrunk-by-a-coordinate-bug run would show (which would move Kept %
-by a small fraction of a percentage point, not a full point, over 20
-strokes). This does not prove the strokes were exactly 500 px; it does rule
-out the specific failure this criterion's timing alone cannot catch --
-strokes silently far smaller than claimed producing a falsely reassuring
-fast number.
+the observed 294,912 px^2 (~10 steps either way).
+
+**Discriminating power**: a coordinate bug that halved both stroke size and
+spacing would shrink that swept-band prediction by ~4x (area scales with
+the square of a linear shrink), landing the cumulative delta around 2-3
+quantisation steps instead of 10 -- smaller, but still visible against the
+floor, not swallowed by it. This does not prove the strokes were exactly
+500 px; it does rule out the specific failure this criterion's timing alone
+cannot catch -- strokes silently far smaller than claimed producing a
+falsely reassuring fast number.
 
 ### Criterion #9 in the app (Step 4)
 
@@ -272,11 +283,11 @@ because the first cycle's reading proved volatile -- see below):
 
 | trial | baseline | editor open | delta |
 |---|---|---|---|
-| 1 | 309.2 MB | 520.7 MB | 211.6 MB |
+| 1 | 309.2 MB | 520.7 MB | 211.5 MB |
 | 2 | 462.5 MB | 575.8 MB | 113.3 MB |
 | 3 | 443.0 MB | 575.3 MB | 132.3 MB |
 
-**Max delta 211.6 MB (median 132.3 MB). PASS** in every trial (bar <= 600 MB).
+**Max delta 211.5 MB (median 132.3 MB). PASS** in every trial (bar <= 600 MB).
 The max is the number to trust here, not the median: see the noise floor
 described next -- with the effect size and the measurement noise this close
 together, the worst observed reading is the defensible one, and it still
