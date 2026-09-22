@@ -2633,6 +2633,13 @@ std::string GuiApp::state_json() {
     out += ",\"dataset\":" + quoted(_cfg.data);
     out += ",\"mask_editor_open\":";
     out += _mask_editor.is_open() ? "true" : "false";
+    // The app's one segmentation checkpoint, which both screens pick and fetch.
+    static const char* kDownload[] = {"idle", "running", "done", "failed", "cancelled"};
+    out += ",\"model_id\":" + quoted(_model_id);
+    out += ",\"model_path\":" + quoted(selected_model_path());
+    out += ",\"model_download\":\"";
+    out += kDownload[(int)_download.state()];
+    out += "\",\"license_prompt\":" + quoted(_license_prompt);
     return out;
 }
 
