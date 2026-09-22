@@ -93,6 +93,8 @@ public:
     std::shared_ptr<const std::vector<uint8_t>> frame_pixels() const { return _rgb; }
 
     // ---- SAM assist (MaskSam.h); every call is safe with no checkpoint ----
+    // The SAM half, created on first use.
+    MaskSam& sam();
     bool sam_available() const;
     // The process-wide inference pool, MiB -- readable with the editor closed.
     static double sam_pool_mib();
@@ -124,7 +126,7 @@ public:
     static std::string sam_blocker(bool mask_preview, bool depth_preview, bool run_active);
     // GuiApp's sam_blocker() answer, every frame before draw(); a blocked
     // prompt is refused with it in sam_error().
-    void set_sam_blocker(const std::string& reason) { _sam_blocker = reason; }
+    void set_sam_blocker(const std::string& reason);
     // Cancels, joins and unloads, before another inference user starts. Keeps
     // the clicks; the next prompt reloads. Returns the milliseconds joined.
     double sam_yield();
@@ -202,7 +204,6 @@ private:
     // The pen tool (MaskPanel.cpp drives it; these two have no ImGui).
     void ensure_livewire();
     PathSpace path_space(const Mapping& m) const;
-    MaskSam& sam();
 
     bool _open = false;
     // Set once in open() before the worker starts, read by both threads
@@ -246,7 +247,7 @@ private:
     float _sam_last_score = 0.0f;
     int64_t _sam_last_area = 0;
     std::string _sam_blocker;
-    uint64_t _doc_gen = 0;           // bumped by open, go_to and the reverts; never reset
+    uint64_t _doc_gen = 0;           // bumped where pump() installs a _doc; never reset
     bool _path_mode = false;
     double _livewire_ms = 0.0;
 

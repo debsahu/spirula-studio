@@ -296,7 +296,7 @@ void GuiApp::shutdown() {
     _compare.destroy_gl();
     _compare.close();
     _mesh_preview_open = false;
-    close_native_previews();
+    stop_inference_users();
     _segment.destroy_gl();
     // Same ordering as _compare above: destroy_gl while GL is still current.
     _mask_editor.destroy_gl();
@@ -1255,18 +1255,22 @@ void GuiApp::close_splat() {
     _compare.close();
     _mesh_preview_open = false;
 }
-// Every inference user starts through here, so the mask editor's SAM session
-// gives way here too: one sam::Session in the process, on one unsynchronised
-// stream, and a dataset run ends in nn::shutdown().
 void GuiApp::close_native_previews() {
     _segment.close();
     _geometry_panel.close();
+}
+
+// Every site that starts inference (or tears it down) calls this, never the
+// bare close: the editor's SAM session shares the pool's slots and one
+// unsynchronised stream, and a dataset run ends in nn::shutdown().
+void GuiApp::stop_inference_users() {
+    close_native_previews();
     _mask_editor.sam_yield();
 }
 
 void GuiApp::launch_training(const TrainConfig& cfg, const std::string& preset) {
     if (cfg.data.empty() || native_work_busy()) return;
-    close_native_previews();
+    stop_inference_users();
     close_splat();
 #ifdef SS_BACKEND_VULKAN
     if (!freeze_native_device()) return;
@@ -1691,7 +1695,7 @@ bool GuiApp::launch_batch_mesh(BatchTask& task, const BatchRow& row) {
     follow_batch_screen(BatchStage::Mesh);
     // The engine has to be free: the mesh child wants the VRAM, and both the
     // last preview and the run that trained this model are holding it.
-    close_native_previews();
+    stop_inference_users();
     close_mesh_preview();
     close_splat();
     _runner.release_engine();
@@ -3323,7 +3327,7 @@ bool GuiApp::launch_dataset_job() {
     // choice, before any preview, decode or child is dispatched. A rejected or
     // conflicting request is reported and the run does not start.
     if (native_work_busy()) return false;
-    close_native_previews();
+    stop_inference_users();
     close_splat();
     if (!freeze_native_device()) return false;
     app::set_crash_note("building dataset " + _workspace);
@@ -4519,7 +4523,7 @@ void GuiApp::open_mask_preview() {
     // A preview decodes and segments on the GPU, so it is a GPU-consuming
     // operation like the run itself: it freezes the same one choice first.
     // The other preview owns the same process-wide inference pool.
-    close_native_previews();
+    stop_inference_users();
     close_splat();
     if (!freeze_native_device()) return;
     _segment.open(preview_source((size_t)_mask_preview_input),
@@ -4784,7 +4788,7 @@ void GuiApp::open_geometry_preview() {
     }
     // One multi-gigabyte backbone at a time: the mask preview holds SAM and
     // this one holds Metric3D, and the inference layer's pool is process-wide.
-    close_native_previews();
+    stop_inference_users();
     close_splat();
     if (!freeze_native_device()) return;
     const size_t idx =
@@ -6561,7 +6565,7 @@ bool GuiApp::mesh_dataset_found() {
 
 void GuiApp::start_meshing() {
     if (_mesh_job.checkpoint.empty() || native_work_busy()) return;
-    close_native_previews();
+    stop_inference_users();
     close_splat();
 #ifdef SS_BACKEND_VULKAN
     if (!freeze_native_device()) return;

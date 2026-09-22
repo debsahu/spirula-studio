@@ -175,6 +175,8 @@ private:
     void close_splat();
     // Close GPU-backed previews before another native handoff.
     void close_native_previews();
+    // close_native_previews(), and the mask editor releases its SAM session.
+    void stop_inference_users();
 
 public:
     // Drag-and-drop entry (GLFW drop callback, main thread): auto-detects

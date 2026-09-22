@@ -30,6 +30,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <new>
 #include <string>
 #include <thread>
 #include <vector>
@@ -3089,6 +3090,99 @@ void test_session_sam_blocker() {
           "sam yield: a yield settles a pending model change");
 }
 
+// release() hands the device back AND forgets what the last job said, in both
+// builds: a model switch must not go on showing the old checkpoint's error.
+void test_mask_sam_release_forgets() {
+    mk::MaskSam sam;
+    sam.refuse("the old checkpoint failed to load");
+    sam.post_result("k", std::vector<mk::AddRegion>(1), true, 0.5f, 1.0);
+    sam.release();
+    check(sam.error().empty(), "sam release: the last error is forgotten");
+    std::string key;
+    std::vector<mk::AddRegion> out;
+    bool keep = false;
+    float score = 0.0f;
+    double ms = 0.0;
+    check(!sam.take_result(key, out, keep, score, ms),
+          "sam release: an untaken result is forgotten");
+}
+
+// The job body runs inside run_guarded(): a throw becomes a reported error,
+// never std::terminate on the job thread.
+void test_mask_sam_run_guarded() {
+    std::string got = "untouched";
+    int ran = 0;
+    mk::run_guarded([&] { ran++; }, [&](const std::string& e) { got = e; });
+    check(ran == 1 && got == "untouched",
+          "sam guard: a body that returns runs once and reports nothing");
+    mk::run_guarded([] { throw std::bad_alloc(); }, [&](const std::string& e) { got = e; });
+    check(got == std::bad_alloc().what(), "sam guard: a std::exception lands with its what()");
+    got = "untouched";
+    mk::run_guarded([] { throw 7; }, [&](const std::string& e) { got = e; });
+    check(!got.empty() && got != "untouched", "sam guard: a throw of a non-exception still lands");
+}
+
+// A planted result stands in for the job: one stamped before a revert is
+// counted and dropped with the document clean, one stamped now paints, and a
+// finished result a yield throws away is counted too.
+void test_session_sam_result_stamp() {
+    Fixture f = make_dataset("sam_result_stamp", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam result: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    mk::AddRegion g;
+    g.w = 64;
+    g.h = 48;
+    g.mask.assign((size_t)64 * 48, 0);
+    for (int y = 10; y < 20; y++)
+        for (int x = 10; x < 30; x++) g.mask[(size_t)y * 64 + x] = 255;
+    g.score = 0.9f;
+    const std::string old = s.sam_frame_stamp();
+    s.revert_open_frame();
+    settle(s);
+    s.sam().post_result(old, {g}, false, 0.9f, 5.0);
+    const mk::Rect r0 = s.sam_pump();
+    check(s.sam_dropped() == 1 && s.sam_results() == 0 && r0.empty() && s.doc() &&
+              !s.doc()->dirty(),
+          "sam result: a result stamped before a revert is dropped, the document clean");
+    s.sam().post_result(s.sam_frame_stamp(), {g}, false, 0.9f, 5.0);
+    const mk::Rect r1 = s.sam_pump();
+    check(s.sam_results() == 1 && s.sam_dropped() == 1 && !r1.empty() && s.doc() &&
+              s.doc()->dirty() && s.sam_last_area() == 200,
+          "sam result: a result with the current stamp paints its 200 pixels");
+    s.sam().post_result(s.sam_frame_stamp(), {g}, false, 0.9f, 5.0);
+    s.sam_yield();
+    check(s.sam_dropped() == 2 && s.sam_results() == 1,
+          "sam yield: a finished result the yield throws away is counted as dropped");
+}
+
+// Lifting a pause takes its message with it; any other error stays.
+void test_session_sam_blocker_clears_its_own_error() {
+    namespace em = spirula::i18n::msg::maskedit;
+    const std::string run = em::sam_blocked_run.get();
+    Fixture f = make_dataset("sam_blocker_clear", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam unpause: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    s.set_sam_blocker(run);
+    s.sam_prompt_point(1.0f, 1.0f, false);
+    check(s.sam_error() == run, "sam unpause: the paused prompt reported the pause");
+    s.set_sam_blocker("");
+    check(s.sam_error().empty(), "sam unpause: the pause message goes when the pause does");
+    s.sam_prompt_point(1.0f, 1.0f, false);
+    const std::string real = s.sam_error();
+    s.set_sam_blocker(run);
+    s.set_sam_blocker("");
+    check(!real.empty() && real != run && s.sam_error() == real,
+          "sam unpause: lifting a pause leaves a real error standing");
+}
+
 }  // namespace
 
 int main() {
@@ -3153,6 +3247,10 @@ int main() {
     test_session_model_sync();
     test_session_sam_stamp();
     test_session_sam_blocker();
+    test_mask_sam_release_forgets();
+    test_mask_sam_run_guarded();
+    test_session_sam_result_stamp();
+    test_session_sam_blocker_clears_its_own_error();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

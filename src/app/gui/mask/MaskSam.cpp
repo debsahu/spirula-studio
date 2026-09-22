@@ -5,6 +5,7 @@
 #include "app/gui/MaskSettings.h"
 #include "i18n/catalog/MaskEdit.h"
 
+#include <exception>
 #include <mutex>
 
 #ifdef SS_BUILD_SAM
@@ -17,7 +18,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
-#include <exception>
 #include <thread>
 #endif
 
@@ -31,22 +31,22 @@ struct MaskSam::State {
     bool text_hint = false;
     MaskSettings prompt;             // the EDITOR'S own, never the dataset screen's
     mutable std::mutex mu;
-    std::string status, error;       // guarded by mu
-#ifdef SS_BUILD_SAM
-    // The job thread's alone while `running`; the UI thread's after a join.
-    std::unique_ptr<sam::Session> session;
-    std::string loaded_model, encoded_key;
-    std::thread worker;              // UI thread only
-    std::atomic<bool> running{false}, cancel{false};
-    bool loaded = false;             // guarded by mu, with everything below
-    bool loaded_text = false;
-    double vram_mib = -1.0;
+    std::string status, error;       // guarded by mu, with the result below
     bool ready = false;
     std::string result_key;
     std::vector<AddRegion> result;
     bool result_keep = false;
     float result_score = 0.0f;
     double result_ms = 0.0;
+#ifdef SS_BUILD_SAM
+    // The job thread's alone while `running`; the UI thread's after a join.
+    std::unique_ptr<sam::Session> session;
+    std::string loaded_model, encoded_key;
+    std::thread worker;              // UI thread only
+    std::atomic<bool> running{false}, cancel{false};
+    bool loaded = false;             // guarded by mu, with the two below
+    bool loaded_text = false;
+    double vram_mib = -1.0;
 #endif
 };
 
@@ -96,6 +96,66 @@ std::string MaskSam::error() const {
     return _s->error;
 }
 
+void run_guarded(const std::function<void()>& body,
+                 const std::function<void(const std::string&)>& on_throw) {
+    try {
+        body();
+    } catch (const std::exception& e) {
+        on_throw(e.what());
+    } catch (...) {
+        on_throw("unknown error");
+    }
+}
+
+bool MaskSam::clear_error_if(const std::string& reason) {
+    std::lock_guard<std::mutex> lk(_s->mu);
+    if (_s->error != reason) return false;
+    _s->error.clear();
+    return true;
+}
+
+void MaskSam::publish(State& s, std::string frame_key, std::vector<AddRegion> regions, bool keep,
+                      float score, double ms) {
+    std::lock_guard<std::mutex> lk(s.mu);
+    s.result_key = std::move(frame_key);
+    s.result = std::move(regions);
+    s.result_keep = keep;
+    s.result_score = score;
+    s.result_ms = ms;
+    s.ready = true;
+    s.status.clear();
+}
+
+void MaskSam::post_result(std::string frame_key, std::vector<AddRegion> regions, bool keep,
+                          float score, double ms) {
+    publish(*_s, std::move(frame_key), std::move(regions), keep, score, ms);
+}
+
+bool MaskSam::take_result(std::string& frame_key, std::vector<AddRegion>& out, bool& keep,
+                          float& score, double& ms) {
+    std::lock_guard<std::mutex> lk(_s->mu);
+    if (!_s->ready) return false;
+    _s->ready = false;
+    frame_key = std::move(_s->result_key);
+    out = std::move(_s->result);
+    keep = _s->result_keep;
+    score = _s->result_score;
+    ms = _s->result_ms;
+    return true;
+}
+
+// Joins any job first (release_device), so nothing it writes can land after.
+bool MaskSam::release() {
+    release_device();
+    std::lock_guard<std::mutex> lk(_s->mu);
+    const bool discarded = _s->ready;
+    _s->ready = false;
+    _s->result.clear();
+    _s->status.clear();
+    _s->error.clear();
+    return discarded;
+}
+
 void MaskSam::refuse(const std::string& reason) {
     std::lock_guard<std::mutex> lk(_s->mu);
     _s->status.clear();
@@ -139,7 +199,7 @@ bool MaskSam::busy() const { return _s->running.load(); }
 
 void MaskSam::cancel() { _s->cancel = true; }
 
-void MaskSam::release() {
+void MaskSam::release_device() {
     _s->cancel = true;
     if (_s->worker.joinable()) _s->worker.join();
     if (_s->session) _s->session->unload();
@@ -150,10 +210,6 @@ void MaskSam::release() {
     _s->loaded = false;
     _s->loaded_text = false;
     _s->vram_mib = -1.0;
-    _s->ready = false;
-    _s->result.clear();
-    _s->status.clear();
-    _s->error.clear();
 }
 
 double MaskSam::vram_mib() const {
@@ -196,19 +252,6 @@ bool MaskSam::start_text(const std::string& frame_key,
     return launch(std::move(j));
 }
 
-bool MaskSam::take_result(std::string& frame_key, std::vector<AddRegion>& out, bool& keep,
-                          float& score, double& ms) {
-    std::lock_guard<std::mutex> lk(_s->mu);
-    if (!_s->ready) return false;
-    _s->ready = false;
-    frame_key = std::move(_s->result_key);
-    out = std::move(_s->result);
-    keep = _s->result_keep;
-    score = _s->result_score;
-    ms = _s->result_ms;
-    return true;
-}
-
 // Refuses while a job runs, so at most one frame buffer is ever held here; a
 // refused job's reference dies with `j` on return.
 bool MaskSam::launch(Job j) {
@@ -237,7 +280,7 @@ bool MaskSam::launch(Job j) {
 }
 
 // The job thread. A throw, the 361 MB frame copy's bad_alloc among them, ends
-// the job with the reason in error rather than in std::terminate.
+// the job with the reason in error (run_guarded).
 void MaskSam::run(State& s, Job j) {
     auto finish = [&s](const std::string& error) {
         {
@@ -247,13 +290,7 @@ void MaskSam::run(State& s, Job j) {
         }
         s.running = false;
     };
-    try {
-        run_stages(s, std::move(j), finish);
-    } catch (const std::exception& e) {
-        finish(e.what());
-    } catch (...) {
-        finish("unknown error");
-    }
+    run_guarded([&] { run_stages(s, std::move(j), finish); }, finish);
 }
 
 // `cancel` is read between stages, never inside one. Measured at 15520x7760
@@ -353,16 +390,10 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
     {
         std::lock_guard<std::mutex> lk(s.mu);
         s.vram_mib = mib;
-        s.result_key = j.frame_key;
-        s.result = std::move(out);
-        s.result_keep = j.keep;
-        s.result_score = best;
-        s.result_ms =
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
-                .count();
-        s.ready = true;
-        s.status.clear();
     }
+    publish(s, j.frame_key, std::move(out), j.keep, best,
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                .count());
     s.running = false;
 }
 
@@ -375,7 +406,7 @@ double MaskSam::pool_mib() { return -1.0; }
 bool MaskSam::text_supported() const { return false; }
 bool MaskSam::busy() const { return false; }
 void MaskSam::cancel() {}
-void MaskSam::release() {}
+void MaskSam::release_device() {}
 double MaskSam::vram_mib() const { return -1.0; }
 
 bool MaskSam::start_points(const std::string&, std::shared_ptr<const std::vector<uint8_t>>, int,
@@ -386,9 +417,6 @@ bool MaskSam::start_points(const std::string&, std::shared_ptr<const std::vector
 bool MaskSam::start_text(const std::string&, std::shared_ptr<const std::vector<uint8_t>>, int,
                          int, const std::string&) {
     refuse(msg::sam_unavailable_build.get());
-    return false;
-}
-bool MaskSam::take_result(std::string&, std::vector<AddRegion>&, bool&, float&, double&) {
     return false;
 }
 

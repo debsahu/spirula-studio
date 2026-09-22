@@ -1171,7 +1171,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     PrepJob job = job_in;
 #ifdef SS_BUILD_SAM
     // Hand the GPU back on any exit: a ~2 GB SAM 3 pool would outlive the run.
-    // Safe: close_native_previews() freed every other Session before launch --
+    // Safe: stop_inference_users() freed every other Session before launch --
     // both previews' and the mask editor's -- and the editor refuses during a run.
     struct ReleaseDevice {
         ~ReleaseDevice() { nn::shutdown(); }

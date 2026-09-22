@@ -106,7 +106,6 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
     _index = std::move(idx);
     _idx = -1;
     _doc.reset();
-    _doc_gen++;
     _rgb.reset();
     _win_dirty = true;
     _close_requested = false;
@@ -277,6 +276,7 @@ void MaskSession::pump() {
     if (have_saved && _doc && _doc->key() == saved_key) _doc->mark_saved(saved_rev, saved_comp);
     if (!have_loaded) return;
     _doc = std::move(l.doc);
+    _doc_gen++;   // by construction: every _doc arrives here
     _rgb = std::make_shared<const std::vector<uint8_t>>(std::move(l.rgb));
     _fw = l.fw;
     _fh = l.fh;
@@ -302,7 +302,6 @@ void MaskSession::go_to(int i) {
     if (i < 0 || i >= frame_count() || i == _idx) return;
     if (_doc && _doc->dirty()) save();
     _doc.reset();
-    _doc_gen++;
     _rgb.reset();
     load_frame(i);
 }
@@ -352,7 +351,6 @@ void MaskSession::revert_open_frame() {
     const std::string key = _doc->key();
     const int i = _idx;
     _doc.reset();
-    _doc_gen++;
     _rgb.reset();
     enqueue([this, key] {
         std::string err;
@@ -367,7 +365,6 @@ void MaskSession::revert_open_frame() {
 void MaskSession::revert_every_frame() {
     const int i = _idx;
     _doc.reset();
-    _doc_gen++;
     _rgb.reset();
     enqueue([this] {
         std::string err;
@@ -576,11 +573,18 @@ std::string MaskSession::sam_blocker(bool mask_preview, bool depth_preview, bool
 
 // Joins on the UI thread, up to one stage of a running job: the price of the
 // other user never sharing the device's unsynchronised stream with this one.
+// A lifted pause takes its own message with it and nothing else.
+void MaskSession::set_sam_blocker(const std::string& reason) {
+    if (reason == _sam_blocker) return;
+    if (_sam && !_sam_blocker.empty()) _sam->clear_error_if(_sam_blocker);
+    _sam_blocker = reason;
+}
+
 double MaskSession::sam_yield() {
     if (!_sam) return 0.0;
     const auto t0 = std::chrono::steady_clock::now();
     _sam->cancel();
-    _sam->release();
+    if (_sam->release()) _sam_dropped++;
     _sam_release_pending = false;
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
         .count();

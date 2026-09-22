@@ -18,6 +18,11 @@ struct MaskSettings;
 
 namespace mask {
 
+// Runs `body`; a throw of any kind becomes one `on_throw(reason)` call rather
+// than std::terminate on the job thread.
+void run_guarded(const std::function<void()>& body,
+                 const std::function<void(const std::string&)>& on_throw);
+
 struct SamPoint {
     float x = 0.0f, y = 0.0f;   // frame pixels
     bool positive = true;       // false: "not this", as SegmentPanel's right click
@@ -44,9 +49,9 @@ public:
     bool text_supported() const;
     bool busy() const;
     void cancel();
-    // Hands the weights back (sam::Session::unload), joining any running job.
-    // Keeps the model path: the next prompt reloads from it.
-    void release();
+    // Joins any job, hands the weights back and forgets status, error and any
+    // untaken result -- true if there was one. Keeps the model path and clicks.
+    bool release();
     // The session's own TOTAL, MiB, as of the last job; -1 with no session.
     double vram_mib() const;
 
@@ -75,11 +80,20 @@ public:
     std::string error() const;
     // A prompt refused before it reached the job: `reason` becomes error().
     void refuse(const std::string& reason);
+    // Clears error() only if it still reads `reason`, and says whether it did.
+    bool clear_error_if(const std::string& reason);
+    // The job's hand-off of a finished result; public so a test can stand in
+    // for the job in a build without SAM.
+    void post_result(std::string frame_key, std::vector<AddRegion> regions, bool keep,
+                     float score, double ms);
 
 private:
     struct State;
     struct Job;
     bool launch(Job job);
+    void release_device();   // the SAM-only half of release()
+    static void publish(State& s, std::string frame_key, std::vector<AddRegion> regions,
+                        bool keep, float score, double ms);
     static void run(State& s, Job job);
     static void run_stages(State& s, Job job,
                            const std::function<void(const std::string&)>& finish);
