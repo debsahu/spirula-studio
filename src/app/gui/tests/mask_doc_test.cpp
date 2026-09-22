@@ -97,6 +97,30 @@ bool write_jpg_rgb(const fs::path& p, int w, int h, const std::vector<uint8_t>& 
     return stbi_write_jpg(p.string().c_str(), w, h, 3, px.data(), 90) != 0;
 }
 
+// write_jpg_rgb with an Exif APP1 carrying `orientation` spliced in after SOI:
+// stbi writes none, so every other session fixture has the identity turn.
+bool write_jpg_rgb_oriented(const fs::path& p, int w, int h, const std::vector<uint8_t>& px,
+                            int orientation) {
+    std::vector<uint8_t> jpg;
+    stbi_write_jpg_to_func(
+        [](void* ctx, void* data, int n) {
+            auto* out = static_cast<std::vector<uint8_t>*>(ctx);
+            out->insert(out->end(), (const uint8_t*)data, (const uint8_t*)data + n);
+        },
+        &jpg, w, h, 3, px.data(), 90);
+    if (jpg.size() < 2) return false;
+    std::vector<uint8_t> seg = {0xFF, 0xE1, 0, 0, 'E', 'x', 'i', 'f', 0, 0,
+                                'I', 'I', 42, 0, 8, 0, 0, 0,          // TIFF, IFD0 at 8
+                                1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0,   // Orientation, SHORT
+                                (uint8_t)orientation, 0, 0, 0, 0, 0, 0, 0};
+    seg[2] = (uint8_t)((seg.size() - 2) >> 8);
+    seg[3] = (uint8_t)(seg.size() - 2);
+    jpg.insert(jpg.begin() + 2, seg.begin(), seg.end());
+    std::error_code ec;
+    fs::create_directories(p.parent_path(), ec);
+    return mk::write_file_atomic(p.string(), jpg.data(), jpg.size());
+}
+
 std::vector<uint8_t> file_bytes(const fs::path& p) {
     std::vector<uint8_t> out;
     mk::read_file(p.string(), out);
@@ -447,8 +471,10 @@ void test_fingerprint_decides() {
     write_png_gray(f.masks / "a.png", 64, 48, synth_mask(64, 48, 5));
     write_png_gray(f.layer / "a.drop.png", 32, 24, std::vector<uint8_t>(32 * 24, 255));
     const std::vector<uint8_t> base_before = file_bytes(f.layer / "a.base.png");
-    check(mk::recomposite_all(layer_root, err) == 0 && err.find("a") != std::string::npos,
-          "mismatch refuses without a batch abort: " + err);
+    // The batch error is "<key>: <why>" per failure; a bare find("a") matched the scratch path.
+    check(mk::recomposite_all(layer_root, err) == 0 && err.rfind("a: ", 0) == 0 &&
+              err.find("; ") == std::string::npos,
+          "mismatch refuses without a batch abort, naming key a alone: " + err);
     check(file_bytes(f.layer / "a.base.png") == base_before, "base untouched on refusal");
 }
 
@@ -583,7 +609,8 @@ void test_recomposite_all_continues_past_failure() {
 
     const int rebased = mk::recomposite_all(layer_root, err);
     check(rebased == 2, "a and c rebase despite b's refusal, got " + std::to_string(rebased));
-    check(err.find('b') != std::string::npos, "the failing key is named in the batch error: " + err);
+    check(err.rfind("b: ", 0) == 0 && err.find("; ") == std::string::npos,
+          "the batch error is exactly one entry, keyed b: " + err);
     // recomposite_all loads its own index off disk; read that back rather
     // than the caller's now-stale copy.
     mk::LayerIndex disk;
@@ -630,7 +657,8 @@ void test_revert_all_continues_past_failure() {
 
     const int reverted = mk::revert_all(layer_root, err);
     check(reverted == 2, "a and c revert despite b's refusal, got " + std::to_string(reverted));
-    check(err.find('b') != std::string::npos, "the failing key is named in the batch error: " + err);
+    check(err.rfind("b: ", 0) == 0 && err.find("; ") == std::string::npos,
+          "the batch error is exactly one entry, keyed b: " + err);
     check(file_bytes(f.masks / "a.png") == original_a, "a genuinely reverted, not just counted");
     check(file_bytes(f.masks / "c.png") == original_c, "c genuinely reverted -- attempted past b");
     for (const char* tag : {"a.base.png", "a.drop.png", "a.keep.png",
@@ -870,7 +898,8 @@ void test_undo_redo() {
         check(exclusive(d), "invariant after stroke " + std::to_string(k));
     }
     check(d.history_size() == 96 && d.can_undo() && !d.can_redo(), "96 ops held");
-    check(d.history_bytes() <= mk::kMaxHistoryBytes, "history bytes under the cap");
+    // No cap check here: 96 small strokes fill 0.01% of kMaxHistoryBytes, so it
+    // could not fail. test_byte_cap_eviction drives the cap at a reachable size.
     check(d.last_label() == &spirula::i18n::msg::maskedit::op_clear, "last label is the 96th op's");
     // The 95th op (k=94, 94%3==1) is ForceKeep -- separates a ForceDrop/
     // ForceKeep label swap from the all-Clear tail this loop ends on.
@@ -1202,6 +1231,66 @@ void test_derive_window() {
     src.composite = comp; src.drop = zero; src.keep = zero;
     mk::derive_window(win, win.r, src, rgba);
     check(rgba[12] == 0 && rgba[15] == 255, "frame sampled to mask grid, no crash");
+}
+
+// The frame at twice the mask's size, every pixel distinct and every texel
+// kept, so each texel IS a frame pixel: skipping the scale reads another one.
+void test_derive_window_frame_scale() {
+    const int W = 4, H = 2, fw = 8, fh = 4;
+    std::vector<uint8_t> rgb((size_t)fw * fh * 3);
+    auto px = [&](int x, int y) { return &rgb[((size_t)y * fw + x) * 3]; };
+    for (int y = 0; y < fh; y++)
+        for (int x = 0; x < fw; x++) {
+            px(x, y)[0] = (uint8_t)(10 + 20 * x);
+            px(x, y)[1] = (uint8_t)(7 + 50 * y);
+            px(x, y)[2] = (uint8_t)(3 * x + y);
+        }
+    const std::vector<uint8_t> kept((size_t)W * H, 255), zero((size_t)W * H, 0);
+    mk::WindowSource src;
+    src.rgb = rgb.data(); src.fw = fw; src.fh = fh;
+    src.composite = kept.data(); src.drop = zero.data(); src.keep = zero.data();
+    src.W = W; src.H = H;
+    mk::Window win;
+    win.r = {0, 0, W, H};
+    win.step = 1;
+    win.tw = W;
+    win.th = H;
+    std::vector<uint8_t> rgba;
+    mk::derive_window(win, win.r, src, rgba);
+    bool scaled = true, separates = false;
+    for (int my = 0; my < H; my++)
+        for (int mx = 0; mx < W; mx++) {
+            const uint8_t* want = px(2 * mx, 2 * my);
+            const uint8_t* got = &rgba[((size_t)my * W + mx) * 4];
+            scaled &= got[0] == want[0] && got[1] == want[1] && got[2] == want[2];
+            separates |= std::memcmp(px(mx, my), want, 3) != 0;
+        }
+    check(separates, "frame scale: fixture, the unscaled pixel differs from the scaled one");
+    check(scaled, "frame scale: texel (x, y) of a 4x2 mask shows frame pixel (2x, 2y) of an 8x4 frame");
+}
+
+// Every other view-math check uses a square pane, where a pane_w/pane_h swap
+// changes nothing. 500x300 over 800x600 separates them at every step.
+void test_view_math_non_square_pane() {
+    const int dw = 800, dh = 600;
+    const float pw = 500.0f, ph = 300.0f;
+    check(std::fabs(mk::fit_scale(dw, dh, pw, ph) - 0.5f) < 1e-6f &&
+              std::fabs(mk::fit_scale(dw, dh, ph, pw) - 0.375f) < 1e-6f,
+          "non-square pane: fit_scale is 0.5, and 0.375 with the pane transposed");
+    mk::View v{2.0f, 400.0f, 300.0f};
+    const mk::Mapping m = mk::mapping(v, dw, dh, pw, ph);
+    check(std::fabs(m.scale - 1.0f) < 1e-6f && std::fabs(m.x0 - 150.0f) < 1e-3f &&
+              std::fabs(m.y0 - 150.0f) < 1e-3f,
+          "non-square pane: mapping's origin is half the pane WIDTH left, half its HEIGHT up");
+    const mk::Window w = mk::window_for(m, dw, dh, pw, ph);
+    check(w.r.x0 == 150 && w.r.y0 == 150 && w.r.x1 == 651 && w.r.y1 == 451,
+          "non-square pane: the window spans pane_w across and pane_h down");
+    const float sx = 420.0f, sy = 40.0f;
+    const float bx = m.to_mask_x(sx), by = m.to_mask_y(sy);
+    mk::zoom_about(v, 1.5f, sx, sy, dw, dh, pw, ph);
+    const mk::Mapping after = mk::mapping(v, dw, dh, pw, ph);
+    check(std::fabs(after.to_mask_x(sx) - bx) < 1e-2f && std::fabs(after.to_mask_y(sy) - by) < 1e-2f,
+          "non-square pane: zoom_about keeps an off-centre cursor's point put");
 }
 
 // ---------------------------------------------------------------------------
@@ -1748,6 +1837,57 @@ void test_session_close_resets_paths() {
     check(s.layer_root().empty() && s.mask_root().empty(), "closed session reports no paths");
     check(s.frame_count() == 0 && s.frame_index() == -1, "closed session reports no frames");
     check(!s.is_open(), "closed session reports not open");
+}
+
+// Orientation 6 (one clockwise turn) on a 64x48 frame whose mask is 32x24:
+// shown 24x32. Displayed pixel (dx, dy) is stored (dy, 23 - dx), then 2x to
+// the frame, so the turn and the frame scale are each told apart.
+void test_session_exif_turn() {
+    Fixture f = make_dataset("session_exif_turn", 64, 48, {"a"}, /*with_masks=*/false);
+    const fs::path jpg = f.images / "a.jpg";
+    check(write_jpg_rgb_oriented(jpg, 64, 48, synth_rgb(64, 48, 0), 6),
+          "exif turn: fixture JPEG written");
+    check(app::photo_turn(jpg.string()).turns_cw == 1,
+          "exif turn: fixture, photo_turn reads Orientation 6 back as one clockwise turn");
+    write_png_gray(f.masks / "a.png", 32, 24, std::vector<uint8_t>((size_t)32 * 24, 255));
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "exif turn: open: " + err);
+    settle(s);
+    check(s.doc() && s.doc()->width() == 32 && s.doc()->height() == 24,
+          "exif turn: the document is the mask, stored 32x24");
+    check(s.turn().turns_cw == 1 && !s.turn().mirror, "exif turn: the session holds the frame's turn");
+    check(s.shown_width() == 24 && s.shown_height() == 32, "exif turn: shown 24x32, the turned mask");
+    if (!s.doc()) return;
+
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {2.0f, 26.0f, 6.0f, 30.0f};
+    const mk::Rect shown = s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    const std::vector<uint8_t>& drop = s.doc()->drop();
+    int painted = 0, stray = 0;
+    for (int y = 0; y < 24; y++)
+        for (int x = 0; x < 32; x++)
+            if (drop[(size_t)y * 32 + x]) {
+                painted++;
+                stray += x < 25 || x > 30 || y < 17 || y > 22;
+            }
+    check(drop[(size_t)19 * 32 + 28] == 255 && painted > 0 && stray == 0,
+          "exif turn: a stroke at displayed (2..6, 26..30) paints stored (26..30, 18..21) only");
+    check(shown.x0 <= 2 && shown.x1 >= 6 && shown.x1 <= 8 && shown.y0 <= 26 && shown.y1 >= 30,
+          "exif turn: commit_stroke reports the change in DISPLAYED pixels");
+
+    const mk::PathSpace sp = s.path_space(m);
+    float fx = 0.0f, fy = 0.0f, bx = 0.0f, by = 0.0f;
+    sp.to_frame(4.5f, 28.5f, fx, fy);
+    check(std::fabs(fx - 57.0f) < 1e-3f && std::fabs(fy - 39.0f) < 1e-3f,
+          "exif turn: path_space maps displayed (4.5, 28.5) to frame (57, 39)");
+    sp.from_frame(57.0f, 39.0f, bx, by);
+    check(std::fabs(bx - 4.5f) < 1e-3f && std::fabs(by - 28.5f) < 1e-3f,
+          "exif turn: path_space's from_frame inverts to_frame");
 }
 
 // ---------------------------------------------------------------------------
@@ -3029,6 +3169,8 @@ int main() {
     test_orientation_mapping();
     test_view_math();
     test_derive_window();
+    test_derive_window_frame_scale();
+    test_view_math_non_square_pane();
     test_session();
     test_session_eraser();
     test_session_size_mismatch();
@@ -3038,6 +3180,7 @@ int main() {
     test_session_corrupt_index_refuses();
     test_session_close_reports_a_failed_save();
     test_session_close_resets_paths();
+    test_session_exif_turn();
     test_path_fill_parity();
     test_livewire_features();
     test_livewire_mapping();

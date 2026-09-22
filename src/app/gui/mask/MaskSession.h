@@ -89,6 +89,8 @@ public:
     void set_radius(float r) { _brush = clamp_brush(r); }
     View& view() { return _view; }
     WindowSource window_source() const;
+    // Pane px <-> frame px: the view, the EXIF turn, the mask-to-frame scale.
+    PathSpace path_space(const Mapping& m) const;
     // The open frame's pixels, co-owned: a holder keeps them past a frame change.
     std::shared_ptr<const std::vector<uint8_t>> frame_pixels() const { return _rgb; }
 
@@ -185,9 +187,8 @@ private:
     void handle_keys(const Mapping& m);
     void ensure_window(const Mapping& m, float pane_w, float pane_h);
     void upload_rect(const Rect& shown);
-    // The pen tool (MaskPanel.cpp drives it; these two have no ImGui).
+    // The pen tool (MaskPanel.cpp drives it; this and path_space have no ImGui).
     void ensure_livewire();
-    PathSpace path_space(const Mapping& m) const;
     MaskSam& sam();
 
     bool _open = false;
