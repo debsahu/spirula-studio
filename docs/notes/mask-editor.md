@@ -417,6 +417,107 @@ building and running `align_fit_test` from a clean worktree at `66342882`
 targets in Step 2 all reported 0; only this ninth, unrelated test misses, and
 it needs its own investigation outside this plan.
 
+### Criterion #13: re-doing a real hand correction on the playroom capture
+
+The last check before this ships against everything else in this plan being a
+synthetic fixture or an invented bench: does the editor reproduce a correction
+the operator already made by hand, on their own real 120 MP capture, with a
+separate Python tool, before this editor existed?
+
+Source data lives outside this submodule, in the parent slam repo at
+`work/osmo_playroom/`: `masks_eq/f00000/` (the SAM 3 output before hand
+correction) and `masks_eq_edited/f00000/` (what the operator painted),
+15520x7760, mode L, values exactly `{0, 255}`. **Both of those trees are
+255 = DROP -- the opposite of spirula's 255 = KEEP** (`src/app/FrameMask.h:53-54`).
+Inverted on the way in with `PIL.ImageOps.invert`, confirmed by re-reading the
+inverted file's own pixel values afterward, not assumed from the invert call
+succeeding.
+
+**Assembled a one-frame spirula dataset** (`/tmp/playroom_mask_check/`:
+`images/f00000.jpg` copied from `masks_eq/f00000/frame.jpg`'s symlink target,
+`masks/f00000.png` = the inverted SAM mask). Confirmed after inversion: size
+`(15520, 7760)`, 2 distinct values `{0, 255}`, SAM drop frac **0.159191**
+(brief expected ~0.159) and the operator's recorded reference drop frac
+**0.068559**, matching `mask_editor_edits.json`'s `f00000.drop_frac` exactly.
+One brief defect found and fixed here: its Step 1 `uv run` line lists
+`--with pillow` only but the script imports `numpy` -- ran with
+`--with pillow --with numpy` instead, which is the only change from the
+brief's script.
+
+**Diffed the SAM mask against the operator's reference before touching the
+GUI**, to know what the correction actually was rather than guessing at
+strokes: `recovered = ref_keep & ~sam_keep` (operator force-kept what SAM had
+dropped) is **9.07%** of the frame and, visualized at 8x downsample, is almost
+entirely a **sharp, full-width horizontal band from row 7056 to the bottom
+edge (row 7759 of 7760)** -- the blanket nadir-sweep cone this project's
+CLAUDE.md already documents recovering on a different capture from this same
+pipeline family. `newly_dropped = sam_keep & ~ref_keep` (operator dropped what
+SAM had kept) is **0.0095%**, confined to a thin outline around the
+already-SAM-dropped person/vacuum silhouette -- edge refinement, not a second
+region. Computed the discriminating-power null required by this task's
+instructions before running the GUI at all: scoring the **unmodified SAM
+mask** against the reference (i.e. "painted nothing") gives IoU **0.4298**,
+far under the 0.97 bar -- so a passing score here cannot be a check that
+cannot fail.
+
+**Re-did the correction in the real app**, driven through
+`SS_GUI_AUTOMATION=1` + `guictl.py` (`build/spirula`, not the `.app` bundle --
+the bundle binary hung idle at `_glfwWaitEventsTimeoutCocoa` and never bound
+the automation port on this run; `build/spirula` answered immediately, same
+binary content otherwise, not investigated further as out of scope).
+`native_dialogs` set to 0 in `~/.config/spirula-studio/gui.conf` for the
+built-in folder browser, restored to 1 after. Opened the dataset, clicked
+**Correct masks**, screenshot confirmed the same SAM mask rendered (`Kept:
+84.1%` = `1 - 0.159191`, exact). Selected the **Box** tool and, with the
+diff analysis above in hand rather than eyeballing the reference image, did a
+single **Ctrl+drag** (force-keep) rectangle spanning the full image width and
+the bottom band (screen coordinates derived from the canvas's reported extent
+in the tree: content x in [68, 1531], y in [92, 823] for a 15520x7760 source
+-- dragged generously past those bounds, [40,750] to [1560,830], to guarantee
+full coverage rather than clipping at the edge). One drag, committed on
+release: **`Kept: 84.1% -> 93.2%`**, `Last stroke: 257.9 ms` -- the one
+in-app timing this task measured, for a single full-width box commit on a
+120 MP mask (not comparable to Task 9's 702 ms `MaskDoc::save` figure for 8K,
+a different operation). **Save**: `mask_edits/f00000.{base,drop,keep}.png` +
+`index.json` appeared (`kept: 0.932195842`, matching the displayed 93.2%
+exactly), status strip read `Saved`, `Corrected frames: 1`. **Done**: `state`
+confirmed `mask_editor_open: false`.
+
+**Compared per the brief's script, unmodified, against the on-disk
+`masks/f00000.png`** (post-Done, i.e. the actually-saved composite, not an
+in-memory value):
+
+```
+drop-region IoU 0.9857  [bar >= 0.97]     -- PASS
+our drop frac 0.067804  recorded 0.068559  delta -0.000755  [bar |delta| <= 0.005] -- PASS
+```
+
+**Both criteria pass, with margin**: IoU is 1.57 points above the 0.97 floor,
+the delta is 6.6x inside the +-0.005 band. Re-verified the saved file is still
+strictly binary after the paint (`{0: 8,166,010 px, 255: 112,269,190 px}`,
+no intermediate values from box-edge antialiasing) and unchanged in size,
+before trusting the numbers above.
+
+**What this run does and does not establish.** One frame, one operator
+correction, one geometrically simple region (a sharp horizontal band, not an
+irregular silhouette) -- a favorable case for a box tool, and the brief's own
+instructions are explicit that a miss here would be reported as a miss rather
+than retried with different strokes. It was not a miss. The stroke I used was
+informed by a pixel-level diff against the reference that a human operator
+redoing this blind would not have available -- a real re-do without that
+foreknowledge would plausibly score lower (more iterations, imprecise
+bounds), and this run does not measure that. What it does establish: the
+paint-to-composite-to-disk pipeline (Box tool, Ctrl force-keep, Save, Done)
+reproduces a real hand correction on a real 120 MP capture to well inside the
+pre-registered tolerance, and the check is not vacuous -- the unmodified-SAM
+null scores 0.4298, decisively separated from both the 0.97 bar and the
+0.9857 result.
+
+Cleanup: `/tmp/playroom_mask_check` and `/tmp/playroom_reference_keep.png`
+removed; `~/.config/spirula-studio/gui.conf`'s `native_dialogs` restored to 1
+from the pre-session backup. `work/osmo_playroom/` in the parent repo was
+only read, never modified.
+
 ## Not in this phase
 
 Path shape, livewire, propagate, find-missing, slideshow, view modes and the
