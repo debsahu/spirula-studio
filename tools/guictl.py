@@ -163,6 +163,9 @@ def cmd_drag(args):
 def cmd_scroll(args):
     p = target(args)
     p["dy"] = args.dy
+    for m in ("shift", "ctrl", "alt"):
+        if getattr(args, m):
+            p[m] = 1
     print(json.dumps(call("/ui/scroll", p)))
 
 
@@ -259,6 +262,8 @@ def build_parser():
     p = sub.add_parser("scroll")
     add_target(p)
     p.add_argument("--dy", type=float, default=-1.0)
+    for m in ("shift", "ctrl", "alt"):
+        p.add_argument("--" + m, action="store_true")
     p.set_defaults(func=cmd_scroll)
 
     p = sub.add_parser("key", help='a chord, e.g. "Ctrl+S" or "Escape"')

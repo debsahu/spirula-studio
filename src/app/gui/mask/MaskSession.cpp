@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 
@@ -399,17 +400,31 @@ Rect MaskSession::commit_stroke(const ShapeStroke& pane_stroke, Paint mode, cons
     return shown_rect(_doc->last_change());
 }
 
-// Plain and Shift add to the dropped set, Ctrl subtracts from it by forcing
-// keep, and both held (Intersect in the 3D editor, meaningless on a layer)
-// clears the correction. Mirrors EditSession::combine_now.
-Paint MaskSession::paint_for(bool shift, bool ctrl) {
+// Plain and Shift drop, Ctrl keeps, both held clears back to the base
+// (Intersect in the 3D editor, meaningless on a layer). The eraser starts
+// from keep instead, so Ctrl still means "the other one".
+Paint MaskSession::paint_for(bool shift, bool ctrl, bool erasing) {
     if (shift && ctrl) return Paint::Clear;
-    if (ctrl) return Paint::ForceKeep;
-    return Paint::ForceDrop;
+    const bool keep = ctrl != erasing;
+    return keep ? Paint::ForceKeep : Paint::ForceDrop;
 }
 
+// Written as a rejection test rather than std::clamp so that a NaN lands on
+// the minimum: std::clamp returns it, and a NaN radius rasterizes nothing
+// while the slider and the status strip still read a number.
+float MaskSession::clamp_brush(float r) {
+    if (!(r > kMinBrush)) return kMinBrush;
+    return r < kMaxBrush ? r : kMaxBrush;
+}
+
+float MaskSession::scale_brush(float r, float factor) { return clamp_brush(r * factor); }
+
 float MaskSession::step_brush(float r, bool grow) {
-    return grow ? std::min(4096.0f, r * 1.18f) : std::max(1.0f, r * 0.85f);
+    return scale_brush(r, grow ? 1.18f : 0.85f);
+}
+
+float MaskSession::wheel_brush(float r, float wheel) {
+    return scale_brush(r, std::pow(1.18f, wheel));
 }
 
 Rect MaskSession::undo() {

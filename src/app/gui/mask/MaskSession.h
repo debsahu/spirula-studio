@@ -74,8 +74,13 @@ public:
     std::string status() const;
     std::string error() const;
     double last_commit_ms() const { return _last_commit_ms; }
-    float brush_radius() const { return _brush; }
-    void set_brush_radius(float r) { _brush = r; }
+    // The brush and the eraser carry separate radii, as every paint program
+    // does; `radius` is whichever tool is up, and the only one `[`/`]`, the
+    // slider and the wheel ever move.
+    bool erasing() const { return _erase; }
+    void set_erasing(bool on) { _erase = on; }
+    float radius() const { return _erase ? _eraser : _brush; }
+    void set_radius(float r) { (_erase ? _eraser : _brush) = clamp_brush(r); }
     View& view() { return _view; }
     WindowSource window_source() const;
 
@@ -85,12 +90,21 @@ public:
     // A finished stroke in pane pixels under `m`: mapped, rasterised, painted.
     // Returns the DISPLAYED rectangle that changed; empty when nothing did.
     Rect commit_stroke(const ShapeStroke& pane_stroke, Paint mode, const Mapping& m);
-    // EditSession::combine_now's grammar over the layers: the mode a stroke
-    // commits with, from the modifiers on the frame it completes.
-    static Paint paint_for(bool shift, bool ctrl);
-    // `[`/`]`'s brush-radius step, clamped to [1, 4096] mask pixels: `grow`
-    // true widens by 1.18x, false narrows by 0.85x.
+    // The mode a stroke commits with, from the modifiers on the frame it
+    // completes and the tool it was drawn with.
+    static Paint paint_for(bool shift, bool ctrl, bool erasing);
+    Paint paint_now(bool shift, bool ctrl) const { return paint_for(shift, ctrl, _erase); }
+    // The radius arithmetic, all of it, in mask pixels. clamp_brush is the
+    // one place [kMinBrush, kMaxBrush] is enforced -- and it folds NaN to the
+    // minimum, which std::clamp would propagate instead.
+    static constexpr float kMinBrush = 1.0f;
+    static constexpr float kMaxBrush = 4096.0f;
+    static float clamp_brush(float r);
+    static float scale_brush(float r, float factor);
+    // `[`/`]`: `grow` true widens by 1.18x, false narrows by 0.85x.
     static float step_brush(float r, bool grow);
+    // Alt+wheel, one notch per `]`, reciprocal so a notch back undoes it.
+    static float wheel_brush(float r, float wheel);
     Rect undo();
     Rect redo();
     void save();
@@ -115,6 +129,11 @@ private:
     void set_corrected(int n);
     Rect shown_rect(const Rect& stored) const;
     // MaskPanel.cpp
+    // The three ways a tool is chosen, so the toolbar and the key handler
+    // cannot drift apart over which flags a switch clears.
+    void pick_tool(ToolId t);
+    void pick_eraser();
+    void pick_path();
     void draw_toolbar();
     void draw_canvas();
     void draw_status();
@@ -145,6 +164,8 @@ private:
     // imgui); a frame change asks it to reset through this flag.
     bool _tool_reset = false;
     float _brush = 24.0f;            // mask pixels
+    float _eraser = 24.0f;           // mask pixels, independent of _brush
+    bool _erase = false;
     bool _panning = false;
     double _last_commit_ms = 0.0;
 

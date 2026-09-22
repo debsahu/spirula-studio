@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 namespace msg = spirula::i18n::msg::maskedit;
 
@@ -105,22 +106,44 @@ void MaskSession::draw() {
         ImGui::SetMouseCursor(ImGuiMouseCursor_Wait);
 }
 
+void MaskSession::pick_tool(ToolId t) {
+    _tool.set_id(t);
+    _path_mode = false;
+    set_erasing(false);
+    _path.cancel();
+}
+
+// The eraser is the brush shape under a different paint mode, not a shape of
+// its own: ToolId is the 3D editor's SELECTION-shape table and a row there
+// would put an "Eraser" button in a panel where it means nothing.
+void MaskSession::pick_eraser() {
+    _tool.set_id(ToolId::Brush);
+    _path_mode = false;
+    set_erasing(true);
+    _path.cancel();
+}
+
+void MaskSession::pick_path() {
+    _path_mode = true;
+    set_erasing(false);
+    _tool.cancel();
+}
+
 void MaskSession::draw_toolbar() {
     const float w = px(96.0f);
     for (int i = (int)ToolId::Box; i <= (int)ToolId::Brush; i++) {
         const ToolRow& row = tool_table()[i];
         if (i != (int)ToolId::Box) ImGui::SameLine();
-        if (ui::KeyButton(tool_label(row.id), w, row.key, !_path_mode && _tool.id() == row.id)) {
-            _tool.set_id(row.id);
-            _path_mode = false;
-            _path.cancel();
-        }
+        if (ui::KeyButton(tool_label(row.id), w, row.key,
+                          !_path_mode && !_erase && _tool.id() == row.id))
+            pick_tool(row.id);
     }
     ImGui::SameLine();
-    if (ui::KeyButton(msg::tool_path, w, "I", _path_mode)) {
-        _path_mode = true;
-        _tool.cancel();
-    }
+    // X, not E: E is the Ellipse in the shared key table, and rebinding it
+    // would move a shortcut the editor already documents.
+    if (ui::KeyButton(msg::tool_eraser, w, "X", _erase)) pick_eraser();
+    ImGui::SameLine();
+    if (ui::KeyButton(msg::tool_path, w, "I", _path_mode)) pick_path();
     ImGui::SameLine();
     ImGui::BeginDisabled(!_doc || !_doc->can_undo());
     if (ui::Button(msg::undo)) upload_rect(undo());
@@ -156,6 +179,22 @@ void MaskSession::draw_toolbar() {
     ImGui::SameLine();
     if (ui::ButtonRaw(">")) go_to(_idx + 1);
     ImGui::EndDisabled();
+
+    // On this row rather than a third one: a third row comes out of what
+    // draw_canvas has to share between canvas and strip, raising the window
+    // height at which the strip clips (docs/notes/mask-editor.md).
+    if (_erase || (!_path_mode && _tool.id() == ToolId::Brush)) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(px(260.0f));
+        // Logarithmic because the steps are multiplicative over twelve
+        // octaves: linear travel would put every usable size in the first 2%.
+        const std::string fmt =
+            spirula::i18n::format(_erase ? msg::eraser_radius : msg::brush_radius, {"%.0f"});
+        float r = radius();
+        if (ui::SliderFloatRaw("##maskbrush", &r, kMinBrush, kMaxBrush, fmt.c_str(),
+                               ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp))
+            set_radius(r);
+    }
 }
 
 void MaskSession::draw_canvas() {
@@ -189,9 +228,15 @@ void MaskSession::draw_canvas() {
     // The view. Never while a stroke is in progress: its points are pane pixels.
     if (!_tool.in_progress()) {
         const Mapping m0 = mapping(_view, _dw, _dh, size.x, size.y);
-        if (hovered && io.MouseWheel != 0.0f)
-            zoom_about(_view, std::pow(1.2f, io.MouseWheel), io.MousePos.x - origin.x,
-                       io.MousePos.y - origin.y, _dw, _dh, size.x, size.y);
+        // Alt, because the bare wheel is the zoom and Shift/Ctrl are the
+        // paint modes. Guarded by in_progress() with the view: a stroke
+        // carries one radius, so changing it mid-stroke would resize all of it.
+        if (hovered && io.MouseWheel != 0.0f) {
+            if (io.KeyAlt) set_radius(wheel_brush(radius(), io.MouseWheel));
+            else
+                zoom_about(_view, std::pow(1.2f, io.MouseWheel), io.MousePos.x - origin.x,
+                           io.MousePos.y - origin.y, _dw, _dh, size.x, size.y);
+        }
         const bool pan_down = ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
                               (space && ImGui::IsMouseDown(ImGuiMouseButton_Left));
         if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
@@ -217,7 +262,7 @@ void MaskSession::draw_canvas() {
     // The tool, fed pane pixels, the left button only. The modifiers are
     // read from the frame the stroke completes, as EditSession does.
     const bool can_stroke = hovered && !space && !_panning;
-    _tool.set_brush_radius(_brush * m.scale);
+    _tool.set_brush_radius(radius() * m.scale);
     ViewportInput in;
     in.hovered = can_stroke;
     in.x = io.MousePos.x - origin.x;
@@ -243,7 +288,7 @@ void MaskSession::draw_canvas() {
             ShapeStroke stroke;
             stroke.kind = ShapeKind::Polygon;
             stroke.pts = std::move(poly);
-            upload_rect(commit_stroke(stroke, paint_for(_path.mode_shift(), _path.mode_ctrl()), m));
+            upload_rect(commit_stroke(stroke, paint_now(_path.mode_shift(), _path.mode_ctrl()), m));
             _last_commit_ms = now_ms() - t0;
         }
         draw_path_overlay(dl, origin, _path);
@@ -252,7 +297,7 @@ void MaskSession::draw_canvas() {
         bool consumed = false;
         if (_tool.update(in, stroke, consumed)) {
             const double t0 = now_ms();
-            upload_rect(commit_stroke(stroke, paint_for(in.shift, in.ctrl), m));
+            upload_rect(commit_stroke(stroke, paint_now(in.shift, in.ctrl), m));
             _last_commit_ms = now_ms() - t0;
         }
         _tool.draw_overlay(dl, origin);
@@ -268,16 +313,10 @@ void MaskSession::handle_keys(const Mapping& m) {
     if (!io.KeyCtrl) {
         for (int i = (int)ToolId::Box; i <= (int)ToolId::Brush; i++) {
             const ToolRow& row = tool_table()[i];
-            if (ImGui::IsKeyPressed((ImGuiKey)row.imgui_key, false)) {
-                _tool.set_id(row.id);
-                _path_mode = false;
-                _path.cancel();
-            }
+            if (ImGui::IsKeyPressed((ImGuiKey)row.imgui_key, false)) pick_tool(row.id);
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_I, false)) {
-            _path_mode = true;
-            _tool.cancel();
-        }
+        if (ImGui::IsKeyPressed(ImGuiKey_I, false)) pick_path();
+        if (ImGui::IsKeyPressed(ImGuiKey_X, false)) pick_eraser();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         if (_path_mode) _path.cancel();
@@ -285,8 +324,8 @@ void MaskSession::handle_keys(const Mapping& m) {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
-        const Paint mode = _path_mode ? paint_for(_path.mode_shift(), _path.mode_ctrl())
-                                      : paint_for(io.KeyShift, io.KeyCtrl);
+        const Paint mode = _path_mode ? paint_now(_path.mode_shift(), _path.mode_ctrl())
+                                      : paint_now(io.KeyShift, io.KeyCtrl);
         ShapeStroke s;
         bool pending = false;
         if (_path_mode) {
@@ -303,8 +342,8 @@ void MaskSession::handle_keys(const Mapping& m) {
             _last_commit_ms = now_ms() - t0;
         }
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, true)) _brush = std::max(1.0f, _brush * 0.85f);
-    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, true)) _brush = std::min(4096.0f, _brush * 1.18f);
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, true)) set_radius(step_brush(radius(), false));
+    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, true)) set_radius(step_brush(radius(), true));
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         if (!io.KeyShift && _path_mode && _path.in_progress() && _path.pop_anchor()) return;
         if (!io.KeyShift && !_path_mode && _tool.id() == ToolId::Polygon && _tool.in_progress() &&
@@ -333,10 +372,10 @@ void MaskSession::draw_status() {
         if (_doc->base_state() == BaseState::Missing)
             ui::TextDisabledWrapped(msg::status_base_missing);
     }
-    ui::Text(msg::brush_radius, {(int)std::lround(_brush)});
+    ui::Text(_erase ? msg::eraser_radius : msg::brush_radius, {(int)std::lround(radius())});
     ImGui::SameLine();
     ui::Text(msg::status_commit, {one_decimal(_last_commit_ms)});
-    ui::TextDisabledWrapped(msg::hint_buttons);
+    ui::TextDisabledWrapped(_erase ? msg::hint_eraser : msg::hint_buttons);
     if (_path_mode) {
         ui::TextDisabledWrapped(msg::hint_path);
         ui::Text(msg::path_anchors, {_path.anchor_count()});

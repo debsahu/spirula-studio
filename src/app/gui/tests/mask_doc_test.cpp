@@ -25,6 +25,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1233,11 +1234,26 @@ void test_session() {
               s.frames()[2].key == "cam1/c" && s.frames()[2].camera == "cam1",
           "frames keyed and grouped as the run keys them");
     check(s.layer_root() == (f.root / mk::kLayerDirName).string(), "layer root under the workspace");
-    check(mk::MaskSession::paint_for(false, false) == mk::Paint::ForceDrop &&
-              mk::MaskSession::paint_for(true, false) == mk::Paint::ForceDrop &&
-              mk::MaskSession::paint_for(false, true) == mk::Paint::ForceKeep &&
-              mk::MaskSession::paint_for(true, true) == mk::Paint::Clear,
-          "paint_for is combine_now's table: plain/Shift drop, Ctrl keep, both clear");
+    check(mk::MaskSession::paint_for(false, false, false) == mk::Paint::ForceDrop &&
+              mk::MaskSession::paint_for(true, false, false) == mk::Paint::ForceDrop &&
+              mk::MaskSession::paint_for(false, true, false) == mk::Paint::ForceKeep &&
+              mk::MaskSession::paint_for(true, true, false) == mk::Paint::Clear,
+          "paint_for, brush: plain/Shift drop, Ctrl keep, both clear");
+    check(mk::MaskSession::paint_for(false, false, true) == mk::Paint::ForceKeep &&
+              mk::MaskSession::paint_for(true, false, true) == mk::Paint::ForceKeep &&
+              mk::MaskSession::paint_for(false, true, true) == mk::Paint::ForceDrop &&
+              mk::MaskSession::paint_for(true, true, true) == mk::Paint::Clear,
+          "paint_for, eraser: plain/Shift keep, Ctrl drop, both clear");
+    // The point of the pair above is that they DIFFER, so assert it directly:
+    // an eraser that ignored its flag would satisfy either table alone.
+    check(mk::MaskSession::paint_for(false, false, false) !=
+                  mk::MaskSession::paint_for(false, false, true) &&
+              mk::MaskSession::paint_for(false, true, false) !=
+                  mk::MaskSession::paint_for(false, true, true),
+          "the eraser flag changes the mode on a plain drag and on Ctrl+drag");
+    check(mk::MaskSession::paint_for(true, true, false) ==
+              mk::MaskSession::paint_for(true, true, true),
+          "Shift+Ctrl clears under both tools: clearing is not the eraser");
     check(mk::MaskSession::step_brush(100.0f, true) == 100.0f * 1.18f &&
               mk::MaskSession::step_brush(100.0f, false) == 100.0f * 0.85f,
           "step_brush: grow x1.18, shrink x0.85");
@@ -1247,6 +1263,45 @@ void test_session() {
     check(mk::MaskSession::step_brush(1.0f, false) == 1.0f &&
               mk::MaskSession::step_brush(1.1f, false) == 1.0f,
           "step_brush clamps shrink at 1, exactly, not below it");
+    check(mk::MaskSession::clamp_brush(0.0f) == 1.0f &&
+              mk::MaskSession::clamp_brush(-5.0f) == 1.0f &&
+              mk::MaskSession::clamp_brush(1e30f) == 4096.0f &&
+              mk::MaskSession::clamp_brush(24.0f) == 24.0f,
+          "clamp_brush pins to [1, 4096] and leaves an interior value alone");
+    {
+        // std::clamp PROPAGATES a NaN, and a NaN radius rasterizes nothing
+        // while the slider and the strip still read a number.
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const float inf = std::numeric_limits<float>::infinity();
+        check(mk::MaskSession::clamp_brush(nan) == 1.0f, "clamp_brush folds NaN to the minimum");
+        check(mk::MaskSession::clamp_brush(inf) == 4096.0f &&
+                  mk::MaskSession::clamp_brush(-inf) == 1.0f,
+              "clamp_brush pins both infinities");
+    }
+    {
+        // Alt+wheel: a notch is a `]`, but the factor is the RECIPROCAL of
+        // 1.18 rather than the bracket's 0.85, so the wheel is exactly
+        // reversible. The bracket check below is what makes that testable.
+        const float r = 100.0f;
+        check(mk::MaskSession::wheel_brush(r, 0.0f) == r, "a zero wheel delta moves nothing");
+        check(std::fabs(mk::MaskSession::wheel_brush(r, 1.0f) -
+                        mk::MaskSession::step_brush(r, true)) < 1e-3f,
+              "one wheel notch up is one `]`");
+        check(mk::MaskSession::wheel_brush(r, 2.0f) > mk::MaskSession::wheel_brush(r, 1.0f) &&
+                  mk::MaskSession::wheel_brush(r, -1.0f) < r,
+              "the wheel grows upward and shrinks downward");
+        const float there_and_back =
+            mk::MaskSession::wheel_brush(mk::MaskSession::wheel_brush(r, 1.0f), -1.0f);
+        check(std::fabs(there_and_back - r) < 1e-3f, "a notch back exactly undoes a notch");
+        const float bracket_round_trip =
+            mk::MaskSession::step_brush(mk::MaskSession::step_brush(r, true), false);
+        check(std::fabs(bracket_round_trip - r) > 0.2f,
+              "the bracket pair is NOT reversible (1.18*0.85 = 1.003), so the check above discriminates");
+        check(mk::MaskSession::wheel_brush(4000.0f, 40.0f) == 4096.0f &&
+                  mk::MaskSession::wheel_brush(2.0f, -40.0f) == 1.0f,
+              "wheel_brush clamps at both ends");
+    }
+    check(!s.erasing() && s.radius() == 24.0f, "the session opens on the brush at 24 px");
     {
         // Monotonic in both directions, and the clamp is REACHED, not
         // approached asymptotically: 4096/0.85^n < 1 well inside 200 steps.
@@ -1349,6 +1404,83 @@ void test_session() {
     s.revert_every_frame();
     settle(s);
     check(s.corrected_count() == 0 && !fs::exists(f.layer / "cam0" / "a.drop.png"), "everything reverted");
+    s.close();
+}
+
+// The eraser, through the same call the panel makes. The base drops a 16x12
+// block, so force-keep and clear give DIFFERENT kept counts over it -- which
+// is the only fixture shape that can tell the two readings of "eraser" apart.
+void test_session_eraser() {
+    const int W = 64, H = 48;
+    Fixture f = make_dataset("session_eraser", W, H, {"a"}, /*with_masks=*/false);
+    std::vector<uint8_t> base((size_t)W * H, 255);
+    for (int y = 0; y < 12; y++)
+        for (int x = 0; x < 16; x++) base[(size_t)y * W + x] = 0;
+    write_png_gray(f.masks / "a.png", W, H, base);
+
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "eraser fixture opens: " + err);
+    settle(s);
+    check(s.doc() != nullptr, "frame loaded");
+    const int64_t kAll = (int64_t)W * H;           // 3072
+    const int64_t kBase = kAll - 16 * 12;          // 2880
+    check(s.doc()->kept() == kBase, "the base drops the 16x12 block and nothing else");
+
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke over_block;                   // covers the block with margin
+    over_block.kind = gui::ShapeKind::Box;
+    over_block.pts = {0.0f, 0.0f, 20.0f, 16.0f};
+
+    s.commit_stroke(over_block, mk::MaskSession::paint_for(false, false, /*erasing=*/true), m);
+    check(s.doc()->kept() == kAll,
+          "the eraser force-keeps what the BASE dropped: every pixel of the frame is kept");
+    s.undo();
+    check(s.doc()->kept() == kBase, "undo puts the block back");
+    // The same stroke as Shift+Ctrl. Clear returns those pixels to the base,
+    // which still drops them -- so this fixture separates the two readings,
+    // and an eraser wired to Paint::Clear would fail the check above.
+    s.commit_stroke(over_block, mk::MaskSession::paint_for(true, true, /*erasing=*/true), m);
+    check(s.doc()->kept() == kBase,
+          "clear over the same box leaves the block dropped: clear is not the eraser");
+    s.undo();
+    check(s.doc()->kept() == kBase, "back to the base");
+
+    // The round trip the operator asked for: brush, then erase the same area.
+    gui::ShapeStroke inside;
+    inside.kind = gui::ShapeKind::Box;
+    inside.pts = {30.0f, 20.0f, 40.0f, 30.0f};
+    s.commit_stroke(inside, mk::MaskSession::paint_for(false, false, /*erasing=*/false), m);
+    const int64_t after_brush = s.doc()->kept();
+    check(after_brush < kBase, "the brush drops something");
+    s.commit_stroke(inside, mk::MaskSession::paint_for(false, false, /*erasing=*/true), m);
+    check(s.doc()->kept() == kBase, "the eraser puts back exactly what the brush took");
+
+    // paint_now reads the session's own flag, which is what the two panel
+    // call sites use -- a tool that highlights but paints the other mode
+    // would pass every static check above.
+    s.set_erasing(false);
+    check(s.paint_now(false, false) == mk::Paint::ForceDrop, "paint_now, brush selected: drop");
+    s.set_erasing(true);
+    check(s.paint_now(false, false) == mk::Paint::ForceKeep, "paint_now, eraser selected: keep");
+    check(s.paint_now(false, true) == mk::Paint::ForceDrop, "paint_now, eraser + Ctrl: drop");
+
+    // Two radii, not one.
+    s.set_erasing(false);
+    s.set_radius(50.0f);
+    s.set_erasing(true);
+    check(s.radius() == 24.0f, "the eraser has its own default, untouched by the brush's 50");
+    s.set_radius(300.0f);
+    s.set_erasing(false);
+    check(s.radius() == 50.0f, "the brush kept 50 while the eraser was set to 300");
+    s.set_erasing(true);
+    check(s.radius() == 300.0f, "and the eraser kept 300");
+    s.set_radius(99999.0f);
+    check(s.radius() == 4096.0f, "set_radius clamps the eraser");
+    s.set_erasing(false);
+    check(s.radius() == 50.0f, "clamping the eraser left the brush alone");
     s.close();
 }
 
@@ -2475,6 +2607,7 @@ int main() {
     test_view_math();
     test_derive_window();
     test_session();
+    test_session_eraser();
     test_session_size_mismatch();
     test_session_flipped_polarity();
     test_session_other_mask_root_refused();

@@ -259,6 +259,12 @@ SS_MSG(done,
     RU("Готово"),
     TR("Bitti"));
 
+SS_MSG(tool_eraser,
+    EN("Eraser"),     JA("消しゴム"),   ZH_HANS("橡皮擦"), ZH_HANT("橡皮擦"),
+    KO("지우개"),      DE("Radierer"),   FR("Gomme"),
+    ES("Borrador"),   PT("Borracha"),   IT("Gomma"),
+    NL("Gum"),        RU("Ластик"),     TR("Silgi"));
+
 // ===========================================================================
 // The status strip
 // ===========================================================================
@@ -279,19 +285,34 @@ SS_MSG(hint_buttons,
     TR("Sürükleme veya Shift+sürükleme: zorla at. Ctrl+sürükleme: zorla tut. Shift+Ctrl+sürükleme: düzeltmeyi sil. Sağ tık çokgeni kapatır."));
 
 SS_MSG(hint_view,
-    EN("Wheel: zoom. Middle drag or Space+drag: pan. [ and ]: brush size. Esc: cancel the stroke."),
-    JA("ホイール: ズーム。中ボタンドラッグまたは Space+ドラッグ: 移動。[ と ]: ブラシサイズ。Esc: ストロークを取り消し。"),
-    ZH_HANS("滚轮：缩放。中键拖动或 Space+拖动：平移。[ 和 ]：画笔大小。Esc：取消笔画。"),
-    ZH_HANT("滾輪：縮放。中鍵拖曳或 Space+拖曳：平移。[ 和 ]：筆刷大小。Esc：取消筆畫。"),
-    KO("휠: 확대/축소. 가운데 버튼 드래그 또는 Space+드래그: 이동. [ 와 ]: 브러시 크기. Esc: 획 취소."),
-    DE("Rad: Zoom. Mittlere Taste ziehen oder Leertaste+Ziehen: verschieben. [ und ]: Pinselgröße. Esc: Strich abbrechen."),
-    FR("Molette : zoom. Glisser avec le bouton du milieu ou Espace+glisser : déplacer. [ et ] : taille du pinceau. Échap : annuler le tracé."),
-    ES("Rueda: zoom. Arrastrar con el botón central o Espacio+arrastrar: desplazar. [ y ]: tamaño del pincel. Esc: cancelar el trazo."),
-    PT("Roda: zoom. Arrastar com o botão do meio ou Espaço+arrastar: deslocar. [ e ]: tamanho do pincel. Esc: cancelar o traço."),
-    IT("Rotella: zoom. Trascina con il tasto centrale o Spazio+trascina: sposta. [ e ]: dimensione del pennello. Esc: annulla il tratto."),
-    NL("Wiel: zoomen. Slepen met middelste knop of spatie+slepen: verschuiven. [ en ]: penseelgrootte. Esc: streek annuleren."),
-    RU("Колесо: масштаб. Перетаскивание средней кнопкой или Пробел+перетаскивание: сдвиг. [ и ]: размер кисти. Esc: отменить штрих."),
-    TR("Tekerlek: yakınlaştırma. Orta tuşla veya Boşluk+sürükleme: kaydırma. [ ve ]: fırça boyutu. Esc: çizimi iptal et."));
+    EN("Wheel: zoom. Alt+wheel, [ and ]: brush or eraser size. Middle drag or Space+drag: pan. Esc: cancel the stroke."),
+    JA("ホイール: ズーム。Alt+ホイール、[ と ]: ブラシまたは消しゴムのサイズ。中ボタンドラッグまたは Space+ドラッグ: 移動。Esc: ストロークを取り消し。"),
+    ZH_HANS("滚轮：缩放。Alt+滚轮、[ 和 ]：画笔或橡皮擦大小。中键拖动或 Space+拖动：平移。Esc：取消笔画。"),
+    ZH_HANT("滾輪：縮放。Alt+滾輪、[ 和 ]：筆刷或橡皮擦大小。中鍵拖曳或 Space+拖曳：平移。Esc：取消筆畫。"),
+    KO("휠: 확대/축소. Alt+휠, [ 와 ]: 브러시 또는 지우개 크기. 가운데 버튼 드래그 또는 Space+드래그: 이동. Esc: 획 취소."),
+    DE("Rad: Zoom. Alt+Rad, [ und ]: Pinsel- oder Radierergröße. Mittlere Taste ziehen oder Leertaste+Ziehen: verschieben. Esc: Strich abbrechen."),
+    FR("Molette : zoom. Alt+molette, [ et ] : taille du pinceau ou de la gomme. Glisser avec le bouton du milieu ou Espace+glisser : déplacer. Échap : annuler le tracé."),
+    ES("Rueda: zoom. Alt+rueda, [ y ]: tamaño del pincel o del borrador. Arrastrar con el botón central o Espacio+arrastrar: desplazar. Esc: cancelar el trazo."),
+    PT("Roda: zoom. Alt+roda, [ e ]: tamanho do pincel ou da borracha. Arrastar com o botão do meio ou Espaço+arrastar: deslocar. Esc: cancelar o traço."),
+    IT("Rotella: zoom. Alt+rotella, [ e ]: dimensione del pennello o della gomma. Trascina con il tasto centrale o Spazio+trascina: sposta. Esc: annulla il tratto."),
+    NL("Wiel: zoomen. Alt+wiel, [ en ]: penseel- of gumgrootte. Slepen met middelste knop of spatie+slepen: verschuiven. Esc: streek annuleren."),
+    RU("Колесо: масштаб. Alt+колесо, [ и ]: размер кисти или ластика. Перетаскивание средней кнопкой или Пробел+перетаскивание: сдвиг. Esc: отменить штрих."),
+    TR("Tekerlek: yakınlaştırma. Alt+tekerlek, [ ve ]: fırça veya silgi boyutu. Orta tuşla veya Boşluk+sürükleme: kaydırma. Esc: çizimi iptal et."));
+
+SS_MSG(hint_eraser,
+    EN("Drag or Shift+drag: force keep. Ctrl+drag: force drop. Shift+Ctrl+drag: clear the correction."),
+    JA("ドラッグまたは Shift+ドラッグ: 強制的に保持。Ctrl+ドラッグ: 強制的に除外。Shift+Ctrl+ドラッグ: 修正を消去。"),
+    ZH_HANS("拖动或 Shift+拖动：强制保留。Ctrl+拖动：强制丢弃。Shift+Ctrl+拖动：清除修正。"),
+    ZH_HANT("拖曳或 Shift+拖曳：強制保留。Ctrl+拖曳：強制捨棄。Shift+Ctrl+拖曳：清除修正。"),
+    KO("드래그 또는 Shift+드래그: 강제 유지. Ctrl+드래그: 강제 제외. Shift+Ctrl+드래그: 수정 지우기."),
+    DE("Ziehen oder Shift+Ziehen: erzwungen behalten. Ctrl+Ziehen: erzwungen verwerfen. Shift+Ctrl+Ziehen: Korrektur löschen."),
+    FR("Glisser ou Shift+glisser : conservation forcée. Ctrl+glisser : exclusion forcée. Shift+Ctrl+glisser : effacer la correction."),
+    ES("Arrastrar o Shift+arrastrar: conservar a la fuerza. Ctrl+arrastrar: descartar a la fuerza. Shift+Ctrl+arrastrar: borrar la corrección."),
+    PT("Arrastar ou Shift+arrastar: manter à força. Ctrl+arrastar: descartar à força. Shift+Ctrl+arrastar: apagar a correção."),
+    IT("Trascina o Shift+trascina: mantieni forzatamente. Ctrl+trascina: scarta forzatamente. Shift+Ctrl+trascina: cancella la correzione."),
+    NL("Slepen of Shift+slepen: geforceerd behouden. Ctrl+slepen: geforceerd weglaten. Shift+Ctrl+slepen: correctie wissen."),
+    RU("Перетаскивание или Shift+перетаскивание: принудительно оставить. Ctrl+перетаскивание: принудительно убрать. Shift+Ctrl+перетаскивание: стереть исправление."),
+    TR("Sürükleme veya Shift+sürükleme: zorla tut. Ctrl+sürükleme: zorla at. Shift+Ctrl+sürükleme: düzeltmeyi sil."));
 
 SS_MSG(status_frame,
     EN("Frame {0} of {1}: {2}"),
@@ -427,6 +448,21 @@ SS_MSG(brush_radius,
     NL("Penseel: {0} px"),
     RU("Кисть: {0} px"),
     TR("Fırça: {0} px"));
+
+SS_MSG(eraser_radius,
+    EN("Eraser: {0} px"),
+    JA("消しゴム: {0} px"),
+    ZH_HANS("橡皮擦：{0} px"),
+    ZH_HANT("橡皮擦：{0} px"),
+    KO("지우개: {0} px"),
+    DE("Radierer: {0} px"),
+    FR("Gomme : {0} px"),
+    ES("Borrador: {0} px"),
+    PT("Borracha: {0} px"),
+    IT("Gomma: {0} px"),
+    NL("Gum: {0} px"),
+    RU("Ластик: {0} px"),
+    TR("Silgi: {0} px"));
 
 SS_MSG(corrected_count,
     EN("Corrected frames: {0}"),

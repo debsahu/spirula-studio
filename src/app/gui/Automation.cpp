@@ -512,7 +512,25 @@ HttpResponse handle_scroll(const HttpRequest& r) {
     w.kind = Step::Kind::Wheel;
     w.x = (float)r.get_double("dx", 0.0);
     w.y = (float)r.get_double("dy", -1.0);
-    return finish(r, enqueue({m, m, w, Step{}}));
+    // Held the way handle_drag holds one: a modified wheel is a distinct
+    // gesture (the mask editor's Alt+wheel), not the same one with a flag.
+    Step mod;
+    mod.kind = Step::Kind::Key;
+    if (r.get_bool("shift", false)) mod.keys.push_back((int)ImGuiKey_LeftShift);
+    if (r.get_bool("ctrl", false)) mod.keys.push_back((int)logical_ctrl_key());
+    if (r.get_bool("alt", false)) mod.keys.push_back((int)ImGuiKey_LeftAlt);
+    if (mod.keys.empty()) return finish(r, enqueue({m, m, w, Step{}}));
+    std::vector<Step> steps;
+    mod.down = true;
+    steps.push_back(mod);
+    steps.push_back(m);
+    steps.push_back(m);
+    steps.push_back(w);
+    steps.push_back(Step{});
+    mod.down = false;
+    steps.push_back(mod);
+    steps.push_back(Step{});
+    return finish(r, enqueue(steps));
 }
 
 HttpResponse handle_key(const HttpRequest& r) {
