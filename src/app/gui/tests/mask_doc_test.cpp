@@ -1380,6 +1380,44 @@ void test_session_close_resets_paths() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan 2, Task 4: the GUI lasso and the CLI path are one fill
+// ---------------------------------------------------------------------------
+
+void test_path_fill_parity() {
+    // Non-square, and a polygon that is not symmetric under a transpose, so a
+    // fill that swaps its axes cannot pass.
+    const int W = 96, H = 40;
+    const std::vector<float> norm = {0.08f, 0.12f, 0.91f, 0.07f, 0.66f, 0.55f,
+                                     0.97f, 0.93f, 0.21f, 0.88f, 0.44f, 0.41f};
+    gui::ShapeStroke lasso;
+    lasso.kind = gui::ShapeKind::Lasso;
+    for (size_t i = 0; i + 1 < norm.size(); i += 2) {
+        lasso.pts.push_back(norm[i] * (float)W);
+        lasso.pts.push_back(norm[i + 1] * (float)H);
+    }
+    gui::Stencil st;
+    gui::rasterize_shape(lasso, W, H, st);
+
+    app::FrameMask m;
+    app::MaskShape p;
+    p.kind = app::MaskShape::Kind::Path;
+    p.remove = true;
+    p.pts = norm;
+    m.shapes.push_back(p);
+    std::vector<uint8_t> out;
+    std::string err;
+    check(app::rasterize_frame_mask(m, W, H, out, err), "parity: rasterizes");
+    size_t differ = 0, inside = 0;
+    for (size_t i = 0; i < (size_t)W * H; i++) {
+        inside += st.in[i] != 0;
+        differ += (st.in[i] != 0) != (out[i] == 0);
+    }
+    check(inside > 300, "parity: the lasso covers something: " + std::to_string(inside));
+    check(differ == 0, "parity: every pixel agrees between lasso and -path: " +
+                           std::to_string(differ) + " differ");
+}
+
+// ---------------------------------------------------------------------------
 // Task 9: floors at 8K. SS_MASK_BENCH=<dir> writes the fixture there and
 // prints medians of three repeats; nothing here fails on a number.
 // ---------------------------------------------------------------------------
@@ -1515,6 +1553,7 @@ int main() {
     test_session();
     test_session_size_mismatch();
     test_session_close_resets_paths();
+    test_path_fill_parity();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
