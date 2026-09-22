@@ -3623,8 +3623,11 @@ void test_session_sam_add_replaces() {
     check(!drop_is(big.mask) && !drop_is(small.mask) && both != big.mask && both != small.mask,
           "sam replace: neither disc is already dropped, and neither holds the other");
     sam_add(s, big, 0);
-    sam_add(s, small, 0);
+    const mk::Rect shrunk = sam_add(s, small, 0);
     check(s.doc()->history_size() == h0 + 1, "sam replace: refining the top object is one step");
+    const mk::Rect was = extent(big.mask, 64, 48);
+    check(shrunk.x0 <= was.x0 && shrunk.y0 <= was.y0 && shrunk.x1 >= was.x1 && shrunk.y1 >= was.y1,
+          "sam replace: the redrawn rect covers what the first add painted, not only the refinement");
     check(drop_is(small.mask), "sam replace: the refinement replaced the first add, pixel for pixel");
     s.doc()->undo();
     check(s.doc()->composite() == comp0, "sam replace: one undo removes the object's add entirely");
@@ -3735,6 +3738,14 @@ void test_held_region_roundtrip() {
     check(none.box.empty() && none.mask.empty(), "held region: nothing set holds nothing");
 }
 
+// A slider release, as the panel reports it: the margin job starts on one
+// frame (the stub builds it inline) and lands on the next.
+void reapply(mk::MaskSession& s) {
+    s.sam_margin_changed();
+    s.sam_pump();
+    s.sam_pump();
+}
+
 // Moving the margin re-applies it to the object just clicked, in place, while
 // that add is still on top; after any other edit it waits for the next click.
 void test_session_sam_margin_reapply() {
@@ -3752,7 +3763,7 @@ void test_session_sam_margin_reapply() {
     const int64_t tight = s.sam_last_area();
     s.sam_prompt().dilate_ratio = 0.4f;
     check(s.sam_margin_reapplies(), "margin reapply: the add on top can be re-applied");
-    s.sam_reapply_margin();
+    reapply(s);
     std::vector<mk::AddRegion> want{g};
     gui::Stencil st;
     mk::Rect b;
@@ -3765,18 +3776,16 @@ void test_session_sam_margin_reapply() {
         dropped_in += (st.in[i] && s.doc()->drop()[i]) ? 1 : 0;
     check(dropped_in == grown, "margin reapply: every pixel of the grown outline is dropped");
     s.sam_prompt().dilate_ratio = 0.0f;
-    s.sam_reapply_margin();
+    reapply(s);
     check(s.sam_last_area() == tight && s.doc()->history_size() == h0,
           "margin reapply: moving it back shrinks the add again");
     s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 0, 0, 4, 4), mk::Rect{0, 0, 4, 4});
     s.sam_prompt().dilate_ratio = 0.4f;
     const int h1 = s.doc()->history_size();
     check(!s.sam_margin_reapplies(), "margin reapply: an edit in between ends it");
-    s.sam_reapply_margin();
+    reapply(s);
     check(s.doc()->history_size() == h1 && s.doc()->keep()[0] == 255,
           "margin reapply: ... and the edit survives");
-    check(s.sam_held_bytes() > 0, "margin reapply: the stale add's detection is still held");
-    s.sam_pump();
     check(s.sam_held_bytes() == 0, "margin reapply: the next frame lets go of a detection that cannot re-apply");
     check(sam_result(s, g, mk::Paint::ForceKeep, 0.4f).held.empty() &&
               sam_result(s, g, mk::Paint::Clear, 0.4f).held.empty() &&
@@ -3806,6 +3815,101 @@ void test_session_sam_noop_replace() {
     sam_add(s, disc_region(64, 48, 15.0f, 36.0f, 5.0f), 0);
     check(s.doc()->history_size() == h0 + 1 && s.doc()->drop()[(size_t)12 * 64 + 42] == 255,
           "sam no-op: the next re-prompt adds, and the hand edit beneath survives");
+}
+
+// Clear or Clear all makes the object numbers mean new things: a click on the
+// same number afterwards is a new object, and must add, never replace.
+void test_session_sam_clear_forgets_add() {
+    Fixture f = make_dataset("sam_clear_forgets", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam clear list: open: " + err);
+    settle(s);
+    const std::vector<uint8_t> drop0 = s.doc()->drop();
+    const size_t monopod = (size_t)20 * 64 + 12, chair = (size_t)24 * 64 + 48;
+    check(drop0[monopod] == 0 && drop0[chair] == 0, "sam clear list: neither spot starts dropped");
+    const int h0 = s.doc()->history_size();
+    sam_add(s, disc_region(64, 48, 12.0f, 20.0f, 5.0f), 0);
+    s.sam_objects_edited();
+    check(!s.sam_margin_reapplies() && s.sam_held_bytes() == 0,
+          "sam clear list: nothing is left to re-apply the margin to");
+    sam_add(s, disc_region(64, 48, 48.0f, 24.0f, 5.0f), 0);
+    check(s.doc()->history_size() == h0 + 2, "sam clear list: after a clear the same number adds");
+    s.doc()->undo();
+    check(s.doc()->drop()[monopod] == 255 && s.doc()->drop()[chair] == 0,
+          "sam clear list: undoing the new object brings the cleared one's add back");
+}
+
+// What sam_prompt_point records once a job starts, reached without a model:
+// the object a result replaces, and each click with its own label.
+void test_session_sam_prompt_bookkeeping() {
+    Fixture f = make_dataset("sam_bookkeeping", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam bookkeeping: open: " + err);
+    settle(s);
+    const int h0 = s.doc()->history_size();
+    const mk::AddRegion big = disc_region(64, 48, 20.0f, 20.0f, 10.0f);
+    const mk::AddRegion small = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
+    s.sam_prompt_started(20.0f, 20.0f, true);
+    s.sam().post_result(s.sam_frame_stamp(), {big}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    s.sam_prompt_started(14.0f, 20.0f, false);
+    s.sam().post_result(s.sam_frame_stamp(), {small}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.doc()->history_size() == h0 + 1 && s.doc()->drop()[(size_t)20 * 64 + 12] == 0,
+          "sam bookkeeping: a prompt's result replaces its object's add through sam_pump");
+    const std::vector<mk::SamPoint> third =
+        s.sam().prompt_points(0, "", mk::SamPoint{30.0f, 20.0f, true});
+    check(third.size() == 3 && third[0].positive && !third[1].positive && third[2].positive,
+          "sam bookkeeping: a third click sends this, not this, this");
+    s.sam_prompt_started(30.0f, 20.0f, true);
+    const std::vector<gui::MaskClick>& c = s.sam_prompt().clicks;
+    check(c.size() == 3 && c[0].positive && !c[1].positive && c[2].positive && c[1].x == 14.0f &&
+              c[0].object == 0 && c[0].frame == 0,
+          "sam bookkeeping: the stored clicks keep their labels, object and frame");
+}
+
+// A slider release while a prompt is in flight: the prompt lands first, then
+// the margin re-applies to it, so the picture ends at what the slider shows.
+void test_session_sam_margin_after_prompt() {
+    Fixture f = make_dataset("sam_margin_after_prompt", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "margin after prompt: open: " + err);
+    settle(s);
+    s.sam_prompt().dilate_ratio = 0.0f;
+    s.sam_prompt_started(30.0f, 24.0f, true);
+    s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 30.0f, 24.0f, 4.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    const int h0 = s.doc()->history_size();
+    const mk::AddRegion g2 = disc_region(64, 48, 34.0f, 24.0f, 7.0f);
+    s.sam_prompt_started(34.0f, 24.0f, true);
+    s.sam().post_result(s.sam_frame_stamp(), {g2}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_prompt().dilate_ratio = 0.4f;
+    reapply(s);
+    std::vector<mk::AddRegion> want{g2};
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t grown = 0;
+    mk::build_add_stencil(want, 64, 48, st, b, grown, 0.4f);
+    check(s.doc()->history_size() == h0 && s.sam_last_area() == grown && s.sam_results() == 2,
+          "margin after prompt: the prompt landed, then took the slider's margin");
+
+    s.sam_prompt().dilate_ratio = 0.1f;
+    s.sam_margin_changed();
+    s.sam_pump();
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 0, 0, 4, 4), mk::Rect{0, 0, 4, 4});
+    const int h1 = s.doc()->history_size();
+    const int dropped = s.sam_dropped();
+    s.sam_pump();
+    check(s.doc()->history_size() == h1 && s.doc()->keep()[0] == 255 &&
+              s.sam_dropped() == dropped + 1 && s.sam_last_area() == grown,
+          "margin after prompt: a margin that lands after another edit is dropped, not stacked");
 }
 
 }  // namespace
@@ -3897,6 +4001,9 @@ int main() {
     test_held_region_roundtrip();
     test_session_sam_margin_reapply();
     test_session_sam_noop_replace();
+    test_session_sam_clear_forgets_add();
+    test_session_sam_prompt_bookkeeping();
+    test_session_sam_margin_after_prompt();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

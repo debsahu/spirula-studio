@@ -141,11 +141,21 @@ public:
     // A "not this" refines in the mode of the current object's add, if that add
     // is still on top; `fallback` (the modifiers) otherwise.
     Paint sam_refine_mode(Paint fallback) const;
-    // The margin slider moved: rebuild the last drop at the editor's margin, in
-    // place, while it is still on top. The DISPLAYED rect changed, or empty.
+    // The margin slider was released: once no job runs, sam_pump() rebuilds the
+    // last drop at the editor's margin on the job thread and lands it in place,
+    // unless something was edited meanwhile.
     bool sam_margin_reapplies() const;
-    Rect sam_reapply_margin();
+    void sam_margin_changed() { _sam_margin_pending = true; }
+    // The object list was edited (Clear, Clear all): its numbers now name other
+    // objects, so no later click may replace the last add.
+    void sam_objects_edited();
+    // What sam_prompt_point() records once its job starts; public for the stub.
+    void sam_prompt_started(float frame_x, float frame_y, bool positive);
+    // UI-thread ms of the frame a margin job started and the one it landed on,
+    // and the job's own ms.
+    double sam_margin_start_ms() const { return _sam_margin_start_ms; }
     double sam_reapply_ms() const { return _sam_reapply_ms; }
+    double sam_reapply_job_ms() const { return _sam_reapply_job_ms; }
     // What the held detections take, bytes; 0 once they cannot re-apply.
     size_t sam_held_bytes() const;
     std::string sam_status() const;
@@ -229,6 +239,8 @@ private:
     void set_corrected(int n);
     Rect shown_rect(const Rect& stored) const;
     bool sam_add_on_top(int object) const;
+    Rect sam_land(SamResult res);
+    void sam_start_margin();
     // MaskPanel.cpp
     // How a tool is chosen, so the toolbar and the key handler cannot drift
     // apart over what else a switch cancels. The mode itself is one value.
@@ -241,6 +253,7 @@ private:
     void draw_status();
     void draw_sam_status();
     void draw_sam_objects();
+    void note_sam_ui(const int before[3], double ms);
     void draw_sam_clicks(ImDrawList* dl, const Mapping& m, float ox, float oy);
     void draw_revert_all_modal();
     void handle_keys(const Mapping& m);
@@ -301,7 +314,9 @@ private:
     int _sam_add_object = -1;
     Paint _sam_add_mode = Paint::ForceDrop;
     std::vector<HeldRegion> _sam_held;
-    double _sam_reapply_ms = 0.0;
+    double _sam_reapply_ms = 0.0, _sam_reapply_job_ms = 0.0, _sam_margin_start_ms = 0.0;
+    int _sam_reapplies = 0, _sam_margin_starts = 0;
+    bool _sam_margin_pending = false;
     bool _sam_margin_moved = false;  // MaskPanel.cpp: re-apply once the slider lets go
     int _sam_objects_drawn = 0;      // MaskPanel.cpp: the object count the list last drew
     int _sam_scroll_frames = 0;      // frames left to hold that list at its end

@@ -37,6 +37,7 @@ struct SamResult {
     Rect bounds;
     int64_t set_px = 0;
     std::vector<HeldRegion> held;
+    bool margin_job = false;    // start_margin()'s, not a prompt's
 };
 
 struct SamPoint {
@@ -93,6 +94,10 @@ public:
     bool start_text(const std::string& frame_key,
                     std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
                     int doc_w, int doc_h, const std::string& phrases, float margin);
+    // Rebuilds a held drop at `margin` on the job thread; no model is needed. A
+    // build with no inference layer rebuilds inline. The result keeps `held`.
+    bool start_margin(std::string frame_key, std::vector<HeldRegion> held, int doc_w, int doc_h,
+                      float margin);
     // One finished job, or false with `out` untouched.
     bool take_result(SamResult& out);
 
@@ -114,6 +119,8 @@ private:
     void release_device();   // the SAM-only half of release()
     static SamResult prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
                              int doc_h, Paint mode, float margin, float score, bool hold);
+    static SamResult remargin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
+                              int doc_h, float margin);
     static void publish(State& s, SamResult r);
     static void run(State& s, Job job);
     static void run_stages(State& s, Job job,

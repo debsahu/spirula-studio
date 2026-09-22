@@ -2173,7 +2173,8 @@ can no longer re-apply.
 | the same run on a build that drops negative points | 1,333,327 / 1,333,327: fails |
 | a lone right click on a new object | results 1 -> 1, clicks 1 -> 1 |
 | three clicks on one object, then a second object (frame 2) | history 1 after all three, 2 after the fourth |
-| slider re-apply, UI thread (`sam_reapply_ms`) | 270-330 ms on one session, 650-1020 ms on another; the stencil rebuild is ~280 ms of it |
+| slider re-apply, UI thread, first build (inline) | 270-330 ms on one session, 650-1020 ms on another; the stencil rebuild is ~280 ms of it |
+| slider re-apply after fix round 1 (a job) | UI thread 0.07-0.11 ms to start it, 15-24 ms to land it; the job 234-250 ms |
 
 **The dataset screen is untouched (P13).** Its fields were set to a prompt, three
 objects and the second current, then an editor session made 9 clicks on 3 objects:
@@ -2184,6 +2185,21 @@ dataset preview was pixel-identical (0 of 54,000 pixels) before and after the mo
 **The strip.** The object box adds 112 px: SAM mode now fits down to a window of
 about **536 px** (measured: canvas 73 px at 545, at its 64 px floor by 500), about
 566 px with no cached checkpoint (derived, +30, not measured).
+
+**Fix round 1.**
+- **Clear and Clear all forget the last add.** The list's numbers then name other
+  objects, so a click on the same number used to replace the cleared object's add,
+  and one undo lost both. `sam_objects_edited()` now runs whenever the list reports
+  an edit. In the app, Clear then a click on another object went history 1 -> 2, and
+  undo brought the cleared object back exactly. On a build without the call it went
+  1 -> 1 and undo lost both.
+- **The re-apply is a model-free job on the SAM worker** (`MaskSam::start_margin`),
+  handed back through the same slot as a prompt. `sam_pump()` starts it only once no
+  job runs, reading `busy()` before it takes a result, so a prompt in flight lands
+  first and the margin re-applies to it. A margin that lands after any other edit is
+  dropped, not stacked. In the app, a chair clicked on a fresh frame and the slider
+  released at 11 % while the encode ran landed at 839,307 px (5 %), then 1,064,432 px,
+  the same as a later re-apply to 11 %.
 
 ### Misses and open items
 

@@ -131,6 +131,17 @@ SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions
     return r;
 }
 
+SamResult MaskSam::remargin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
+                            int doc_h, float margin) {
+    std::vector<AddRegion> regions;
+    for (const HeldRegion& h : held) regions.push_back(expand_region(h));
+    SamResult r = prepare(std::move(frame_key), std::move(regions), doc_w, doc_h,
+                          Paint::ForceDrop, margin, 0.0f, false);
+    r.held = std::move(held);
+    r.margin_job = true;
+    return r;
+}
+
 void MaskSam::publish(State& s, SamResult r) {
     std::lock_guard<std::mutex> lk(s.mu);
     s.result = std::move(r);
@@ -270,6 +281,51 @@ bool MaskSam::start_text(const std::string& frame_key,
     j.score_threshold = _s->prompt.threshold;
     j.nms_threshold = _s->prompt.nms;
     return launch(std::move(j));
+}
+
+// The same worker and hand-off as a prompt, so the two can never land out of
+// order; the ~150-300 ms of stencil work at 15520x7760 stays off the UI thread.
+bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
+                           int doc_h, float margin) {
+    if (busy() || held.empty()) return false;
+    if (_s->worker.joinable()) _s->worker.join();
+    {
+        std::lock_guard<std::mutex> lk(_s->mu);
+        _s->error.clear();
+        _s->status = msg::sam_working.get();
+    }
+    _s->cancel = false;
+    _s->running = true;
+    State* s = _s.get();
+    try {
+        _s->worker = std::thread([s, key = std::move(frame_key), held = std::move(held), doc_w,
+                                  doc_h, margin]() mutable {
+            auto finish = [s](const std::string& error) {
+                {
+                    std::lock_guard<std::mutex> lk(s->mu);
+                    s->status.clear();
+                    s->error = error;
+                }
+                s->running = false;
+            };
+            run_guarded(
+                [&] {
+                    const auto t0 = std::chrono::steady_clock::now();
+                    SamResult r = remargin(std::move(key), std::move(held), doc_w, doc_h, margin);
+                    r.ms = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - t0).count();
+                    if (s->cancel) return finish(std::string());
+                    publish(*s, std::move(r));
+                    s->running = false;
+                },
+                finish);
+        });
+    } catch (const std::exception& e) {
+        _s->running = false;
+        refuse(e.what());
+        return false;
+    }
+    return true;
 }
 
 // Refuses while a job runs, so at most one frame buffer is ever held here; a
@@ -445,6 +501,13 @@ bool MaskSam::start_text(const std::string&, std::shared_ptr<const std::vector<u
                          int, int, int, const std::string&, float) {
     refuse(msg::sam_unavailable_build.get());
     return false;
+}
+
+bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
+                           int doc_h, float margin) {
+    if (held.empty()) return false;
+    publish(*_s, remargin(std::move(frame_key), std::move(held), doc_w, doc_h, margin));
+    return true;
 }
 
 #endif  // !SS_BUILD_SAM

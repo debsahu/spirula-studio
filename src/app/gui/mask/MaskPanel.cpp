@@ -94,9 +94,9 @@ void MaskSession::draw() {
     pump();
     {
         const double t0 = now_ms();
-        const int before = _sam_results;
+        const int before[3] = {_sam_results, _sam_reapplies, _sam_margin_starts};
         upload_rect(sam_pump());
-        if (_sam_results != before) _sam_ui_ms = now_ms() - t0;
+        note_sam_ui(before, now_ms() - t0);
     }
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos, ImGuiCond_Appearing);
@@ -507,14 +507,14 @@ void MaskSession::draw_sam_status() {
     if (_model_picker) _model_picker();
     if (!sam_has_model()) ui::TextDisabled(dmsg::mask_model_first);
     // The editor's own margin, never the dataset's. A drop takes it, and a
-    // release re-applies it to the drop just made while that is still on top.
+    // release re-applies it to the drop just made (sam_margin_changed).
     MaskSettings& p = sam_prompt();
     if (draw_margin_slider(p.dilate_ratio, p.shrink_ratio, /*keep=*/false, px(220.0f),
                            /*inline_label=*/true))
         _sam_margin_moved = true;
     if (_sam_margin_moved && !ImGui::IsAnyItemActive()) {
         _sam_margin_moved = false;
-        upload_rect(sam_reapply_margin());
+        sam_margin_changed();
     }
     ui::TextDisabledWrapped(msg::sam_hint);
     draw_sam_objects();
@@ -537,6 +537,14 @@ void MaskSession::draw_sam_status() {
     if (pad > 0.0f) ImGui::Dummy(ImVec2(0.0f, pad));
 }
 
+// A frame's pump-and-upload time, credited to what it did: a prompt landing,
+// a margin landing, or a margin job starting.
+void MaskSession::note_sam_ui(const int before[3], double ms) {
+    if (_sam_results != before[0]) _sam_ui_ms = ms;
+    if (_sam_reapplies != before[1]) _sam_reapply_ms = ms;
+    if (_sam_margin_starts != before[2]) _sam_margin_start_ms = ms;
+}
+
 // The dataset screen's object list over the editor's clicks, in a fixed-height
 // box (two objects, then it scrolls, to the end on a new one) so the picture
 // never moves. Disabled with no checkpoint: the line above says why.
@@ -548,6 +556,7 @@ void MaskSession::draw_sam_objects() {
         MaskSettings& p = sam_prompt();
         bool edited = false;
         draw_mask_objects(p, (long long)_idx, _frames[(size_t)_idx].camera, std::string(), edited);
+        if (edited) sam_objects_edited();
         // Twice: the first frame clamps to the content size before the new row.
         if (p.object_count != _sam_objects_drawn) _sam_scroll_frames = 2;
         if (_sam_scroll_frames > 0 && _sam_scroll_frames--) ImGui::SetScrollHereY(1.0f);

@@ -637,10 +637,15 @@ bool MaskSession::sam_prompt_point(float frame_x, float frame_y, Paint mode, boo
     if (!sam.start_points(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
                           std::move(points), mode, sam_prompt().dilate_ratio))
         return false;
-    sam.add_click(_idx, camera, frame_x, frame_y, positive);
+    sam_prompt_started(frame_x, frame_y, positive);
+    return true;
+}
+
+void MaskSession::sam_prompt_started(float frame_x, float frame_y, bool positive) {
+    MaskSam& sam = this->sam();
+    sam.add_click(_idx, _frames[(size_t)_idx].camera, frame_x, frame_y, positive);
     _sam_job_object = sam.prompt().current_object;
     _sam_t0 = std::chrono::steady_clock::now();
-    return true;
 }
 
 bool MaskSession::sam_prompt_text(const std::string& phrases) {
@@ -671,12 +676,27 @@ Rect MaskSession::sam_pump() {
         return {};
     }
     if (!_doc) return {};
-    if (!_sam->take_result(res)) return {};
-    // A result that outlived its document -- a frame change, a revert, another
-    // dataset -- is counted and dropped, never painted onto what is open now.
-    if (res.frame_key != sam_frame_stamp()) {
+    // Read before the take: a job publishes before it stops, so a job idle here
+    // has had its result taken below, and a margin job cannot overwrite it.
+    const bool idle = !_sam->busy();
+    Rect shown;
+    if (_sam->take_result(res)) shown = sam_land(std::move(res));
+    if (_sam_margin_pending && idle) sam_start_margin();
+    return shown;
+}
+
+// A result that outlived its document -- a frame change, a revert, another
+// dataset -- is counted and dropped, never painted onto what is open now; so
+// is a margin that lands after another edit, rather than stacking on it.
+Rect MaskSession::sam_land(SamResult res) {
+    if (res.frame_key != sam_frame_stamp() || (res.margin_job && !sam_add_on_top(_sam_add_object))) {
         _sam_dropped++;
         return {};
+    }
+    if (res.margin_job) {
+        _sam_reapplies++;
+        _sam_reapply_job_ms = res.ms;
+        return apply_sam_add(std::move(res), _sam_add_object);
     }
     _sam_results++;
     _sam_last_job_ms = res.ms;
@@ -687,6 +707,19 @@ Rect MaskSession::sam_pump() {
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - _sam_t0)
             .count();
     return shown;
+}
+
+void MaskSession::sam_start_margin() {
+    _sam_margin_pending = false;
+    if (!sam_margin_reapplies()) return;
+    if (_sam->start_margin(sam_frame_stamp(), std::move(_sam_held), _doc->width(), _doc->height(),
+                           sam_prompt().dilate_ratio))
+        _sam_margin_starts++;
+}
+
+void MaskSession::sam_objects_edited() {
+    _sam_add_object = -1;
+    _sam_held.clear();
 }
 
 // The stamp names the document (a reload moves it) and the revision every paint,
@@ -731,25 +764,6 @@ size_t MaskSession::sam_held_bytes() const {
     size_t n = 0;
     for (const HeldRegion& h : _sam_held) n += h.mask.size();
     return n;
-}
-
-// On the UI thread, once per slider release: the held crops are rebuilt at the
-// frame's size and grown again, the one full-plane pass this costs.
-Rect MaskSession::sam_reapply_margin() {
-    if (!sam_margin_reapplies()) return {};
-    const auto t0 = std::chrono::steady_clock::now();
-    std::vector<AddRegion> regions;
-    for (const HeldRegion& h : _sam_held) regions.push_back(expand_region(h));
-    SamResult r;
-    r.mode = Paint::ForceDrop;
-    r.landed = build_add_stencil(regions, _doc->width(), _doc->height(), r.stencil, r.bounds,
-                                 r.set_px, drop_margin(r.mode, sam_prompt().dilate_ratio));
-    if (!r.landed) return {};
-    r.held = std::move(_sam_held);
-    const Rect shown = apply_sam_add(std::move(r), _sam_add_object);
-    _sam_reapply_ms = std::chrono::duration<double, std::milli>(
-                          std::chrono::steady_clock::now() - t0).count();
-    return shown;
 }
 
 }  // namespace mask
