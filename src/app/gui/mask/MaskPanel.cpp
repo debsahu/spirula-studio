@@ -206,15 +206,9 @@ void MaskSession::draw_canvas() {
         dl->AddImage((ImTextureID)(intptr_t)_tex, a, b);
     }
 
-    // The tool, fed pane pixels. Whichever button starts a stroke is the one
-    // the tool is fed as "left" until that stroke ends.
+    // The tool, fed pane pixels, the left button only. The modifiers are
+    // read from the frame the stroke completes, as EditSession does.
     const bool can_stroke = hovered && !space && !_panning;
-    const bool busy = _path_mode ? _path.in_progress() : _tool.in_progress();
-    if (!busy && can_stroke) {
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) _stroke_right = false;
-        else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) _stroke_right = true;
-    }
-    const ImGuiMouseButton btn = _stroke_right ? ImGuiMouseButton_Right : ImGuiMouseButton_Left;
     _tool.set_brush_radius(_brush * m.scale);
     ViewportInput in;
     in.hovered = can_stroke;
@@ -222,19 +216,21 @@ void MaskSession::draw_canvas() {
     in.y = io.MousePos.y - origin.y;
     in.W = (int)size.x;
     in.H = (int)size.y;
-    in.down = ImGui::IsMouseDown(btn);
-    in.clicked = can_stroke && ImGui::IsMouseClicked(btn);
-    in.released = ImGui::IsMouseReleased(btn);
-    in.right_clicked = !_stroke_right && can_stroke && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
-    in.double_clicked = can_stroke && ImGui::IsMouseDoubleClicked(btn);
+    in.down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    in.clicked = can_stroke && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    in.released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+    in.right_clicked = can_stroke && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+    in.double_clicked = can_stroke && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
     in.shift = io.KeyShift;
     in.ctrl = io.KeyCtrl;
     in.alt = io.KeyAlt;
-    const Paint mode = io.KeyShift ? Paint::Clear
-                     : _stroke_right ? Paint::ForceKeep : Paint::ForceDrop;
     if (_path_mode) {
         ensure_livewire();
         _path.set_space(path_space(m));
+        // A pen has no drag to read a held modifier off at release: the mode
+        // is fixed by whatever is held on the click that plants the first
+        // anchor, and stays that way however the path later closes.
+        if (!_path.in_progress()) _path_paint = paint_for(io.KeyShift, io.KeyCtrl);
         std::vector<float> poly;
         bool consumed = false;
         if (_path.update(in, poly, consumed)) {
@@ -242,7 +238,7 @@ void MaskSession::draw_canvas() {
             ShapeStroke stroke;
             stroke.kind = ShapeKind::Polygon;
             stroke.pts = std::move(poly);
-            upload_rect(commit_stroke(stroke, mode, m));
+            upload_rect(commit_stroke(stroke, _path_paint, m));
             _last_commit_ms = now_ms() - t0;
         }
         draw_path_overlay(dl, origin, _path);
@@ -251,7 +247,7 @@ void MaskSession::draw_canvas() {
         bool consumed = false;
         if (_tool.update(in, stroke, consumed)) {
             const double t0 = now_ms();
-            upload_rect(commit_stroke(stroke, mode, m));
+            upload_rect(commit_stroke(stroke, paint_for(in.shift, in.ctrl), m));
             _last_commit_ms = now_ms() - t0;
         }
         _tool.draw_overlay(dl, origin);
@@ -284,8 +280,7 @@ void MaskSession::handle_keys(const Mapping& m) {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
-        const Paint mode = io.KeyShift ? Paint::Clear
-                         : _stroke_right ? Paint::ForceKeep : Paint::ForceDrop;
+        const Paint mode = _path_mode ? _path_paint : paint_for(io.KeyShift, io.KeyCtrl);
         ShapeStroke s;
         bool pending = false;
         if (_path_mode) {

@@ -708,6 +708,10 @@ the brief asked for:
    (50.1% -> 50.2%) rather than fell -- confirms `_stroke_right`'s button
    grammar (the first button held decides ForceDrop/ForceKeep for the whole
    stroke, Task 10 Step 7) end to end, not just in `PathTool`'s own tests.
+   **Superseded by fix round 1 below** -- `_stroke_right` reverted an explicit
+   operator decision from plan 1 (Shift/Ctrl, not left/right) and was removed;
+   this observation stands as a record of what the pre-fix build did, not of
+   current behaviour.
 5. **Esc mid-path cancels cleanly; zoom mid-path keeps the polyline on the
    traced feature.** Two anchors placed, Esc: overlay gone, Kept and "Last
    stroke" unchanged, nothing added to the undo stack. Separately, two
@@ -716,13 +720,101 @@ the brief asked for:
    before the zoom (screenshot), confirming `path_space`'s frame-pixel
    storage survives a view change mid-path (Decision 4).
 
-**One thing this check surfaced that the brief did not ask about**:
-`hint_buttons` (the always-shown line above `hint_path`) still reads "Ctrl+drag:
-force keep... Right click closes a polygon" -- the grammar Task 10 replaced.
-It is now wrong for every tool, not just Path: right-drag is force-keep, Ctrl
-is no longer read for paint mode at all. Left unedited (out of Task 10's file
-list, and a 13-language catalog string is not a one-line fix to make under
-time pressure); flagged for the operator/reviewer rather than changed here.
+**One thing this check surfaced that the brief did not ask about, RESOLVED by
+fix round 1 below**: `hint_buttons` (the always-shown line above `hint_path`)
+read "Ctrl+drag: force keep... Right click closes a polygon" while the code
+listened for a right button -- wrong for every tool, not just Path. Restoring
+`paint_for(shift, ctrl)` made `hint_buttons` accurate again with no edit to
+its own text; `hint_path` got one new sentence for the pen tool's own
+first-anchor convention. See below.
+
+### Fix round 1: `_stroke_right` reverted an explicit operator decision (2026-09-22)
+
+Plan 1 gave the operator a choice of paint grammar and they chose Shift/Ctrl
+(matching the 3D editor's Add/Subtract/Intersect, and keeping one binary to
+one drag grammar) over left-drops/right-keeps, implemented as
+`MaskSession::paint_for(bool shift, bool ctrl)`. Task 10, following its own
+brief literally, introduced `_stroke_right` and read it at both commit sites
+in `MaskPanel.cpp`, ahead of the `if (_path_mode)` branch -- so the button
+grammar applied to every tool, not just the pen, and silently reverted the
+operator's choice. `_stroke_right` did not exist anywhere before Task 10 (see
+the original report); the brief's own "Consumes" line was simply wrong about
+it being pre-existing, and implementing its code as given carried the
+reversion through without anyone having decided it.
+
+**Fix**: removed `_stroke_right` entirely. Both `MaskPanel.cpp` commit sites
+(the canvas branch and the Enter handler) route through `paint_for` again for
+every tool including the pen's non-path branch. `ViewportInput` construction
+reverted to the pre-Task-10 form -- left button for down/clicked/released/
+double-clicked, right button only for `right_clicked` -- so the pen's right
+button is close-only again, never a second "which button" mode switch, and it
+can close a path however that path was started.
+
+**The pen tool still needs SOME per-path state, and it is now confined to the
+path tool's own anchor bookkeeping, per the operator's instruction if removal
+broke something structural.** A pen has no drag to read a held modifier off
+at release (as `paint_for(in.shift, in.ctrl)` does for the other tools), so
+`MaskSession` gained one member, `Paint _path_paint = Paint::ForceDrop;`,
+captured once via `paint_for(io.KeyShift, io.KeyCtrl)` on the click that
+plants the FIRST anchor (`if (!_path.in_progress()) _path_paint = ...`, read
+before `_path.update` runs) and used whichever way the path later closes
+(first-anchor click, Enter, or right-click). This is the operator's explicit
+overruling of plan 2's Global Constraints ("the button that placed the first
+anchor picks the mode"): **Ctrl+click on the first anchor selects keep**, as
+naturally as a right click, with no drag to make the modifier awkward.
+
+**`hint_path` gained one new sentence** in all 13 languages: "Ctrl+click the
+first anchor to keep instead, Shift+Ctrl to clear." (or that language's
+equivalent), inserted after the edge-snapping sentence and before the closing
+sentence -- everything else in the message is untouched. Per-language note:
+German already renders "Ctrl+Z" as "Strg+Z" in this specific message (an
+established exception to the file's general "keys stay Latin" rule -- see
+`hint_buttons`, which keeps "Ctrl" untranslated), so the new clause mirrors
+that local precedent ("Strg+Klick", "Umschalt+Strg") rather than the file-wide
+one; every other language's new clause keeps "Ctrl"/"Shift" untranslated,
+matching that language's own existing `hint_path` and `hint_buttons` text.
+
+**Re-verified live in the app**, `/tmp/spirula_mask_bench`, Box tool and Path
+tool, restored to pristine afterward (`masks/f0000.png` MD5 unchanged):
+
+- Box tool: plain drag painted drop (red, Kept 50.1% -> 46.5%); Ctrl+drag on
+  the same region painted keep (Kept back to 50.3%); Shift+Ctrl+drag on it
+  cleared the correction (tint gone, Kept 50.2%, matching the untouched
+  baseline within antialiasing); a right-button drag over a clean area
+  produced a byte-identical screenshot to the frame before it -- no paint, no
+  pan, confirmed both by the unchanged "Last stroke"/"Kept" readouts and by
+  the screenshot's file size matching exactly.
+- Path tool: a plain-click path closed and painted drop (Kept 50.2% -> 43.1%,
+  `hint_path`'s new sentence visible and correctly worded in the screenshot);
+  a path whose first anchor was Ctrl+clicked (via a zero-length `guictl.py
+  drag --ctrl`, since `click` has no modifier flags) painted keep and raised
+  Kept to 52.1%; a path whose first anchor was Shift+Ctrl+clicked cleared the
+  same region back to 50.2%; a path with every anchor plain-clicked but
+  closed by a right click **away from the first anchor** still closed and
+  used the drop mode captured at the first anchor, confirming right-click is
+  close-only and no longer gated by which button started the path. One
+  harness miss along the way: a right-click aimed below the canvas bounds
+  (`(900, 900)` against a canvas that ends around y=822) landed outside
+  `ImGui::IsItemHovered()` and did nothing -- not a product defect, corrected
+  by aiming on-canvas.
+
+Rebuilt clean; `mask_doc_test` and `frame_mask_test` both unchanged (no test
+file touched this round) and both 0 failures; `check_i18n.sh` still 3155/3155
+translated, 0 stubs; `check_font_coverage.py` and both comment lints clean.
+
+**Two smaller items from the original report, now on record as recurring /
+systemic rather than one-off**:
+- `--print-only` does not exist as a CLI flag (`sam mask --help` lists
+  `--print`) -- this is the SECOND plan in this feature to cite it (Task 11's
+  brief here; an earlier one before it), so it is worth treating as a plan
+  defect to watch for rather than a typo in one document.
+- Task 3's `build/pathcli/data/` fixture had been cleaned from `build/`
+  between when Task 3 ran and when Task 11 needed it, and had to be
+  regenerated from Task 3's own script. A fixture that lives only under
+  `build/` (gitignored, routinely wiped) is a fixture that vanishes; the next
+  person to need it will hit the same thing unless it moves somewhere that
+  survives a clean build, or its generating script is treated as the durable
+  artifact (as this round did).
 
 ### Task 11 manual check, in the app and the CLI (2026-09-22)
 

@@ -141,14 +141,15 @@ private:
     float _brush = 24.0f;            // mask pixels
     bool _panning = false;
     double _last_commit_ms = 0.0;
-    // Which button started the stroke in progress: right paints ForceKeep,
-    // left ForceDrop, until that stroke ends.
-    bool _stroke_right = false;
 
     PathTool _path;
     std::unique_ptr<Livewire> _livewire;   // the open frame's edge map, built on first use
     bool _path_mode = false;
     double _livewire_ms = 0.0;
+    // paint_for(shift, ctrl) at the first anchor -- a pen has no drag to read
+    // a held modifier off at release, so it is captured once, at the click
+    // that starts the path, and used whichever way the path later closes.
+    Paint _path_paint = Paint::ForceDrop;
 
     // MaskPanel.cpp's texture and window.
     GLuint _tex = 0;

@@ -563,40 +563,53 @@ SS_MSG(tool_path,
     NL("Pad"),        RU("Контур"),     TR("Yol"));
 
 SS_MSG(hint_path,
-    EN("Click along an edge to drop anchors; the path snaps to the edge. Click the first "
-       "anchor, Enter or right-click closes it and paints its inside. Ctrl+Z takes an anchor "
-       "back; Esc cancels."),
-    JA("輪郭に沿ってクリックして点を置くと、パスが輪郭に沿います。最初の点をクリックするか "
-       "Enter か右クリックで閉じ、内側を塗ります。Ctrl+Z で点を戻し、Esc で中止します。"),
-    ZH_HANS("沿边缘点击放下锚点，路径会贴合边缘。点击第一个锚点、按 Enter 或右键闭合并涂抹其"
-            "内部。Ctrl+Z 撤回一个锚点，Esc 取消。"),
-    ZH_HANT("沿邊緣點擊放下錨點，路徑會貼合邊緣。點擊第一個錨點、按 Enter 或右鍵閉合並塗抹其"
-            "內部。Ctrl+Z 收回一個錨點，Esc 取消。"),
-    KO("윤곽을 따라 클릭해 앵커를 놓으면 경로가 윤곽에 붙습니다. 첫 앵커 클릭, Enter 또는 "
-       "오른쪽 클릭으로 닫고 안쪽을 칠합니다. Ctrl+Z는 앵커를 되돌리고 Esc는 취소합니다."),
+    EN("Click along an edge to drop anchors; the path snaps to the edge. Ctrl+click the "
+       "first anchor to keep instead, Shift+Ctrl to clear. Click the first anchor, Enter "
+       "or right-click closes it and paints its inside. Ctrl+Z takes an anchor back; Esc "
+       "cancels."),
+    JA("輪郭に沿ってクリックして点を置くと、パスが輪郭に沿います。最初の点を Ctrl+クリック"
+       "すると保持になり、Shift+Ctrl でクリアします。最初の点をクリックするか Enter か右ク"
+       "リックで閉じ、内側を塗ります。Ctrl+Z で点を戻し、Esc で中止します。"),
+    ZH_HANS("沿边缘点击放下锚点，路径会贴合边缘。Ctrl+点击第一个锚点改为保留，Shift+Ctrl "
+            "则清除。点击第一个锚点、按 Enter 或右键闭合并涂抹其内部。Ctrl+Z 撤回一个锚点，"
+            "Esc 取消。"),
+    ZH_HANT("沿邊緣點擊放下錨點，路徑會貼合邊緣。Ctrl+點擊第一個錨點改為保留，Shift+Ctrl "
+            "則清除。點擊第一個錨點、按 Enter 或右鍵閉合並塗抹其內部。Ctrl+Z 收回一個錨點，"
+            "Esc 取消。"),
+    KO("윤곽을 따라 클릭해 앵커를 놓으면 경로가 윤곽에 붙습니다. 첫 앵커를 Ctrl+클릭하면 "
+       "유지로 바뀌고, Shift+Ctrl은 지웁니다. 첫 앵커 클릭, Enter 또는 오른쪽 클릭으로 닫고 "
+       "안쪽을 칠합니다. Ctrl+Z는 앵커를 되돌리고 Esc는 취소합니다."),
     DE("Entlang einer Kante klicken, um Anker zu setzen; der Pfad legt sich an die Kante. "
-       "Erster Anker, Eingabe oder Rechtsklick schließt ihn und malt sein Inneres. Strg+Z "
-       "nimmt einen Anker zurück, Esc bricht ab."),
+       "Strg+Klick auf den ersten Anker behält ihn stattdessen, Umschalt+Strg löscht die "
+       "Korrektur. Erster Anker, Eingabe oder Rechtsklick schließt ihn und malt sein "
+       "Inneres. Strg+Z nimmt einen Anker zurück, Esc bricht ab."),
     FR("Cliquez le long d'un contour pour poser des ancres ; le chemin épouse le contour. "
-       "La première ancre, Entrée ou un clic droit le ferme et peint son intérieur. Ctrl+Z "
+       "Ctrl+clic sur la première ancre la conserve à la place, Shift+Ctrl efface. La "
+       "première ancre, Entrée ou un clic droit le ferme et peint son intérieur. Ctrl+Z "
        "retire une ancre, Échap annule."),
     ES("Haga clic a lo largo de un borde para poner anclas; el trazado se ajusta al borde. "
-       "La primera ancla, Intro o clic derecho lo cierra y pinta su interior. Ctrl+Z quita "
+       "Ctrl+clic en la primera ancla la conserva en su lugar, Shift+Ctrl la borra. La "
+       "primera ancla, Intro o clic derecho lo cierra y pinta su interior. Ctrl+Z quita "
        "un ancla; Esc cancela."),
-    PT("Clique ao longo de um contorno para pôr âncoras; o traçado cola-se ao contorno. A "
+    PT("Clique ao longo de um contorno para pôr âncoras; o traçado cola-se ao contorno. "
+       "Ctrl+clique na primeira âncora mantém-na em vez disso, Shift+Ctrl apaga. A "
        "primeira âncora, Enter ou clique direito fecha-o e pinta o interior. Ctrl+Z retira "
        "uma âncora; Esc cancela."),
-    IT("Fai clic lungo un bordo per posare ancoraggi; il tracciato segue il bordo. Il primo "
-       "ancoraggio, Invio o clic destro lo chiude e ne dipinge l'interno. Ctrl+Z toglie un "
-       "ancoraggio; Esc annulla."),
-    NL("Klik langs een rand om ankers te zetten; het pad volgt de rand. Het eerste anker, "
-       "Enter of rechtsklik sluit het en schildert de binnenkant. Ctrl+Z neemt een anker "
-       "terug; Esc breekt af."),
-    RU("Щёлкайте вдоль края, чтобы ставить опорные точки; контур прилипает к краю. Первая "
-       "точка, Enter или правая кнопка замыкают его и закрашивают внутренность. Ctrl+Z "
-       "убирает точку, Esc отменяет."),
-    TR("Kenar boyunca tıklayarak çapalar bırakın; yol kenara yapışır. İlk çapa, Enter veya "
-       "sağ tık onu kapatır ve içini boyar. Ctrl+Z bir çapayı geri alır; Esc iptal eder."));
+    IT("Fai clic lungo un bordo per posare ancoraggi; il tracciato segue il bordo. Ctrl+clic "
+       "sul primo ancoraggio lo mantiene invece, Shift+Ctrl cancella. Il primo ancoraggio, "
+       "Invio o clic destro lo chiude e ne dipinge l'interno. Ctrl+Z toglie un ancoraggio; "
+       "Esc annulla."),
+    NL("Klik langs een rand om ankers te zetten; het pad volgt de rand. Ctrl+klik op het "
+       "eerste anker behoudt het juist, Shift+Ctrl wist. Het eerste anker, Enter of "
+       "rechtsklik sluit het en schildert de binnenkant. Ctrl+Z neemt een anker terug; Esc "
+       "breekt af."),
+    RU("Щёлкайте вдоль края, чтобы ставить опорные точки; контур прилипает к краю. "
+       "Ctrl+щелчок по первой точке сохраняет её, Shift+Ctrl стирает. Первая точка, Enter "
+       "или правая кнопка замыкают его и закрашивают внутренность. Ctrl+Z убирает точку, "
+       "Esc отменяет."),
+    TR("Kenar boyunca tıklayarak çapalar bırakın; yol kenara yapışır. İlk çapaya "
+       "Ctrl+tıklamak onu tutar, Shift+Ctrl siler. İlk çapa, Enter veya sağ tık onu kapatır "
+       "ve içini boyar. Ctrl+Z bir çapayı geri alır; Esc iptal eder."));
 
 SS_MSG(path_building,
     EN("Preparing the edge map for this frame..."),
