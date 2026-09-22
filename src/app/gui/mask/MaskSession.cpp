@@ -105,7 +105,7 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
     _index = std::move(idx);
     _idx = -1;
     _doc.reset();
-    _rgb.clear();
+    _rgb.reset();
     _win_dirty = true;
     _close_requested = false;
     _tool_reset = true;
@@ -148,7 +148,7 @@ void MaskSession::close() {
     _quit = false;
     _open = false;
     _doc.reset();
-    _rgb.clear();
+    _rgb.reset();
     _frames.clear();
     _idx = -1;
     _workspace.clear();
@@ -275,7 +275,7 @@ void MaskSession::pump() {
     if (have_saved && _doc && _doc->key() == saved_key) _doc->mark_saved(saved_rev, saved_comp);
     if (!have_loaded) return;
     _doc = std::move(l.doc);
-    _rgb = std::move(l.rgb);
+    _rgb = std::make_shared<const std::vector<uint8_t>>(std::move(l.rgb));
     _fw = l.fw;
     _fh = l.fh;
     _turn = l.turn;
@@ -300,7 +300,7 @@ void MaskSession::go_to(int i) {
     if (i < 0 || i >= frame_count() || i == _idx) return;
     if (_doc && _doc->dirty()) save();
     _doc.reset();
-    _rgb.clear();
+    _rgb.reset();
     load_frame(i);
 }
 
@@ -349,7 +349,7 @@ void MaskSession::revert_open_frame() {
     const std::string key = _doc->key();
     const int i = _idx;
     _doc.reset();
-    _rgb.clear();
+    _rgb.reset();
     enqueue([this, key] {
         std::string err;
         if (!mask::revert_frame(_layer_root, _mask_root, key, _index, err))
@@ -363,7 +363,7 @@ void MaskSession::revert_open_frame() {
 void MaskSession::revert_every_frame() {
     const int i = _idx;
     _doc.reset();
-    _rgb.clear();
+    _rgb.reset();
     enqueue([this] {
         std::string err;
         const bool flipped = _index.mask_flipped;
@@ -443,7 +443,7 @@ Rect MaskSession::redo() {
 WindowSource MaskSession::window_source() const {
     WindowSource s;
     if (!_doc) return s;
-    s.rgb = _rgb.data();
+    s.rgb = _rgb ? _rgb->data() : nullptr;
     s.fw = _fw;
     s.fh = _fh;
     s.composite = _doc->composite().data();
@@ -472,10 +472,10 @@ void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
 }
 
 void MaskSession::ensure_livewire() {
-    if (_livewire || !_doc || _rgb.empty()) return;
+    if (_livewire || !_doc || !_rgb || _rgb->empty()) return;
     const auto t0 = std::chrono::steady_clock::now();
     auto lw = std::make_unique<Livewire>();
-    lw->build(_rgb.data(), _fw, _fh);
+    lw->build(_rgb->data(), _fw, _fh);
     _livewire_ms = std::chrono::duration<double, std::milli>(
                        std::chrono::steady_clock::now() - t0).count();
     _livewire = std::move(lw);

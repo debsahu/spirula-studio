@@ -2953,6 +2953,36 @@ void test_mask_sam_click_filters() {
           "sam clicks: a click carrying a dataset source is excluded");
 }
 
+// ---------------------------------------------------------------------------
+// SAM assist: the frame buffer a job holds (P8a)
+// ---------------------------------------------------------------------------
+
+// A holder's frame buffer outlives the frame change that replaces it and the
+// close that drops it. The two frames differ, so a shared or recycled buffer
+// would change under its holder: the use-after-free, in behavioural form.
+void test_session_frame_pixels_outlive_navigation() {
+    Fixture f = make_dataset("frame_pixels", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "frame pixels: open: " + err);
+    settle(s);
+    const std::shared_ptr<const std::vector<uint8_t>> held = s.frame_pixels();
+    check(held && held->size() == (size_t)64 * 48 * 3,
+          "frame pixels: frame 0 is held at fw x fh x 3");
+    const std::vector<uint8_t> frame0 = held ? *held : std::vector<uint8_t>();
+    s.go_to(1);
+    settle(s);
+    const std::shared_ptr<const std::vector<uint8_t>> now = s.frame_pixels();
+    check(now && now.get() != held.get() && *now != frame0,
+          "frame pixels: frame 1 is a different buffer with different pixels");
+    check(held && *held == frame0,
+          "frame pixels: the held frame-0 buffer is unchanged after the frame change");
+    s.close();
+    check(!s.frame_pixels(), "frame pixels: close drops the session's reference");
+    check(held && *held == frame0, "frame pixels: the held buffer is unchanged after close");
+}
+
 }  // namespace
 
 int main() {
@@ -3013,6 +3043,7 @@ int main() {
     test_mask_sam_clicks();
     test_mask_sam_negative_clicks();
     test_mask_sam_click_filters();
+    test_session_frame_pixels_outlive_navigation();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

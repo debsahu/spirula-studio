@@ -85,6 +85,8 @@ public:
     void set_radius(float r) { _brush = clamp_brush(r); }
     View& view() { return _view; }
     WindowSource window_source() const;
+    // The open frame's pixels, co-owned: a holder keeps them past a frame change.
+    std::shared_ptr<const std::vector<uint8_t>> frame_pixels() const { return _rgb; }
 
     // ---- actions ----
     void go_to(int i);
@@ -156,7 +158,9 @@ private:
 
     // The open frame, UI thread.
     std::unique_ptr<MaskDoc> _doc;
-    std::vector<uint8_t> _rgb;
+    // Co-owned with any SAM job still reading it, so replacing or dropping it
+    // here never frees what a job holds. const: nothing may refill it in place.
+    std::shared_ptr<const std::vector<uint8_t>> _rgb;
     int _fw = 0, _fh = 0;
     sfm::ExifTransform _turn;
     int _dw = 0, _dh = 0;
