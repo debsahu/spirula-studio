@@ -147,6 +147,10 @@ private:
     bool _path_mode = false;
     double _livewire_ms = 0.0;
 
+    // What draw_status() took last frame, so draw_canvas() can reserve it
+    // instead of a constant. 0 until the first frame has been drawn.
+    float _status_h = 0.0f;
+
     // MaskPanel.cpp's texture and window.
     GLuint _tex = 0;
     Window _win;

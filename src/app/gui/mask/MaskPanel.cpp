@@ -92,7 +92,9 @@ void MaskSession::draw() {
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
         draw_toolbar();
         draw_canvas();
+        const float status_y = ImGui::GetCursorPosY();
         draw_status();
+        _status_h = ImGui::GetCursorPosY() - status_y;
     }
     ImGui::End();
     if (!open) _close_requested = true;
@@ -158,7 +160,11 @@ void MaskSession::draw_toolbar() {
 
 void MaskSession::draw_canvas() {
     const ImVec2 avail = ImGui::GetContentRegionAvail();
-    const float status_h = px(118.0f);
+    // What the strip actually took last frame. Its height is however many
+    // lines the tool and the wrapped hints produce, which no constant can
+    // know; frame one has no measurement, so seed the pen tool's eight.
+    const float status_h = _status_h > 0.0f ? _status_h
+                                            : 8.0f * ImGui::GetTextLineHeightWithSpacing();
     const ImVec2 size(std::max(avail.x, px(64.0f)), std::max(avail.y - status_h, px(64.0f)));
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 far(origin.x + size.x, origin.y + size.y);
