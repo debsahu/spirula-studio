@@ -1749,9 +1749,14 @@ void test_path_tool_basic() {
 
     // Close on the first anchor: within 10 px of it, with 3 anchors.
     t.update(at(40, 27), out, consumed);
-    check(!t.near_first(), "15 px away is not near the first anchor");
+    check(!t.near_first(), "34.5 px away is not near the first anchor");
     t.update(at(12, 11), out, consumed);
     check(t.near_first(), "2.2 px away is near");
+    // Straddle kPathCloseRadius = 10.0f exactly, so the constant is pinned.
+    t.update(at(19.9f, 10.0f), out, consumed);
+    check(t.near_first(), "9.9 px away is inside the close radius");
+    t.update(at(20.1f, 10.0f), out, consumed);
+    check(!t.near_first(), "10.1 px away is outside the close radius");
     check(t.update(click_at(12, 11), out, consumed) && consumed, "clicking the first anchor closes");
     check(same_points(out, {10, 10, 50, 10, 50, 40}, 1e-6f), "closed polygon is the three anchors");
     check(!t.in_progress() && t.anchor_count() == 0, "closing resets the tool");
@@ -1798,6 +1803,10 @@ void test_path_tool_livewire() {
     bool consumed;
     t.update(click_at(100, 10), out, consumed);
     check(lw.has_anchor(), "the first anchor seeds the search");
+    // A near hop and a far hop must both grow, so no constant satisfies both.
+    t.update(at(100, 11), out, consumed);
+    const double ms_tiny = t.last_segment_ms();
+    const size_t pops_tiny = lw.pops();
     t.update(at(100, 60), out, consumed);
     t.overlay(an, co, li);
     check(li.size() >= 2 * 51, "live segment follows the edge: " + std::to_string(li.size() / 2));
@@ -1807,7 +1816,11 @@ void test_path_tool_livewire() {
     check(li[0] == 100.0f && li[1] == 10.0f && li[li.size() - 2] == 100.0f && li[li.size() - 1] == 60.0f,
           "live segment's ends are the exact anchor and cursor");
     const double ms = t.last_segment_ms();
-    check(ms >= 0.0 && ms < 1000.0, "segment time recorded: " + std::to_string(ms) + " ms");
+    check(ms >= 0.0 && ms < 1000.0, "segment time stays in a sane range: " + std::to_string(ms) + " ms");
+    check(lw.pops() > pops_tiny, "the far hover visits more nodes: " + std::to_string(lw.pops()) +
+                                      " vs " + std::to_string(pops_tiny));
+    check(ms > ms_tiny, "segment time grows with the search, not a constant: " + std::to_string(ms) +
+                             " vs " + std::to_string(ms_tiny) + " ms");
 
     t.update(click_at(100, 110), out, consumed);
     t.overlay(an, co, li);
@@ -1839,25 +1852,25 @@ void test_path_tool_livewire() {
 }
 
 void test_path_tool_space() {
-    // Fed pixels are frame pixels scaled by 2 and offset by (5, 7): what a
-    // zoomed canvas does. Anchors and the closed polygon must come back in
-    // fed pixels; the livewire sees frame pixels.
+    // Fed pixels are frame pixels scaled 2x on X, 4x on Y, each offset --
+    // different axes catch a transposed scale a uniform factor would miss.
+    // Anchors and the closed polygon come back in fed pixels; the livewire sees frame pixels.
     const int W = 200, H = 120;
     mk::Livewire lw;
     lw.build(step_edge_rgb(W, H).data(), W, H);
     mk::PathTool t;
     t.set_livewire(&lw);
     mk::PathSpace sp;
-    sp.to_frame = [](float x, float y, float& fx, float& fy) { fx = (x - 5.0f) * 0.5f; fy = (y - 7.0f) * 0.5f; };
-    sp.from_frame = [](float fx, float fy, float& x, float& y) { x = fx * 2.0f + 5.0f; y = fy * 2.0f + 7.0f; };
+    sp.to_frame = [](float x, float y, float& fx, float& fy) { fx = (x - 5.0f) * 0.5f; fy = (y - 7.0f) * 0.25f; };
+    sp.from_frame = [](float fx, float fy, float& x, float& y) { x = fx * 2.0f + 5.0f; y = fy * 4.0f + 7.0f; };
     t.set_space(sp);
     std::vector<float> out, an, co, li;
     bool consumed;
-    t.update(click_at(205, 27), out, consumed);      // frame (100, 10)
-    t.update(click_at(205, 227), out, consumed);     // frame (100, 110)
-    t.update(click_at(305, 127), out, consumed);     // frame (150, 60)
+    t.update(click_at(205, 47), out, consumed);       // frame (100, 10)
+    t.update(click_at(205, 447), out, consumed);      // frame (100, 110)
+    t.update(click_at(305, 247), out, consumed);      // frame (150, 60)
     t.overlay(an, co, li);
-    check(same_points(an, {205, 27, 205, 227, 305, 127}, 1e-3f), "anchors reported in fed pixels");
+    check(same_points(an, {205, 47, 205, 447, 305, 247}, 1e-3f), "anchors reported in fed pixels");
     bool on_edge = true;
     for (size_t i = 2; i + 3 < co.size() && i < 2 * 100; i += 2) {
         const float fx = (co[i] - 5.0f) * 0.5f;
@@ -1865,11 +1878,11 @@ void test_path_tool_space() {
     }
     check(on_edge, "the committed edge run maps back to the ridge in frame pixels");
     t.update(at(30, 30), out, consumed);
-    check(!t.near_first(), "fed (30,30) is 175 px from the first anchor");
-    t.update(at(210, 30), out, consumed);
-    check(t.near_first(), "fed (210,30) is 5.8 px from it");
-    check(t.update(click_at(210, 30), out, consumed) && out.size() >= 6, "closes in fed space");
-    check(std::fabs(out[0] - 205.0f) < 1e-3f && std::fabs(out[1] - 27.0f) < 1e-3f,
+    check(!t.near_first(), "fed (30,30) is 175.8 px from the first anchor");
+    t.update(at(210, 45), out, consumed);
+    check(t.near_first(), "fed (210,45) is 5.4 px from it");
+    check(t.update(click_at(210, 45), out, consumed) && out.size() >= 6, "closes in fed space");
+    check(std::fabs(out[0] - 205.0f) < 1e-3f && std::fabs(out[1] - 47.0f) < 1e-3f,
           "closed polygon starts at the fed first anchor");
 }
 
