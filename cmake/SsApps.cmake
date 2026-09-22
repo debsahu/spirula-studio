@@ -357,6 +357,14 @@ add_executable(packed_lens_test
     ${SS_SRC}/app/Pano360.cpp)
 ss_configure_app(packed_lens_test)
 
+# The stencil shapes, spelling and fill, with no GUI: FrameMask.cpp is compiled
+# into the CLI too, so this must link without imgui.
+add_executable(frame_mask_test
+    ${SS_SRC}/app/tests/frame_mask_test.cpp
+    ${SS_SRC}/app/FrameMask.cpp
+    ${SS_SRC}/app/FrameLook.cpp)
+ss_configure_app(frame_mask_test)
+
 # The GUI files with no GUI in them: the stamp that decides whether a finished
 # reconstruction is kept or built again, and the preset serializers. Named
 # rather than globbed -- each such test names its own sources.

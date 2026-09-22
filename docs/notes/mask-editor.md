@@ -550,7 +550,29 @@ removed; `~/.config/spirula-studio/gui.conf`'s `native_dialogs` restored to 1
 from the pre-session backup. `work/osmo_playroom/` in the parent repo was
 only read, never modified.
 
+## Path shape and livewire
+
+A `path` is one more `MaskShape::Kind`: 3 or more corners normalised to the
+frame, closed implicitly, `-path` removing what is inside exactly as `-rect`
+does, in the same ordered list. It is filled by the even-odd scanline fill in
+`src/core/PolygonFill.h`, which is the fill the 3D editor's lasso already
+used (moved down so the CLI's `spirula sam mask --shape` can reach it).
+
+The pen tool (`src/app/gui/mask/PathTool.h`) drops anchors and joins them
+with the livewire (`Livewire.h`): Dijkstra over a cost image from gradient
+magnitude, gradient direction and Laplacian zero crossings, after Mortensen
+and Barrett 1995, with diagonal links weighted by their length. The cost
+image is built once per frame shown over the frame decimated to at most 4096
+px on its long edge (1.9 px of precision at 8K, 3.8 px on a 15520-wide
+still, both under the masker's rim dilation). The search is lazy: each
+cursor move pops the heap only until the cursor's pixel is settled.
+
+Keys mirror the polygon tool rather than the spec's first draft: a click
+drops an anchor, a click on the first anchor, Enter or a right click closes,
+Ctrl+Z takes an anchor back, Esc cancels. Two polygon tools in one panel
+with opposite right-click meanings was judged worse than the departure.
+
 ## Not in this phase
 
-Path shape, livewire, propagate, find-missing, slideshow, view modes and the
-peek key, session persistence.
+Propagate, find-missing, slideshow, view modes and the peek key, session
+persistence; vertex handles on a path; a Bezier path.
