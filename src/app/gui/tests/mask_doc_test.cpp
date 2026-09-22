@@ -2880,6 +2880,8 @@ void test_mask_sam_stub_refuses() {
     check(!sam.take_result(key, out, keep, score, ms), "sam stub: no result to take");
     check(key == "untouched" && out.size() == 1 && keep && score == -1.0f && ms == -1.0,
           "sam stub: take_result left every output alone");
+    check(sam.status().empty(), "sam stub: status is empty with no job run");
+    check(sam.error().empty(), "sam stub: error is empty with no job run");
     sam.cancel();
     sam.release();
     check(!sam.busy() && sam.vram_mib() < 0.0 && sam.has_model(),
@@ -2911,6 +2913,28 @@ void test_mask_sam_clicks() {
     check(zero.size() == 2 && zero[0].x == 10.0f && zero[1].x == 30.0f,
           "sam clicks: ... only this frame and camera, in click order");
     check(sam.object_points(3, "cam2").empty(), "sam clicks: a camera with no clicks sends none");
+    const mk::MaskSam& ro = sam;
+    check(&ro.prompt() == &p && ro.prompt().clicks.size() == 5 && ro.prompt().object_count == 2,
+          "sam clicks: the const prompt() reads the state the non-const one wrote");
+}
+
+// Each frame holds one click that must be sent beside one that must not, so a
+// dropped filter shows as a second point rather than as an empty result.
+void test_mask_sam_click_filters() {
+    mk::MaskSam sam;
+    gui::MaskSettings& p = sam.prompt();
+    sam.add_click(5, "cam0", 1.0f, 1.0f);
+    sam.add_click(5, "cam0", 2.0f, 2.0f);
+    p.clicks.back().positive = false;
+    sam.add_click(6, "cam0", 3.0f, 3.0f);
+    sam.add_click(6, "cam0", 4.0f, 4.0f);
+    p.clicks.back().source = "/captures/a.mp4";
+    const std::vector<mk::SamPoint> neg = sam.object_points(5, "cam0");
+    check(neg.size() == 1 && neg[0].x == 1.0f,
+          "sam clicks: a negative click is excluded from the positive set");
+    const std::vector<mk::SamPoint> src = sam.object_points(6, "cam0");
+    check(src.size() == 1 && src[0].x == 3.0f,
+          "sam clicks: a click carrying a dataset source is excluded");
 }
 
 }  // namespace
@@ -2971,6 +2995,7 @@ int main() {
     test_add_history_bytes();
     test_mask_sam_stub_refuses();
     test_mask_sam_clicks();
+    test_mask_sam_click_filters();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

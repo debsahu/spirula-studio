@@ -172,7 +172,7 @@ private:
 
     PathTool _path;
     std::unique_ptr<Livewire> _livewire;   // the open frame's edge map, built on first use
-    std::unique_ptr<MaskSam> _sam;   // created on first use, dropped in close()
+    std::unique_ptr<MaskSam> _sam;   // SAM assist; nothing creates it yet
     bool _path_mode = false;
     double _livewire_ms = 0.0;
 

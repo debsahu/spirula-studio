@@ -49,6 +49,10 @@ fi
 # pointer reads exactly like a live one.
 bash tools/check_comments.sh >/dev/null || { bash tools/check_comments.sh; exit 1; }
 
+# The mask editor's testable half is built without SS_BUILD_SAM; an unguarded
+# sam/ include there is invisible to mask_doc_test's link-level symbol gate.
+bash tools/check_sam_guard.sh >/dev/null || { bash tools/check_sam_guard.sh; exit 1; }
+
 # Comment blocks in uncommitted work must fit the AGENTS.md budget. Also wired
 # into CMake (cmake/SsChecks.cmake), which covers a bare cmake/ninja build;
 # running it here fails before the configure step rather than after it.
