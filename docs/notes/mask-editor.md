@@ -356,7 +356,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:151` and `:364`), and
+does (both call the identical function, `MaskPanel.cpp:148` and `:361`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -379,7 +379,7 @@ would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:402`), read before the series and after every one of
+readout (`MaskPanel.cpp:399`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -483,7 +483,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:151` (`ui::Button(msg::undo)`) and `:364`
+   worked. `MaskPanel.cpp:148` (`ui::Button(msg::undo)`) and `:361`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -527,9 +527,9 @@ what was inferred rather than run flagged as such.
   "Kept %" and painted a lighter/keep-tinted stroke inside a drop region;
   Shift+Ctrl+drag over that same stroke returned "Kept %" exactly to its
   pre-stroke value and removed the tint. "The modifier read is the one held
-  at release" is read from source (`MaskPanel.cpp:289-290` samples
+  at release" is read from source (`MaskPanel.cpp:286-287` samples
   `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
-  and `:312` hands those to `paint_now` on the frame the stroke commits)
+  and `:309` hands those to `paint_now` on the frame the stroke commits)
   rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
@@ -563,7 +563,7 @@ what was inferred rather than run flagged as such.
   switching from a dirty `f0000` to `f0001` autosaved `f0000`'s layers to
   disk and the new frame's status read "Saved". `<` and the slider were
   **not** independently exercised; `go_to()` is the single function behind
-  all three (`MaskPanel.cpp:179`, `:183`, `:185`), so this is inferred from
+  all three (`MaskPanel.cpp:176`, `:180`, `:182`), so this is inferred from
   the one call tested.
 - [x] **Closing the window with Done or its close box while dirty writes the
   files.** Both exercised independently: Done and the title-bar close box
@@ -1357,11 +1357,11 @@ height -- which is the same reason the reserve is measured rather than
 computed.
 
 **That 192 px is the worst case the battery reached, not the worst case
-`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:394-428`), the eight
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:391-425`), the eight
 items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
 `hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
 and the status-or-error line. Two more items exist: `status_base_regenerated`
-and `status_base_missing` (`MaskPanel.cpp:407-410`), one `TextDisabledWrapped`
+and `status_base_missing` (`MaskPanel.cpp:404-407`), one `TextDisabledWrapped`
 each and mutually exclusive, since `base_state()` returns one value. Neither
 was on screen for any row of the table above, and the exact arithmetic is how
 that is known rather than assumed -- 110, 132 and 176 are 5, 6 and 8 lines to
@@ -1419,7 +1419,7 @@ than wrong.
 
 **The fix above removes the defect at every window size a person would work
 at, and does not remove it at every window size.** `draw_canvas` floors the
-canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:394-428`) draws its
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:391-425`) draws its
 full content unconditionally with no cap and no truncation. Once the window is
 short enough that the canvas has pinned at its floor, every further pixel of
 shrink becomes a pixel of strip pushed past the window bottom. It is the same
@@ -1636,11 +1636,11 @@ for **an eraser with the same affordances**.
 `shape_of()` maps it to a `ShapeKind`, `kNumSelectTools` lays out the Select
 tab, and `EditPanel` iterates it. An eraser is not a shape, and a row there
 would put an "Eraser" button in a panel where it means nothing. So it is a
-mask-editor flag, `MaskSession::_erase`, mutually exclusive with the shapes
-and the pen exactly as `_path_mode` already is, and it forces the brush shape.
-The three switches go through `pick_tool` / `pick_eraser` / `pick_path`
-(`MaskPanel.cpp`), which is also what keeps the toolbar and the key handler
-from drifting over which flags a switch clears -- they used to duplicate that.
+mask-editor mode, one value of `MaskSession`'s `CanvasMode` (shapes, eraser,
+pen, SAM), which makes two tools on at once unrepresentable; the eraser also
+forces the brush shape. The switches go through `pick_tool` / `pick_eraser` /
+`pick_path` / `pick_sam` (`MaskPanel.cpp`), which is also what keeps the
+toolbar and the key handler from drifting over what else a switch cancels.
 
 ### It paints `ForceKeep`, and the alternative reading is wrong for a reason
 
@@ -1671,7 +1671,7 @@ keeps them apart. **The operator used it on a real 120 MP correction and asked
 for the opposite**: *"carry over eraser and brush size from each other, rather
 than keeping it independent."* Their experience of the task beats the
 generalisation, so `_eraser` is gone and `radius()` / `set_radius()`
-(`MaskSession.h:88-89`) address the one float. The slider, `[`/`]` and
+(`MaskSession.h:97-98`) address the one float. The slider, `[`/`]` and
 Alt+wheel all move it whichever tool is up.
 
 **The test was inverted, not deleted.** It guarded independence, which is now
@@ -1698,7 +1698,7 @@ self-evident the moment you switch and the number does not change.
 
 ### The slider
 
-`MaskPanel.cpp:191-205`, on the **frame-navigation row**, shown only under the
+`MaskPanel.cpp:188-202`, on the **frame-navigation row**, shown only under the
 brush or the eraser, `ImGuiSliderFlags_Logarithmic | AlwaysClamp` over
 `[kMinBrush, kMaxBrush]` = [1, 4096]. The range is twelve octaves and `[`/`]`
 are multiplicative, so a linear slider would put every usable size in the
@@ -1742,7 +1742,7 @@ changed.
 takes `ImGui::GetItemRectMin()` / `GetItemRectMax()`, so it draws over the **last
 item**, not specifically over a button. The slider therefore carries
 `[ ] Alt+wheel` in the same corner `Q B E L P C F T K`, `I` and `X` sit in
-(`MaskPanel.cpp:206-212`), plus a `help_on_hover` sentence of the kind `save` /
+(`MaskPanel.cpp:203-209`), plus a `help_on_hover` sentence of the kind `save` /
 `revert_frame` / `revert_all` already have.
 
 **The hint is a `Msg`, not a raw key string.** The brackets are identifiers and
@@ -1791,7 +1791,7 @@ eraser ever does move into `ToolId`, the key comes with it.
 
 ### Alt+wheel over the canvas
 
-`MaskPanel.cpp:243-251`. The bare wheel is already the zoom, and Shift/Ctrl
+`MaskPanel.cpp:240-248`. The bare wheel is already the zoom, and Shift/Ctrl
 are the paint modes, so Alt is what was left; it is read by no mask tool and
 by no view gesture. The factor is `1.18^wheel` -- the **reciprocal** of the
 grow step, not the bracket's 0.85 -- so a notch back exactly undoes a notch,

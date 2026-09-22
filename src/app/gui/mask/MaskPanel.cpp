@@ -110,8 +110,7 @@ void MaskSession::draw() {
 
 void MaskSession::pick_tool(ToolId t) {
     _tool.set_id(t);
-    _path_mode = false;
-    set_erasing(false);
+    set_mode(CanvasMode::Shape);
     _path.cancel();
 }
 
@@ -120,14 +119,12 @@ void MaskSession::pick_tool(ToolId t) {
 // would put an "Eraser" button in a panel where it means nothing.
 void MaskSession::pick_eraser() {
     _tool.set_id(ToolId::Brush);
-    _path_mode = false;
-    set_erasing(true);
+    set_mode(CanvasMode::Eraser);
     _path.cancel();
 }
 
 void MaskSession::pick_path() {
-    _path_mode = true;
-    set_erasing(false);
+    set_mode(CanvasMode::Path);
     _tool.cancel();
 }
 
@@ -137,15 +134,15 @@ void MaskSession::draw_toolbar() {
         const ToolRow& row = tool_table()[i];
         if (i != (int)ToolId::Box) ImGui::SameLine();
         if (ui::KeyButton(tool_label(row.id), w, row.key,
-                          !_path_mode && !_erase && _tool.id() == row.id))
+                          mode() == CanvasMode::Shape && _tool.id() == row.id))
             pick_tool(row.id);
     }
     ImGui::SameLine();
     // X, not E: E is the Ellipse in the shared key table, and rebinding it
     // would move a shortcut the editor already documents.
-    if (ui::KeyButton(msg::tool_eraser, w, "X", _erase)) pick_eraser();
+    if (ui::KeyButton(msg::tool_eraser, w, "X", erasing())) pick_eraser();
     ImGui::SameLine();
-    if (ui::KeyButton(msg::tool_path, w, "I", _path_mode)) pick_path();
+    if (ui::KeyButton(msg::tool_path, w, "I", path_mode())) pick_path();
     ImGui::SameLine();
     ImGui::BeginDisabled(!_doc || !_doc->can_undo());
     if (ui::Button(msg::undo)) upload_rect(undo());
@@ -188,7 +185,7 @@ void MaskSession::draw_toolbar() {
     // On this row rather than a third one: a third row comes out of what
     // draw_canvas has to share between canvas and strip, raising the window
     // height at which the strip clips (docs/notes/mask-editor.md).
-    if (_erase || (!_path_mode && _tool.id() == ToolId::Brush)) {
+    if (erasing() || (mode() == CanvasMode::Shape && _tool.id() == ToolId::Brush)) {
         ImGui::SameLine();
         // 340 rather than the frame slider's 260 so the corner hint below
         // clears the centred value at its widest ("Eraser: 4096 px").
@@ -196,7 +193,7 @@ void MaskSession::draw_toolbar() {
         // Logarithmic because the steps are multiplicative over twelve
         // octaves: linear travel would put every usable size in the first 2%.
         const std::string fmt =
-            spirula::i18n::format(_erase ? msg::eraser_radius : msg::brush_radius, {"%.0f"});
+            spirula::i18n::format(erasing() ? msg::eraser_radius : msg::brush_radius, {"%.0f"});
         float r = radius();
         if (ui::SliderFloatRaw("##maskbrush", &r, kMinBrush, kMaxBrush, fmt.c_str(),
                                ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp))
@@ -289,7 +286,7 @@ void MaskSession::draw_canvas() {
     in.shift = io.KeyShift;
     in.ctrl = io.KeyCtrl;
     in.alt = io.KeyAlt;
-    if (_path_mode) {
+    if (path_mode()) {
         ensure_livewire();
         _path.set_space(path_space(m));
         _path.note_modifiers(io.KeyShift, io.KeyCtrl);
@@ -331,16 +328,16 @@ void MaskSession::handle_keys(const Mapping& m) {
         if (ImGui::IsKeyPressed(ImGuiKey_X, false)) pick_eraser();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-        if (_path_mode) _path.cancel();
+        if (path_mode()) _path.cancel();
         else _tool.cancel();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
-        const Paint mode = _path_mode ? paint_now(_path.mode_shift(), _path.mode_ctrl())
+        const Paint mode = path_mode() ? paint_now(_path.mode_shift(), _path.mode_ctrl())
                                       : paint_now(io.KeyShift, io.KeyCtrl);
         ShapeStroke s;
         bool pending = false;
-        if (_path_mode) {
+        if (path_mode()) {
             std::vector<float> poly;
             pending = _path.commit_pending(poly);
             s.kind = ShapeKind::Polygon;
@@ -357,8 +354,8 @@ void MaskSession::handle_keys(const Mapping& m) {
     if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, true)) set_radius(step_brush(radius(), false));
     if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, true)) set_radius(step_brush(radius(), true));
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-        if (!io.KeyShift && _path_mode && _path.in_progress() && _path.pop_anchor()) return;
-        if (!io.KeyShift && !_path_mode && _tool.id() == ToolId::Polygon && _tool.in_progress() &&
+        if (!io.KeyShift && path_mode() && _path.in_progress() && _path.pop_anchor()) return;
+        if (!io.KeyShift && !path_mode() && _tool.id() == ToolId::Polygon && _tool.in_progress() &&
             _tool.pop_point())
             return;
         upload_rect(io.KeyShift ? redo() : undo());
@@ -409,11 +406,11 @@ void MaskSession::draw_status() {
         if (_doc->base_state() == BaseState::Missing)
             ui::TextDisabledWrapped(msg::status_base_missing);
     }
-    ui::Text(_erase ? msg::eraser_radius : msg::brush_radius, {(int)std::lround(radius())});
+    ui::Text(erasing() ? msg::eraser_radius : msg::brush_radius, {(int)std::lround(radius())});
     ImGui::SameLine();
     ui::Text(msg::status_commit, {one_decimal(_last_commit_ms)});
-    ui::TextDisabledWrapped(_erase ? msg::hint_eraser : msg::hint_buttons);
-    if (_path_mode) {
+    ui::TextDisabledWrapped(erasing() ? msg::hint_eraser : msg::hint_buttons);
+    if (path_mode()) {
         ui::TextDisabledWrapped(msg::hint_path);
         ui::Text(msg::path_anchors, {_path.anchor_count()});
         if (!_path.snapping()) ui::TextDisabledWrapped(msg::path_straight);

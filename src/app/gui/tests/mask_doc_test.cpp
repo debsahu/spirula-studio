@@ -3323,6 +3323,35 @@ void test_session_sam_blocker_clears_its_own_error() {
           "sam unpause: lifting a pause leaves a real error standing");
 }
 
+// ---------------------------------------------------------------------------
+// SAM assist: the canvas mode (P14)
+// ---------------------------------------------------------------------------
+
+// Every ordered pair of canvas modes: picking the second must leave exactly
+// the second on, whatever the first was. A mode kept in its own flag fails.
+void test_canvas_mode_is_exclusive() {
+    mk::MaskSession s;
+    const mk::CanvasMode all[] = {mk::CanvasMode::Shape, mk::CanvasMode::Eraser,
+                                  mk::CanvasMode::Path, mk::CanvasMode::Sam};
+    bool exclusive = true;
+    for (mk::CanvasMode a : all)
+        for (mk::CanvasMode b : all) {
+            s.set_mode(a);
+            s.set_mode(b);
+            exclusive = exclusive && s.mode() == b &&
+                        s.erasing() == (b == mk::CanvasMode::Eraser) &&
+                        s.path_mode() == (b == mk::CanvasMode::Path) &&
+                        s.sam_mode() == (b == mk::CanvasMode::Sam);
+        }
+    check(exclusive, "canvas mode: selecting any mode deselects every other");
+    s.set_mode(mk::CanvasMode::Sam);
+    s.set_erasing(false);
+    check(s.mode() == mk::CanvasMode::Shape, "canvas mode: set_erasing(false) leaves SAM for the shapes");
+    s.set_mode(mk::CanvasMode::Path);
+    s.set_erasing(true);
+    check(s.erasing() && !s.path_mode(), "canvas mode: set_erasing(true) leaves the pen");
+}
+
 }  // namespace
 
 int main() {
@@ -3394,6 +3423,7 @@ int main() {
     test_mask_sam_run_guarded();
     test_session_sam_result_stamp();
     test_session_sam_blocker_clears_its_own_error();
+    test_canvas_mode_is_exclusive();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

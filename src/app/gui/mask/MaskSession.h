@@ -38,6 +38,10 @@ struct FrameRef {
 
 class MaskSam;
 
+// What a left click on the canvas does. One value rather than a flag per tool,
+// so no two can be on at once, whichever picker forgets what.
+enum class CanvasMode { Shape, Eraser, Path, Sam };
+
 // The continuous inverse of to_stored (MaskDoc.h): a stored point to the
 // displayed frame. Plan 1 has the pixel form only.
 void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
@@ -80,11 +84,16 @@ public:
     std::string status() const;
     std::string error() const;
     double last_commit_ms() const { return _last_commit_ms; }
+    CanvasMode mode() const { return _mode; }
+    void set_mode(CanvasMode m) { _mode = m; }
+    bool erasing() const { return _mode == CanvasMode::Eraser; }
+    bool path_mode() const { return _mode == CanvasMode::Path; }
+    bool sam_mode() const { return _mode == CanvasMode::Sam; }
+    // Off returns to the shapes, which is where every other picker leaves it.
+    void set_erasing(bool on) { _mode = on ? CanvasMode::Eraser : CanvasMode::Shape; }
     // ONE radius, shared by the brush and the eraser: the operator wants the
     // size to carry when they switch tools mid-correction. A second copy is
     // the defect to avoid here, not a feature to add.
-    bool erasing() const { return _erase; }
-    void set_erasing(bool on) { _erase = on; }
     float radius() const { return _brush; }
     void set_radius(float r) { _brush = clamp_brush(r); }
     View& view() { return _view; }
@@ -156,7 +165,7 @@ public:
     // The mode a stroke commits with, from the modifiers on the frame it
     // completes and the tool it was drawn with.
     static Paint paint_for(bool shift, bool ctrl, bool erasing);
-    Paint paint_now(bool shift, bool ctrl) const { return paint_for(shift, ctrl, _erase); }
+    Paint paint_now(bool shift, bool ctrl) const { return paint_for(shift, ctrl, erasing()); }
     // The radius arithmetic, all of it, in mask pixels. clamp_brush is the
     // one place [kMinBrush, kMaxBrush] is enforced -- and it folds NaN to the
     // minimum, which std::clamp would propagate instead.
@@ -192,8 +201,8 @@ private:
     void set_corrected(int n);
     Rect shown_rect(const Rect& stored) const;
     // MaskPanel.cpp
-    // The three ways a tool is chosen, so the toolbar and the key handler
-    // cannot drift apart over which flags a switch clears.
+    // How a tool is chosen, so the toolbar and the key handler cannot drift
+    // apart over what else a switch cancels. The mode itself is one value.
     void pick_tool(ToolId t);
     void pick_eraser();
     void pick_path();
@@ -229,7 +238,7 @@ private:
     // imgui); a frame change asks it to reset through this flag.
     bool _tool_reset = false;
     float _brush = 24.0f;            // mask pixels, the brush's AND the eraser's
-    bool _erase = false;
+    CanvasMode _mode = CanvasMode::Shape;
     bool _panning = false;
     double _last_commit_ms = 0.0;
 
@@ -250,7 +259,6 @@ private:
     int64_t _sam_last_area = 0;
     std::string _sam_blocker;
     uint64_t _doc_gen = 0;           // bumped where pump() installs a _doc; never reset
-    bool _path_mode = false;
     double _livewire_ms = 0.0;
 
     // What draw_status() took last frame, so draw_canvas() can reserve it
