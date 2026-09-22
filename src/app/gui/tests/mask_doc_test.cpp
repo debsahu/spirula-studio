@@ -1871,8 +1871,9 @@ void test_path_tool_livewire() {
     check(ms >= 0.0 && ms < 1000.0, "segment time stays in a sane range: " + std::to_string(ms) + " ms");
     check(lw.pops() > pops_tiny, "the far hover visits more nodes: " + std::to_string(lw.pops()) +
                                       " vs " + std::to_string(pops_tiny));
-    check(ms > ms_tiny, "segment time grows with the search, not a constant: " + std::to_string(ms) +
-                             " vs " + std::to_string(ms_tiny) + " ms");
+    // Printed, never asserted: both readings are under 0.01 ms and invert
+    // under scheduler noise. pops() above is the deterministic proof.
+    std::printf("note  far/near segment time %.6f vs %.6f ms\n", ms, ms_tiny);
 
     t.update(click_at(100, 110), out, consumed);
     t.overlay(an, co, li);
