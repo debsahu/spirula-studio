@@ -648,8 +648,13 @@ void MaskSession::sam_prompt_started(float frame_x, float frame_y, bool positive
     _sam_t0 = std::chrono::steady_clock::now();
 }
 
+// A list with no phrase in it (sam::split_phrases would drop every entry) is
+// refused here: a job would pay a ~1.5 s encode to find nothing.
 bool MaskSession::sam_prompt_text(const std::string& phrases) {
     if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending) return false;
+    if (std::all_of(phrases.begin(), phrases.end(),
+                    [](char c) { return c == ';' || c == ' ' || c == '\t'; }))
+        return false;
     if (!_sam_blocker.empty()) {
         sam().refuse(_sam_blocker);
         return false;

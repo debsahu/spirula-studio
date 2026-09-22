@@ -4056,6 +4056,93 @@ void test_session_sam_redo_then_refine() {
           "redo refine: an undo and a new edit in its place makes a re-prompt add");
 }
 
+// An undo alone takes the add off the top: a refinement then adds, and the
+// hand edit beneath the undone add is never undone in its place.
+void test_session_sam_undo_then_refine() {
+    Fixture f = make_dataset("sam_undo_refine", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "undo refine: open: " + err);
+    settle(s);
+    const int h0 = s.doc()->history_size();
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 50, 5, 60, 15), mk::Rect{50, 5, 60, 15});
+    sam_add(s, disc_region(64, 48, 20.0f, 20.0f, 10.0f), 0);
+    s.undo();
+    sam_add(s, disc_region(64, 48, 27.0f, 20.0f, 5.0f), 0);
+    check(s.doc()->history_size() == h0 + 2 && s.doc()->keep()[(size_t)10 * 64 + 55] == 255,
+          "undo refine: after an undo a refinement adds, and the hand edit survives");
+}
+
+// A fresh add that changes nothing leaves the redo stack alone: only a
+// replacement's own undone add is dropped from it.
+void test_session_sam_noop_fresh_keeps_redo() {
+    Fixture f = make_dataset("sam_noop_fresh", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "noop fresh: open: " + err);
+    settle(s);
+    s.doc()->paint(mk::Paint::ForceDrop, box_stencil(64, 48, 40, 10, 60, 40), mk::Rect{40, 10, 60, 40});
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 0, 0, 4, 4), mk::Rect{0, 0, 4, 4});
+    s.undo();
+    const uint64_t rev = s.doc()->revision();
+    sam_add(s, disc_region(64, 48, 50.0f, 25.0f, 4.0f), 0);
+    check(s.doc()->revision() == rev, "noop fresh: the add lands on dropped pixels and changes nothing");
+    check(s.doc()->can_redo(), "noop fresh: a no-op fresh add keeps the undone hand stroke's redo");
+}
+
+// Shift alone is a held modifier: on a kept object it drops, not keeps.
+void test_session_sam_click_mode_shift() {
+    Fixture f = make_dataset("sam_click_shift", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "click shift: open: " + err);
+    settle(s);
+    sam_add(s, disc_region(64, 48, 20.0f, 20.0f, 6.0f), 0, mk::Paint::ForceKeep);
+    check(s.sam_click_mode(false, false) == mk::Paint::ForceKeep,
+          "click shift: the fixture's add is a keep on top");
+    check(s.sam_click_mode(true, false) == mk::Paint::ForceDrop,
+          "click shift: Shift alone on a kept object drops");
+}
+
+// At the history cap every add evicts the oldest step; the serials must be
+// evicted with them, or a hand edit after the add reads as the add.
+void test_session_sam_refine_at_cap() {
+    Fixture f = make_dataset("sam_refine_cap", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "refine cap: open: " + err);
+    settle(s);
+    for (int k = 0; k < mk::kMaxHistoryOps - 1; k++)
+        s.doc()->paint(k % 2 ? mk::Paint::ForceKeep : mk::Paint::ForceDrop,
+                       box_stencil(64, 48, 0, 0, 4, 4), mk::Rect{0, 0, 4, 4});
+    sam_add(s, disc_region(64, 48, 20.0f, 30.0f, 6.0f), 0);
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 50, 30, 60, 40), mk::Rect{50, 30, 60, 40});
+    check(s.doc()->history_size() == mk::kMaxHistoryOps,
+          "refine cap: the fixture is at the op cap, so the hand edit evicted a step");
+    sam_add(s, disc_region(64, 48, 24.0f, 30.0f, 6.0f), 0);
+    check(s.doc()->keep()[(size_t)35 * 64 + 55] == 255,
+          "refine cap: at the cap a hand edit after the add survives a re-prompt");
+}
+
+// A phrase list with no phrase in it never starts a job (and its encode).
+void test_session_sam_empty_phrase() {
+    Fixture f = make_dataset("sam_empty_phrase", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "empty phrase: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    check(!s.sam_prompt_text("") && !s.sam_prompt_text("  ; \t;") && s.sam_error().empty(),
+          "empty phrase: an empty or blank list is refused before any job");
+    check(!s.sam_prompt_text(" ; door") && !s.sam_error().empty(),
+          "empty phrase: a list with one phrase in it reaches the job (the stub refuses it)");
+}
+
 }  // namespace
 
 int main() {
@@ -4153,6 +4240,11 @@ int main() {
     test_add_stencil_box_sizes_margin();
     test_session_sam_click_mode();
     test_session_sam_redo_then_refine();
+    test_session_sam_undo_then_refine();
+    test_session_sam_noop_fresh_keeps_redo();
+    test_session_sam_click_mode_shift();
+    test_session_sam_refine_at_cap();
+    test_session_sam_empty_phrase();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();
