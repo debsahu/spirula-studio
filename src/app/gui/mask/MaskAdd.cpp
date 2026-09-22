@@ -2,6 +2,8 @@
 
 #include "app/gui/mask/MaskAdd.h"
 
+#include "core/MaskMargin.h"
+
 #include <algorithm>
 
 namespace gui {
@@ -44,7 +46,7 @@ Rect extent(const std::vector<uint8_t>& p, int w, const Rect& within, int64_t& n
 // Filling and the final scan cover only the destination box each region can
 // reach, not the whole W x H plane; this runs on the SAM job thread.
 bool build_add_stencil(std::vector<AddRegion>& regions, int W, int H,
-                       Stencil& out, Rect& bounds, int64_t& set_px) {
+                       Stencil& out, Rect& bounds, int64_t& set_px, float margin) {
     if (W <= 0 || H <= 0) return false;
     std::vector<uint8_t> plane;
     bool have = false;
@@ -53,8 +55,19 @@ bool build_add_stencil(std::vector<AddRegion>& regions, int W, int H,
     for (AddRegion& g : regions) {
         if (g.w <= 0 || g.h <= 0 || g.mask.size() != (size_t)g.w * (size_t)g.h) continue;
         int64_t n = 0;
-        const Rect s = extent(g.mask, g.w, Rect{0, 0, g.w, g.h}, n);
+        Rect s = extent(g.mask, g.w, Rect{0, 0, g.w, g.h}, n);
         if (s.empty()) continue;
+        if (margin > 0.0f) {
+            const int r = margin::radius_px((float)s.x0, (float)s.y0, (float)s.x1,
+                                            (float)s.y1, margin);
+            std::vector<uint8_t> hit(g.mask.size(), 0);
+            margin::accumulate(g.mask.data(), g.w, g.h, r, hit);
+            for (uint8_t& v : hit) v = v ? 255 : 0;
+            g.mask = std::move(hit);
+            const Rect grown{std::max(0, s.x0 - r), std::max(0, s.y0 - r),
+                             std::min(g.w, s.x1 + r), std::min(g.h, s.y1 + r)};
+            s = extent(g.mask, g.w, grown, n);
+        }
         const Rect d{first_dst(s.x0, g.w, W), first_dst(s.y0, g.h, H),
                      first_dst(s.x1, g.w, W), first_dst(s.y1, g.h, H)};
         box = Rect{std::min(box.x0, d.x0), std::min(box.y0, d.y0),

@@ -78,15 +78,16 @@ public:
                    bool positive = true);
     std::vector<SamPoint> object_points(long long frame, const std::string& camera) const;
 
-    // The job co-owns `rgb`, so the caller may replace or drop its own copy at
-    // once. `points` are frame pixels; `phrases` is semicolon separated; the
-    // stencil is built at doc_w x doc_h, the open document's size.
+    // The job co-owns `rgb`, so the caller may drop its copy at once. `points`
+    // are frame pixels, `phrases` semicolon separated; the stencil is doc_w x
+    // doc_h, and `margin` the editor's ratio, applied through drop_margin().
     bool start_points(const std::string& frame_key,
                       std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
-                      int doc_w, int doc_h, std::vector<SamPoint> points, Paint mode);
+                      int doc_w, int doc_h, std::vector<SamPoint> points, Paint mode,
+                      float margin);
     bool start_text(const std::string& frame_key,
                     std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
-                    int doc_w, int doc_h, const std::string& phrases);
+                    int doc_w, int doc_h, const std::string& phrases, float margin);
     // One finished job, or false with `out` untouched.
     bool take_result(SamResult& out);
 
@@ -99,7 +100,7 @@ public:
     // The job's hand-off of a finished result, stencil built on the calling
     // thread; public so a test can stand in for the job in a build without SAM.
     void post_result(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                     int doc_h, Paint mode, float score, double ms);
+                     int doc_h, Paint mode, float margin, float score, double ms);
 
 private:
     struct State;
@@ -107,7 +108,7 @@ private:
     bool launch(Job job);
     void release_device();   // the SAM-only half of release()
     static SamResult prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                             int doc_h, Paint mode, float score);
+                             int doc_h, Paint mode, float margin, float score);
     static void publish(State& s, SamResult r);
     static void run(State& s, Job job);
     static void run_stages(State& s, Job job,

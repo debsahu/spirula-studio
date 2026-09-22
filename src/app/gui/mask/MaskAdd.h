@@ -21,11 +21,17 @@ struct AddRegion {
     float score = 0.0f;
 };
 
-// Unions `regions` (consumed) into one W x H document-pixel stencil, nearest-
-// neighbour where sizes differ; `bounds` is its extent, `set_px` its count.
-// False, with the three outputs untouched, when nothing landed.
+// Unions `regions` (consumed), each grown first by `margin` of its own extent
+// (core/MaskMargin.h), into one W x H nearest-resampled stencil; `bounds` is its
+// extent, `set_px` its count. False, outputs untouched, when nothing landed.
 bool build_add_stencil(std::vector<AddRegion>& regions, int W, int H,
-                       Stencil& out, Rect& bounds, int64_t& set_px);
+                       Stencil& out, Rect& bounds, int64_t& set_px, float margin = 0.0f);
+
+// The margin grows what is thrown away, as on the dataset screen: a drop takes
+// the editor's ratio, a keep or a clear SAM's exact outline. Never signed.
+inline float drop_margin(Paint mode, float ratio) {
+    return mode == Paint::ForceDrop && ratio > 0.0f ? ratio : 0.0f;
+}
 
 }  // namespace mask
 }  // namespace gui

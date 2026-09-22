@@ -111,13 +111,14 @@ bool MaskSam::clear_error_if(const std::string& reason) {
 }
 
 SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                           int doc_h, Paint mode, float score) {
+                           int doc_h, Paint mode, float margin, float score) {
     SamResult r;
     r.frame_key = std::move(frame_key);
     r.mode = mode;
     r.score = score;
     r.detections = (int)regions.size();
-    r.landed = build_add_stencil(regions, doc_w, doc_h, r.stencil, r.bounds, r.set_px);
+    r.landed = build_add_stencil(regions, doc_w, doc_h, r.stencil, r.bounds, r.set_px,
+                                 drop_margin(mode, margin));
     return r;
 }
 
@@ -129,8 +130,9 @@ void MaskSam::publish(State& s, SamResult r) {
 }
 
 void MaskSam::post_result(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
-                          int doc_h, Paint mode, float score, double ms) {
-    SamResult r = prepare(std::move(frame_key), std::move(regions), doc_w, doc_h, mode, score);
+                          int doc_h, Paint mode, float margin, float score, double ms) {
+    SamResult r =
+        prepare(std::move(frame_key), std::move(regions), doc_w, doc_h, mode, margin, score);
     r.ms = ms;
     publish(*_s, std::move(r));
 }
@@ -170,6 +172,7 @@ struct MaskSam::Job {
     int fw = 0, fh = 0, doc_w = 0, doc_h = 0;
     std::vector<SamPoint> points;
     Paint mode = Paint::ForceDrop;
+    float margin = 0.0f;
     bool text = false;
     int max_size = 0;
     float score_threshold = 0.5f, nms_threshold = 0.1f;
@@ -220,7 +223,8 @@ double MaskSam::vram_mib() const {
 
 bool MaskSam::start_points(const std::string& frame_key,
                            std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
-                           int doc_w, int doc_h, std::vector<SamPoint> points, Paint mode) {
+                           int doc_w, int doc_h, std::vector<SamPoint> points, Paint mode,
+                           float margin) {
     // SAM needs a "this" to exclude a "not this" from.
     if (std::none_of(points.begin(), points.end(), [](const SamPoint& p) { return p.positive; }))
         return false;
@@ -233,6 +237,7 @@ bool MaskSam::start_points(const std::string& frame_key,
     j.doc_h = doc_h;
     j.points = std::move(points);
     j.mode = mode;
+    j.margin = margin;
     return launch(std::move(j));
 }
 
@@ -240,7 +245,7 @@ bool MaskSam::start_points(const std::string& frame_key,
 // set the thresholds, read here on the UI thread so the job never touches them.
 bool MaskSam::start_text(const std::string& frame_key,
                          std::shared_ptr<const std::vector<uint8_t>> rgb, int fw, int fh,
-                         int doc_w, int doc_h, const std::string& phrases) {
+                         int doc_w, int doc_h, const std::string& phrases, float margin) {
     if (!text_supported()) return false;
     Job j;
     j.frame_key = frame_key;
@@ -250,6 +255,7 @@ bool MaskSam::start_text(const std::string& frame_key,
     j.doc_w = doc_w;
     j.doc_h = doc_h;
     j.phrases = phrases;
+    j.margin = margin;
     j.text = true;
     j.max_size = _s->prompt.max_image_size;
     j.score_threshold = _s->prompt.threshold;
@@ -396,9 +402,14 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         std::lock_guard<std::mutex> lk(s.mu);
         s.vram_mib = mib;
     }
-    SamResult res = prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode, best);
+    SamResult res = prepare(j.frame_key, std::move(out), j.doc_w, j.doc_h, j.mode, j.margin, best);
     res.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
                  .count();
+    // The stencil takes ~150 ms at 15520x7760; an Esc during it must still win.
+    if (s.cancel) {
+        finish(std::string());
+        return;
+    }
     publish(s, std::move(res));
     s.running = false;
 }
@@ -416,12 +427,12 @@ void MaskSam::release_device() {}
 double MaskSam::vram_mib() const { return -1.0; }
 
 bool MaskSam::start_points(const std::string&, std::shared_ptr<const std::vector<uint8_t>>, int,
-                           int, int, int, std::vector<SamPoint>, Paint) {
+                           int, int, int, std::vector<SamPoint>, Paint, float) {
     refuse(msg::sam_unavailable_build.get());
     return false;
 }
 bool MaskSam::start_text(const std::string&, std::shared_ptr<const std::vector<uint8_t>>, int,
-                         int, int, int, const std::string&) {
+                         int, int, int, const std::string&, float) {
     refuse(msg::sam_unavailable_build.get());
     return false;
 }

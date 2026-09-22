@@ -613,11 +613,16 @@ const std::string& MaskSession::sam_model_path() const {
 }
 
 
+float MaskSession::sam_margin() const { return _sam ? _sam->prompt().dilate_ratio : -1.0f; }
+
 double MaskSession::sam_vram_mib() const { return _sam ? _sam->vram_mib() : -1.0; }
 
 // Slice 1: one click is one prompt, and a lone "not this" has nothing to refine.
+// A point off the frame is ignored quietly: SAM answers it with speckle.
 bool MaskSession::sam_prompt_point(float frame_x, float frame_y, Paint mode, bool positive) {
     if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending || !positive)
+        return false;
+    if (!(frame_x >= 0.0f && frame_y >= 0.0f && frame_x < (float)_fw && frame_y < (float)_fh))
         return false;
     if (!_sam_blocker.empty()) {
         sam().refuse(_sam_blocker);
@@ -627,7 +632,7 @@ bool MaskSession::sam_prompt_point(float frame_x, float frame_y, Paint mode, boo
     _sam_click_y = frame_y;
     std::vector<SamPoint> points{SamPoint{frame_x, frame_y, true}};
     if (!sam().start_points(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
-                            std::move(points), mode))
+                            std::move(points), mode, sam_prompt().dilate_ratio))
         return false;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;
@@ -640,7 +645,7 @@ bool MaskSession::sam_prompt_text(const std::string& phrases) {
         return false;
     }
     if (!sam().start_text(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
-                          phrases))
+                          phrases, sam_prompt().dilate_ratio))
         return false;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;

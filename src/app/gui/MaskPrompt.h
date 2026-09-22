@@ -56,6 +56,12 @@ void prompt_toggle_term(std::string& prompt, const char* term);
 bool draw_subject_palette(std::string& prompt, std::string& negative,
                           bool keep_subject);
 
+// The margin a match's outline moves by, 0-50% of its size: removing grows it
+// (`dilate_ratio`), keeping trims it (`shrink_ratio`). `inline_label` puts the
+// label beside a `width` slider, else above it. True when it changed.
+bool draw_margin_slider(float& dilate_ratio, float& shrink_ratio, bool keep, float width,
+                        bool inline_label);
+
 class FileDownload;   // app/gui/ModelCache.h
 
 // The row under the checkpoint combo, in the dataset screen's own order: a

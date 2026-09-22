@@ -178,6 +178,25 @@ bool draw_subject_palette(std::string& prompt, std::string& negative,
     return edited;
 }
 
+bool draw_margin_slider(float& dilate_ratio, float& shrink_ratio, bool keep, float width,
+                        bool inline_label) {
+    float& ratio = keep ? shrink_ratio : dilate_ratio;
+    float margin_pct = ratio * 100.0f;
+    const spirula::i18n::Msg& label = keep ? dmsg::mask_dilate_keep : dmsg::mask_dilate_remove;
+    bool changed = false;
+    if (inline_label) {
+        ImGui::SetNextItemWidth(width);
+        changed = ui::SliderFloat(label, &margin_pct, 0.0f, 50.0f, "%.0f%%");
+    } else {
+        ui::Text(label);
+        ImGui::SetNextItemWidth(width);
+        changed = ui::SliderFloatRaw("##dilate", &margin_pct, 0.0f, 50.0f, "%.0f%%");
+    }
+    if (changed) ratio = margin_pct / 100.0f;
+    ui::help_on_hover(keep ? dmsg::mask_shrink_help : dmsg::mask_dilate_help);
+    return changed;
+}
+
 void draw_mask_model_picker(std::string& model_id, FileDownload& download,
                             const std::function<void()>& request_download) {
     int model_idx = 0;

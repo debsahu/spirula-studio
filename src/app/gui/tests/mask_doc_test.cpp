@@ -17,6 +17,7 @@
 #include "app/gui/mask/MaskSession.h"
 #include "app/gui/mask/MaskWindow.h"
 #include "core/ImageOrient.h"
+#include "core/MaskMargin.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
 #include "i18n/catalog/MaskEdit.h"
@@ -3018,9 +3019,10 @@ void test_mask_sam_stub_refuses() {
     check(!sam.text_supported(), "sam stub: no text tower whatever the catalog says");
     check(!sam.busy(), "sam stub: never busy");
     check(sam.vram_mib() < 0.0, "sam stub: reports no device accounting");
-    check(!sam.start_points("f", px, 4, 4, 4, 4, {mk::SamPoint{1.0f, 1.0f}}, mk::Paint::ForceDrop),
+    check(!sam.start_points("f", px, 4, 4, 4, 4, {mk::SamPoint{1.0f, 1.0f}}, mk::Paint::ForceDrop,
+                            0.05f),
           "sam stub: refuses a point");
-    check(!sam.start_text("f", px, 4, 4, 4, 4, "person"), "sam stub: refuses a phrase");
+    check(!sam.start_text("f", px, 4, 4, 4, 4, "person", 0.05f), "sam stub: refuses a phrase");
     check(px.use_count() == 1, "sam stub: a refused start keeps no reference to the frame");
     mk::SamResult out;
     out.frame_key = "untouched";
@@ -3247,7 +3249,7 @@ void test_session_sam_blocker() {
 void test_mask_sam_release_forgets() {
     mk::MaskSam sam;
     sam.refuse("the old checkpoint failed to load");
-    sam.post_result("k", std::vector<mk::AddRegion>(1), 4, 4, mk::Paint::ForceKeep, 0.5f, 1.0);
+    sam.post_result("k", std::vector<mk::AddRegion>(1), 4, 4, mk::Paint::ForceKeep, 0.0f, 0.5f, 1.0);
     sam.release();
     check(sam.error().empty(), "sam release: the last error is forgotten");
     mk::SamResult out;
@@ -3290,17 +3292,17 @@ void test_session_sam_result_stamp() {
     const std::string old = s.sam_frame_stamp();
     s.revert_open_frame();
     settle(s);
-    s.sam().post_result(old, {g}, 64, 48, mk::Paint::ForceDrop, 0.9f, 5.0);
+    s.sam().post_result(old, {g}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 5.0);
     const mk::Rect r0 = s.sam_pump();
     check(s.sam_dropped() == 1 && s.sam_results() == 0 && r0.empty() && s.doc() &&
               !s.doc()->dirty(),
           "sam result: a result stamped before a revert is dropped, the document clean");
-    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.9f, 5.0);
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 5.0);
     const mk::Rect r1 = s.sam_pump();
     check(s.sam_results() == 1 && s.sam_dropped() == 1 && !r1.empty() && s.doc() &&
               s.doc()->dirty() && s.sam_last_area() == 200,
           "sam result: a result with the current stamp paints its 200 pixels");
-    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.9f, 5.0);
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 5.0);
     s.sam_yield();
     check(s.sam_dropped() == 2 && s.sam_results() == 1,
           "sam yield: a finished result the yield throws away is counted as dropped");
@@ -3434,15 +3436,147 @@ void test_session_sam_paint_modes() {
     g.w = 64;
     g.h = 48;
     g.mask.assign((size_t)all, 255);
-    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.9f, 1.0);
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
     s.sam_pump();
     check(s.doc()->kept() == 0, "sam paint: a plain click's result drops the object");
-    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::Clear, 0.9f, 1.0);
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::Clear, 0.0f, 0.9f, 1.0);
     s.sam_pump();
     check(s.doc()->kept() == base, "sam paint: a Shift+Ctrl result clears back to the base");
-    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceKeep, 0.9f, 1.0);
+    s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, mk::Paint::ForceKeep, 0.0f, 0.9f, 1.0);
     s.sam_pump();
     check(s.doc()->kept() == all, "sam paint: a Ctrl result keeps the object");
+}
+
+// A Clear reverts SAM's region only: a hand stroke beside it survives.
+void test_session_sam_clear_is_local() {
+    const int W = 64, H = 48;
+    Fixture f = make_dataset("sam_clear_local", W, H, {"a"}, /*with_masks=*/false);
+    write_png_gray(f.masks / "a.png", W, H, std::vector<uint8_t>((size_t)W * H, 255));
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam clear: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    const int64_t all = (int64_t)W * H;
+    mk::Mapping m;
+    m.scale = 1.0f;
+    gui::ShapeStroke hand;
+    hand.kind = gui::ShapeKind::Box;
+    hand.pts = {0.0f, 0.0f, 10.0f, 10.0f};
+    s.commit_stroke(hand, mk::Paint::ForceDrop, m);
+    const int64_t after_hand = s.doc()->kept();
+    mk::AddRegion g;
+    g.w = W;
+    g.h = H;
+    g.mask.assign((size_t)all, 0);
+    for (int y = 20; y < 30; y++)
+        for (int x = 30; x < 40; x++) g.mask[(size_t)y * W + x] = 255;
+    s.sam().post_result(s.sam_frame_stamp(), {g}, W, H, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    check(after_hand < all && s.doc()->kept() == after_hand - 100,
+          "sam clear: the hand stroke and SAM's drop both landed");
+    s.sam().post_result(s.sam_frame_stamp(), {g}, W, H, mk::Paint::Clear, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.doc()->kept() == after_hand, "sam clear: a Clear reverts SAM's region, the stroke stays");
+}
+
+// ---------------------------------------------------------------------------
+// SAM assist: the drop margin (core/MaskMargin.h, sam::Masker's rule)
+// ---------------------------------------------------------------------------
+
+void test_margin_radius() {
+    check(margin::radius_px(0, 0, 400, 400, 0.05f) == 10,
+          "margin radius: 5% of a 400 px box is the odd kernel 21, radius 10");
+    check(margin::radius_px(0, 0, 200, 50, 0.3f) == 18,
+          "margin radius: the mean side, not the long one (kernel 37)");
+    check(margin::radius_px(0, 0, 4, 4, 0.05f) == 1, "margin radius: the floor of 3 keeps a tiny box moving");
+    check(margin::radius_px(0, 0, 400, 400, 0.0f) == 0, "margin radius: ratio 0 is exactly none");
+    check(margin::radius_px(0, 0, 400, 400, -0.05f) == -10, "margin radius: signed, as Masker takes it");
+}
+
+// A drop grows by its radius on every side; the grown count is the margin's own.
+void test_add_stencil_drop_margin() {
+    const int W = 64, H = 48;
+    std::vector<mk::AddRegion> r(1);
+    r[0].w = W;
+    r[0].h = H;
+    r[0].mask.assign((size_t)W * H, 0);
+    for (int y = 14; y < 34; y++)
+        for (int x = 20; x < 40; x++) r[0].mask[(size_t)y * W + x] = 255;
+    const int rad = margin::radius_px(20, 14, 40, 34, 0.3f);
+    std::vector<uint8_t> hit((size_t)W * H, 0);
+    margin::accumulate(r[0].mask.data(), W, H, rad, hit);
+    int64_t want = 0;
+    for (uint8_t v : hit) want += v;
+    gui::Stencil st;
+    mk::Rect b;
+    int64_t set = -1;
+    check(rad == 3 && mk::build_add_stencil(r, W, H, st, b, set, 0.3f),
+          "drop margin: a 20 px square at 30% has radius 3 and builds");
+    check(same_rect(b, mk::Rect{17, 11, 43, 37}) && set == want && set > 400,
+          "drop margin: the square grows 3 px on every side, by the margin's own count");
+}
+
+// Only a drop takes the margin; never signed, so no trim can reach the editor.
+void test_drop_margin_modes() {
+    check(mk::drop_margin(mk::Paint::ForceDrop, 0.2f) == 0.2f, "drop margin: a drop takes the ratio");
+    check(mk::drop_margin(mk::Paint::ForceKeep, 0.2f) == 0.0f &&
+              mk::drop_margin(mk::Paint::Clear, 0.2f) == 0.0f,
+          "drop margin: keep and clear use SAM's exact outline");
+    check(mk::drop_margin(mk::Paint::ForceDrop, -0.1f) == 0.0f,
+          "drop margin: a negative ratio never trims");
+    Fixture f = make_dataset("sam_margin_modes", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "drop margin: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    mk::AddRegion g;
+    g.w = 64;
+    g.h = 48;
+    g.mask.assign((size_t)64 * 48, 0);
+    for (int y = 14; y < 34; y++)
+        for (int x = 20; x < 40; x++) g.mask[(size_t)y * 64 + x] = 255;
+    int64_t area[3];
+    const mk::Paint modes[3] = {mk::Paint::ForceDrop, mk::Paint::ForceKeep, mk::Paint::Clear};
+    for (int i = 0; i < 3; i++) {
+        s.sam().post_result(s.sam_frame_stamp(), {g}, 64, 48, modes[i], 0.3f, 0.9f, 1.0);
+        s.sam_pump();
+        area[i] = s.sam_last_area();
+    }
+    check(area[0] > 400 && area[1] == 400 && area[2] == 400,
+          "drop margin: a drop result grows, a keep and a clear do not");
+}
+
+// The editor's margin is its own MaskSettings, never the dataset screen's.
+void test_editor_margin_is_its_own() {
+    gui::MaskSettings dataset;
+    mk::MaskSession s;
+    check(s.sam_margin() < 0.0f, "editor margin: nothing before SAM is used");
+    s.sam_prompt().dilate_ratio = 0.2f;
+    check(dataset.dilate_ratio == 0.05f && s.sam_margin() == 0.2f,
+          "editor margin: setting the editor's leaves a dataset's at its 5% default");
+    mk::MaskSession fresh;
+    check(fresh.sam_prompt().dilate_ratio == 0.05f, "editor margin: a new editor starts at 5%");
+}
+
+// A point off the frame never reaches the model: no job, and no error either.
+void test_prompt_point_off_frame() {
+    Fixture f = make_dataset("sam_off_frame", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "off frame: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    const float bad[][2] = {{-0.5f, 10.0f}, {10.0f, -1.0f}, {64.0f, 10.0f}, {10.0f, 48.0f}};
+    bool quiet = true;
+    for (const auto& p : bad) quiet = quiet && !s.sam_prompt_point(p[0], p[1], mk::Paint::ForceDrop);
+    check(quiet && s.sam_error().empty(), "off frame: four points outside are refused silently");
+    s.sam_prompt_point(63.5f, 47.5f, mk::Paint::ForceDrop);
+    check(!s.sam_error().empty(), "off frame: the last pixel inside still reaches the job (the stub refuses it)");
 }
 
 }  // namespace
@@ -3521,6 +3655,12 @@ int main() {
     test_strip_reserve();
     test_click_maps_by_shown_layout();
     test_session_sam_paint_modes();
+    test_session_sam_clear_is_local();
+    test_margin_radius();
+    test_add_stencil_drop_margin();
+    test_drop_margin_modes();
+    test_editor_margin_is_its_own();
+    test_prompt_point_off_frame();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

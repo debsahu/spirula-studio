@@ -2670,6 +2670,9 @@ std::string GuiApp::state_json() {
     out += ",\"sam_click\":[" + std::to_string(_mask_editor.sam_click_x()) + "," +
            std::to_string(_mask_editor.sam_click_y()) + "]";
     out += ",\"mask_editor_canvas_h\":" + std::to_string(_mask_editor.canvas_height());
+    out += ",\"mask_editor_anchors\":" + std::to_string(_mask_editor.path_anchors());
+    out += ",\"sam_margin\":" + std::to_string(_mask_editor.sam_margin());
+    out += ",\"mask_dilate_ratio\":" + std::to_string(_mask.dilate_ratio);
     return out;
 }
 
@@ -4727,15 +4730,8 @@ void GuiApp::draw_masking_options() {
         if (ui::InputInt(dmsg::mask_max_size, &_mask.max_image_size))
             _mask.max_image_size = std::max(0, _mask.max_image_size);
         ui::help_on_hover(dmsg::mask_max_size_help);
-        ImGui::SetNextItemWidth(px(220.0f));
-        float& ratio = keep_subject ? _mask.shrink_ratio : _mask.dilate_ratio;
-        float margin_pct = ratio * 100.0f;
-        if (ui::SliderFloat(keep_subject ? dmsg::mask_dilate_keep
-                                         : dmsg::mask_dilate_remove,
-                            &margin_pct, 0.0f, 50.0f, "%.0f%%"))
-            ratio = margin_pct / 100.0f;
-        ui::help_on_hover(keep_subject ? dmsg::mask_shrink_help
-                                       : dmsg::mask_dilate_help);
+        draw_margin_slider(_mask.dilate_ratio, _mask.shrink_ratio, keep_subject, px(220.0f),
+                           /*inline_label=*/true);
 
         // The rest is the memory bank, which photos never get.
         bool any_video = false;

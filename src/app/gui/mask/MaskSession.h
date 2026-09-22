@@ -165,6 +165,9 @@ public:
     float sam_click_x() const { return _sam_click_x; }
     float sam_click_y() const { return _sam_click_y; }
     float canvas_height() const { return _canvas_h; }
+    int path_anchors() const { return _path.anchor_count(); }
+    // The editor's own drop margin (its MaskSettings), -1 before SAM was used.
+    float sam_margin() const;
 
     // ---- actions ----
     void go_to(int i);
@@ -283,6 +286,7 @@ private:
     // What draw_status() took last frame, so draw_canvas() can reserve it
     // instead of a constant. 0 until the first frame has been drawn.
     float _status_h = 0.0f;
+    bool _popup_at_start = false;    // a popup was open when this frame began
     float _toolbar_w = 0.0f;         // the tool row's width last frame, window px
 
     // MaskPanel.cpp's texture and window.

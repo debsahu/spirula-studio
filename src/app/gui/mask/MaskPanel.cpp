@@ -10,6 +10,8 @@
 
 #include "app/gui/DatasetPrep.h"
 #include "app/gui/Layout.h"
+#include "app/gui/MaskPrompt.h"
+#include "app/gui/MaskSettings.h"
 #include "app/gui/Ui.h"
 #include "i18n/catalog/Dataset.h"
 #include "i18n/catalog/MaskEdit.h"
@@ -88,6 +90,7 @@ void MaskSession::draw() {
     // an 8K MaskDoc::save() (~700 ms). Deferring to the NEXT call means the
     // frame that requested it still reaches the screen before the block.
     if (_close_requested) { close(); return; }
+    _popup_at_start = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup);
     pump();
     {
         const double t0 = now_ms();
@@ -353,7 +356,10 @@ void MaskSession::draw_canvas() {
 
 void MaskSession::handle_keys(const Mapping& m) {
     const ImGuiIO& io = ImGui::GetIO();
-    if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || io.WantTextInput)
+    // RootAndChildWindows counts a popup opened from this window as focused, so
+    // a modal (or one closed earlier this frame by the same Esc) masks the keys.
+    if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || io.WantTextInput ||
+        _popup_at_start || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup))
         return;
     if (!io.KeyCtrl) {
         for (int i = (int)ToolId::Box; i <= (int)ToolId::Brush; i++) {
@@ -417,7 +423,8 @@ void MaskSession::draw_revert_all_modal() {
     if (_doc && _doc->dirty()) ui::Text(msg::revert_all_unsaved);
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
-    // Esc is Cancel: the convention, and the direction that loses nothing.
+    // Esc is Cancel, the convention; handle_keys skips this frame, so the same Esc
+    // cannot also cancel a stroke or a path behind the modal.
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
     if (ui::Button(msg::revert_all_button, ImVec2(px(220.0f), 0)) && idle()) {
         revert_every_frame();
@@ -474,6 +481,10 @@ void MaskSession::draw_status() {
 void MaskSession::draw_sam_status() {
     if (_model_picker) _model_picker();
     if (!sam_has_model()) ui::TextDisabled(dmsg::mask_model_first);
+    // The editor's own margin, never the dataset's; a drop takes it (drop_margin).
+    MaskSettings& p = sam_prompt();
+    draw_margin_slider(p.dilate_ratio, p.shrink_ratio, /*keep=*/false, px(220.0f),
+                       /*inline_label=*/true);
     ui::TextDisabledWrapped(msg::sam_hint);
     const float y0 = ImGui::GetCursorPosY();
     const std::string sam_err = sam_error();

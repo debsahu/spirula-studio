@@ -55,27 +55,27 @@ row src/app/gui/mask/Livewire.h 3 "Mortensen and Barrett 1995"
 row src/app/gui/mask/Livewire.h 84 "std::vector<uint8_t> _parent;"
 row _deps/imgui-src/imgui.cpp 1850-1856 "ImGuiKey_LeftCtrl)  { key = ImGuiKey_LeftSuper; }"
 row _deps/imgui-src/imgui.cpp 1957-1967 "Convert Ctrl(Super)+Left click into Right-click"
-row src/app/gui/mask/MaskPanel.cpp 174 "ui::Button(msg::undo)"
-row src/app/gui/mask/MaskPanel.cpp 399 "io.KeyShift ? redo() : undo()"
+row src/app/gui/mask/MaskPanel.cpp 177 "ui::Button(msg::undo)"
+row src/app/gui/mask/MaskPanel.cpp 405 "io.KeyShift ? redo() : undo()"
 row src/app/gui/mask/MaskSession.cpp 389-400 "MaskSession::commit_stroke" 389
 row src/app/gui/mask/MaskSession.cpp 389-400 "if (r.empty()) return {};" 400
-row src/app/gui/mask/MaskPanel.cpp 74 "shown.empty()) return;"
-row src/app/gui/mask/MaskPanel.cpp 445 "msg::status_kept"
+row src/app/gui/mask/MaskPanel.cpp 76 "shown.empty()) return;"
+row src/app/gui/mask/MaskPanel.cpp 452 "msg::status_kept"
 row src/app/gui/mask/MaskLayer.cpp 341-375 "bool recomposite_frame" 341
 row src/app/gui/mask/MaskLayer.cpp 341-375 "}" 375
-row src/app/gui/mask/MaskPanel.cpp 316-317 "in.shift = io.KeyShift;"
-row src/app/gui/mask/MaskPanel.cpp 316-317 "in.ctrl = io.KeyCtrl;"
-row src/app/gui/mask/MaskPanel.cpp 344 "paint_now(in.shift, in.ctrl)"
+row src/app/gui/mask/MaskPanel.cpp 319-320 "in.shift = io.KeyShift;"
+row src/app/gui/mask/MaskPanel.cpp 319-320 "in.ctrl = io.KeyCtrl;"
+row src/app/gui/mask/MaskPanel.cpp 347 "paint_now(in.shift, in.ctrl)"
 row src/app/gui/edit/EditTool.cpp 205 "ToolId::Box || _id == ToolId::Ellipse"
 row src/app/gui/edit/EditTool.cpp 160 "ToolId::Lasso || _id == ToolId::Brush"
-row src/app/gui/mask/MaskPanel.cpp 204 'go_to(_idx - 1)'
-row src/app/gui/mask/MaskPanel.cpp 208 'go_to(_slider_idx)'
-row src/app/gui/mask/MaskPanel.cpp 210 'go_to(_idx + 1)'
+row src/app/gui/mask/MaskPanel.cpp 207 'go_to(_idx - 1)'
+row src/app/gui/mask/MaskPanel.cpp 211 'go_to(_slider_idx)'
+row src/app/gui/mask/MaskPanel.cpp 213 'go_to(_idx + 1)'
 row cmake/SsApps.cmake 382-384 "align_fit_test.cpp"
 row cmake/SsApps.cmake 382 "add_executable(align_fit_test" 382
 row src/app/FrameMask.h 52-53 "255 = keep"
 row src/app/gui/mask/Livewire.cpp 76 "_step = std::max(1,"
-row src/sam/MaskDilate.cpp 34-46 "int dilate_radius_px"
+row src/core/MaskMargin.h 19-28 "inline int radius_px"
 row src/app/gui/GlLoader.h 3-6 "namespaced under glx::"
 row src/app/gui/mask/MaskSession.cpp 230 "enqueue([this, f, i]"
 row src/app/gui/mask/MaskSession.cpp 250 "_status.clear();"
@@ -84,10 +84,10 @@ row src/app/gui/mask/Livewire.h 80-90 "_acos_abs[256][8]"
 row src/app/gui/mask/Livewire.h 80-90 "std::vector<uint8_t> _fg;"
 row src/app/gui/mask/Livewire.cpp 83-131 "std::vector<uint8_t> luma(n);"
 row src/app/gui/mask/Livewire.cpp 225-226 "_parent.assign(n, kUnseen);"
-row src/app/gui/mask/MaskPanel.cpp 431-470 "void MaskSession::draw_status()" 431
-row src/app/gui/mask/MaskPanel.cpp 431-470 "}" 470
-row src/app/gui/mask/MaskPanel.cpp 450-453 "status_base_regenerated"
-row src/app/gui/mask/MaskPanel.cpp 450-453 "status_base_missing"
+row src/app/gui/mask/MaskPanel.cpp 438-477 "void MaskSession::draw_status()" 438
+row src/app/gui/mask/MaskPanel.cpp 438-477 "}" 477
+row src/app/gui/mask/MaskPanel.cpp 457-460 "status_base_regenerated"
+row src/app/gui/mask/MaskPanel.cpp 457-460 "status_base_missing"
 row src/app/gui/mask/MaskPanel.cpp 1-5 "ImGui is permitted here"
 row src/app/gui/Fonts.cpp 33 "kBaseSize = 16.0f"
 row src/app/gui/Layout.cpp 33 "FramePadding = ImVec2(6, 4)"
@@ -98,9 +98,9 @@ row src/app/gui/Layout.cpp 49-50 "FontScaleMain = scale"
 row cmake/SsApps.cmake 412-427 "add_executable(mask_doc_test" 412
 row cmake/SsApps.cmake 412-427 "ss_configure_app(mask_doc_test)" 427
 # The slider and the eraser.
-row src/app/gui/mask/MaskPanel.cpp 216-230 "ImGuiSliderFlags_Logarithmic"
-row src/app/gui/mask/MaskPanel.cpp 216-230 "erasing() || (mode() == CanvasMode::Shape && _tool.id() == ToolId::Brush)" 216
-row src/app/gui/mask/MaskPanel.cpp 270-278 "io.KeyAlt) set_radius(wheel_brush(radius(), io.MouseWheel))"
+row src/app/gui/mask/MaskPanel.cpp 219-233 "ImGuiSliderFlags_Logarithmic"
+row src/app/gui/mask/MaskPanel.cpp 219-233 "erasing() || (mode() == CanvasMode::Shape && _tool.id() == ToolId::Brush)" 219
+row src/app/gui/mask/MaskPanel.cpp 273-281 "io.KeyAlt) set_radius(wheel_brush(radius(), io.MouseWheel))"
 row src/app/gui/mask/MaskSession.cpp 407-432 "// Plain and Shift drop, Ctrl keeps" 407
 row src/app/gui/mask/MaskSession.cpp 407-432 "const bool keep = ctrl != erasing;"
 row src/app/gui/mask/MaskSession.cpp 407-432 "if (!(r > kMinBrush)) return kMinBrush;"
@@ -113,8 +113,8 @@ row src/app/gui/mask/MaskLayer.h 47-48 "final = keep ? 255 : drop ? 0 : base"
 row src/app/gui/edit/EditTool.h 27-32 "enum class ToolId"
 row src/app/gui/Automation.cpp 509-532 'r.get_bool("alt", false)) mod.keys.push_back((int)ImGuiKey_LeftAlt)'
 # The radius keys surfaced on the slider.
-row src/app/gui/mask/MaskPanel.cpp 231-237 "ui::corner_key(msg::radius_keys.get())"
-row src/app/gui/mask/MaskPanel.cpp 231-237 "ui::help_on_hover(msg::radius_help)"
+row src/app/gui/mask/MaskPanel.cpp 234-240 "ui::corner_key(msg::radius_keys.get())"
+row src/app/gui/mask/MaskPanel.cpp 234-240 "ui::help_on_hover(msg::radius_help)"
 row src/app/gui/Ui.h 219-229 "inline void corner_key(const char* key)"
 row src/app/gui/Ui.h 219-229 "ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax()"
 # The SAM half.

@@ -1200,15 +1200,8 @@ void SegmentPanel::draw(MaskSettings& settings, app::FrameStencil& stencil) {
     // moves the red on the picture: the outlines come back tight against the
     // object and leave a rim of its colour that would be reconstructed.
     ImGui::Spacing();
-    ui::Text(keep ? dmsg::mask_dilate_keep : dmsg::mask_dilate_remove);
-    float& ratio = keep ? settings.shrink_ratio : settings.dilate_ratio;
-    float margin_pct = ratio * 100.0f;
-    ImGui::SetNextItemWidth(-1);
-    if (ui::SliderFloatRaw("##dilate", &margin_pct, 0.0f, 50.0f, "%.0f%%")) {
-        ratio = margin_pct / 100.0f;
-        edited = true;
-    }
-    ui::help_on_hover(keep ? dmsg::mask_shrink_help : dmsg::mask_dilate_help);
+    edited |= draw_margin_slider(settings.dilate_ratio, settings.shrink_ratio, keep, -1.0f,
+                                 /*inline_label=*/false);
 
     ImGui::Spacing();
     ImGui::Separator();
