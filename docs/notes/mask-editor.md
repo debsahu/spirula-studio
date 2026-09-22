@@ -11,7 +11,7 @@ MaskSession   the frames of a dataset, the worker, the open frame
 MaskPanel.cpp the window: canvas, tools, status, navigation
 ```
 
-Every `file:line` below was re-derived against commit `4c4e4601`, and they
+Every `file:line` below was re-derived against commit `9f0278b9`, and they
 drift with every commit that touches the file. Each one is quoted alongside
 the symbol or the statement it points at, so re-find it by that and treat the
 number as a hint. A citation that lands somewhere unrelated means the file
@@ -1696,7 +1696,7 @@ self-evident the moment you switch and the number does not change.
 
 ### The slider
 
-`MaskPanel.cpp:183-195`, on the **frame-navigation row**, shown only under the
+`MaskPanel.cpp:186-200`, on the **frame-navigation row**, shown only under the
 brush or the eraser, `ImGuiSliderFlags_Logarithmic | AlwaysClamp` over
 `[kMinBrush, kMaxBrush]` = [1, 4096]. The range is twelve octaves and `[`/`]`
 are multiplicative, so a linear slider would put every usable size in the
@@ -1727,6 +1727,57 @@ is degraded, not fatal. **At the 900 px width the earlier battery used, the
 row already overflowed before this change**; the eraser widens an existing
 overflow rather than creating one. Not fixed here, and recorded so nobody
 rediscovers it as new.
+
+### The keys are on the slider, in the corner the tool buttons use
+
+The operator asked for *"[ and ] as shortcuts"*. **They already worked** -- the
+gap was discovery. The only place that said so was `hint_view`, the fourth line
+of the status strip at the bottom of the window, sharing a sentence with zoom,
+pan and Esc. So this is an affordance, not a binding, and nothing about the keys
+changed.
+
+`ui::corner_key` (`Ui.h:219-229`) turns out to be the right tool unmodified: it
+takes `ImGui::GetItemRectMin()` / `GetItemRectMax()`, so it draws over the **last
+item**, not specifically over a button. The slider therefore carries
+`[ ] Alt+wheel` in the same corner `Q B E L P C F T K`, `I` and `X` sit in
+(`MaskPanel.cpp:201-207`), plus a `help_on_hover` sentence of the kind `save` /
+`revert_frame` / `revert_all` already have.
+
+**The hint is a `Msg`, not a raw key string.** The brackets are identifiers and
+stay Latin, as the tool keys do -- but "wheel" is a word, and every language
+already translates it in `hint_view`, so leaving it English would have been a
+real regression that no lint would catch (`corner_key` is not one of
+`check_i18n.sh`'s banned entry points). Alt+wheel earned the extra characters by
+being the least discoverable of the three ways in.
+
+**Cost, measured in the running app rather than argued:**
+
+| | before | after |
+|---|---|---|
+| row 1 right edge | 1068 px | **1068 px** -- unchanged, the hint adds no item |
+| `status_h` (shape / brush / eraser) | 110 px | **110 px** -- unchanged, nothing new clips |
+| row 2 right edge | 588 px | 668 px |
+
+The slider widened 260 -> 340 px so the hint clears the centred value at its
+widest (`Eraser: 4096 px`). Row 2 is not the constrained row: it had ~1000 px
+spare and still has ~920.
+
+**One blemish, recorded rather than hidden.** At the very top of the range the
+grab reaches the right edge and the hint draws **over** it -- an overlap, not a
+clip, and exactly what an active tool button already does with its corner key.
+It does not reach the state a first-time user meets: the 24 px default puts the
+grab at 38% of a logarithmic track, so the right corner is clear. Checked with
+the grab mid-track in five languages and the hint renders complete and clear of
+both the grab and the value in all five -- `[ ] Alt+wheel`, `[ ] Alt+ホイール`,
+`[ ] Alt+tekerlek`, `[ ] Alt+колесо`, `[ ] Alt+molette`.
+
+**No new test, and the reason is not laziness.** No binding changed; the
+arithmetic behind `[` and `]` is already pinned by `step_brush`'s six checks and
+the shared-radius carry checks, and a hint drawn with `AddText` has no seam
+`mask_doc_test` can reach -- `MaskPanel.cpp` is outside that binary by design
+(the same gap this note already records for the status strip). What was done
+instead is the app check: `[` pressed twice from 4096 px gave **2959 px**, which
+is 4096 x 0.85^2, so the keys still drive the slider after the width change.
 
 ### Key **X**, not E
 
@@ -1806,6 +1857,9 @@ A synthetic three-frame workspace whose base mask drops one 200x200 block, so
   and one that could have failed.
 - Plain wheel still zooms: the photo's width at a fixed row goes 895 -> 1492
   screen px over three notches in (clipped by the canvas at 1584).
+- The corner hint reads `[ ] Alt+wheel` at the default and stays clear of the
+  value at 4096 px; the tooltip raised on hover; `[` twice from 4096 gave
+  **2959 px** = 4096 x 0.85^2.
 
 ### `/ui/scroll` grew `shift=`, `ctrl=` and `alt=`
 
