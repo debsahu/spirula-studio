@@ -11,7 +11,7 @@ MaskSession   the frames of a dataset, the worker, the open frame
 MaskPanel.cpp the window: canvas, tools, status, navigation
 ```
 
-Every `file:line` below was re-derived against commit `d26a1d3e`, and they
+Every `file:line` below was re-derived against commit `8fe56631`, and they
 drift with every commit that touches the file. Each one is quoted alongside
 the symbol or the statement it points at, so re-find it by that and treat the
 number as a hint. A citation that lands somewhere unrelated means the file
@@ -355,7 +355,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:126` and `:313`), and
+does (both call the identical function, `MaskPanel.cpp:149` and `:352`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -371,14 +371,14 @@ screen px at this zoom), all plain drags (ForceDrop).
 
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
-(`MaskSession.cpp:384-395`, `if (r.empty()) return {};`) and `upload_rect`
-does the same (`MaskPanel.cpp:69`), so a coordinate-mapping bug that made
+(`MaskSession.cpp:385-396`, `if (r.empty()) return {};`) and `upload_rect`
+does the same (`MaskPanel.cpp:70`), so a coordinate-mapping bug that made
 every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:326`), read before the series and after every one of
+readout (`MaskPanel.cpp:365`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -482,7 +482,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:126` (`ui::Button(msg::undo)`) and `:313`
+   worked. `MaskPanel.cpp:149` (`ui::Button(msg::undo)`) and `:352`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -526,9 +526,9 @@ what was inferred rather than run flagged as such.
   "Kept %" and painted a lighter/keep-tinted stroke inside a drop region;
   Shift+Ctrl+drag over that same stroke returned "Kept %" exactly to its
   pre-stroke value and removed the tint. "The modifier read is the one held
-  at release" is read from source (`MaskPanel.cpp:232-233` samples
+  at release" is read from source (`MaskPanel.cpp:277-278` samples
   `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
-  and `:255` hands those to `paint_for` on the frame the stroke commits)
+  and `:300` hands those to `paint_now` on the frame the stroke commits)
   rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
@@ -562,7 +562,7 @@ what was inferred rather than run flagged as such.
   switching from a dirty `f0000` to `f0001` autosaved `f0000`'s layers to
   disk and the new frame's status read "Saved". `<` and the slider were
   **not** independently exercised; `go_to()` is the single function behind
-  all three (`MaskPanel.cpp:151`, `:155`, `:157`), so this is inferred from
+  all three (`MaskPanel.cpp:174`, `:178`, `:180`), so this is inferred from
   the one call tested.
 - [x] **Closing the window with Done or its close box while dirty writes the
   files.** Both exercised independently: Done and the title-bar close box
@@ -1126,9 +1126,9 @@ the two apart. Two checks settle it for the set. (a) Source: every frame load
 clears `_status` and resets the livewire, so the line can only come from a
 fresh `ensure_livewire()`. The two halves are in different functions, which an
 earlier draft of this note put both in `pump()`: `load_frame`'s worker clears
-`_status` as it publishes the loaded frame (`MaskSession.cpp:247`, inside the
-`enqueue` lambda that starts at `:227`), and `pump()` calls
-`_livewire.reset()` when it installs that frame on the UI thread (`:287`).
+`_status` as it publishes the loaded frame (`MaskSession.cpp:248`, inside the
+`enqueue` lambda that starts at `:228`), and `pump()` calls
+`_livewire.reset()` when it installs that frame on the UI thread (`:288`).
 The argument is unchanged by the correction -- the clear still happens before
 the frame is published and the reset still happens as it is installed -- but
 an inheritor who went looking for both in `pump()` would have found one.
@@ -1356,11 +1356,11 @@ height -- which is the same reason the reserve is measured rather than
 computed.
 
 **That 192 px is the worst case the battery reached, not the worst case
-`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:318-352`), the eight
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:357-391`), the eight
 items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
 `hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
 and the status-or-error line. Two more items exist: `status_base_regenerated`
-and `status_base_missing` (`MaskPanel.cpp:331-334`), one `TextDisabledWrapped`
+and `status_base_missing` (`MaskPanel.cpp:370-373`), one `TextDisabledWrapped`
 each and mutually exclusive, since `base_state()` returns one value. Neither
 was on screen for any row of the table above, and the exact arithmetic is how
 that is known rather than assumed -- 110, 132 and 176 are 5, 6 and 8 lines to
@@ -1418,7 +1418,7 @@ than wrong.
 
 **The fix above removes the defect at every window size a person would work
 at, and does not remove it at every window size.** `draw_canvas` floors the
-canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:318-352`) draws its
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:357-391`) draws its
 full content unconditionally with no cap and no truncation. Once the window is
 short enough that the canvas has pinned at its floor, every further pixel of
 shrink becomes a pixel of strip pushed past the window bottom. It is the same
@@ -1620,6 +1620,172 @@ frame, confirm no `Edge map` line, press **I**, watch it arrive). An appearance
 cannot be stale. This is the same defect shape as a check that reads a
 condition something other than the thing being checked could satisfy, and it
 is worth assuming of every other sticky field in this panel.
+
+## Task 16: the brush-size slider, and the eraser (2026-09-22)
+
+Radius was keyboard-only and invisible. On the operator's 15520 x 7760 masks
+the 24 px default is a dot, nothing on screen said `[` and `]` existed, and
+finding a usable size meant holding `]`. While that was in flight they asked
+for **an eraser with the same affordances**.
+
+### The eraser is a paint mode, not a `ToolId`
+
+`ToolId` (`EditTool.h:27-32`) is the 3D editor's **selection-shape** table:
+`shape_of()` maps it to a `ShapeKind`, `kNumSelectTools` lays out the Select
+tab, and `EditPanel` iterates it. An eraser is not a shape, and a row there
+would put an "Eraser" button in a panel where it means nothing. So it is a
+mask-editor flag, `MaskSession::_erase`, mutually exclusive with the shapes
+and the pen exactly as `_path_mode` already is, and it forces the brush shape.
+The three switches go through `pick_tool` / `pick_eraser` / `pick_path`
+(`MaskPanel.cpp`), which is also what keeps the toolbar and the key handler
+from drifting over which flags a switch clears -- they used to duplicate that.
+
+### It paints `ForceKeep`, and the alternative reading is wrong for a reason
+
+`composite()` is `keep ? 255 : drop ? 0 : base` (`MaskLayer.h:47-48`). So
+`Paint::Clear` can only undo the operator's own strokes: over a pixel the
+**run's** mask dropped it returns the pixel to that drop and nothing visible
+happens. Recovering what the run got wrong is most of what this editor is for,
+so "erase" has to mean `ForceKeep`. That also undoes a brush stroke, because
+`paint_rect` zeroes `_drop` when it sets `_keep`
+(`MaskDoc.cpp:176-180`). `Shift+Ctrl` stays `Clear`, and `Ctrl` still swaps
+the two, so the three operations stay distinct:
+`paint_for(shift, ctrl, erasing)` is now three-argument, and `paint_now` is
+the member that supplies the session's own flag at the two commit sites.
+
+**The unit test for this needs a base-DROPPED region or it proves nothing.**
+Over base-kept pixels `ForceKeep` and `Clear` produce the identical kept
+count, so a fixture painted on ordinary ground is satisfied by either. The
+test builds a 64x48 frame whose base drops one 16x12 block: the eraser over it
+takes `kept()` from 2880 to 3072 and `Clear` leaves it at 2880. Mutating the
+eraser to `Clear` fails that check and fails "the eraser puts back exactly
+what the brush took" **not at all** -- which is the evidence that the block is
+doing the work.
+
+### Separate radii, one per tool
+
+The size you paint with and the size you correct with are rarely the same, and
+every paint program keeps them apart. `radius()` / `set_radius()`
+(`MaskSession.h:77-82`) address whichever tool is up; the slider, `[`/`]`, the
+wheel and the strip all go through them. The app run below shows both radii
+live at once.
+
+### The slider
+
+`MaskPanel.cpp:183-195`, on the **frame-navigation row**, shown only under the
+brush or the eraser, `ImGuiSliderFlags_Logarithmic | AlwaysClamp` over
+`[kMinBrush, kMaxBrush]` = [1, 4096]. The range is twelve octaves and `[`/`]`
+are multiplicative, so a linear slider would put every usable size in the
+first 2% of travel. Measured in the app: at 65 px the grab sits at **0.50** of
+the 260 px track, where linear would put it at 0.016.
+
+Its format string is `i18n::format(brush_radius | eraser_radius, {"%.0f"})` --
+the sanctioned way to get translated words into a printf pattern ImGui fills
+(`Ui.h`, `SliderIntRaw`'s comment), and it reuses the message the strip
+already had rather than adding a label.
+
+**No third toolbar row, and the `164` is unchanged -- measured, not argued.**
+`##maskcanvas` starts at `y0 = 92` in every tool state after the change,
+exactly as before it, so `avail_y = winh - 100` still holds and the rule
+`window height < status_h + 164 * ui_scale()` is untouched. `status_h` at
+1600x950, read as `942 - canvas.y1`: shape **110**, brush **110**, eraser
+**110**, pen **176** -- the same four numbers the table above records. The
+eraser costs no strip height because `hint_eraser` REPLACES `hint_buttons`
+rather than adding to it, and is shorter (it has no "Right click closes a
+polygon" clause).
+
+**What the toolbar row DID cost is width.** Its right edge (the `Done`
+button's) goes **964 -> 1068 px** at `ui_scale() == 1.0`, English labels: the
+row now needs a window at least ~1076 px wide, where it needed ~972 before.
+The window has no `HorizontalScrollbar` flag, so below that `Done` is clipped
+rather than scrollable -- the title-bar close box does the same job, so this
+is degraded, not fatal. **At the 900 px width the earlier battery used, the
+row already overflowed before this change**; the eraser widens an existing
+overflow rather than creating one. Not fixed here, and recorded so nobody
+rediscovers it as new.
+
+### Key **X**, not E
+
+Taken in the shared table (`EditTool.cpp`): `Q B E L P C F T K`, plus `I` for
+the pen. **E is the Ellipse.** Rebinding a shortcut the editor already
+documents in order to add a tool is not a trade worth making, so the eraser
+took `X`, which is free in the shared table as well as in this panel -- if an
+eraser ever does move into `ToolId`, the key comes with it.
+
+### Alt+wheel over the canvas
+
+`MaskPanel.cpp:231-239`. The bare wheel is already the zoom, and Shift/Ctrl
+are the paint modes, so Alt is what was left; it is read by no mask tool and
+by no view gesture. The factor is `1.18^wheel` -- the **reciprocal** of the
+grow step, not the bracket's 0.85 -- so a notch back exactly undoes a notch,
+where `[` after `]` does not (1.18 x 0.85 = 1.003). A test asserts both, so a
+wheel wired straight to `step_brush` cannot pass. It sits inside the same
+`!_tool.in_progress()` guard as the view, because a `ShapeStroke` carries one
+radius and changing it mid-stroke would resize the whole stroke.
+
+Measured in the app, reading the slider's own label: 24.00 -> 28.32 -> 33.42
+-> 39.43 -> 46.53 -> 54.91 up, then 54.91 -> 46.53 -> 39.43 -> 33.42 back
+down. Exactly reversible, to the digit the strip prints.
+
+**A pre-existing trap this uncovered, and it is NOT new: a second wheel event
+at a pixel-identical pointer position is ignored.** ImGui locks wheeling to
+one window and releases the lock when the mouse moves; with the pointer held
+still, `IsItemHovered()` on the canvas goes false and stays false while
+wheeling continues. Proved with a temporary probe: first event `hovered=1`,
+every one after it `hovered=0` until a 1 px `move` was injected between
+notches, after which all of them read `hovered=1`. **The zoom has always sat
+behind the identical gate**, so it has always behaved this way -- a trackpad
+scroll, where the pointer genuinely does not move, is the case that reaches it
+in real use. Left alone here; it is ImGui's documented lock, not ours.
+
+### The `Brush: N px` strip line stays; the reason to drop it does not hold
+
+It was proposed for deletion on the grounds that it costs a line of strip
+height. **It costs none**: it shares its line with `status_commit` via
+`SameLine()`, so removing it leaves the line -- and the height -- exactly
+where it was. It now names the active tool (`Eraser: N px` under the eraser)
+and remains the only radius readout when the slider is hidden.
+
+### `step_brush` had no production caller, and now has two
+
+Its arithmetic was re-inlined into `MaskPanel.cpp` at `6126a650`, leaving six
+tests pinning dead code -- the shape of defect this note keeps finding. `[`
+and `]` route through it again, and `clamp_brush` / `scale_brush` /
+`wheel_brush` join it in `MaskSession.cpp` (`405-430`), the file
+`mask_doc_test` links, so every radius arithmetic both tools use is tested in
+one place. `clamp_brush` is a rejection test rather than `std::clamp` because
+`std::clamp` **propagates a NaN**, and a NaN radius rasterizes nothing while
+the slider and the strip still read a number.
+
+### Verified in the app (`SS_GUI_AUTOMATION=1`, offscreen, 1600x950)
+
+A synthetic three-frame workspace whose base mask drops one 200x200 block, so
+`Kept %` has a known starting value of 94.9%.
+
+- The slider is present under **Brush** and **Eraser** and absent under Box,
+  Polygon and Path -- by button and by key (`B` hides, `X` shows, `C` shows,
+  `I` hides).
+- Six `]` presses took the label 24 -> **65 px**, the value `step_brush`
+  predicts (24 x 1.18^6 = 64.9).
+- Dragging the slider moved the strip to **2097 px**; a linear track at the
+  same travel would have read ~3650.
+- Erasing inside the base-dropped block took `Kept` **94.9% -> 95.4%** and
+  carved a clean untinted capsule out of the red region. Predicted area for an
+  18 px radius over a ~77 mask-px path is 0.48% of the frame.
+- Brush (24 px) over base-kept ground: **95.4% -> 94.7%**, predicted 0.70%.
+  The eraser (18 px) over the same path: **94.7% -> 95.2%**. It does not fully
+  restore, **because the two radii are independent** -- which is the clearest
+  demonstration of that in the run.
+- Plain wheel still zooms: the photo's width at a fixed row goes 895 -> 1492
+  screen px over three notches in (clipped by the canvas at 1584).
+
+### `/ui/scroll` grew `shift=`, `ctrl=` and `alt=`
+
+`Automation.cpp:507-530`, the way `/ui/drag` already had them, plus the
+matching flags in `guictl.py`. Without it a modified wheel cannot be driven
+from a script at all, and this binding would have shipped unexercised. This is
+a change to test infrastructure outside the feature's file list, flagged here
+rather than folded in silently -- the same call the pen tool's fix round made.
 
 ## Not in this phase
 
