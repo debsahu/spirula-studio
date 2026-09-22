@@ -8,6 +8,7 @@
 
 #include "app/gui/mask/PathOverlay.h"
 
+#include "app/gui/DatasetPrep.h"
 #include "app/gui/Layout.h"
 #include "app/gui/Ui.h"
 #include "i18n/catalog/Dataset.h"
@@ -87,6 +88,7 @@ void MaskSession::draw() {
     // frame that requested it still reaches the screen before the block.
     if (_close_requested) { close(); return; }
     pump();
+    upload_rect(sam_pump());
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos, ImGuiCond_Appearing);
     ImGui::SetNextWindowSize(vp->WorkSize, ImGuiCond_Appearing);
@@ -128,6 +130,13 @@ void MaskSession::pick_path() {
     _tool.cancel();
 }
 
+// A click here is a prompt, not a stroke: nothing half drawn may survive into it.
+void MaskSession::pick_sam() {
+    set_mode(CanvasMode::Sam);
+    _tool.cancel();
+    _path.cancel();
+}
+
 void MaskSession::draw_toolbar() {
     const float w = px(96.0f);
     for (int i = (int)ToolId::Box; i <= (int)ToolId::Brush; i++) {
@@ -143,6 +152,14 @@ void MaskSession::draw_toolbar() {
     if (ui::KeyButton(msg::tool_eraser, w, "X", erasing())) pick_eraser();
     ImGui::SameLine();
     if (ui::KeyButton(msg::tool_path, w, "I", path_mode())) pick_path();
+    ImGui::SameLine();
+    // Armable with no checkpoint: the SAM strip is where one is picked and fetched.
+    ImGui::BeginDisabled(!sam_available());
+    if (ui::KeyButton(msg::tool_sam, w, "G", sam_mode())) pick_sam();
+    ImGui::EndDisabled();
+    if (!sam_available())
+        ui::help_on_hover_raw(backends().masking_reason.c_str(),
+                              ImGuiHoveredFlags_AllowWhenDisabled);
     ImGui::SameLine();
     ImGui::BeginDisabled(!_doc || !_doc->can_undo());
     if (ui::Button(msg::undo)) upload_rect(undo());
@@ -286,7 +303,13 @@ void MaskSession::draw_canvas() {
     in.shift = io.KeyShift;
     in.ctrl = io.KeyCtrl;
     in.alt = io.KeyAlt;
-    if (path_mode()) {
+    if (sam_mode()) {
+        if (in.clicked && !sam_busy() && sam_has_model()) {
+            float fx = 0.0f, fy = 0.0f;
+            path_space(m).to_frame(in.x, in.y, fx, fy);
+            sam_prompt_point(fx, fy, io.KeyCtrl);
+        }
+    } else if (path_mode()) {
         ensure_livewire();
         _path.set_space(path_space(m));
         _path.note_modifiers(io.KeyShift, io.KeyCtrl);
@@ -326,9 +349,11 @@ void MaskSession::handle_keys(const Mapping& m) {
         }
         if (ImGui::IsKeyPressed(ImGuiKey_I, false)) pick_path();
         if (ImGui::IsKeyPressed(ImGuiKey_X, false)) pick_eraser();
+        if (ImGui::IsKeyPressed(ImGuiKey_G, false) && sam_available()) pick_sam();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-        if (path_mode()) _path.cancel();
+        if (sam_mode()) sam_cancel();
+        else if (path_mode()) _path.cancel();
         else _tool.cancel();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
@@ -409,7 +434,25 @@ void MaskSession::draw_status() {
     ui::Text(erasing() ? msg::eraser_radius : msg::brush_radius, {(int)std::lround(radius())});
     ImGui::SameLine();
     ui::Text(msg::status_commit, {one_decimal(_last_commit_ms)});
-    ui::TextDisabledWrapped(erasing() ? msg::hint_eraser : msg::hint_buttons);
+    if (!sam_mode()) ui::TextDisabledWrapped(erasing() ? msg::hint_eraser : msg::hint_buttons);
+    if (sam_mode()) {
+        // GuiApp's picker over the app's one model: choose, fetch, watch it land.
+        if (_model_picker) _model_picker();
+        if (!sam_has_model()) ui::TextDisabled(dmsg::mask_model_first);
+        ui::TextDisabledWrapped(msg::sam_hint);
+        const std::string sam_err = sam_error();
+        if (sam_busy()) {
+            ui::TextDisabledRaw(sam_status());
+            ui::TextDisabledWrapped(msg::sam_cancel_slow);
+        } else if (!sam_err.empty()) {
+            ui::TextColoredRaw(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), sam_err);
+        } else if (sam_results() > 0) {
+            char score[16];
+            std::snprintf(score, sizeof score, "%.2f", sam_last_score());
+            ui::Text(msg::sam_result, {(long long)sam_last_area(), sam_last_detections(),
+                                       std::string(score), one_decimal(sam_last_ms())});
+        }
+    }
     if (path_mode()) {
         ui::TextDisabledWrapped(msg::hint_path);
         ui::Text(msg::path_anchors, {_path.anchor_count()});

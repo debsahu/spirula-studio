@@ -206,6 +206,7 @@ private:
     void pick_tool(ToolId t);
     void pick_eraser();
     void pick_path();
+    void pick_sam();
     void draw_toolbar();
     void draw_canvas();
     void draw_status();

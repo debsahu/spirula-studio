@@ -2640,6 +2640,32 @@ std::string GuiApp::state_json() {
     out += ",\"model_download\":\"";
     out += kDownload[(int)_download.state()];
     out += "\",\"license_prompt\":" + quoted(_license_prompt);
+    // Index order is the declaration order of mask::CanvasMode.
+    static const char* kCanvasModes[] = {"shape", "eraser", "path", "sam"};
+    const mask::MaskDoc* mdoc = _mask_editor.doc();
+    out += ",\"mask_editor_mode\":\"";
+    out += kCanvasModes[(int)_mask_editor.mode()];
+    out += "\",\"mask_editor_frame\":" + std::to_string(_mask_editor.frame_index());
+    out += ",\"mask_editor_key\":" + quoted(mdoc ? mdoc->key() : std::string());
+    out += ",\"mask_editor_history\":" + std::to_string(mdoc ? mdoc->history_size() : -1);
+    out += ",\"mask_editor_kept\":" + std::to_string(mdoc ? mdoc->kept() : (int64_t)-1);
+    out += ",\"mask_editor_clicks\":" + std::to_string(_mask_editor.sam_click_count());
+    out += ",\"mask_editor_model\":" + quoted(_mask_editor.sam_model_path());
+    out += ",\"sam_model_changes\":" + std::to_string(_mask_editor.sam_model_changes());
+    out += ",\"sam_text_ok\":";
+    out += _mask_editor.sam_text_supported() ? "true" : "false";
+    out += ",\"sam_busy\":";
+    out += _mask_editor.sam_busy() ? "true" : "false";
+    out += ",\"sam_results\":" + std::to_string(_mask_editor.sam_results());
+    out += ",\"sam_dropped\":" + std::to_string(_mask_editor.sam_dropped());
+    out += ",\"sam_last_ms\":" + std::to_string(_mask_editor.sam_last_ms());
+    out += ",\"sam_last_job_ms\":" + std::to_string(_mask_editor.sam_last_job_ms());
+    out += ",\"sam_last_area\":" + std::to_string(_mask_editor.sam_last_area());
+    out += ",\"sam_last_detections\":" + std::to_string(_mask_editor.sam_last_detections());
+    out += ",\"sam_last_score\":" + std::to_string(_mask_editor.sam_last_score());
+    out += ",\"sam_status\":" + quoted(_mask_editor.sam_status());
+    out += ",\"sam_error\":" + quoted(_mask_editor.sam_error());
+    out += ",\"sam_vram_mib\":" + std::to_string(_mask_editor.sam_vram_mib());
     return out;
 }
 
@@ -2731,6 +2757,9 @@ void GuiApp::frame() {
         // already taken the device.
         _mask_editor.set_sam_blocker(mask::MaskSession::sam_blocker(
             _segment.is_open(), _geometry_panel.is_open(), native_work_busy()));
+        // Every frame: a pick on either screen, or a finished download, lands now.
+        const ModelEntry* me = find_model(_model_id);
+        _mask_editor.set_sam_model(selected_model_path(), me && me->text_prompts);
         _mask_editor.draw();
     }
     // After every screen and the editor, so either can raise the one consent modal.
@@ -5367,6 +5396,10 @@ void GuiApp::open_mask_editor(const std::string& workspace, const std::string& i
     if (dataset_busy() || native_work_busy()) return;
     close_native_previews();
     _mask_editor.set_log([this](const std::string& s) { log(s); });
+    // The dataset screen's own picker, over the app's one model and download.
+    _mask_editor.set_model_picker([this] {
+        draw_mask_model_picker(_model_id, _download, [this] { request_model_download(); });
+    });
     std::string err;
     if (!_mask_editor.open(workspace, image_dir, mask_dir, mask_flipped, err)) log(err);
 }

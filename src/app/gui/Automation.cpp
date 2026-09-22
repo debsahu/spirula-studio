@@ -61,7 +61,8 @@ struct State {
     bool armed = false;
     HttpServer http;
     std::string token;
-    std::function<std::string()> state_source;
+    std::function<std::string()> state_source;   // GUI thread only
+    std::string app_state;          // guarded by mu; state_source's last answer
 
     std::mutex mu;
     std::condition_variable cv;
@@ -359,10 +360,7 @@ std::string state_json() {
         out += ",\"framebuffer\":[" + std::to_string(s.fb_w) + "," +
                std::to_string(s.fb_h) + "]";
         out += ",\"fb_scale\":" + json_num(s.fb_scale);
-    }
-    if (s.state_source) {
-        std::string extra = s.state_source();
-        if (!extra.empty()) out += "," + extra;
+        if (!s.app_state.empty()) out += "," + s.app_state;
     }
     out += "}";
     return out;
@@ -792,8 +790,12 @@ void end_frame(int fb_w, int fb_h) {
     bool shoot = false;
     int want_w = 0, quality = 85;
     bool jpeg = false;
+    // Sampled here, between frames: the HTTP thread calling it would read the
+    // app mid-frame, and a torn read of a SAM result's fields was observed.
+    std::string app_state = s.state_source ? s.state_source() : std::string();
     {
         std::lock_guard<std::mutex> lk(s.mu);
+        s.app_state = std::move(app_state);
         s.published.swap(s.building);
         s.frame_no++;
         const ImGuiIO& io = ImGui::GetIO();

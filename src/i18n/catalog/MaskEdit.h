@@ -906,6 +906,57 @@ SS_MSG(sam_blocked_run,
     RU("Помощь SAM приостановлена, пока задача использует GPU."),
     TR("Bir iş GPU'yu kullanırken SAM yardımı duraklatılır."));
 
+SS_MSG(tool_sam,
+    EN("SAM"),        JA("SAM"),        ZH_HANS("SAM"),   ZH_HANT("SAM"),
+    KO("SAM"),        DE("SAM"),        FR("SAM"),
+    ES("SAM"),        PT("SAM"),        IT("SAM"),
+    NL("SAM"),        RU("SAM"),        TR("SAM"));
+
+SS_MSG(sam_hint,
+    EN("Click an object to drop it; Ctrl+click keeps it instead. Esc cancels."),
+    JA("オブジェクトをクリックすると除外します。Ctrl+クリックでは代わりに保持します。Esc で中止します。"),
+    ZH_HANS("点击物体将其丢弃；Ctrl+点击则改为保留。Esc 取消。"),
+    ZH_HANT("點擊物件將其捨棄；Ctrl+點擊則改為保留。Esc 取消。"),
+    KO("개체를 클릭하면 제외합니다. Ctrl+클릭하면 대신 유지합니다. Esc로 취소합니다."),
+    DE("Klicken Sie auf ein Objekt, um es zu verwerfen; Ctrl+Klick behält es stattdessen. Esc bricht ab."),
+    FR("Cliquez sur un objet pour l'exclure ; Ctrl+clic le conserve à la place. Esc annule."),
+    ES("Haga clic en un objeto para descartarlo; Ctrl+clic lo conserva en su lugar. Esc cancela."),
+    PT("Clique em um objeto para descartá-lo; Ctrl+clique o mantém em vez disso. Esc cancela."),
+    IT("Fai clic su un oggetto per scartarlo; Ctrl+clic invece lo mantiene. Esc annulla."),
+    NL("Klik op een object om het weg te laten; Ctrl+klik behoudt het in plaats daarvan. Esc annuleert."),
+    RU("Щёлкните объект, чтобы убрать его; Ctrl+щелчок вместо этого оставляет его. Esc отменяет."),
+    TR("Atmak için bir nesneye tıklayın; Ctrl+tık onu tutar. Esc iptal eder."));
+
+SS_MSG(sam_cancel_slow,
+    EN("Esc cancels. A prompt already inside the model can take up to 1.5 s to stop."),
+    JA("Esc で中止します。モデル内で処理中のプロンプトは停止まで最大 1.5 秒かかります。"),
+    ZH_HANS("Esc 取消。已进入模型的提示最多需要 1.5 秒才能停止。"),
+    ZH_HANT("Esc 取消。已進入模型的提示最多需要 1.5 秒才能停止。"),
+    KO("Esc로 취소합니다. 이미 모델에서 처리 중인 프롬프트는 멈추는 데 최대 1.5초 걸릴 수 있습니다."),
+    DE("Esc bricht ab. Ein Prompt, der schon im Modell läuft, kann bis zu 1,5 s zum Anhalten brauchen."),
+    FR("Esc annule. Une requête déjà dans le modèle peut mettre jusqu'à 1,5 s à s'arrêter."),
+    ES("Esc cancela. Una indicación que ya está dentro del modelo puede tardar hasta 1,5 s en detenerse."),
+    PT("Esc cancela. Um prompt já dentro do modelo pode levar até 1,5 s para parar."),
+    IT("Esc annulla. Un prompt già dentro il modello può impiegare fino a 1,5 s per fermarsi."),
+    NL("Esc annuleert. Een prompt die al in het model zit, kan tot 1,5 s nodig hebben om te stoppen."),
+    RU("Esc отменяет. Запрос, уже переданный модели, может остановиться только через 1,5 с."),
+    TR("Esc iptal eder. Modele girmiş bir istemin durması 1,5 sn kadar sürebilir."));
+
+SS_MSG(sam_result,
+    EN("Added {0} px, detections: {1}, score {2}, {3} ms"),
+    JA("追加 {0} px、検出数: {1}、スコア {2}、{3} ms"),
+    ZH_HANS("已添加 {0} px，检测数：{1}，得分 {2}，{3} ms"),
+    ZH_HANT("已新增 {0} px，偵測數：{1}，分數 {2}，{3} ms"),
+    KO("추가 {0} px, 검출 수: {1}, 점수 {2}, {3} ms"),
+    DE("Hinzugefügt: {0} px, Erkennungen: {1}, Score {2}, {3} ms"),
+    FR("Ajouté : {0} px, détections : {1}, score {2}, {3} ms"),
+    ES("Añadido: {0} px, detecciones: {1}, puntuación {2}, {3} ms"),
+    PT("Adicionado: {0} px, detecções: {1}, pontuação {2}, {3} ms"),
+    IT("Aggiunti: {0} px, rilevamenti: {1}, punteggio {2}, {3} ms"),
+    NL("Toegevoegd: {0} px, detecties: {1}, score {2}, {3} ms"),
+    RU("Добавлено: {0} пкс, обнаружений: {1}, оценка {2}, {3} мс"),
+    TR("Eklenen: {0} px, algılama: {1}, puan {2}, {3} ms"));
+
 }  // namespace maskedit
 }  // namespace msg
 }  // namespace i18n

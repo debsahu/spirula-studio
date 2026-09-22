@@ -356,7 +356,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:148` and `:361`), and
+does (both call the identical function, `MaskPanel.cpp:165` and `:386`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -373,13 +373,13 @@ screen px at this zoom), all plain drags (ForceDrop).
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
 (`MaskSession.cpp:388-399`, `if (r.empty()) return {};`) and `upload_rect`
-does the same (`MaskPanel.cpp:72`), so a coordinate-mapping bug that made
+does the same (`MaskPanel.cpp:73`), so a coordinate-mapping bug that made
 every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:399`), read before the series and after every one of
+readout (`MaskPanel.cpp:424`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -483,7 +483,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:148` (`ui::Button(msg::undo)`) and `:361`
+   worked. `MaskPanel.cpp:165` (`ui::Button(msg::undo)`) and `:386`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -527,9 +527,9 @@ what was inferred rather than run flagged as such.
   "Kept %" and painted a lighter/keep-tinted stroke inside a drop region;
   Shift+Ctrl+drag over that same stroke returned "Kept %" exactly to its
   pre-stroke value and removed the tint. "The modifier read is the one held
-  at release" is read from source (`MaskPanel.cpp:286-287` samples
+  at release" is read from source (`MaskPanel.cpp:303-304` samples
   `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
-  and `:309` hands those to `paint_now` on the frame the stroke commits)
+  and `:332` hands those to `paint_now` on the frame the stroke commits)
   rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
@@ -563,7 +563,7 @@ what was inferred rather than run flagged as such.
   switching from a dirty `f0000` to `f0001` autosaved `f0000`'s layers to
   disk and the new frame's status read "Saved". `<` and the slider were
   **not** independently exercised; `go_to()` is the single function behind
-  all three (`MaskPanel.cpp:176`, `:180`, `:182`), so this is inferred from
+  all three (`MaskPanel.cpp:193`, `:197`, `:199`), so this is inferred from
   the one call tested.
 - [x] **Closing the window with Done or its close box while dirty writes the
   files.** Both exercised independently: Done and the title-bar close box
@@ -1357,11 +1357,11 @@ height -- which is the same reason the reserve is measured rather than
 computed.
 
 **That 192 px is the worst case the battery reached, not the worst case
-`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:391-425`), the eight
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:416-468`), the eight
 items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
 `hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
 and the status-or-error line. Two more items exist: `status_base_regenerated`
-and `status_base_missing` (`MaskPanel.cpp:404-407`), one `TextDisabledWrapped`
+and `status_base_missing` (`MaskPanel.cpp:429-432`), one `TextDisabledWrapped`
 each and mutually exclusive, since `base_state()` returns one value. Neither
 was on screen for any row of the table above, and the exact arithmetic is how
 that is known rather than assumed -- 110, 132 and 176 are 5, 6 and 8 lines to
@@ -1372,7 +1372,9 @@ line and +38 where it wraps**, putting the real worst case at 900 px around
 214 rather than 192. **The rule below survives unchanged**, because it is
 parameterised on the measured `status_h` and not on any row of this table; it
 is the table's worst row that is not a bound. That is the third time in this
-section that measuring the strip has turned out to beat enumerating it.
+section that measuring the strip has turned out to beat enumerating it. SAM mode
+adds the checkpoint picker's rows on top of these; its heights are under "SAM assist,
+Task 5" below.
 
 **The fix measures the strip instead of predicting it.** `draw()` records
 `ImGui::GetCursorPosY()` either side of `draw_status()` into `_status_h`, and
@@ -1419,7 +1421,7 @@ than wrong.
 
 **The fix above removes the defect at every window size a person would work
 at, and does not remove it at every window size.** `draw_canvas` floors the
-canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:391-425`) draws its
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:416-468`) draws its
 full content unconditionally with no cap and no truncation. Once the window is
 short enough that the canvas has pinned at its floor, every further pixel of
 shrink becomes a pixel of strip pushed past the window bottom. It is the same
@@ -1698,7 +1700,7 @@ self-evident the moment you switch and the number does not change.
 
 ### The slider
 
-`MaskPanel.cpp:188-202`, on the **frame-navigation row**, shown only under the
+`MaskPanel.cpp:205-219`, on the **frame-navigation row**, shown only under the
 brush or the eraser, `ImGuiSliderFlags_Logarithmic | AlwaysClamp` over
 `[kMinBrush, kMaxBrush]` = [1, 4096]. The range is twelve octaves and `[`/`]`
 are multiplicative, so a linear slider would put every usable size in the
@@ -1728,7 +1730,7 @@ rather than scrollable -- the title-bar close box does the same job, so this
 is degraded, not fatal. **At the 900 px width the earlier battery used, the
 row already overflowed before this change**; the eraser widens an existing
 overflow rather than creating one. Not fixed here, and recorded so nobody
-rediscovers it as new.
+rediscovers it as new. The SAM button (Task 5) moves the edge to 1172 px.
 
 ### The keys are on the slider, in the corner the tool buttons use
 
@@ -1742,7 +1744,7 @@ changed.
 takes `ImGui::GetItemRectMin()` / `GetItemRectMax()`, so it draws over the **last
 item**, not specifically over a button. The slider therefore carries
 `[ ] Alt+wheel` in the same corner `Q B E L P C F T K`, `I` and `X` sit in
-(`MaskPanel.cpp:203-209`), plus a `help_on_hover` sentence of the kind `save` /
+(`MaskPanel.cpp:220-226`), plus a `help_on_hover` sentence of the kind `save` /
 `revert_frame` / `revert_all` already have.
 
 **The hint is a `Msg`, not a raw key string.** The brackets are identifiers and
@@ -1791,7 +1793,7 @@ eraser ever does move into `ToolId`, the key comes with it.
 
 ### Alt+wheel over the canvas
 
-`MaskPanel.cpp:240-248`. The bare wheel is already the zoom, and Shift/Ctrl
+`MaskPanel.cpp:257-265`. The bare wheel is already the zoom, and Shift/Ctrl
 are the paint modes, so Alt is what was left; it is read by no mask tool and
 by no view gesture. The factor is `1.18^wheel` -- the **reciprocal** of the
 grow step, not the bracket's 0.85 -- so a notch back exactly undoes a notch,
@@ -1982,6 +1984,102 @@ loaded, 2407.1 MiB once a 15520x7760 frame is encoded. P12 is writable against
 returned to its pre-load value exactly. Measured on the visual-prompt path
 only: a text prompt fills `TextFeat` / `PromptFeat` / `FusionFeat`, which
 `unload()` also releases, but no text prompt ran here.
+
+## SAM assist, Task 5: the first usable slice (2026-09-22)
+
+**How to reach it.** Open the editor with **Correct masks** (Train screen, beside the
+dataset path; or the dataset screen, under Update Dataset, when the workspace's
+`masks/` is not itself an input). Press **G** or the **SAM** button at the right of
+the tool row. The status strip then shows the checkpoint picker (the dataset screen's
+own, over the same model id and download), the hint, and the last result. A click on
+the canvas drops the object under it; **Ctrl+click** keeps it (on macOS the logical
+Ctrl is the Command key, as for every other Ctrl chord in the editor); **Esc** cancels
+a prompt in flight. With no cached checkpoint the button still arms, and the strip
+offers **Get the model** and the licence prompt; the consent modal is drawn from
+`frame()`, so it appears over the editor on any screen.
+
+**What changed underneath.** `CanvasMode {Shape, Eraser, Path, Sam}` replaces the
+eraser and pen flags, so two tools on at once is unrepresentable. The dataset screen's
+checkpoint picker moved to `draw_mask_model_picker` (`MaskPrompt.cpp`); its row choice
+is the ImGui-free `mask_picker_row`, pinned in `mask_doc_test`. `GuiApp::frame()` hands
+the editor the app's checkpoint every frame, so a pick on either screen or a finished
+download lands at once.
+
+### Measured in the app (M5 Pro, offscreen 1600x950, `sam3-q4_0`, the 15520x7760 fixture)
+
+Every GUI run used a throwaway `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` and its own
+automation port; the fixture was a copy of a 46-frame 360 photo dataset (images linked,
+`masks/` and `sparse/` copied).
+
+| check | observed |
+|---|---|
+| P14 keys `b g x g i g x b` | `shape sam eraser sam path sam eraser shape` |
+| P14 buttons `sam eraser sam path sam` | `sam eraser sam path sam` |
+| P16b picker transcript, before vs after the extraction | `diff` identical; transitions clause PASS |
+| P16b against a build that never draws the modal | `asked: modal=0`; both halves fail |
+| P9, no cached checkpoint, from inside the editor | mode `sam`, editor model `''`, Get-model drawn in the editor, a click: results 0 -> 0, busy false, clicks 0 -> 0, no modal, nothing written to the cache |
+| P9, a build configured `-DSS_BUILD_SAM=OFF` | `key g` and a click on the SAM button both leave the mode `shape`; hovering the disabled button shows `backends().masking_reason` ("built without the segmentation module") |
+| P15a, pick in the editor | app `model_id` `sam2.1-tiny`, path `''`; dataset screen then shows Get-model with Tiny in its combo |
+| P15b, pick on the dataset screen with the editor open | editor model == app path == the SAM 3 file |
+| P18, Train screen, consent + download from the editor | modal on the Train screen (`license_prompt` `sam2`); `running` with Stop in the editor; editor closed mid-download, still `running`; `done`, 79,320,544 bytes; reopened editor holds the Tiny path unasked |
+| P17 warm | `sam_vram_mib` 2407.1, text ok true, second click job 50.8 ms |
+| P17 switched to Tiny, before any prompt | `sam_vram_mib` -1, text ok false |
+| P17 back to SAM 3 | job 5716 ms (paid the load) |
+| P17 (c), switch while an encode runs | busy when the pick landed; dropped 0 -> 0, results 3 -> 3, history 0 -> 0 |
+| status vs error, during the first load | status = `sam_first_load`, error empty |
+| status vs error, a 50 MiB zero-filled Tiny file | status empty, error = the loader's bad-magic sentence, drawn red in the strip; no crash |
+| P1b, first prompt of a session (load + encode), job ms | 10455, 6001, 5716, 11118 across four loads; the upload alone logged 7172 ms once |
+| P1, first click on a new frame, warm (prompt -> painted / job) | 4096/3614, 4044/3577, 4063/3588, 4109/3595, 4194/3587 ms |
+| P2, further clicks on the same frame (prompt -> painted / job) | 648/105, 546/83, 564/97, 623/114 ms |
+| P3, three points, document at base before each | drop-layer pixels == `sam_last_area` exactly (1,819,873 / 327,044 / 520,960); pairwise IoU 0.0000; areas differ 82.0 / 71.4 / 37.2 %; PASS |
+| Ctrl+click on a dropped person | kept +901,028 px == `sam_last_area` (force-keep) |
+| Esc during a first click on a new frame | idle 3372 ms after Esc; results, dropped and history unchanged |
+
+**The cross-screen inference checks, driven rather than read.** (a)+(b) Editor warm
+(2407.1 MiB), then the dataset screen's Try the mask: the editor yielded at once
+(`sam_vram_mib` -1); the preview ran SAM 3 on a "person" prompt; an editor click while
+it was open was refused with `sam_blocked_preview` in `sam_error`; closing the preview
+cleared that message; the next editor click showed `sam_first_load` and took 11,461 ms
+(a cold reload), painted, no crash. (c) Update Dataset, "Add the masks only": the
+editor yielded (2407.1 -> -1); a click during the run was refused with
+`sam_blocked_run`; the message cleared when the run ended; the next click reloaded
+(11,335 ms). (d) The strip draws `sam_error()` in red (the bad-magic run above).
+(e) Revert all's confirmation: **Esc does not close it** (a modal with no close box);
+it stays open and deletes nothing. Cancel closes it; the `mask_edits/` listing and an
+MD5 over every file in `masks/` and `mask_edits/` were identical before and after.
+
+### The strip and the tool row
+
+The SAM button widens tool row 1 by one button: `Done`'s right edge is now **1172 px**
+(was 1068), so the row needs a window about **1180 px** wide at `ui_scale()` 1.0.
+`status_h` in SAM mode, read as `942 - canvas.y1`: ready with a result **206**, busy
+**228**, no cached checkpoint **236** (the pen tool is 176). By the rule above, SAM mode
+with no checkpoint clips below **400 px** of window height. Checked by resizing the
+editor: at 420 px the last line fits, at 380 px it is cut. A session status line or a
+failed-download line adds a line to any of these.
+
+### Misses and open items
+
+- **`sam_cancel_slow` says "up to 1.5 s"; this machine took 3.4 s** from Esc to idle on
+  a first click (the encode is not interruptible and runs about 3.6 s here). The text
+  understates the wait.
+- **Closing the editor keeps the session** (`close()` does not release it; plan Task 8),
+  so a close and reopen does not make P1b's "first prompt of a session". Three reopen
+  samples read 4.06 s, 4.06 s and 4.08 s against 11.6 s for the one that really loaded.
+  The P1b row above is from model switches, which do release.
+- **Prompt -> painted exceeds the job by 450-540 ms** on every warm click (P2): that time
+  is on the UI thread, painting the 15520x7760 add and uploading it.
+- **Revert all ignores Esc** (above). Whether it should dismiss is a design call.
+- **The same point on the same frame gave 1,494,660 px once and 1,819,873 px later.**
+  Probably the canvas moved between the two clicks (the strip's height changes with
+  its content, and the click is in pane pixels); not verified.
+- **The automation layer read the app mid-frame.** `/ui/state` called
+  `GuiApp::state_json()` on the HTTP thread; one read returned a new job time beside an
+  old prompt time and a zeroed area. `Automation.cpp` now samples it at the end of each
+  frame on the GUI thread and serves that.
+- ImGui's `BeginCombo` reports no label to the automation hook, so `tree` cannot name
+  the checkpoint combo; the harness finds it as the one unnamed on-screen item px(260)
+  wide.
 
 ## Not in this phase
 
