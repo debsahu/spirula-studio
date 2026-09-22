@@ -1918,6 +1918,69 @@ fresh document without the byte checks going blind. The paint time separates
 the two arms on either document (~11x at full size), but it is not asserted:
 it is a timing.
 
+## SAM assist, Task 3: does the device number fall on unload? (2026-09-22)
+
+**VERIFIED, M5 Pro 24 GB, MoltenVK 1.4.2, `sam3-q4_0.ggml`.** Yes, all of it,
+every time. A throwaway probe in `cmd_segment` (never committed; reverted)
+read five instruments at each stage, then ran three more load / encode /
+segment / unload cycles on the same `Session` in the same process:
+
+```
+./build/spirula sam segment --model ~/.cache/spirula-studio/models/sam3-q4_0.ggml \
+  --image ingest/osmo360/test/play_room/photo-monopod/CAM_20260810150859_0066_D.JPG \
+  --point 12261,6053 --vram --out <tmp>
+```
+
+Five processes x four cycles = 20 unloads. Every one gave the same numbers to
+0.1 MiB (MiB throughout; `footprint` prints MB but means MiB):
+
+| stage | TOTAL | pool | allocator | Metal | phys_footprint |
+|---|---|---|---|---|---|
+| before first load | 0.0 | 0.0 | 0.0 | 0.1 | 4.4 |
+| after load | 2192.0 | 1680.0 | 2257.0 | 2257.5 | -- |
+| after encode + segment (15520x7760) | 2407.1 | 1895.1 | 2472.1 | 2472.9 | 4329.6 |
+| after `unload()` | **0.0** | **0.0** | 65.0 | 65.7 | 1922.4 (settled) |
+
+`[model] weights: 1652.2 MiB` on every load. Pool delta across unload
+**1895.1**, TOTAL delta **2407.1**, both on all 20 unloads; neither creeps
+across cycles.
+
+**What each instrument is.** `TOTAL` = every `VramPool` slot's *capacity*
+(not its `used`) plus the session arena's capacity (`Session.cpp:565-585`);
+`totalCapacity()` is the pool part alone. Capacity is the byte count handed
+to `vkAllocateMemory` for that slot, and `VramPool::release*` calls
+`Allocator::free`, which calls `vkFreeMemory` at once (`Memory.cpp:243-266`, `:362-395`):
+the pool keeps no free list, so "grow-only" means a slot never shrinks while
+held, not that freed memory is cached. The 65.0 MiB left after unload is the
+Stream's staging and parameter rings, allocated straight from the
+`Allocator`, outside both the pool and `TOTAL`.
+
+**Two cross-checks that do not read our bookkeeping.** (1) Metal's own
+`currentAllocatedSize` on the system device, via the ObjC runtime: equals the
+allocator's live total to within 0.8 MiB at every stage, including after
+unload. (2) The kernel ledger: `task_info` `phys_footprint`, and `footprint
+-p`'s category *Owned physical footprint (unmapped) (graphics)*, which went
+2467 MB loaded -> 60 MB after unload. The footprint fell by 2407.2 MiB per
+cycle, i.e. by exactly `TOTAL`.
+
+**The OS gives the memory back late.** `vkFreeMemory` returns before the
+kernel ledger moves: polling every 25 ms, `phys_footprint` reached 90% of the
+drop 0-200 ms after `unload()` on 10 of 11 polled unloads and 2125 ms on one
+(a first-cycle unload). An OS-side reading taken right after close can still
+show the checkpoint; the pool reading cannot, because it is our own count.
+
+**`phys_footprint` is not `ps -o rss=`.** RSS misses device memory on Apple
+silicon (641 MB against 1652.2 MiB, spec 6.3); `phys_footprint` includes it.
+It is still only a delta instrument: it also carries the decoded 120 MP frame
+(~750 MiB here) and every other heap.
+
+**Ruling.** P6 is writable against `sam_vram_mib` (`TOTAL`): 2192.0 MiB
+loaded, 2407.1 MiB once a 15520x7760 frame is encoded. P12 is writable against
+`sam_pool_mib`: it fell 1895.1 MiB, above the 1652.2 MiB weight size, and
+returned to its pre-load value exactly. Measured on the visual-prompt path
+only: a text prompt fills `TextFeat` / `PromptFeat` / `FusionFeat`, which
+`unload()` also releases, but no text prompt ran here.
+
 ## Not in this phase
 
 Propagate, find-missing, slideshow, view modes and the peek key, session
