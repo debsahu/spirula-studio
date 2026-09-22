@@ -2048,6 +2048,71 @@ void bench_8k(const char* dir) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Plan 2, Task 9: livewire floors. Criterion 5: build <= 300 ms at 8K, built
+// once. Criterion 6: <= 16 ms per cursor move, p95, after the first 200 ms.
+// ---------------------------------------------------------------------------
+
+// p95/max of a sorted-in-place sample; (0, 0) on an empty one.
+void p95_max(std::vector<double>& v, double& p95, double& mx) {
+    std::sort(v.begin(), v.end());
+    p95 = v.empty() ? 0.0 : v[(size_t)(0.95 * (double)(v.size() - 1))];
+    mx = v.empty() ? 0.0 : v.back();
+}
+
+void bench_livewire_on(const char* label, const std::vector<uint8_t>& rgb, int fw, int fh) {
+    mk::Livewire lw;
+    // One direct call, not median_ms (repeats=3 would leave builds() at 3
+    // before a single cursor move, making criterion 5's builds==1 unmeasurable).
+    const auto t0 = std::chrono::steady_clock::now();
+    lw.build(rgb.data(), fw, fh);
+    const double build_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - t0).count();
+    std::printf("bench livewire %-8s %dx%d -> grid %dx%d step %d  build %8.1f ms  [bar: <= 300 at 8K]  bytes %.1f MB\n",
+                label, fw, fh, lw.width(), lw.height(), lw.step(), build_ms,
+                (double)lw.bytes() / 1048576.0);
+    // A segment: anchor a third in, cursor walks right 2 grid px/move, 200
+    // moves each timed alone. `ms` is the brief's cumulative-time warm-up
+    // filter; `ms_all` is unfiltered (see report: the filter can starve).
+    const int ax = lw.width() / 3, ay = lw.height() / 2;
+    lw.set_anchor(ax, ay);
+    std::vector<int> path;
+    std::vector<double> ms, ms_all;
+    double elapsed = 0.0;
+    size_t skipped = 0, found = 0;
+    for (int i = 1; i <= 200; i++) {
+        const auto a = std::chrono::steady_clock::now();
+        const bool ok = lw.path_to(std::min(lw.width() - 1, ax + 2 * i), ay + (i % 5) - 2, path);
+        const auto b = std::chrono::steady_clock::now();
+        if (ok && !path.empty()) found++;
+        const double t = std::chrono::duration<double, std::milli>(b - a).count();
+        ms_all.push_back(t);
+        elapsed += t;
+        if (elapsed <= 200.0) { skipped++; continue; }
+        ms.push_back(t);
+    }
+    double p95, mx, p95_all, mx_all;
+    p95_max(ms, p95, mx);
+    p95_max(ms_all, p95_all, mx_all);
+    std::printf("bench livewire %-8s cursor moves: %zu timed (%zu in the first 200 ms), p95 %8.2f ms  max %8.2f ms  | all 200: p95 %8.2f ms  max %8.2f ms  pops %zu  builds %d  found %zu/200  [bar: p95 <= 16, builds == 1]\n",
+                label, ms.size(), skipped, p95, mx, p95_all, mx_all, lw.pops(), lw.builds(), found);
+}
+
+void bench_livewire(const char* dir) {
+    const fs::path images = fs::path(dir) / "images";
+    const fs::path f0 = images / "f0000.jpg";
+    if (!fs::exists(f0))
+        write_jpg_rgb(f0, 7680, 3840, synth_rgb(7680, 3840, 0));
+    int fw, fh;
+    std::vector<uint8_t> rgb;
+    if (app::load_rgb(f0.string(), fw, fh, rgb)) bench_livewire_on("8K", rgb, fw, fh);
+    else std::printf("bench livewire 8K: could not read %s\n", f0.string().c_str());
+    if (const char* real = std::getenv("SS_LIVEWIRE_IMAGE")) {
+        if (app::load_rgb(real, fw, fh, rgb)) bench_livewire_on("still", rgb, fw, fh);
+        else std::printf("bench livewire still: could not read %s\n", real);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -2090,6 +2155,7 @@ int main() {
     test_livewire_corner_path();
     test_livewire_sign_alignment();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
+    if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }

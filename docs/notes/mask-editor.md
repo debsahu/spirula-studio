@@ -150,6 +150,68 @@ the cost scales with the stroke, not the frame. The ~90x margin measured
 below is therefore structural -- a property of which design got built -- not
 luck, and not slack available to spend on a future feature.
 
+### Plan 2, Task 9: livewire floors at 8K and on a real 15520x7760 still
+
+| quantity | value | notes |
+|---|---|---|
+| livewire build, 8K synthetic (7680x3840 -> grid 3840x1920 step 2) | 12.4 ms | median of 3; bar <= 300 ms; `builds()` = 1 in every run |
+| livewire cursor move, 8K synthetic, 200 moves | p95 2.44 ms / max 4.81 ms | worst of 3, **unfiltered** -- the brief's post-warm-up filter kept 0/200 in every run, see note below |
+| livewire build, real still 15520x7760 (grid 3880x1940 step 4) | 17.0 ms | median of 3; bar <= 300 ms; `builds()` = 1 in every run |
+| livewire cursor move, real still, 200 moves | p95 0.92 ms / max 1.52 ms | worst of 3, unfiltered; same caveat |
+
+M5 Pro, 18 cores, macOS 26.6.2, load average ~0.7-1.1/18 during measurement
+(quiet). Fixture: `bench_8k`'s synthetic 7680x3840 frame, and the real
+15520x7760 Osmo still
+`ingest/osmo360/test/play_room/photo-monopod/CAM_20260810150859_0066_D.JPG`.
+Three repeats of the full test binary; build is the median of the three,
+p95/max are the worst (highest) of the three, per Step 3 of the task. Pops
+(1,460,818 at 8K; 679,948 on the still) were identical across all 3 runs --
+the search is deterministic -- and every one of the 200 `path_to` calls at
+both sizes returned a non-empty path (`found 200/200`), which is how the
+loop is known to be doing real Dijkstra expansion each move rather than
+no-opping: `builds()` reading 1 only proves *that* number, not that the
+moves that followed were genuine, and `pops()` and `found` are what supply
+that second half.
+
+**The brief's own warm-up filter cannot produce a sample at this speed, and
+that is reported as a finding, not patched into a green number.** Its rule
+is "skip a move while the *summed measured time of the timed moves so far
+in this segment* is <= 200 ms"; with per-move cost in the 0.1-5 ms range,
+the cumulative sum across all 200 moves in a segment never reaches 200 ms,
+so the filter never opens and `ms` stays empty in every one of the 3 runs at
+both sizes -- printing `p95 0.00 ms max 0.00 ms`, which reads as an easy
+pass but is zero data, not a fast one. The bench was extended (still in
+`mask_doc_test.cpp`, not a separate script) to also record every move
+unfiltered as `ms_all`; because that is a strict superset of whatever the
+filter would have kept, it can only be equal to or slower than the intended
+number, never a friendlier substitute. `lw.build` was also changed from
+`median_ms` (3 repeats) to one direct timed call, because 3 repeats left
+`builds()` at 3 before a single cursor move, which would have made
+criterion 5's "built once" unmeasurable by the same reasoning.
+
+Livewire, criterion 5 (cost image at 8K, bar 300 ms, built once): 12.4 ms
+(median of 3) at 3840 x 1920, `builds()` = 1 after 200 cursor moves, in
+every run. **PASS.**
+
+Criterion 6 (cursor response, bar p95 <= 16 ms after the first 200 ms of a
+segment): the filtered measurement is 0 samples in all 3 runs at both
+sizes (see above), so it cannot itself be read as pass or fail. Over all
+200 moves unfiltered, worst of 3 runs: p95 2.44 ms, max 4.81 ms over 200
+moves on the synthetic 8K frame (pops/move ~7,304); p95 0.92 ms, max
+1.52 ms over 200 moves on the 15520 x 7760 still at step 4 (pops/move
+~3,400). Both are more than 3x under the bar even at the max, let alone the
+p95. **PASS**, by the unfiltered numbers -- the filtered protocol as
+specified produced no data at either size on this machine, which is itself
+worth recording: the implementation is fast enough that a 200-move segment
+does not last as long as the warm-up window meant to exclude a slow first
+move. The synthetic frame is a smooth gradient with almost no edges, which
+is the search's worst case (the expanded region is a disc around the
+anchor rather than a strip along an edge); the still is the realistic one,
+and its lower pops/move despite a near-identical grid size (3880x1940 vs
+3840x1920) is consistent with real edges giving Dijkstra a steeper cost
+gradient to steer by. Memory: `Livewire::bytes()` = 21.1 MB at the 8K grid,
+21.6 MB at the still's.
+
 ## Task 15: in-app and file-level verification
 
 Everything below was measured against the running `spirula` GUI process (not
