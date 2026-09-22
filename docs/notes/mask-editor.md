@@ -372,7 +372,7 @@ screen px at this zoom), all plain drags (ForceDrop).
 
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
-(`MaskSession.cpp:392-403`, `if (r.empty()) return {};`) and `upload_rect`
+(`MaskSession.cpp:397-408`, `if (r.empty()) return {};`) and `upload_rect`
 does the same (`MaskPanel.cpp:76`), so a coordinate-mapping bug that made
 every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
@@ -1127,9 +1127,9 @@ the two apart. Two checks settle it for the set. (a) Source: every frame load
 clears `_status` and resets the livewire, so the line can only come from a
 fresh `ensure_livewire()`. The two halves are in different functions, which an
 earlier draft of this note put both in `pump()`: `load_frame`'s worker clears
-`_status` as it publishes the loaded frame (`MaskSession.cpp:253`, inside the
-`enqueue` lambda that starts at `:233`), and `pump()` calls
-`_livewire.reset()` when it installs that frame on the UI thread (`:295`).
+`_status` as it publishes the loaded frame (`MaskSession.cpp:258`, inside the
+`enqueue` lambda that starts at `:238`), and `pump()` calls
+`_livewire.reset()` when it installs that frame on the UI thread (`:300`).
 The argument is unchanged by the correction -- the clear still happens before
 the frame is published and the reset still happens as it is installed -- but
 an inheritor who went looking for both in `pump()` would have found one.
@@ -1673,7 +1673,7 @@ keeps them apart. **The operator used it on a real 120 MP correction and asked
 for the opposite**: *"carry over eraser and brush size from each other, rather
 than keeping it independent."* Their experience of the task beats the
 generalisation, so `_eraser` is gone and `radius()` / `set_radius()`
-(`MaskSession.h:99-100`) address the one float. The slider, `[`/`]` and
+(`MaskSession.h:107-108`) address the one float. The slider, `[`/`]` and
 Alt+wheel all move it whichever tool is up.
 
 **The test was inverted, not deleted.** It guarded independence, which is now
@@ -1830,7 +1830,7 @@ and remains the only radius readout when the slider is hidden.
 Its arithmetic was re-inlined into `MaskPanel.cpp` at `6126a650`, leaving six
 tests pinning dead code -- the shape of defect this note keeps finding. `[`
 and `]` route through it again, and `clamp_brush` / `scale_brush` /
-`wheel_brush` join it in `MaskSession.cpp:410-435`, the file
+`wheel_brush` join it in `MaskSession.cpp:415-440`, the file
 `mask_doc_test` links, so every radius arithmetic both tools use is tested in
 one place. `clamp_brush` is a rejection test rather than `std::clamp` because
 `std::clamp` **propagates a NaN**, and a NaN radius rasterizes nothing while

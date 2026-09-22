@@ -57,8 +57,8 @@ row _deps/imgui-src/imgui.cpp 1850-1856 "ImGuiKey_LeftCtrl)  { key = ImGuiKey_Le
 row _deps/imgui-src/imgui.cpp 1957-1967 "Convert Ctrl(Super)+Left click into Right-click"
 row src/app/gui/mask/MaskPanel.cpp 177 "ui::Button(msg::undo)"
 row src/app/gui/mask/MaskPanel.cpp 408 "io.KeyShift ? redo() : undo()"
-row src/app/gui/mask/MaskSession.cpp 392-403 "MaskSession::commit_stroke" 392
-row src/app/gui/mask/MaskSession.cpp 392-403 "if (r.empty()) return {};" 403
+row src/app/gui/mask/MaskSession.cpp 397-408 "MaskSession::commit_stroke" 397
+row src/app/gui/mask/MaskSession.cpp 397-408 "if (r.empty()) return {};" 408
 row src/app/gui/mask/MaskPanel.cpp 76 "shown.empty()) return;"
 row src/app/gui/mask/MaskPanel.cpp 455 "msg::status_kept"
 row src/app/gui/mask/MaskLayer.cpp 341-375 "bool recomposite_frame" 341
@@ -77,9 +77,9 @@ row src/app/FrameMask.h 52-53 "255 = keep"
 row src/app/gui/mask/Livewire.cpp 76 "_step = std::max(1,"
 row src/core/MaskMargin.h 19-28 "inline int radius_px"
 row src/app/gui/GlLoader.h 3-6 "namespaced under glx::"
-row src/app/gui/mask/MaskSession.cpp 233 "enqueue([this, f, i]"
-row src/app/gui/mask/MaskSession.cpp 253 "_status.clear();"
-row src/app/gui/mask/MaskSession.cpp 295 "_livewire.reset();"
+row src/app/gui/mask/MaskSession.cpp 238 "enqueue([this, f, i]"
+row src/app/gui/mask/MaskSession.cpp 258 "_status.clear();"
+row src/app/gui/mask/MaskSession.cpp 300 "_livewire.reset();"
 row src/app/gui/mask/Livewire.h 80-90 "_acos_abs[256][8]"
 row src/app/gui/mask/Livewire.h 80-90 "std::vector<uint8_t> _fg;"
 row src/app/gui/mask/Livewire.cpp 83-131 "std::vector<uint8_t> luma(n);"
@@ -101,13 +101,13 @@ row cmake/SsApps.cmake 412-427 "ss_configure_app(mask_doc_test)" 427
 row src/app/gui/mask/MaskPanel.cpp 219-233 "ImGuiSliderFlags_Logarithmic"
 row src/app/gui/mask/MaskPanel.cpp 219-233 "erasing() || (mode() == CanvasMode::Shape && _tool.id() == ToolId::Brush)" 219
 row src/app/gui/mask/MaskPanel.cpp 273-281 "io.KeyAlt) set_radius(wheel_brush(radius(), io.MouseWheel))"
-row src/app/gui/mask/MaskSession.cpp 410-435 "// Plain and Shift drop, Ctrl keeps" 410
-row src/app/gui/mask/MaskSession.cpp 410-435 "const bool keep = ctrl != erasing;"
-row src/app/gui/mask/MaskSession.cpp 410-435 "if (!(r > kMinBrush)) return kMinBrush;"
-row src/app/gui/mask/MaskSession.cpp 410-435 "std::pow(1.18f, wheel)"
-row src/app/gui/mask/MaskSession.cpp 410-435 "}" 435
-row src/app/gui/mask/MaskSession.h 99-100 "float radius() const { return _brush; }"
-row src/app/gui/mask/MaskSession.h 99-100 "set_radius(float r) { _brush = clamp_brush(r); }"
+row src/app/gui/mask/MaskSession.cpp 415-440 "// Plain and Shift drop, Ctrl keeps" 415
+row src/app/gui/mask/MaskSession.cpp 415-440 "const bool keep = ctrl != erasing;"
+row src/app/gui/mask/MaskSession.cpp 415-440 "if (!(r > kMinBrush)) return kMinBrush;"
+row src/app/gui/mask/MaskSession.cpp 415-440 "std::pow(1.18f, wheel)"
+row src/app/gui/mask/MaskSession.cpp 415-440 "}" 440
+row src/app/gui/mask/MaskSession.h 107-108 "float radius() const { return _brush; }"
+row src/app/gui/mask/MaskSession.h 107-108 "set_radius(float r) { _brush = clamp_brush(r); }"
 row src/app/gui/mask/MaskDoc.cpp 176-180 "case Paint::ForceKeep: _keep[i] = 255; _drop[i] = 0; break;"
 row src/app/gui/mask/MaskLayer.h 47-48 "final = keep ? 255 : drop ? 0 : base"
 row src/app/gui/edit/EditTool.h 27-32 "enum class ToolId"

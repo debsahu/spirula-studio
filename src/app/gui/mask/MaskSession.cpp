@@ -58,13 +58,19 @@ std::string size_mismatch_text(const std::string& joined, const MaskDoc& doc) {
 
 }  // namespace
 
-MaskSession::MaskSession() = default;
-MaskSession::~MaskSession() { close(); }
+MaskSession::MaskSession()
+    : _sam_ops{[](MaskSam& s) { return s.busy(); }, [](MaskSam& s) { return s.release(); }} {}
+
+MaskSession::~MaskSession() {
+    close();
+    sam_drain_retiring();
+}
 
 bool MaskSession::open(const std::string& workspace, const std::string& image_dir,
                        const std::string& mask_dir, bool mask_flipped,
                        std::string& error) {
     close();
+    sam_drain_retiring();
     std::error_code ec;
     _workspace = normalize_dir(fs::absolute(workspace, ec).string());
     _image_root = normalize_dir(fs::absolute(image_dir, ec).string());
@@ -130,8 +136,7 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
 void MaskSession::close() {
     if (!_open && !_worker.joinable()) return;
     if (_doc && _doc->dirty()) save();
-    // Before the worker's join, so the weights go back before a ~700 ms save lands.
-    if (_sam) _sam_close_ms = sam_yield();
+    close_sam();
     {
         std::lock_guard<std::mutex> lk(_qmu);
         _quit = true;
@@ -623,11 +628,46 @@ void MaskSession::sam_forget() {
     _sam_blocker.clear();
 }
 
-double MaskSession::sam_yield() {
-    if (!_sam) return 0.0;
+// Before the worker's join, so the weights go back before a ~700 ms save lands.
+// A running job is cancelled and parked instead: joining it here froze the UI
+// for the whole stage, 2887 ms mid-encode and 7805 ms mid-load.
+void MaskSession::close_sam() {
+    _sam_close_ms = 0.0;
+    if (!_sam) return;
     const auto t0 = std::chrono::steady_clock::now();
-    _sam->cancel();
-    if (_sam->release()) _sam_dropped++;
+    if (_sam_ops.busy(*_sam)) {
+        _sam->cancel();
+        sam_drain_retiring();
+        _sam_retiring = std::move(_sam);
+    } else {
+        sam_yield();
+    }
+    _sam_close_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+}
+
+void MaskSession::sam_poll_retiring() {
+    if (!_sam_retiring || _sam_ops.busy(*_sam_retiring)) return;
+    const auto t0 = std::chrono::steady_clock::now();
+    sam_drain_retiring();
+    _sam_retire_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+}
+
+void MaskSession::sam_drain_retiring() {
+    if (!_sam_retiring) return;
+    _sam_retiring->cancel();
+    _sam_ops.release(*_sam_retiring);
+    _sam_retiring.reset();
+}
+
+double MaskSession::sam_yield() {
+    const auto t0 = std::chrono::steady_clock::now();
+    sam_drain_retiring();
+    if (_sam) {
+        _sam->cancel();
+        if (_sam_ops.release(*_sam)) _sam_dropped++;
+    }
     _sam_release_pending = false;
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
         .count();

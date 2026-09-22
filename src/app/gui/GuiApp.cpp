@@ -301,6 +301,7 @@ void GuiApp::shutdown() {
     // Same ordering as _compare above: destroy_gl while GL is still current.
     _mask_editor.destroy_gl();
     _mask_editor.close();
+    _mask_editor.sam_drain_retiring();   // before nn::shutdown() frees the device
     _geometry_panel.destroy_gl();
     _colmap.cancel();
     _sfm.cancel();
@@ -2668,6 +2669,9 @@ std::string GuiApp::state_json() {
     out += ",\"sam_vram_mib\":" + std::to_string(_mask_editor.sam_vram_mib());
     out += ",\"sam_pool_mib\":" + std::to_string(mask::MaskSession::sam_pool_mib());
     out += ",\"sam_close_ms\":" + std::to_string(_mask_editor.sam_close_ms());
+    out += ",\"sam_retiring\":";
+    out += _mask_editor.sam_retiring() ? "true" : "false";
+    out += ",\"sam_retire_ms\":" + std::to_string(_mask_editor.sam_retire_ms());
     out += ",\"sam_ui_ms\":" + std::to_string(_mask_editor.sam_ui_ms());
     out += ",\"sam_click\":[" + std::to_string(_mask_editor.sam_click_x()) + "," +
            std::to_string(_mask_editor.sam_click_y()) + "]";
@@ -2772,6 +2776,8 @@ void GuiApp::frame() {
         case Screen::Mesh:   draw_mesh();   break;
     }
 
+    // A job cancelled by the editor's close finishes its stage off this thread.
+    _mask_editor.sam_poll_retiring();
     if (_mask_editor.is_open()) {
         // Read now, not at the top of the frame: a preview opened above has
         // already taken the device.

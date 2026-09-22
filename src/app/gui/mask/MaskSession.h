@@ -40,6 +40,13 @@ struct FrameRef {
 class MaskSam;
 struct SamResult;
 
+// How close() and the retiring slot see a MaskSam, so a test can stand in for
+// a job that is still running. `release` is MaskSam::release: it joins.
+struct SamOps {
+    std::function<bool(MaskSam&)> busy;
+    std::function<bool(MaskSam&)> release;
+};
+
 // What a left click on the canvas does. One value rather than a flag per tool,
 // so no two can be on at once, whichever picker forgets what.
 enum class CanvasMode { Shape, Eraser, Path, Sam };
@@ -65,7 +72,8 @@ public:
     // fails while closing has no status strip left to reach.
     void set_log(std::function<void(const std::string&)> log) { _log = std::move(log); }
     bool is_open() const { return _open; }
-    // Saves a dirty frame, hands the SAM checkpoint back, then joins the worker.
+    // Saves a dirty frame, hands the SAM checkpoint back (or, mid-job, cancels it
+    // into the retiring slot), then joins the worker.
     void close();
     void destroy_gl();
     void draw();
@@ -169,9 +177,17 @@ public:
     // GuiApp's sam_blocker() answer, every frame before draw(); a blocked
     // prompt is refused with it in sam_error().
     void set_sam_blocker(const std::string& reason);
-    // Cancels, joins and unloads, before another inference user starts. Keeps
-    // the clicks; the next prompt reloads. Returns the milliseconds joined.
+    // Cancels, joins and unloads, before another inference user starts; drains
+    // the retiring slot too. Keeps the clicks. Returns the milliseconds joined.
     double sam_yield();
+    // A job still running when the editor closed waits here, cancelled, so the
+    // UI thread never joins it: poll() releases it once idle, every frame;
+    // drain() releases it now, before anything else touches the device.
+    bool sam_retiring() const { return (bool)_sam_retiring; }
+    void sam_poll_retiring();
+    void sam_drain_retiring();
+    double sam_retire_ms() const { return _sam_retire_ms; }
+    void set_sam_ops(SamOps ops) { _sam_ops = std::move(ops); }
     // What a job is stamped with and a result must still match: the frame's
     // key AND the document generation, since a revert reopens the same key.
     std::string sam_frame_stamp() const;
@@ -188,7 +204,7 @@ public:
     int sam_last_detections() const { return _sam_last_detections; }
     // Why the last result painted nothing, for the strip; null when it painted.
     const spirula::i18n::Msg* sam_empty_note() const;
-    // UI-thread ms the last close() spent joining a SAM job and unloading.
+    // UI-thread ms the last close() spent on SAM; 0 when it had none.
     double sam_close_ms() const { return _sam_close_ms; }
     // UI-thread ms of the last result's paint and upload; the frame pixel the
     // last point prompt was sent at; the canvas height drawn last frame.
@@ -246,6 +262,7 @@ private:
     Rect shown_rect(const Rect& stored) const;
     bool sam_add_on_top(int object) const;
     bool sam_add_redoable() const;
+    void close_sam();
     void sam_forget();
     Rect sam_land(SamResult res);
     void sam_start_margin();
@@ -302,6 +319,9 @@ private:
     // Created on first use; its session is released by sam_yield() and a model
     // change, and close() releases it and then drops the object, clicks included.
     std::unique_ptr<MaskSam> _sam;
+    std::unique_ptr<MaskSam> _sam_retiring;
+    SamOps _sam_ops;
+    double _sam_retire_ms = 0.0;
     std::string _sam_model;
     bool _sam_text_hint = false;
     bool _sam_release_pending = false;   // a model change waiting for the job to stop

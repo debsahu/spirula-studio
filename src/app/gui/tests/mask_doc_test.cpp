@@ -4190,11 +4190,14 @@ void test_session_close_forgets_sam() {
     settle(s);
     s.set_sam_model("/m/a.ggml", true);
     s.sam_prompt().dilate_ratio = 0.3f;
+    s.sam_prompt_point(21.0f, 22.0f, mk::Paint::ForceDrop);
     s.sam_prompt_started(20.0f, 20.0f, true);
     s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 20.0f, 20.0f, 6.0f)}, 64, 48,
                         mk::Paint::ForceDrop, 0.0f, 0.9f, 7.0);
     s.sam_pump();
     s.sam().refuse("a stale error");
+    check(s.sam_click_x() == 21.0f && s.sam_click_y() == 22.0f,
+          "close sam: the fixture has a last click point");
     s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 40.0f, 20.0f, 4.0f)}, 64, 48,
                         mk::Paint::ForceDrop, 0.0f, 0.9f, 7.0);
     check(s.sam_click_count() == 1 && s.sam_results() == 1 && s.sam_last_area() > 0 &&
@@ -4217,6 +4220,8 @@ void test_session_close_forgets_sam() {
           "close sam: no status, error or session survives");
     check(!s.sam_margin_reapplies() && s.sam_held_bytes() == 0,
           "close sam: nothing is left to re-apply the margin to");
+    check(s.sam_click_x() == -1.0f && s.sam_click_y() == -1.0f,
+          "close sam: the last click point goes with it");
     check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
           "close sam: reopen: " + err);
     settle(s);
@@ -4299,6 +4304,154 @@ void test_session_sam_vetoed_all() {
     s.sam_pump();
     check(s.sam_last_area() > 0 && s.sam_empty_note() == nullptr,
           "vetoed: a result that painted takes no note");
+}
+
+// Stands in for MaskSam's busy() and release(): `busy` is a job still inside a
+// stage; each release records whether it came while busy and the editor open.
+struct FakeSamOps {
+    bool busy = false;
+    int releases = 0, releases_while_busy = 0;
+    bool open_at_release = false;
+    int sleep_ms = 0;
+    const mk::MaskSession* s = nullptr;
+    mk::SamOps ops() {
+        return {[this](mk::MaskSam&) { return busy; },
+                [this](mk::MaskSam&) {
+                    releases++;
+                    releases_while_busy += busy ? 1 : 0;
+                    open_at_release = s && s->is_open();
+                    if (sleep_ms) std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+                    return false;
+                }};
+    }
+};
+
+// A close mid-job must not join it on the UI thread: it parks the job, and the
+// per-frame poll releases it only once the stage it is in has ended.
+void test_session_close_parks_busy_job() {
+    Fixture f = make_dataset("sam_close_parks", 64, 48, {"a"});
+    FakeSamOps fake;
+    mk::MaskSession s;
+    fake.s = &s;
+    s.set_sam_ops(fake.ops());
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "retire: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    s.sam();
+    fake.busy = true;
+    s.close();
+    check(fake.releases == 0 && s.sam_retiring(),
+          "retire: close never releases a busy job on the UI thread, it parks it");
+    s.sam_poll_retiring();
+    check(fake.releases == 0 && s.sam_retiring(), "retire: the poll waits while the job still runs");
+    fake.busy = false;
+    s.sam_poll_retiring();
+    check(fake.releases == 1 && !s.sam_retiring(), "retire: the poll releases once the job is idle");
+    s.sam_poll_retiring();
+    check(fake.releases == 1, "retire: the poll releases once, not every frame");
+}
+
+// An idle session is released by close() itself, while the editor is still
+// open -- not left to ~MaskSam -- and a later close with no SAM reports 0 ms.
+void test_session_close_releases_idle() {
+    Fixture f = make_dataset("sam_close_idle", 64, 48, {"a"});
+    FakeSamOps fake;
+    fake.sleep_ms = 5;
+    mk::MaskSession s;
+    fake.s = &s;
+    s.set_sam_ops(fake.ops());
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "close idle: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    s.sam();
+    s.close();
+    check(fake.releases == 1 && fake.open_at_release && !s.sam_retiring(),
+          "close idle: close releases an idle session itself, before the editor is torn down");
+    check(s.sam_close_ms() >= 5.0, "close idle: sam_close_ms covers that release");
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "close idle: reopen: " + err);
+    settle(s);
+    s.close();
+    check(s.sam_close_ms() == 0.0 && fake.releases == 1,
+          "close idle: a close with no SAM reports 0 ms, not the last close's");
+}
+
+// Every other inference user drains the parked job first, even mid-stage: when
+// sam_yield(), a reopen or destruction returns, no MaskSam is left unreleased.
+void test_session_retiring_drains() {
+    Fixture f = make_dataset("sam_retire_drains", 64, 48, {"a"});
+    std::string err;
+    {
+        FakeSamOps fake;
+        mk::MaskSession s;
+        s.set_sam_ops(fake.ops());
+        check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+              "drain: open: " + err);
+        settle(s);
+        s.set_sam_model("/m/a.ggml", true);
+        s.sam();
+        fake.busy = true;
+        s.close();
+        s.sam_yield();
+        check(fake.releases == 1 && fake.releases_while_busy == 1 && !s.sam_retiring(),
+              "drain: sam_yield releases the parked job even mid-stage");
+        check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+              "drain: reopen: " + err);
+        settle(s);
+        s.set_sam_model("/m/a.ggml", true);
+        s.sam();
+        s.close();
+        check(s.sam_retiring() && fake.releases == 1, "drain: a second busy close parks again");
+        check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+              "drain: reopen 2: " + err);
+        check(fake.releases == 2 && !s.sam_retiring(),
+              "drain: a reopen releases the parked job before its own session starts");
+        settle(s);
+        s.set_sam_model("/m/a.ggml", true);
+        s.sam();
+        s.sam_yield();
+        check(fake.releases == 3, "drain: sam_yield releases the live session as well");
+    }
+    FakeSamOps fake;
+    {
+        mk::MaskSession s;
+        s.set_sam_ops(fake.ops());
+        check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+              "drain: open 3: " + err);
+        settle(s);
+        s.set_sam_model("/m/a.ggml", true);
+        s.sam();
+        fake.busy = true;
+        s.close();
+        check(s.sam_retiring(), "drain: the fixture parked a job before destruction");
+    }
+    check(fake.releases == 1, "drain: destroying the session releases the parked job");
+}
+
+// MaskDoc serials restart per document, so another frame's first edit can carry
+// the add's serial: only the stamp tells them apart.
+void test_session_sam_held_other_frame() {
+    Fixture f = make_dataset("sam_held_other_frame", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "held other frame: open: " + err);
+    settle(s);
+    sam_add(s, disc_region(64, 48, 30.0f, 24.0f, 6.0f), 0);
+    const uint64_t add_step = s.doc()->top_step();
+    check(s.sam_held_bytes() > 0, "held other frame: the add holds its detection");
+    s.go_to(1);
+    settle(s);
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 0, 0, 4, 4), mk::Rect{0, 0, 4, 4});
+    check(s.doc()->key() == "b" && s.doc()->top_step() == add_step,
+          "held other frame: fixture: frame b's first edit has the add's serial");
+    s.sam_pump();
+    check(s.sam_held_bytes() == 0,
+          "held other frame: another frame's edit with the same serial does not keep it");
 }
 
 int main() {
@@ -4405,6 +4558,10 @@ int main() {
     test_session_close_forgets_sam();
     test_session_sam_margin_after_undo_redo();
     test_session_sam_vetoed_all();
+    test_session_close_parks_busy_job();
+    test_session_close_releases_idle();
+    test_session_retiring_drains();
+    test_session_sam_held_other_frame();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();
