@@ -1467,20 +1467,35 @@ void test_session_eraser() {
     check(s.paint_now(false, false) == mk::Paint::ForceKeep, "paint_now, eraser selected: keep");
     check(s.paint_now(false, true) == mk::Paint::ForceDrop, "paint_now, eraser + Ctrl: drop");
 
-    // Two radii, not one.
+    // ONE radius, shared. The operator asked for the size to carry across a
+    // tool switch, so the defect to guard is a SECOND copy surviving: a
+    // switch that forgets to carry it, or a writer that moves only one.
     s.set_erasing(false);
     s.set_radius(50.0f);
+    check(s.radius() == 50.0f, "the brush's radius is set to 50");
     s.set_erasing(true);
-    check(s.radius() == 24.0f, "the eraser has its own default, untouched by the brush's 50");
+    check(s.radius() == 50.0f, "switching to the eraser carries the brush's 50 px across");
     s.set_radius(300.0f);
+    check(s.radius() == 300.0f, "the eraser's radius is set to 300");
     s.set_erasing(false);
-    check(s.radius() == 50.0f, "the brush kept 50 while the eraser was set to 300");
+    check(s.radius() == 300.0f,
+          "and switching back carries the eraser's 300 px: the carry is BOTH ways");
+    // The clamp has to carry too. A second copy that syncs only the value the
+    // caller passed would read 99999 here, or fall back to 300.
     s.set_erasing(true);
-    check(s.radius() == 300.0f, "and the eraser kept 300");
     s.set_radius(99999.0f);
-    check(s.radius() == 4096.0f, "set_radius clamps the eraser");
     s.set_erasing(false);
-    check(s.radius() == 50.0f, "clamping the eraser left the brush alone");
+    check(s.radius() == 4096.0f, "a value clamped under the eraser reaches the brush clamped");
+    // The invariant, stated as one: set_erasing must never change the radius,
+    // whichever way it goes and however often. A divergence of any kind
+    // breaks this even where the four checks above happen to agree.
+    bool invariant = true;
+    for (int i = 0; i < 6; i++) {
+        const float before = s.radius();
+        s.set_erasing(i % 2 == 0);
+        invariant = invariant && s.radius() == before;
+    }
+    check(invariant, "set_erasing never moves the radius, in either direction");
     s.close();
 }
 

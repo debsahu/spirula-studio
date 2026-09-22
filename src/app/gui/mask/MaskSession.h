@@ -74,13 +74,13 @@ public:
     std::string status() const;
     std::string error() const;
     double last_commit_ms() const { return _last_commit_ms; }
-    // The brush and the eraser carry separate radii, as every paint program
-    // does; `radius` is whichever tool is up, and the only one `[`/`]`, the
-    // slider and the wheel ever move.
+    // ONE radius, shared by the brush and the eraser: the operator wants the
+    // size to carry when they switch tools mid-correction. A second copy is
+    // the defect to avoid here, not a feature to add.
     bool erasing() const { return _erase; }
     void set_erasing(bool on) { _erase = on; }
-    float radius() const { return _erase ? _eraser : _brush; }
-    void set_radius(float r) { (_erase ? _eraser : _brush) = clamp_brush(r); }
+    float radius() const { return _brush; }
+    void set_radius(float r) { _brush = clamp_brush(r); }
     View& view() { return _view; }
     WindowSource window_source() const;
 
@@ -163,8 +163,7 @@ private:
     // The tool is only ever touched from MaskPanel.cpp (EditTool.cpp needs
     // imgui); a frame change asks it to reset through this flag.
     bool _tool_reset = false;
-    float _brush = 24.0f;            // mask pixels
-    float _eraser = 24.0f;           // mask pixels, independent of _brush
+    float _brush = 24.0f;            // mask pixels, the brush's AND the eraser's
     bool _erase = false;
     bool _panning = false;
     double _last_commit_ms = 0.0;
