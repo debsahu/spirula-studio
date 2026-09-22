@@ -8,6 +8,7 @@
 #include "app/gui/edit/Selection.h"
 #include "app/gui/mask/Livewire.h"
 #include "app/gui/mask/MaskAdd.h"
+#include "app/gui/MaskPrompt.h"
 #include "app/gui/MaskSettings.h"
 #include "app/gui/mask/MaskSam.h"
 #include "app/gui/mask/MaskDoc.h"
@@ -3352,6 +3353,20 @@ void test_canvas_mode_is_exclusive() {
     check(s.erasing() && !s.path_mode(), "canvas mode: set_erasing(true) leaves the pen");
 }
 
+// The dataset screen's own branch order over all eight inputs: a download in
+// flight shows progress even for a cached entry, and no entry shows nothing.
+void test_mask_picker_row() {
+    using gui::PickerRow;
+    const PickerRow want[8] = {PickerRow::None,        PickerRow::Downloading,
+                               PickerRow::None,        PickerRow::Downloading,
+                               PickerRow::GetModel,    PickerRow::Downloading,
+                               PickerRow::Ready,       PickerRow::Downloading};
+    bool all = true;
+    for (int i = 0; i < 8; i++)
+        all = all && gui::mask_picker_row(i & 4, i & 2, i & 1) == want[i];
+    check(all, "picker row: the dataset screen's branch order, all eight inputs");
+}
+
 }  // namespace
 
 int main() {
@@ -3424,6 +3439,7 @@ int main() {
     test_session_sam_result_stamp();
     test_session_sam_blocker_clears_its_own_error();
     test_canvas_mode_is_exclusive();
+    test_mask_picker_row();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

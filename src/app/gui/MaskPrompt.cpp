@@ -2,6 +2,8 @@
 
 #include "app/gui/MaskPrompt.h"
 
+#include "app/gui/Layout.h"
+#include "app/gui/ModelCache.h"
 #include "app/gui/Ui.h"
 #include "i18n/catalog/Dataset.h"
 
@@ -13,6 +15,10 @@ namespace dmsg = spirula::i18n::msg::dataset;
 namespace gui {
 
 namespace {
+
+// GuiApp.cpp's kOk and kErr, so the picker reads the same on both screens.
+const ImVec4 kPickerOk(0.35f, 0.85f, 0.45f, 1.0f);
+const ImVec4 kPickerErr(1.0f, 0.42f, 0.42f, 1.0f);
 
 // The English terms. Chosen for what SAM 3 actually responds to -- a concrete
 // countable noun, singular, optionally qualified -- rather than for what reads
@@ -170,6 +176,51 @@ bool draw_subject_palette(std::string& prompt, std::string& negative,
 
     ImGui::TreePop();
     return edited;
+}
+
+void draw_mask_model_picker(std::string& model_id, FileDownload& download,
+                            const std::function<void()>& request_download) {
+    int model_idx = 0;
+    const auto& catalog = model_catalog();
+    for (size_t i = 0; i < catalog.size(); i++)
+        if (model_id == catalog[i].id) model_idx = (int)i;
+    ImGui::SetNextItemWidth(px(260.0f));
+    if (ui::BeginCombo(dmsg::mask_model, catalog[model_idx].label->get())) {
+        for (size_t i = 0; i < catalog.size(); i++) {
+            const bool cached = model_is_cached(catalog[i]);
+            const std::string label =
+                cached ? std::string(catalog[i].label->get())
+                       : spirula::i18n::format(dmsg::mask_model_needs_download,
+                                               {catalog[i].label->get()});
+            if (ui::SelectableRaw(label, (int)i == model_idx)) model_id = catalog[i].id;
+            if (ImGui::IsItemHovered()) ui::SetTooltip(*catalog[i].blurb);
+        }
+        ImGui::EndCombo();
+    }
+    const ModelEntry* entry = find_model(model_id);
+    if (entry) ui::TextDisabled(*entry->blurb);
+    const bool downloading = download.state() == FileDownload::State::Running;
+    switch (mask_picker_row(entry != nullptr, entry && model_is_cached(*entry), downloading)) {
+        case PickerRow::GetModel:
+            if (ui::Button(dmsg::mask_get_model)) request_download();
+            ImGui::SameLine();
+            ui::TextDisabled(dmsg::mask_one_time_download);
+            break;
+        case PickerRow::Downloading:
+            // The overlay is a byte count from curl, not a sentence.
+            ui::ProgressBarRaw(std::max(download.progress(), 0.0f), ImVec2(260, 0),
+                               download.status().c_str());
+            ImGui::SameLine();
+            if (ui::Button(dmsg::stop)) download.cancel();
+            break;
+        case PickerRow::Ready:
+            ui::TextColored(kPickerOk, dmsg::mask_model_ready);
+            break;
+        case PickerRow::None:
+            break;
+    }
+    if (download.state() == FileDownload::State::Failed)
+        ui::TextColoredWrappedRaw(kPickerErr, download.status());
 }
 
 }  // namespace gui

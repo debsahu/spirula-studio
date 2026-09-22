@@ -24,6 +24,7 @@
 
 #include "i18n/Message.h"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -54,5 +55,21 @@ void prompt_toggle_term(std::string& prompt, const char* term);
 // `keep_subject` picks those headings, exactly as it picks the field labels.
 bool draw_subject_palette(std::string& prompt, std::string& negative,
                           bool keep_subject);
+
+class FileDownload;   // app/gui/ModelCache.h
+
+// The row under the checkpoint combo, in the dataset screen's own order: a
+// download in flight wins over "ready". Inline so mask_doc_test can pin it.
+enum class PickerRow { None, GetModel, Downloading, Ready };
+inline PickerRow mask_picker_row(bool has_entry, bool cached, bool downloading) {
+    if (has_entry && !cached && !downloading) return PickerRow::GetModel;
+    if (downloading) return PickerRow::Downloading;
+    return has_entry ? PickerRow::Ready : PickerRow::None;
+}
+
+// The checkpoint picker both the dataset screen and the mask editor draw, over
+// the SAME model id and download. `request_download` asks consent first.
+void draw_mask_model_picker(std::string& model_id, FileDownload& download,
+                            const std::function<void()>& request_download);
 
 }  // namespace gui

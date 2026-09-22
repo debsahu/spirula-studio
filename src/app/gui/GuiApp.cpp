@@ -2733,6 +2733,8 @@ void GuiApp::frame() {
             _segment.is_open(), _geometry_panel.is_open(), native_work_busy()));
         _mask_editor.draw();
     }
+    // After every screen and the editor, so either can raise the one consent modal.
+    draw_license_modal();
 
     if (_dialog.draw()) handle_dialog_result(_dialog.results());
     // The save dialog steps aside while the folder picker is up; bring it
@@ -4582,44 +4584,8 @@ void GuiApp::draw_masking_options() {
     const bool builtin_masking = backends().builtin_masking;
 
     if (_mask_enable && builtin_masking) {
-        // ---- model selection + download ----
-        int model_idx = 0;
-        const auto& catalog = model_catalog();
-        for (size_t i = 0; i < catalog.size(); i++)
-            if (_model_id == catalog[i].id) model_idx = (int)i;
-        ImGui::SetNextItemWidth(px(260.0f));
-        if (ui::BeginCombo(dmsg::mask_model, catalog[model_idx].label->get())) {
-            for (size_t i = 0; i < catalog.size(); i++) {
-                const bool cached = model_is_cached(catalog[i]);
-                const std::string label =
-                    cached ? std::string(catalog[i].label->get())
-                           : i18n::format(dmsg::mask_model_needs_download,
-                                          {catalog[i].label->get()});
-                if (ui::SelectableRaw(label, (int)i == model_idx))
-                    _model_id = catalog[i].id;
-                if (ImGui::IsItemHovered()) ui::SetTooltip(*catalog[i].blurb);
-            }
-            ImGui::EndCombo();
-        }
+        draw_mask_model_picker(_model_id, _download, [this] { request_model_download(); });
         entry = find_model(_model_id);
-        if (entry) ui::TextDisabled(*entry->blurb);
-
-        const bool downloading = _download.state() == ModelDownload::State::Running;
-        if (entry && !model_is_cached(*entry) && !downloading) {
-            if (ui::Button(dmsg::mask_get_model)) request_model_download();
-            ImGui::SameLine();
-            ui::TextDisabled(dmsg::mask_one_time_download);
-        } else if (downloading) {
-            // The overlay is a byte count from curl, not a sentence.
-            ui::ProgressBarRaw(std::max(_download.progress(), 0.0f),
-                               ImVec2(260, 0), _download.status().c_str());
-            ImGui::SameLine();
-            if (ui::Button(dmsg::stop)) _download.cancel();
-        } else if (entry) {
-            ui::TextColored(kOk, dmsg::mask_model_ready);
-        }
-        if (_download.state() == ModelDownload::State::Failed)
-            ui::TextColoredWrappedRaw(kErr, _download.status());
         if (entry && !entry->text_prompts && _mask.clicks.empty())
             ui::TextColored(kWarn, dmsg::mask_no_text_prompts);
         if (!_mask.clicks.empty()) {
@@ -6265,7 +6231,6 @@ void GuiApp::draw_new_dataset() {
     draw_clear_project_modal();
     draw_drop_intermediate_modal();
     draw_mask_recon_modal();
-    draw_license_modal();
 }
 
 // ---------------------------------------------------------------------------
