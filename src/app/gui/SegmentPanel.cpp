@@ -574,6 +574,7 @@ namespace {
 // A shape's draggable points, in normalized image coordinates: the first is
 // what moves the whole thing, the rest resize it.
 int shape_handles(const app::MaskShape& s, ImVec2 out[3]) {
+    if (s.kind == app::MaskShape::Kind::Path) return 0;
     if (s.kind == app::MaskShape::Kind::Ellipse) {
         out[0] = ImVec2(s.cx, s.cy);
         out[1] = ImVec2(s.cx + s.rx, s.cy);
@@ -587,6 +588,17 @@ int shape_handles(const app::MaskShape& s, ImVec2 out[3]) {
 }
 
 bool shape_contains(const app::MaskShape& s, float u, float v) {
+    if (s.kind == app::MaskShape::Kind::Path) {
+        const size_t n = s.pts.size() / 2;
+        bool in = false;
+        for (size_t i = 0, j = n - 1; i < n; j = i++) {
+            const float ay = s.pts[2 * i + 1], by = s.pts[2 * j + 1];
+            if ((ay > v) == (by > v)) continue;
+            const float x = s.pts[2 * i] + (v - ay) / (by - ay) * (s.pts[2 * j] - s.pts[2 * i]);
+            if (u < x) in = !in;
+        }
+        return in;
+    }
     if (s.kind == app::MaskShape::Kind::Ellipse) {
         if (s.rx <= 0.0f || s.ry <= 0.0f) return false;
         const float du = (u - s.cx) / s.rx, dv = (v - s.cy) / s.ry;
@@ -597,6 +609,13 @@ bool shape_contains(const app::MaskShape& s, float u, float v) {
 }
 
 void move_shape(app::MaskShape& s, float du, float dv) {
+    if (s.kind == app::MaskShape::Kind::Path) {
+        for (size_t i = 0; i + 1 < s.pts.size(); i += 2) {
+            s.pts[i] += du;
+            s.pts[i + 1] += dv;
+        }
+        return;
+    }
     s.cx += du;
     s.cy += dv;
     if (s.kind == app::MaskShape::Kind::Rect) {
@@ -734,13 +753,17 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
         const app::MaskShape& s = stencil.mask.shapes[i];
         const ImU32 col = (int)i == _shape_sel ? IM_COL32(255, 255, 255, 235)
                                                : IM_COL32(255, 255, 255, 120);
-        if (s.kind == app::MaskShape::Kind::Ellipse)
+        const float thick = (int)i == _shape_sel ? 2.0f : 1.5f;
+        if (s.kind == app::MaskShape::Kind::Path) {
+            for (size_t k = 0; k + 1 < s.pts.size(); k += 2)
+                dl->PathLineTo(to_screen(s.pts[k], s.pts[k + 1]));
+            dl->PathStroke(col, ImDrawFlags_Closed, thick);
+        } else if (s.kind == app::MaskShape::Kind::Ellipse) {
             dl->AddEllipse(to_screen(s.cx, s.cy),
-                           ImVec2(s.rx * size.x, s.ry * size.y), col, 0.0f, 64,
-                           (int)i == _shape_sel ? 2.0f : 1.5f);
-        else
-            dl->AddRect(to_screen(s.cx, s.cy), to_screen(s.rx, s.ry), col, 0.0f,
-                        0, (int)i == _shape_sel ? 2.0f : 1.5f);
+                           ImVec2(s.rx * size.x, s.ry * size.y), col, 0.0f, 64, thick);
+        } else {
+            dl->AddRect(to_screen(s.cx, s.cy), to_screen(s.rx, s.ry), col, 0.0f, 0, thick);
+        }
     }
 
     const std::string camera = shown_camera();
@@ -832,10 +855,11 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
     for (size_t i = 0; i < s.mask.shapes.size(); i++) {
         app::MaskShape& sh = s.mask.shapes[i];
         ImGui::PushID((int)i);
-        const std::string label = spirula::i18n::format(
-            sh.kind == app::MaskShape::Kind::Rect ? dmsg::stencil_shape_box
-                                                  : dmsg::stencil_shape_circle,
-            {(int)i + 1});
+        const spirula::i18n::Msg& kind_label =
+            sh.kind == app::MaskShape::Kind::Rect      ? dmsg::stencil_shape_box
+            : sh.kind == app::MaskShape::Kind::Path    ? dmsg::stencil_shape_path
+                                                       : dmsg::stencil_shape_circle;
+        const std::string label = spirula::i18n::format(kind_label, {(int)i + 1});
         // Toggling, not a plain radio: the selected shape swallows clicks on
         // the picture, so there has to be a way to let go of it again.
         const bool sel = _shape_sel == (int)i;
