@@ -995,11 +995,16 @@ Task 10's new messages fit the existing subsets.
 lines, `mask_doc_test` **749**. The 749 is 750 minus the one assertion removed
 below; nothing else changed. Both binaries exit 0.
 
-Nine of the ten test binaries in the battery exit 0. `align_fit_test` exits 1
-on `FAIL ... and its axes are the room's`, **deterministically -- 10 of 10
-runs**, and it is the same pre-existing failure plan 1 recorded above: it links
-only `align_fit_test.cpp` and `AlignFit.cpp`, `git diff 66342882 HEAD` over
-both is empty, and neither appears in the 33-file change set of plans 1 and 2.
+**`align_fit_test` is a KNOWN PRE-EXISTING FAILURE. Do not re-diagnose it.**
+Nine of the ten test binaries in the battery exit 0; `align_fit_test` exits 1
+on `FAIL ... and its axes are the room's`, **deterministically, 10 of 10 runs**.
+It is not ours and no plan-2 change can reach it, established three independent
+ways: the target links only `align_fit_test.cpp` and `AlignFit.cpp`
+(`cmake/SsApps.cmake:382`); `git diff 66342882 HEAD` over both files is empty;
+and neither file appears in the 33-file change set of plans 1 and 2. `AlignFit`
+was last touched by `f60271a8`, which predates plan 1's base. Plan 1 recorded
+the same failure above, independently. **A brief that asks for ten zeros from
+this battery is asking for something no commit in either plan can deliver.**
 
 **The readers are untouched (spec #2).** `git diff --stat 66342882 -- src/data
 src/sfm src/kernels` is empty.
@@ -1009,28 +1014,41 @@ src/sfm src/kernels` is empty.
 `/tmp/spirula_mask_bench` (three synthetic 7680x3840 frames), **I**, status
 line read off a screenshot:
 
-| reading | frame | grid / step | build |
-|---|---|---|---|
-| 1 | f0000 | 3840x1920, step 2 | **96 ms** |
-| 2 | f0000, via `>` then `<` | 3840x1920, step 2 | **96 ms** |
-| 3 | f0000, via `>` then `<` | 3840x1920, step 2 | **96 ms** |
-| discriminator, f0001 | f0001 | 3840x1920, step 2 | 108 ms |
-| discriminator, f0002 | f0002 | 3840x1920, step 2 | 88 ms |
+| reading | frame reached how | grid / step | build | stale-proof? |
+|---|---|---|---|---|
+| 1 | editor opened on f0000, **I** pressed | 3840x1920, step 2 | 96 ms | no |
+| 2 | `>` then `<`, back to f0000 | 3840x1920, step 2 | 96 ms | no |
+| 3 | `>` then `<`, back to f0000 | 3840x1920, step 2 | 96 ms | no |
+| **4** | `>` to **f0001**, pen tool already on | 3840x1920, step 2 | **108 ms** | **yes** |
+| **5** | `>` to **f0002** with the BRUSH tool, then **I** | 3840x1920, step 2 | **88 ms** | **yes** |
+| 6-8, after the strip fix below | editor reopened; then `>`/`<` x3 | 3840x1920, step 2 | 19, 83, 83, 87 ms | mixed |
+| 9 | 120 MP still, see below | 3880x1940, step 4 | 128-129 ms | yes |
 
-**PASS**, 3.1x inside the bar at worst. The grid and step are what the design
-predicts for a 7680-wide frame (4096 px cap on the long edge -> step 2).
+**PASS**, 2.8x inside the bar at the worst reading. The grid and step are what
+the design predicts for a 7680-wide frame (4096 px cap on the long edge ->
+step 2).
 
-**Three identical readings is exactly the shape this project distrusts, so it
-was not left as evidence.** `post_status` is sticky: had the map *not* been
-rebuilt, the previous build's text would still be on screen and would read 96
-again. Two independent checks settle it. (a) Source: `pump()` clears `_status`
-and calls `_livewire.reset()` on every frame load (`MaskSession.cpp:200,240`),
-so the line can only come from a fresh `ensure_livewire()`. (b) Observed: with
-the **Brush** tool selected, changing to f0002 leaves **no `Edge map` line at
-all** on the status strip; pressing **I** makes it appear, reading 88 ms. The
-96/96/96 repeat is `>` then `<` back to the *same* frame, so identical input
-doing identical work is the expected answer; the two frame-changing readings
-(108, 88) are what show the number is live.
+**Readings 4 and 5 are the ones to quote. 1-3 cannot be told from a stale
+line and are kept only to show the trap.** `post_status` is sticky, so had the
+map *not* been rebuilt, the previous build's text would still be on screen and
+would read 96 again -- three identical readings is exactly what a stale status
+line looks like. Two independent checks settle it. (a) Source: `pump()` clears
+`_status` and calls `_livewire.reset()` on every frame load
+(`MaskSession.cpp:200,240`), so the line can only come from a fresh
+`ensure_livewire()`. (b) Observed: with the **Brush** tool selected, changing to
+f0002 leaves **no `Edge map` line at all** on the strip, and pressing **I**
+makes it appear reading 88 ms -- an appearance, not a persistence, so nothing
+stale could have produced it. Readings 1-3 are `>` then `<` back to the *same*
+frame, so identical input doing identical work is the expected answer and the
+repeat carries no information either way.
+
+**The 19-108 ms spread is real and its cause was not isolated.** The low
+readings (18, 19 ms) were taken with the app otherwise idle and are close to
+`bench_livewire`'s 12.6 ms median, which is the build with nothing else
+running. The 83-108 ms readings were all taken within a few seconds of a frame
+navigation, when the worker is still decoding and the panel is re-deriving and
+uploading an 8K window texture. That is a plausible account, not a measurement:
+nobody instrumented the contention. Every reading clears the bar regardless.
 
 **Built once.** With a two-anchor path open on f0002, 47 cursor moves scattered
 over the frame across 10 s left the status line unchanged at
@@ -1074,14 +1092,55 @@ of the grid.
 
 **Verdict: PASS on criterion 6, which excludes exactly this warm-up** ("p95
 after the first 200 ms of a segment"), corroborated by the bench's **p95
-2.38 ms / max 4.68 ms** on the same 8K synthetic fixture. But record the
-816.7 ms honestly: **it is three orders of magnitude above the bench's max, and
-the bench cannot see it**, because `bench_livewire_on` walks the cursor 2 grid
-px per move, so the frontier grows a little at a time and no single move ever
-pays for a whole disc. A user who plants an anchor and then clicks across the
-frame pays it once per anchor. The cause is not separated here between Dijkstra
-expansion and first-touch paging of the distance/parent arrays; both are
-first-use costs and both are gone on the second visit.
+2.38 ms / max 4.68 ms** on the same 8K synthetic fixture. The criterion is
+honest about what it leaves out. What it leaves out is the next section, and
+anyone about to read criterion 6 as a guarantee has to read that first.
+
+#### KNOWN COST: the first far cursor move after an anchor stalls ~0.76 s at 8K
+
+**This is the most useful thing the plan-2 verification found, and no test or
+bench in this tree covers it.** Criterion 6 passes and the pen tool is still
+shipping a stall a user feels on every anchor they plant.
+
+**The measurement.** 8K synthetic frame, one anchor planted, then the cursor
+jumped to a far corner it had never been near: **816.7 ms**, against a measured
+harness floor of 52.3-56.4 ms, so roughly **760 ms of search**. The next three
+far corners came back at the floor, and a second visit to all four was at the
+floor. A gentler version of the same thing shows in the interior sweep above:
+first pass 135.8 / 164.9 / **260.0** / 55.5 / 121.0 / 55.2 ms, the identical six
+targets on a second pass **all** 53.0-56.1 ms.
+
+**The mechanism.** The search is lazy by design: each cursor move pops the heap
+only until the cursor's own pixel is settled, which is what makes the common
+case free. The cost of settling a pixel is therefore paid by whichever move
+first asks for it. Move the cursor a little and you extend the settled region a
+little; jump it across the frame and that one move expands the frontier out to
+a disc reaching the new cursor, settling everything nearer on the way. It is
+paid once per anchor, because `set_anchor` is what resets the search, and after
+the first big jump most of the grid is already settled. The share of the 760 ms
+that is Dijkstra expansion versus first-touch paging of the distance and parent
+arrays was **not** separated; both are first-use costs and both vanish on the
+second visit, so the split does not change the user's experience.
+
+**Why the bench cannot see it, structurally.** `bench_livewire_on` walks the
+cursor **2 grid px per move** for 200 moves from an anchor at the grid's own
+centre. Every move therefore extends an already-adjacent frontier by a sliver,
+and **no single move in the bench ever settles a disc**. Its p95 and max
+describe steady-state tracking along a path, which is the right thing for
+criterion 6 and the wrong thing for this. The gap between its 4.68 ms max and
+the app's 816.7 ms is not a discrepancy between two measurements of one
+quantity -- they are measurements of two different gestures, and only the app's
+matches "plant an anchor, then click somewhere else".
+
+**A suggestion, UNTESTED, for whoever picks this up.** The anchor click is
+already a natural place to spend time: the user has just committed a point and
+is not yet moving. Expanding the search eagerly from `set_anchor` -- on the
+panel's worker, for a budgeted number of pops, with the cursor's last known
+position as the direction hint -- would move this cost off the first move and
+into a moment nothing is waiting on. Nothing about that has been implemented or
+measured, the budget is unknown, and the interaction with `Livewire`'s
+single-threaded state would have to be worked out before any of it is real.
+Recorded as a lead, not a plan.
 
 #### The 120 MP still (the operator's capture; not the design point)
 
@@ -1122,25 +1181,78 @@ which is `index.json`'s `"kept": 0.840092123` to six places.
 The fixture is left in place at `/tmp/spirula_osmo_one` rather than deleted; it
 is a copy, and nothing in the repo or in `work/` was written.
 
-#### A defect this check found and did not fix: the status strip overflows
+#### The status strip used to overflow the window, hiding the status AND errors
 
-**The `Edge map` line cannot be read in the mask editor without scrolling the
-window**, and neither can an error message. `draw_canvas` reserves a fixed
-`px(118.0f)` for the status strip (`MaskPanel.cpp:161`) and `draw_status` then
-draws below the canvas, so the strip's top edge is pinned 118 px above the
-window bottom whatever the window size -- a taller window does not help. At the
-default one line of 22 px the strip needs **132 px with a shape tool selected
-and 176 px with the pen tool**: six lines become eight (`hint_path`,
-`path_anchors`, and `path_straight` when the livewire is absent). The status /
-error line is drawn last, so it is the one that falls off.
+**Found by this check and fixed.** `draw_canvas` reserved a fixed `px(118.0f)`
+for the strip and `draw_status` drew below the canvas, so the strip's top edge
+was pinned 118 px above the window bottom **whatever the window size** -- a
+taller window did not help, because the reserve is subtracted from the
+available height rather than positioned in it. Anything past 118 px fell off
+the bottom. `draw_status` emits the status line last, and the **error** line in
+the same slot, so the two things that most need to be read were the first to
+go. An error nobody can see is worse than no error, because the code believes
+it reported.
 
-Every reading in this section was taken by scrolling the mask window down
-first. The base case is already over budget by one line before the pen tool
-adds any, so this is not new in plan 2 -- plan 2 made it worse. Not changed
-here: it is a layout constant outside this task's brief, and the fix wants an
-operator's eye on how much canvas it costs.
+**What the strip actually needs, measured** in the running app by
+instrumenting the height and reading it back, ui scale 1.0, line pitch 22 px:
 
-#### Two traps this feature has already paid for
+| window width | tool | status line | measured |
+|---|---|---|---|
+| 1600 (the size the app opens at) | shape | empty | **110 px** |
+| 1600 | shape | present | **132 px** |
+| 1600 | pen (livewire ready) | present | **176 px** |
+| 900 (the window narrowed by hand) | shape | present | 132 px |
+| 900 | pen, `hint_path` now wrapping to 2 lines | present | **192 px** |
+
+So the old 118 was short by 14 px in the commonest case a user ever sees -- a
+shape tool with any status text at all -- and by 58 to 74 px with the pen tool.
+Five status lines become six when a status or error exists, eight with the pen
+tool (`hint_path`, `path_anchors`, and `path_straight` when the livewire is
+absent), nine with both, and more again whenever a hint or a long error path
+wraps.
+
+**The fix measures the strip instead of predicting it.** `draw()` records
+`ImGui::GetCursorPosY()` either side of `draw_status()` into `_status_h`, and
+`draw_canvas()` reserves that. **A constant is the wrong shape for this
+quantity and was the cause of the bug**: the height depends on the tool, on
+whether a status or error is live, on the window width through text wrapping,
+on the translation (the same message is longer in German), and on the ui scale
+-- none of which a number in the source can know. Computing it ahead of the
+draw was rejected as the other way round: it would mean re-deriving ImGui's
+wrapping for each message and keeping that copy in step with `draw_status`,
+which is the same class of duplication that produced the original defect.
+There is no feedback risk in using last frame's value, because the strip's
+content does not depend on the canvas height -- the wrap width is the window's.
+The cost is one frame of staleness on a tool switch, invisible at 60 Hz.
+
+Frame one has no measurement, so it seeds from
+`8.0f * ImGui::GetTextLineHeightWithSpacing()` -- the pen tool's eight
+unwrapped lines, which reproduces the measured 176 px exactly at scale 1.0 and
+tracks the font and the ui scale instead of pinning a pixel count.
+
+**Verified in the running app, without scrolling anything.** Pen tool on
+`/tmp/spirula_mask_bench`: `Edge map: 3840x1920, step 2, built in 19 ms` fully
+visible at the window's default size, no scrollbar. Window dragged to 900 px
+wide so `hint_path` wraps: all nine lines visible, strip 192 px. Error path
+provoked by `chmod 555` on the mask directory and a save:
+`Could not write /tmp/spirula_mask_bench/masks/f0000.png.` visible in red, with
+the pen tool (9 lines) **and** with a shape tool (7 lines). Both would have
+been below the window edge before.
+
+**Re-taken readings after the fix, none of them scrolled**, to check the change
+did not move any number this section reports: edge map at 8K **83, 83, 87 ms**
+across three `>`/`<` cycles (before: 96, 96, 96, 108, 88); on the 120 MP still
+**128 ms** (before: 129); RSS on the still 99,488 KB before the editor /
+1,365,056 KB with the frame open / 1,424,208 KB after the edge map (before:
+100,672 / 1,366,272 / 1,467,888). Nothing moved beyond the spread already
+present between readings of the same quantity.
+
+**For plan 3: `px(118.0f)` no longer exists**, so there is no constant left to
+raise. Plan 3's Task 9 proposed 154, which is below what the pen tool needed
+even unwrapped; the measured strip makes that adjustment unnecessary rather
+than wrong.
+
+#### Three traps this feature has already paid for
 
 **A fixture that lives only in `build/` is a fixture that vanishes.** Task 11's
 check had to regenerate Task 3's dataset from its brief because `build/` had
@@ -1168,6 +1280,20 @@ orders of magnitude of headroom, not a comparison of two sub-millisecond
 readings. **25 consecutive runs of `mask_doc_test` after the change: 25 passes,
 749 `ok` lines every time.** No other assertion in the file compares wall-clock
 times; `bench_8k` and `bench_livewire` print theirs and fail on nothing.
+
+**`post_status` is sticky, so a stale status line is indistinguishable from a
+fresh one.** Nothing clears `_status` on a timer; it holds whatever was last
+posted until something overwrites it, and `pump()`'s clear on a frame load is
+the only automatic reset. Reading a number off the strip therefore measures
+"the last time this was posted", not "now", and a check that reads the same
+value three times has learned nothing -- it is satisfied equally by a working
+rebuild and by no rebuild at all. Two ways out, both used above: reach the line
+through a path that provably reposts (change frame, which clears it first), or
+establish its **absence** and then its appearance (select a shape tool, change
+frame, confirm no `Edge map` line, press **I**, watch it arrive). An appearance
+cannot be stale. This is the same defect shape as a check that reads a
+condition something other than the thing being checked could satisfy, and it
+is worth assuming of every other sticky field in this panel.
 
 ## Not in this phase
 
