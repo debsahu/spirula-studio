@@ -6,6 +6,7 @@
 #include "app/FrameLook.h"
 #include "app/FrameMask.h"
 #include "app/gui/edit/Selection.h"
+#include "app/gui/mask/Livewire.h"
 #include "app/gui/mask/MaskDoc.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "app/gui/mask/MaskSession.h"
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1418,6 +1420,167 @@ void test_path_fill_parity() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan 2, Task 6: the livewire's cost image
+// ---------------------------------------------------------------------------
+
+// Grey RGB frames whose every gradient is known by hand.
+std::vector<uint8_t> gray_rgb(int w, int h, const std::function<uint8_t(int, int)>& f) {
+    std::vector<uint8_t> px((size_t)w * h * 3);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const uint8_t v = f(x, y);
+            uint8_t* p = &px[((size_t)y * w + x) * 3];
+            p[0] = p[1] = p[2] = v;
+        }
+    return px;
+}
+
+// 40 left of column 100, 200 from it on: a vertical step edge between
+// columns 99 and 100. Sobel puts Gx = 640 on both, 0 elsewhere.
+std::vector<uint8_t> step_edge_rgb(int w, int h) {
+    return gray_rgb(w, h, [](int x, int) { return (uint8_t)(x < 100 ? 40 : 200); });
+}
+
+// 40 up to column 98, 120 at 99, 200 from 100: a two-step ramp whose
+// Laplacian is +80, 0, -80 on columns 98, 99, 100.
+std::vector<uint8_t> ramp_rgb(int w, int h) {
+    return gray_rgb(w, h, [](int x, int) {
+        return (uint8_t)(x <= 98 ? 40 : x == 99 ? 120 : 200);
+    });
+}
+
+std::vector<uint8_t> flat_rgb(int w, int h, uint8_t v) {
+    return gray_rgb(w, h, [v](int, int) { return v; });
+}
+
+size_t count_zero_crossings(const mk::Livewire& lw) {
+    size_t n = 0;
+    for (int y = 0; y < lw.height(); y++)
+        for (int x = 0; x < lw.width(); x++) n += lw.zero_crossing(x, y);
+    return n;
+}
+
+void test_livewire_features() {
+    const int W = 200, H = 120;
+    mk::Livewire lw;
+    lw.build(step_edge_rgb(W, H).data(), W, H);
+    check(lw.ready() && lw.step() == 1 && lw.width() == W && lw.height() == H,
+          "step edge: grid is the frame at step 1");
+    check(lw.builds() == 1, "one build counted");
+    check(lw.bytes() > (size_t)W * H * 3, "bytes accounts for the feature planes");
+
+    // fG: 0 on the two ridge columns (G = Gmax), 255 off them.
+    check(lw.magnitude_cost(99, 60) == 0 && lw.magnitude_cost(100, 60) == 0,
+          "ridge columns have zero magnitude cost");
+    check(lw.magnitude_cost(50, 60) == 255 && lw.magnitude_cost(101, 60) == 255 &&
+              lw.magnitude_cost(98, 60) == 255,
+          "flat columns have full magnitude cost");
+
+    // fZ: exactly the two ridge columns over the interior rows.
+    check(count_zero_crossings(lw) == 2 * (size_t)(H - 2),
+          "zero crossings are the two ridge columns, interior rows: " +
+              std::to_string(count_zero_crossings(lw)));
+    check(lw.zero_crossing(99, 60) && lw.zero_crossing(100, 60) &&
+              !lw.zero_crossing(98, 60) && !lw.zero_crossing(101, 60),
+          "zero crossing on 99 and 100 only");
+
+    // D' is perpendicular to the gradient: vertical on a vertical edge.
+    float dx, dy;
+    lw.direction(99, 60, dx, dy);
+    check(std::fabs(dx) < 0.02f && std::fabs(dy) > 0.99f, "D' on the ridge is vertical");
+    lw.direction(50, 60, dx, dy);
+    check(dx == 0.0f && dy == 0.0f, "D' is zero where there is no gradient");
+
+    // fD: along the edge ~0, across it ~2/3 (0.0026 and 0.6641 after the
+    // 255-code angle quantisation; hand-checked). The parallel-direction
+    // mutant swaps the two.
+    const float along = lw.direction_cost(99, 60, 99, 61);
+    const float across = lw.direction_cost(99, 60, 100, 60);
+    check(along >= 0.0f && along < 0.02f, "direction cost along the edge ~0: " + std::to_string(along));
+    check(std::fabs(across - 2.0f / 3.0f) < 0.02f,
+          "direction cost across the edge ~2/3: " + std::to_string(across));
+    check(along < across, "along < across");
+    check(lw.direction_cost(99, 60, 99, 62) < 0.0f, "non-adjacent pixels have no direction cost");
+    check(lw.direction_cost(-1, 60, 0, 60) < 0.0f, "outside the grid has no direction cost");
+
+    // The full link: ~0 along the ridge; 0.43 + 0.43*2/3 + 0.14 = 0.85667 on
+    // a flat pixel, times sqrt(2) on a diagonal.
+    check(lw.link_cost(99, 60, 99, 61) < 0.02f, "link along the ridge is almost free");
+    check(std::fabs(lw.link_cost(50, 60, 50, 61) - 0.85667f) < 0.01f,
+          "flat axial link costs 0.85667: " + std::to_string(lw.link_cost(50, 60, 50, 61)));
+    check(std::fabs(lw.link_cost(50, 60, 51, 61) - 0.85667f * 1.41421356f) < 0.02f,
+          "flat diagonal link is sqrt(2) times that");
+    check(lw.link_cost(50, 60, 52, 60) < 0.0f, "non-adjacent link cost is -1");
+
+    // The ramp: its centre column has Laplacian exactly 0 between +80 and
+    // -80 and must be the one and only zero crossing.
+    mk::Livewire ramp;
+    ramp.build(ramp_rgb(W, H).data(), W, H);
+    check(count_zero_crossings(ramp) == (size_t)(H - 2),
+          "ramp: one zero-crossing column: " + std::to_string(count_zero_crossings(ramp)));
+    check(ramp.zero_crossing(99, 60) && !ramp.zero_crossing(98, 60) && !ramp.zero_crossing(100, 60),
+          "ramp: the centre column is the crossing");
+
+    // Flat: no gradient anywhere, full magnitude cost, no crossings.
+    mk::Livewire flat;
+    flat.build(flat_rgb(64, 32, 128).data(), 64, 32);
+    check(flat.magnitude_cost(10, 10) == 255 && count_zero_crossings(flat) == 0,
+          "flat image: fG = 1 everywhere, no zero crossings");
+
+    // clear() empties the grid but keeps the build count.
+    flat.clear();
+    check(!flat.ready() && flat.builds() == 1, "clear keeps the build counter");
+
+    // A cancel flag already set: the build stops between passes, leaves the
+    // grid empty and does not count. Catches a checkpoint that is ignored.
+    std::atomic<bool> cancel{true};
+    mk::Livewire stopped;
+    stopped.build(flat_rgb(64, 32, 128).data(), 64, 32, mk::kLivewireMaxEdge,
+                  mk::LivewireWeights{}, &cancel);
+    check(!stopped.ready() && stopped.builds() == 0, "a set cancel flag stops the build before it counts");
+    cancel = false;
+    stopped.build(flat_rgb(64, 32, 128).data(), 64, 32, mk::kLivewireMaxEdge,
+                  mk::LivewireWeights{}, &cancel);
+    check(stopped.ready() && stopped.builds() == 1, "a clear cancel flag builds as before");
+}
+
+void test_livewire_mapping() {
+    // 4097 x 5 at the default cap: step 2, 2049 x 3. The fifth row is a
+    // partial block; the y factor must still be the step, never fh / gh.
+    mk::Livewire lw;
+    lw.build(flat_rgb(4097, 5, 90).data(), 4097, 5);
+    check(lw.step() == 2 && lw.width() == 2049 && lw.height() == 3,
+          "4097x5 decimates to 2049x3 at step 2");
+    float fx, fy;
+    lw.to_frame(2048, 0, fx, fy);
+    check((int)std::floor(fx) == 4096, "last grid column lands on the last frame column");
+    lw.to_frame(0, 1, fx, fy);
+    check((int)std::floor(fy) == 3, "grid row 1 is frame row 3 (step), not row 2 (fh/gh)");
+    lw.to_frame(0, 2, fx, fy);
+    check((int)std::floor(fy) == 4, "last grid row clamps to the last frame row");
+    lw.to_frame(0, 0, fx, fy);
+    check((int)std::floor(fx) == 1 && (int)std::floor(fy) == 1, "grid (0,0) is the block centre (1,1)");
+    int gx, gy;
+    lw.to_grid(4096.9f, 4.9f, gx, gy);
+    check(gx == 2048 && gy == 2, "frame corner maps to the last grid cell");
+    lw.to_grid(0.0f, 0.0f, gx, gy);
+    check(gx == 0 && gy == 0, "frame origin maps to grid origin");
+    lw.to_grid(-3.0f, -3.0f, gx, gy);
+    check(gx == 0 && gy == 0, "outside clamps");
+    lw.to_grid(3.0f, 2.0f, gx, gy);
+    check(gx == 1 && gy == 1, "frame (3,2) is grid (1,1)");
+
+    // An explicit cap.
+    mk::Livewire small;
+    small.build(step_edge_rgb(200, 120).data(), 200, 120, 50);
+    check(small.step() == 4 && small.width() == 50 && small.height() == 30,
+          "cap 50 on 200x120 gives step 4, 50x30");
+    small.to_frame(25, 15, fx, fy);
+    check(std::fabs(fx - 102.0f) < 1e-4f && std::fabs(fy - 62.0f) < 1e-4f,
+          "block centre at step 4: (25.5*4, 15.5*4)");
+}
+
+// ---------------------------------------------------------------------------
 // Task 9: floors at 8K. SS_MASK_BENCH=<dir> writes the fixture there and
 // prints medians of three repeats; nothing here fails on a number.
 // ---------------------------------------------------------------------------
@@ -1554,6 +1717,8 @@ int main() {
     test_session_size_mismatch();
     test_session_close_resets_paths();
     test_path_fill_parity();
+    test_livewire_features();
+    test_livewire_mapping();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;

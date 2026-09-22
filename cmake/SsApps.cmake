@@ -430,6 +430,8 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/edit/SelectShape.cpp
         ${SS_SRC}/app/gui/edit/Selection.cpp
         ${SS_SRC}/app/FrameMask.cpp
-        ${SS_SRC}/app/FrameLook.cpp)
+        ${SS_SRC}/app/FrameLook.cpp
+        ${SS_SRC}/app/gui/mask/Livewire.cpp
+        ${SS_SRC}/app/gui/mask/PathTool.cpp)
     ss_configure_app(mask_doc_test)
 endif()
