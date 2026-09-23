@@ -419,7 +419,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:195` and `:490`), and
+does (both call the identical function, `MaskPanel.cpp:195` and `:529`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -442,7 +442,7 @@ would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:542`), read before the series and after every one of
+readout (`MaskPanel.cpp:581`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -546,7 +546,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:195` (`ui::Button(msg::undo)`) and `:490`
+   worked. `MaskPanel.cpp:195` (`ui::Button(msg::undo)`) and `:529`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -590,9 +590,9 @@ what was inferred rather than run flagged as such.
   "Kept %" and painted a lighter/keep-tinted stroke inside a drop region;
   Shift+Ctrl+drag over that same stroke returned "Kept %" exactly to its
   pre-stroke value and removed the tint. "The modifier read is the one held
-  at release" is read from source (`MaskPanel.cpp:397-398` samples
+  at release" is read from source (`MaskPanel.cpp:436-437` samples
   `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
-  and `:433` hands those to `paint_now` on the frame the stroke commits)
+  and `:472` hands those to `paint_now` on the frame the stroke commits)
   rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
@@ -1420,11 +1420,11 @@ height -- which is the same reason the reserve is measured rather than
 computed.
 
 **That 192 px is the worst case the battery reached, not the worst case
-`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:528-569`), the eight
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:567-608`), the eight
 items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
 `hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
 and the status-or-error line. Two more items exist: `status_base_regenerated`
-and `status_base_missing` (`MaskPanel.cpp:548-551`), one `TextDisabledWrapped`
+and `status_base_missing` (`MaskPanel.cpp:587-590`), one `TextDisabledWrapped`
 each and mutually exclusive, since `base_state()` returns one value. Neither
 was on screen for any row of the table above, and the exact arithmetic is how
 that is known rather than assumed -- 110, 132 and 176 are 5, 6 and 8 lines to
@@ -1484,7 +1484,7 @@ than wrong.
 
 **The fix above removes the defect at every window size a person would work
 at, and does not remove it at every window size.** `draw_canvas` floors the
-canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:528-569`) draws its
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:567-608`) draws its
 full content unconditionally with no cap and no truncation. Once the window is
 short enough that the canvas has pinned at its floor, every further pixel of
 shrink becomes a pixel of strip pushed past the window bottom. It is the same
@@ -1856,7 +1856,7 @@ eraser ever does move into `ToolId`, the key comes with it.
 
 ### Alt+wheel over the canvas
 
-`MaskPanel.cpp:335-343`. The bare wheel is already the zoom, and Shift/Ctrl
+`MaskPanel.cpp:374-382`. The bare wheel is already the zoom, and Shift/Ctrl
 are the paint modes, so Alt is what was left; it is read by no mask tool and
 by no view gesture. The factor is `1.18^wheel` -- the **reciprocal** of the
 grow step, not the bracket's 0.85 -- so a notch back exactly undoes a notch,
@@ -3013,11 +3013,11 @@ taller.
 
 Hold **Tab** over the canvas to see the bare photo, **Shift+Tab** the bare
 mask; release and the overlay returns. The canvas owns Tab while hovered or
-active (`SetItemKeyOwner`, `MaskPanel.cpp:300-305`), which is what stops
+active (`SetItemKeyOwner`, `MaskPanel.cpp:339-344`), which is what stops
 imgui's nav from tabbing: the tabbing request polls Tab with
 `ImGuiKeyOwner_NoOwner` (`_deps/imgui-src/imgui.cpp:14152`) and stands down
 when the key has an owner. The hint is one strip line after `hint_view` in
-every mode (`MaskPanel.cpp:567-568`). `state_json` reports `mask_peek`,
+every mode (`MaskPanel.cpp:606-607`). `state_json` reports `mask_peek`,
 `mask_peek_total` (frames peeked since launch, monotonic) and `nav_visible`
 (`io.NavVisible`, the observable for "nav took the Tab"), at
 `GuiApp.cpp:2645-2650`.
@@ -3216,6 +3216,43 @@ pinned by a test, all benign today: a propagate queued ahead of an Undo click
 instead of the failed targets (a restored target restores again, idempotently),
 and undo order. The record copies each snapshot's PNG bytes once, and the
 whole record is built before the 256 MB cap decides whether to keep it.
+
+### Task 7: the propagate row and its warning (2026-09-23)
+
+Row B holds the three scope radios, From and To (always drawn, greyed unless
+Range), Propagate and Undo propagate; row C is `prop_warn_moves`, one
+unwrapped line drawn whatever the row's state. The whole row is disabled
+while the worker is busy; inside it Propagate also waits for SAM work and
+Undo propagate does not (Decision 21). The panel's `_prop_from - 1` is the
+only place the UI's 1-based range becomes the session's 0-based one.
+
+**Both buttons use `help_on_hover_disabled`.** With plain `help_on_hover`
+(measured as a mutant) a greyed Propagate shows no tooltip during a SAM job,
+and its help is what says a propagate would miss later SAM edits.
+
+`tools/mask_editor_checks/workflow_bench.sh` makes the bench (three 8K root
+frames plus `cam1/f0002`) and prints `root 3 cam1 1`; with its cam1 copy
+removed it prints `cam1 0`. The Train screen that offers `correct_masks`
+needs a `sparse/0`, which the script does not write: the run below used a
+hand-written four-image one.
+
+| check (M5 Pro, offscreen 1600x950, `sam3-q4_0`, the bench above) | observed |
+|---|---|
+| f0000: one brush stroke, Range 2 to 3, Propagate | `Propagated: 2, refused: 0, failed: 0`; md5 differs for f0000, f0001, f0002 only |
+| Undo propagate | `Propagate undone: 2`; only f0000 differs (the saved source) |
+| Whole camera, Propagate | `Propagated: 2, refused: 0, failed: 0`; `masks/cam1/f0002.png` unchanged |
+| mutant: `_prop_from`, `_prop_to` without `- 1`, same steps | `Propagated: 1, refused: 0, failed: 0`; f0001 unchanged |
+| From under Next frame: type 2 | stays 1 (disabled) |
+| Next frame to Range to Whole camera | every rect in the row identical; Undo propagate stays at 594-689 |
+| SAM click, job running (`sam_busy` true) | Propagate greyed with its tooltip; Undo propagate enabled |
+| worker running a propagate | both buttons at the disabled colour, radios dimmed, warning drawn |
+| right edges at scale 1, EN / RU | tool row 1172 / 1280; row B 689 / 816; row C 414 / 538 |
+
+**The new rows do not raise the window's minimum width** in either language:
+the tool row stays the widest, so the minimum stays 1180 px in English and
+1288 px in Russian (right edge plus 8 px padding, read from the item rects
+and the row C ink, not from a resize). Shape-mode canvas height is 614 px,
+against the 666 Task 4 recorded: 52 px, the 30 + 22 Decision 24 estimated.
 
 ## Not in this phase
 

@@ -263,7 +263,8 @@ void MaskSession::note_row_width() {
                                           ImGui::GetStyle().WindowPadding.x);
 }
 
-// Row A: the view. Tasks 7, 9 and 12 add rows B to D and Play (Decision 24).
+// Rows A to C: the view, propagate, its warning. Tasks 9 and 12 add row D and
+// Play (Decision 24).
 void MaskSession::draw_workflow_row() {
     const bool locked = _tool.in_progress();
     const spirula::i18n::Msg* names[3] = {&msg::view_overlay, &msg::view_mask_only,
@@ -277,6 +278,44 @@ void MaskSession::draw_workflow_row() {
         else ui::help_on_hover(msg::view_help);
     }
     ImGui::EndDisabled();
+    note_row_width();
+
+    // Row B: propagate. Row C: its warning, drawn whether or not B is enabled.
+    ImGui::BeginDisabled(!_doc || !idle());
+    if (ui::RadioButton(msg::prop_scope_next, _prop_scope == 0)) _prop_scope = 0;
+    ImGui::SameLine();
+    if (ui::RadioButton(msg::prop_scope_range, _prop_scope == 1)) _prop_scope = 1;
+    ImGui::SameLine();
+    if (ui::RadioButton(msg::prop_scope_camera, _prop_scope == 2)) _prop_scope = 2;
+    // Always drawn, so the row never changes width with the scope.
+    ImGui::BeginDisabled(_prop_scope != 1);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(px(90.0f));
+    ui::InputInt(msg::prop_from, &_prop_from);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(px(90.0f));
+    ui::InputInt(msg::prop_to, &_prop_to);
+    ImGui::EndDisabled();
+    _prop_from = std::clamp(_prop_from, 1, std::max(1, frame_count()));
+    _prop_to = std::clamp(_prop_to, 1, std::max(1, frame_count()));
+    ImGui::SameLine();
+    ImGui::BeginDisabled(sam_work_pending());
+    if (ui::Button(msg::prop_go)) {
+        const PropagateScope scope = _prop_scope == 0 ? PropagateScope::Next
+                                   : _prop_scope == 1 ? PropagateScope::Range
+                                                      : PropagateScope::Camera;
+        propagate(scope, _prop_from - 1, _prop_to - 1);   // the one 1-to-0-based step
+    }
+    ImGui::EndDisabled();
+    ui::help_on_hover_disabled(msg::prop_go_help);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!can_undo_propagate());
+    if (ui::Button(msg::prop_undo)) undo_propagate();
+    ImGui::EndDisabled();
+    ui::help_on_hover_disabled(msg::prop_undo_help);
+    ImGui::EndDisabled();
+    note_row_width();
+    ui::TextDisabled(msg::prop_warn_moves);
     note_row_width();
 }
 

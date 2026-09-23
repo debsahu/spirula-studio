@@ -468,6 +468,8 @@ private:
     Style _win2_style = Style::MaskOnly;
     std::vector<uint8_t> _rgba2;
     int _held_pane = -1;             // the pane a held left button pressed in
+    int _prop_scope = 0;             // 0 next, 1 range, 2 camera
+    int _prop_from = 1, _prop_to = 1;   // 1-based, as the status strip counts
     int _slider_idx = 0;
     bool _close_requested = false;
     bool _revert_all_ask = false;    // Revert all was clicked; open its confirmation

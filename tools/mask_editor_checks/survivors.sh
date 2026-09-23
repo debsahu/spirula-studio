@@ -33,6 +33,18 @@ has 1 '} else if (path_mode()) {'
 has 1 'const int active = bind_pane(hover_pane,'
 has 2 'switch_view(_view_mode,'
 has 2 'in_each_pane('
+# Plan 3 Task 7: the propagate row. The 1-based UI range becomes 0-based here
+# only, and only Propagate (never Undo propagate) waits for a SAM job.
+has 1 'propagate(scope, _prop_from - 1, _prop_to - 1);'
+has 1 'ImGui::BeginDisabled(_prop_scope != 1);'
+has 1 'ImGui::BeginDisabled(!can_undo_propagate());'
+has 1 'ui::TextDisabled(msg::prop_warn_moves);'
+has 3 'note_row_width();'
+gate=$(awk '/BeginDisabled\(sam_work_pending\(\)\);/{on=1} on{print} on&&/EndDisabled\(\);/{exit}' "$F")
+if printf '%s' "$gate" | command grep -qF 'msg::prop_go)' &&
+   ! printf '%s' "$gate" | command grep -qF 'msg::prop_undo)'; then
+    echo "ok   the SAM gate holds Propagate and not Undo propagate"
+else echo "FAIL the SAM gate holds Propagate and not Undo propagate"; FAILS=$((FAILS + 1)); fi
 none '_path_mode'
 none 'paint_for('
 none '_status_h > 0.0f'
