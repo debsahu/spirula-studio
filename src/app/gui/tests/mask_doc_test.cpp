@@ -39,6 +39,12 @@
 #include <thread>
 #include <vector>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 namespace mk = gui::mask;
 
@@ -2727,10 +2733,14 @@ void bench_8k(const char* dir) {
         const double fps = (100.0 - kWarm) / s;
         const int decodes = p.decoded();
         p.stop();
+        // One decode a shown frame, plus the first tick's one re-pick and the
+        // window wrapping onto frames 0..depth-1 as the last ones are shown.
+        const int max_decodes = 100 + 1 + depth;
         std::printf("bench slideshow pool %s %4d  depth %2d  %8.1f fps   longest wait %8.1f ms   "
-                    "first frame %8.1f ms   decodes %3d   [bar: >= %.0f fps, wait <= 400 ms] %s\n",
-                    label, target, depth, fps, max_gap, first_ms, decodes, bar_fps,
-                    (fps >= bar_fps && max_gap <= 400.0) ? "PASS" : "MISS");
+                    "first frame %8.1f ms   decodes %3d   [bar: >= %.0f fps, wait <= 400 ms, "
+                    "decodes <= %d] %s\n",
+                    label, target, depth, fps, max_gap, first_ms, decodes, bar_fps, max_decodes,
+                    (fps >= bar_fps && max_gap <= 400.0 && decodes <= max_decodes) ? "PASS" : "MISS");
     };
     pool_rate(images, masks, "f%04d", 3, 7680, 3840, 1024, "8K   ", 5.0);
     pool_rate(images, masks, "f%04d", 3, 7680, 3840, 4096, "8K   ", 5.0);
@@ -4291,6 +4301,11 @@ void test_slide_prefetch() {
     gui::Picture fpic;
     check(wait_has(fp, 0) && fp.take(0, fpic) && fpic.rgb[0] < 150,
           "flipped: the file's dropped corner is kept, so it is not tinted");
+    // The file KEEPS the ellipse centre, so flipped it must be tinted: a flag
+    // that threw the mask away would leave corner and centre both untinted.
+    const size_t mid = ((size_t)12 * 32 + 16) * 3;
+    check(pic.rgb.size() > mid && fpic.rgb.size() > mid && pic.rgb[mid] < 150 && fpic.rgb[mid] >= 150,
+          "flipped: the file's kept centre is dropped, so it is tinted");
     fp.stop();
     check(!p.take(0, pic), "a taken frame is gone");
     p.want(1, 4);
@@ -4387,6 +4402,43 @@ void test_slide_prefetch_evicts_farthest() {
     p.stop();
     check(front_held, "evict: the front of the window is never the frame evicted");
     check(churned > 6, "evict: puts kept arriving while the front was watched");
+}
+
+// A decode whose index left the window while it ran lands nowhere. Frame 0's
+// mask is a FIFO, so its decode blocks in open() until the test opens the
+// write end: the window provably moves while frame 0 is mid-decode.
+void test_slide_prefetch_discards_stale() {
+#ifndef _WIN32
+    Fixture f = make_dataset("slide_stale", 64, 48, {"a", "b"});
+    const fs::path fifo = f.masks / "a.png";
+    fs::remove(fifo);
+    check(mkfifo(fifo.c_str(), 0600) == 0, "stale: the fixture's mask is a FIFO");
+    std::vector<mk::SlideFrame> frames;
+    for (const std::string& k : f.keys)
+        frames.push_back({(f.images / (k + ".jpg")).string(), (f.masks / (k + ".png")).string()});
+    mk::SlidePrefetch p;
+    p.set_target(32);
+    p.start(frames, 1);
+    p.want(0, 1);
+    // O_NONBLOCK: the write end opens only once the worker holds the read end.
+    bool in_flight = false;
+    for (int i = 0; i < 3000 && !in_flight; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) { in_flight = true; p.want(1, 1); close(fd); }
+        else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check(in_flight && p.decoded() == 0, "stale: fixture check: frame 0 was mid-decode when the window moved");
+    // Each open-and-close hands the blocked reader an EOF; the mask fails to
+    // load and frame 0 decodes as the bare photo, which must then be discarded.
+    for (int i = 0; i < 3000 && p.decoded() < 1; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check(p.decoded() >= 1 && !p.has(0), "stale: a decode that left the window is not put");
+    check(wait_has(p, 1), "stale: the window's own frame still lands");
+    p.stop();
+#endif
 }
 
 }  // namespace
@@ -4949,6 +5001,7 @@ int main() {
     test_session_sam_redo_after_dropped_margin();
     test_slide_prefetch();
     test_slide_prefetch_evicts_farthest();
+    test_slide_prefetch_discards_stale();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

@@ -3,7 +3,7 @@
 // The slideshow's decoder: a few threads that turn frames into pane-sized
 // Pictures (the composite tinted over the photo) a little ahead of the one
 // on screen, held in a ring under FilmReel's byte and slot budget, plus the
-// clock that paces playback. No ImGui, no GL. Design: docs/notes/mask-editor.md.
+// clock that paces playback. No ImGui, no GL calls. Design: docs/notes/mask-editor.md.
 
 #include "app/gui/FilmReel.h"
 #include "app/gui/Picture.h"
