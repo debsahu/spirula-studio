@@ -1,7 +1,14 @@
 // Single translation unit that materializes the stb_image implementation.
 // All other TUs `#include "external/stb_image.h"` to get the declarations only.
+// Allocation: core/PageAlloc.h, which maps large buffers on opted-in threads only.
+
+#include "core/PageAlloc.h"
 
 #define STB_IMAGE_IMPLEMENTATION
+#define STBI_MALLOC(sz)                     spirula::page_alloc(sz)
+#define STBI_REALLOC(p, newsz)              spirula::page_realloc(p, newsz)
+#define STBI_REALLOC_SIZED(p, oldsz, newsz) spirula::page_realloc(p, newsz)
+#define STBI_FREE(p)                        spirula::page_free(p)
 
 // Compile-time slim-down: drop formats nothing here reads. PNG / JPEG / BMP /
 // TGA cover everything the dataparser sees; PNM is kept because the SfM module
