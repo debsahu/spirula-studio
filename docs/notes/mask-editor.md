@@ -2429,7 +2429,7 @@ band and the person along with the pole.
 Each null sits 0.22-0.38 under the 0.80 bar, and so does dropping the whole box, so
 P10 can fail both ways. The null is not near 0.80, so P10 needs no redesign.
 
-### P10 in the app: PASS on both frames run
+### P10 in the app: PASS on all five monopod frames
 
 Setup: `build/spirula` from `29cd5991`, offscreen at 1600x950, `sam3-q4_0`, margin
 5%. The dataset was a two-frame scratch copy (the JPEGs, and `masks_eq` inverted to
@@ -2442,12 +2442,21 @@ it scores was rewritten by this run.
 |---|---|---|---|---|---|---|---|
 | f00016 | 11448, 5698 | 11,309 ms (first load) | 0.68 | 1,108,140 px | **0** | **0.8475** | >= 0.80 PASS |
 | f00022 | 11588, 5907 | 3,576 ms | 0.82 | 573,194 px | **0** | **0.8159** | >= 0.80 PASS |
+| f00024 | 11378, 6205 | 6,849 ms (first load) | 0.80 | 1,158,173 px | 47,589 | **0.8221** | >= 0.80 PASS |
+| f00025 | 11430, 6187 | 5,445 ms | 0.80 | 407,513 px | **0** | **0.9408** | >= 0.80 PASS |
+| f00026 | 11290, 6292 | 5,729 ms | 0.77 | 1,032,023 px | 7,815 | **0.8995** | >= 0.80 PASS |
 
-Neither click changed a single pixel outside its box, so scoring inside the box
-hides nothing. Neither click removed any of SAM's existing drops either. Because
-nothing spilled outside the reference, **the IoU equals the fraction of the operator's
-painted region that ended up dropped**. The shortfall (476,567 and 400,975 px) is
-under-coverage only.
+**Summary: 5 of 5 pass; minimum IoU 0.8159, median 0.8475.** f00024-f00026 ran later, in a
+second process from `19e0059e` (the same source), under the same protocol. Their points
+were picked from photo-only crops and written down before any run.
+
+No click changed a single pixel outside its box, so scoring inside the box hides
+nothing. No click removed any of SAM's existing drops either. On f00016, f00022 and
+f00025 nothing spilled outside the reference, so there **the IoU equals the fraction
+of the operator's painted region that ended up dropped**. f00024 and f00026 spilled
+47,589 and 7,815 px, which is 4.1% and 0.8% of their adds. On every frame the
+shortfall is dominated by area the operator painted and the click did not reach
+(476,567 / 400,975 / 484,414 / 62,423 / 166,795 px), not by spill.
 
 **An in-app mutant, killed by name.** On f00022, an undo, then one click on the pink
 blanket beside the pole. The blanket region swallowed the pole too, 12.4 M px in all:
@@ -2464,8 +2473,8 @@ scores 1.0000 and passes.
 - **The resolution floor is anisotropic.** SAM sees the frame squashed to 1008x1008
   (`src/sam/model/Hparams.h:48`). The decoder's mask is 288x288 (`:134`). That is
   53.9 frame px per cell across a 15520-wide frame, but 26.9 px down it.
-- **Two frames of five were run**, each with one click at one chosen point. f00024,
-  f00025 and f00026 have their nulls measured and were not clicked.
+- **All five monopod frames were run, but that is still only five**, each with one
+  click at one chosen point. The weakest frame clears the bar by only 0.016.
 - The margin stayed at 5%. A wider margin would cover more of the loose reference.
   That is tuning, and it was not tried.
 
