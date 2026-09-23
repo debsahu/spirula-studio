@@ -1589,7 +1589,7 @@ shape of the evidence behind every number in this note.
 **Nothing automated ever drives the GUI.** `mask_doc_test` links `MaskLayer`,
 `MaskDoc`, `MaskSession`, `MaskWindow`, `EditDoc`, `SelectShape`, `Selection`,
 `FrameMask`, `FrameLook`, `Livewire` and `PathTool`
-(`cmake/SsApps.cmake:412-427`) -- **`MaskPanel.cpp` and `PathOverlay.cpp` are
+(`cmake/SsApps.cmake:414-429`) -- **`MaskPanel.cpp` and `PathOverlay.cpp` are
 in no test target at all**, which is the deliberate ImGui carve-out and is
 also the reason nothing in CI can catch a panel regression. Every in-app
 result in this note came from a hand-run `guictl.py` battery. It is
@@ -2046,7 +2046,7 @@ was handed to someone else, or freed. Nothing errors when that happens.
 
 So the editor **yields**, and while it cannot yield it **refuses**:
 
-- **Yield.** `GuiApp::stop_inference_users()` (`GuiApp.cpp:1184-1187`) is
+- **Yield.** `GuiApp::stop_inference_users()` (`GuiApp.cpp:1228-1231`) is
   `close_native_previews()` followed by `_mask_editor.sam_yield()`, which
   cancels, joins, unloads, drains the retiring slot and keeps the clicks. It
   is called at the **seven** sites that start inference or tear it down:
@@ -2131,7 +2131,7 @@ driven in the app is "The cross-screen inference checks" under Task 5.
    through the capture and a camera; the editor holds a prepared frame key and
    its own frame index, none of those. **Nothing makes a leaked click harmless.**
    An editor click carries an empty `source`, and a dataset run reads an empty
-   `source` as **every input** (`clicks_for`, `DatasetPrep.cpp:389-393`; the
+   `source` as **every input** (`clicks_for`, `DatasetPrep.cpp:398-402`; the
    Update Dataset check in `GuiApp.cpp` reads it the same way): a click that
    reached the dataset's settings would prompt the whole capture, at a frame
    index that means something else there. Only `SegmentPanel::start_job`'s

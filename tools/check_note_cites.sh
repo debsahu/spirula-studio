@@ -95,8 +95,8 @@ row src/app/gui/Layout.cpp 34 "ItemSpacing = ImVec2(8, 6)"
 row src/app/gui/Layout.h 26 "unscaled * ui_scale()"
 row src/app/gui/Layout.cpp 49-50 "ScaleAllSizes(scale)"
 row src/app/gui/Layout.cpp 49-50 "FontScaleMain = scale"
-row cmake/SsApps.cmake 412-427 "add_executable(mask_doc_test" 412
-row cmake/SsApps.cmake 412-427 "ss_configure_app(mask_doc_test)" 427
+row cmake/SsApps.cmake 414-429 "add_executable(mask_doc_test" 414
+row cmake/SsApps.cmake 414-429 "ss_configure_app(mask_doc_test)" 429
 # The slider and the eraser.
 row src/app/gui/mask/MaskPanel.cpp 219-233 "ImGuiSliderFlags_Logarithmic"
 row src/app/gui/mask/MaskPanel.cpp 219-233 "erasing() || (mode() == CanvasMode::Shape && _tool.id() == ToolId::Brush)" 219
@@ -128,13 +128,13 @@ row src/nn/vk/Memory.cpp 362-395 "void VramPool::release(" 362
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::releaseAll()"
 # The SAM half's architecture: the one-session rule and the decisions not to undo.
 row src/app/gui/mask/MaskSession.h 310 "std::shared_ptr<const std::vector<uint8_t>> _rgb;"
-row src/app/gui/DatasetPrep.cpp 389-393 "std::vector<MaskClick> clicks_for(" 389
-row src/app/gui/DatasetPrep.cpp 389-393 "if (c.source.empty() || c.source == in.path)"
+row src/app/gui/DatasetPrep.cpp 398-402 "std::vector<MaskClick> clicks_for(" 398
+row src/app/gui/DatasetPrep.cpp 398-402 "if (c.source.empty() || c.source == in.path)"
 row src/app/gui/mask/MaskSam.cpp 419 "p.device = j.device;"
 row src/app/gui/mask/MaskSam.cpp 452 "img.data.assign(j.rgb->begin(), j.rgb->end());"
 row src/app/gui/mask/MaskSession.cpp 287 "_doc_gen++;"
-row src/app/gui/GuiApp.cpp 1184-1187 "void GuiApp::stop_inference_users()" 1184
-row src/app/gui/GuiApp.cpp 1184-1187 "_mask_editor.sam_yield();"
+row src/app/gui/GuiApp.cpp 1228-1231 "void GuiApp::stop_inference_users()" 1228
+row src/app/gui/GuiApp.cpp 1228-1231 "_mask_editor.sam_yield();"
 row src/app/gui/mask/MaskSam.cpp 14 "never sam::Masker"
 row src/app/gui/MaskSettings.h 36-38 "return keep_subject ? -shrink_ratio : dilate_ratio;"
 row src/app/gui/mask/MaskAdd.h 57-59 "mode == Paint::ForceDrop && ratio > 0.0f ? ratio : 0.0f"
