@@ -59,6 +59,23 @@ std::string size_mismatch_text(const std::string& joined, const MaskDoc& doc) {
 
 }  // namespace
 
+std::vector<int> propagate_targets(const std::vector<FrameRef>& frames, int src,
+                                   PropagateScope scope, int lo, int hi) {
+    std::vector<int> out;
+    const int n = (int)frames.size();
+    if (src < 0 || src >= n) return out;
+    const std::string& cam = frames[(size_t)src].camera;
+    int a = 0, b = n - 1;
+    if (scope == PropagateScope::Next) a = b = src + 1;
+    if (scope == PropagateScope::Range) {
+        a = std::max(lo, 0);
+        b = std::min(hi, n - 1);
+    }
+    for (int i = a; i <= b && i < n; i++)
+        if (i != src && i >= 0 && frames[(size_t)i].camera == cam) out.push_back(i);
+    return out;
+}
+
 MaskSession::MaskSession()
     : _sam_ops{[](MaskSam& s) { return s.busy(); }, [](MaskSam& s) { return s.release(); }} {}
 

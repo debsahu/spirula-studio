@@ -1561,6 +1561,286 @@ void test_session() {
     s.close();
 }
 
+// ---------------------------------------------------------------------------
+// Plan 3, Task 5: propagate copies layers, not masks; refuses a size;
+// snapshot and restore put a target back
+// ---------------------------------------------------------------------------
+
+std::vector<uint8_t> stencil_pixels(const fs::path& p) {
+    int w = 0, h = 0;
+    std::vector<uint8_t> px;
+    app::load_stencil(p.string(), w, h, px);
+    return px;
+}
+
+void test_propagate_targets() {
+    std::vector<mk::FrameRef> fr = {
+        {"/i/cam0/a.jpg", "cam0/a", "cam0"}, {"/i/cam0/b.jpg", "cam0/b", "cam0"},
+        {"/i/cam0/c.jpg", "cam0/c", "cam0"}, {"/i/cam0/e.jpg", "cam0/e", "cam0"},
+        {"/i/cam1/d.jpg", "cam1/d", "cam1"}};
+    using S = mk::PropagateScope;
+    check(mk::propagate_targets(fr, 0, S::Camera, 0, 0) == std::vector<int>({1, 2, 3}),
+          "camera: every other frame with the key, never the source");
+    check(mk::propagate_targets(fr, 4, S::Camera, 0, 0).empty(), "camera: alone in its camera");
+    check(mk::propagate_targets(fr, 0, S::Next, 0, 0) == std::vector<int>({1}),
+          "next: one frame, not the rest of the camera");
+    check(mk::propagate_targets(fr, 2, S::Next, 0, 0) == std::vector<int>({3}), "next: same camera");
+    check(mk::propagate_targets(fr, 3, S::Next, 0, 0).empty(), "next: refused across cameras");
+    check(mk::propagate_targets(fr, 4, S::Next, 0, 0).empty(), "next: at the end");
+    check(mk::propagate_targets(fr, 0, S::Range, 0, 4) == std::vector<int>({1, 2, 3}),
+          "range: clipped to the camera, source excluded");
+    check(mk::propagate_targets(fr, 1, S::Range, 2, 2) == std::vector<int>({2}), "range: one frame");
+    check(mk::propagate_targets(fr, 1, S::Range, 3, 1).empty(), "range: inverted is empty");
+    check(mk::propagate_targets(fr, 1, S::Range, -5, 99) == std::vector<int>({0, 2, 3}),
+          "range: clamped to the frames");
+    check(mk::propagate_targets(fr, 9, S::Camera, 0, 0).empty(), "source out of range");
+}
+
+void test_propagate_to() {
+    Fixture f = make_dataset("propagate", 64, 48, {"cam0/a", "cam0/b", "cam0/c", "cam1/d"});
+    // A fifth frame of the same camera at another size.
+    write_jpg_rgb(f.images / "cam0" / "e.jpg", 32, 24, synth_rgb(32, 24, 9));
+    write_png_gray(f.masks / "cam0" / "e.png", 32, 24, synth_mask(32, 24, 9));
+    // g and h exist only so the three sizes frame_size chooses between differ.
+    write_jpg_rgb(f.images / "cam0" / "g.jpg", 64, 48, synth_rgb(64, 48, 10));
+    write_png_gray(f.masks / "cam0" / "g.png", 16, 12, synth_mask(16, 12, 10));
+    write_jpg_rgb(f.images / "cam0" / "h.jpg", 64, 48, synth_rgb(64, 48, 11));
+    write_png_gray(f.masks / "cam0" / "h.png", 16, 12, synth_mask(16, 12, 11));
+    write_png_gray(f.layer / "cam0" / "h.base.png", 8, 6, synth_mask(8, 6, 11));
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> original_b = file_bytes(f.masks / "cam0" / "b.png");
+    const std::vector<uint8_t> original_e = file_bytes(f.masks / "cam0" / "e.png");
+    const std::vector<uint8_t> base_b = stencil_pixels(f.masks / "cam0" / "b.png");
+    const std::vector<uint8_t> base_c = stencil_pixels(f.masks / "cam0" / "c.png");
+    check(base_b != base_c, "fixture: b and c have different bases");
+    const std::vector<uint8_t> drop = box_layer(64, 48, 4, 4, 14, 14);
+    const std::vector<uint8_t> keep = box_layer(64, 48, 40, 20, 50, 30);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    int w = 0, h = 0;
+    std::string from;
+    check(mk::frame_size(layer_root, mask_root, "cam0/b", (f.images / "cam0" / "b.jpg").string(), w, h, from) &&
+              w == 64 && h == 48, "frame_size from the mask");
+    check(mk::frame_size(layer_root, mask_root, "cam0/e", (f.images / "cam0" / "e.jpg").string(), w, h, from) &&
+              w == 32 && h == 24, "frame_size of the odd frame");
+    fs::remove(f.masks / "cam1" / "d.png");
+    check(mk::frame_size(layer_root, mask_root, "cam1/d", (f.images / "cam1" / "d.jpg").string(), w, h, from) &&
+              w == 64 && h == 48 && from == (f.images / "cam1" / "d.jpg").string(),
+          "frame_size falls back to the image when the mask is gone");
+    // Decision 7's order, on frames whose three candidate sizes differ: the
+    // mask beats the image, the base beats the mask.
+    check(mk::frame_size(layer_root, mask_root, "cam0/g", (f.images / "cam0" / "g.jpg").string(), w, h, from) &&
+              w == 16 && h == 12 && from == (f.masks / "cam0" / "g.png").string(),
+          "frame_size prefers the mask over the image");
+    check(mk::frame_size(layer_root, mask_root, "cam0/h", (f.images / "cam0" / "h.jpg").string(), w, h, from) &&
+              w == 8 && h == 6 && from == (f.layer / "cam0" / "h.base.png").string(),
+          "frame_size prefers the base over the mask");
+
+    // Onto b: b's composite is b's OWN base under a's layers.
+    mk::PropagateRefusal refused;
+    check(mk::propagate_to(layer_root, mask_root, "cam0/b", (f.images / "cam0" / "b.jpg").string(),
+                           64, 48, drop.data(), keep.data(), idx, refused, err),
+          "propagate_to b: " + err);
+    std::vector<uint8_t> want(base_b.size());
+    mk::composite(base_b.data(), drop.data(), keep.data(), want.size(), want.data());
+    check(stencil_pixels(f.masks / "cam0" / "b.png") == want, "b's composite = b's base under the layers");
+    check(file_bytes(f.layer / "cam0" / "b.base.png") == original_b, "b's base is b's original, byte for byte");
+    check(stencil_pixels(f.layer / "cam0" / "b.drop.png") == drop &&
+              stencil_pixels(f.layer / "cam0" / "b.keep.png") == keep, "b's layers are the source's");
+    check(idx.frames.count("cam0/b") == 1, "b indexed");
+    // Not the source's mask: c gets c's base under the same layers, which differs from b's.
+    check(mk::propagate_to(layer_root, mask_root, "cam0/c", (f.images / "cam0" / "c.jpg").string(),
+                           64, 48, drop.data(), keep.data(), idx, refused, err), "propagate_to c");
+    check(stencil_pixels(f.masks / "cam0" / "c.png") != stencil_pixels(f.masks / "cam0" / "b.png"),
+          "c and b differ after the same propagate: the mask was not copied");
+
+    // The odd size is refused, with its size, and nothing is written.
+    check(!mk::propagate_to(layer_root, mask_root, "cam0/e", (f.images / "cam0" / "e.jpg").string(),
+                            64, 48, drop.data(), keep.data(), idx, refused, err) &&
+              err.empty() && refused.w == 32 && refused.h == 24, "e refused with its size");
+    check(file_bytes(f.masks / "cam0" / "e.png") == original_e && !fs::exists(f.layer / "cam0" / "e.drop.png") &&
+              idx.frames.count("cam0/e") == 0, "refusal writes nothing");
+    // Refused before the load, which would rebase a regenerated mask first.
+    const std::vector<uint8_t> e_px = stencil_pixels(f.masks / "cam0" / "e.png");
+    const std::vector<uint8_t> e_zero((size_t)32 * 24, 0);
+    check(mk::save_frame(layer_root, mask_root, "cam0/e", 32, 24, e_px.data(), e_zero.data(),
+                         e_zero.data(), true, idx, err), "fixture: e edited");
+    write_png_gray(f.masks / "cam0" / "e.png", 32, 24, synth_mask(32, 24, 12));
+    check(mk::base_state(mask_root, "cam0/e", idx) == mk::BaseState::Regenerated, "fixture: e regenerated");
+    const std::vector<uint8_t> e_mask = file_bytes(f.masks / "cam0" / "e.png");
+    const std::vector<uint8_t> e_base = file_bytes(f.layer / "cam0" / "e.base.png");
+    check(!mk::propagate_to(layer_root, mask_root, "cam0/e", (f.images / "cam0" / "e.jpg").string(),
+                            64, 48, drop.data(), keep.data(), idx, refused, err) && refused.w == 32 &&
+              file_bytes(f.masks / "cam0" / "e.png") == e_mask &&
+              file_bytes(f.layer / "cam0" / "e.base.png") == e_base,
+          "a regenerated odd frame is refused without being rebased");
+
+    // A frame with no mask takes layers only (plan 1 decision 7), no composite.
+    check(mk::propagate_to(layer_root, mask_root, "cam1/d", (f.images / "cam1" / "d.jpg").string(),
+                           64, 48, drop.data(), keep.data(), idx, refused, err) &&
+              refused.w == 0 && refused.h == 0,
+          "propagate_to d (no mask), and the previous refusal was cleared at entry");
+    check(!fs::exists(f.masks / "cam1" / "d.png") && fs::exists(f.layer / "cam1" / "d.drop.png"),
+          "no mask conjured, layers written");
+
+    // A target whose own layer file is the wrong size is refused with that
+    // file named, not silently bulldozed.
+    Fixture f2 = make_dataset("propagate_badlayer", 64, 48, {"cam0/a", "cam0/b"});
+    const std::string mr2 = f2.masks.string(), lr2 = f2.layer.string();
+    write_png_gray(f2.layer / "cam0" / "b.drop.png", 32, 24, synth_mask(32, 24, 3));
+    const std::vector<uint8_t> b2_before = file_bytes(f2.masks / "cam0" / "b.png");
+    mk::LayerIndex idx2;
+    idx2.mask_root = mr2;
+    check(!mk::propagate_to(lr2, mr2, "cam0/b", (f2.images / "cam0" / "b.jpg").string(), 64, 48,
+                            drop.data(), keep.data(), idx2, refused, err) &&
+              err.find("b.drop.png") != std::string::npos && refused.w == 0,
+          "a mis-sized layer file is a failure that names itself: " + err);
+    check(file_bytes(f2.masks / "cam0" / "b.png") == b2_before && idx2.frames.count("cam0/b") == 0,
+          "and b's mask is untouched");
+}
+
+void test_snapshot_restore() {
+    Fixture f = make_dataset("snapshot", 64, 48, {"a", "b", "c"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> original_b = file_bytes(f.masks / "b.png");
+    const std::vector<uint8_t> base_c = stencil_pixels(f.masks / "c.png");
+    const std::vector<uint8_t> drop1 = box_layer(64, 48, 4, 4, 14, 14), keep1 = box_layer(64, 48, 40, 20, 50, 30);
+    const std::vector<uint8_t> drop2 = box_layer(64, 48, 20, 20, 30, 30), keep2 = box_layer(64, 48, 0, 0, 5, 5);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    mk::PropagateRefusal refused;
+
+    // b was unedited: a snapshot records absence, and restoring it is a revert.
+    mk::LayerSnapshot sb;
+    check(mk::snapshot_layers(layer_root, "b", idx, sb, err) && !sb.had_entry && !sb.had_drop &&
+              !sb.had_keep && sb.bytes() == 0, "snapshot of an unedited frame is empty");
+    check(mk::propagate_to(layer_root, mask_root, "b", (f.images / "b.jpg").string(), 64, 48,
+                           drop1.data(), keep1.data(), idx, refused, err), "propagate b");
+    check(file_bytes(f.masks / "b.png") != original_b, "fixture: b changed");
+    check(mk::restore_layers(layer_root, mask_root, sb, idx, err), "restore b: " + err);
+    check(file_bytes(f.masks / "b.png") == original_b, "b's mask is byte-identical to before");
+    check(!fs::exists(f.layer / "b.drop.png") && !fs::exists(f.layer / "b.base.png") &&
+              idx.frames.count("b") == 0, "b's layers, base and entry are gone");
+
+    // c had layers: a snapshot records them, and restoring puts them back
+    // with the composite re-derived over c's base.
+    check(mk::propagate_to(layer_root, mask_root, "c", (f.images / "c.jpg").string(), 64, 48,
+                           drop1.data(), keep1.data(), idx, refused, err), "first layers on c");
+    mk::LayerSnapshot sc;
+    check(mk::snapshot_layers(layer_root, "c", idx, sc, err) && sc.had_entry && sc.had_drop &&
+              sc.had_keep && sc.bytes() > 0, "snapshot of an edited frame holds its layer files");
+    check(sc.drop_png == file_bytes(f.layer / "c.drop.png"), "snapshot bytes are the file's");
+    check(mk::propagate_to(layer_root, mask_root, "c", (f.images / "c.jpg").string(), 64, 48,
+                           drop2.data(), keep2.data(), idx, refused, err), "second layers on c");
+    check(stencil_pixels(f.layer / "c.drop.png") == drop2, "fixture: c now carries the second layers");
+    check(mk::restore_layers(layer_root, mask_root, sc, idx, err), "restore c: " + err);
+    check(file_bytes(f.layer / "c.drop.png") == sc.drop_png && file_bytes(f.layer / "c.keep.png") == sc.keep_png,
+          "c's layer files are the snapshot's bytes");
+    std::vector<uint8_t> want(base_c.size());
+    mk::composite(base_c.data(), drop1.data(), keep1.data(), want.size(), want.data());
+    check(stencil_pixels(f.masks / "c.png") == want, "c's composite is the first layers over c's base");
+    check(mk::base_state(mask_root, "c", idx) == mk::BaseState::Unchanged, "c's index entry matches its file");
+    uint64_t fp = 0;
+    mk::fingerprint_file((f.layer / "c.base.png").string(), fp);
+    check(idx.frames["c"].base_fp == fp, "restored base fingerprint is the file's");
+
+    // A write the restore cannot make is reported, not swallowed. A directory
+    // is only ever a RENAME target here, never a file this test reads.
+    check(mk::propagate_to(layer_root, mask_root, "c", (f.images / "c.jpg").string(), 64, 48,
+                           drop2.data(), keep2.data(), idx, refused, err), "c carries the second layers again");
+    const std::vector<uint8_t> keep2_png = file_bytes(f.layer / "c.keep.png");
+    const fs::path blocked = f.layer / "c.drop.png";
+    std::error_code ec;
+    fs::remove(blocked, ec);
+    fs::create_directories(blocked, ec);
+    check(fs::is_directory(blocked), "fixture: a directory blocks c's drop layer");
+    check(!mk::restore_layers(layer_root, mask_root, sc, idx, err) &&
+              err.find("c.drop.png") != std::string::npos,
+          "restore reports the file it could not write: " + err);
+    check(keep2_png != sc.keep_png && file_bytes(f.layer / "c.keep.png") == keep2_png,
+          "and stops there: the keep layer is not half-restored");
+    fs::remove_all(blocked, ec);
+
+    // had_entry without had_drop: the absent layer is removed, not left
+    // behind, and the frame comes back with an all-zero drop.
+    check(!fs::exists(blocked), "fixture: c has an entry and no drop layer");
+    mk::LayerSnapshot sc2;
+    check(mk::snapshot_layers(layer_root, "c", idx, sc2, err) && sc2.had_entry && !sc2.had_drop &&
+              sc2.had_keep, "snapshot of an entry whose drop layer is gone");
+    check(mk::propagate_to(layer_root, mask_root, "c", (f.images / "c.jpg").string(), 64, 48,
+                           drop2.data(), keep2.data(), idx, refused, err), "third layers on c");
+    check(stencil_pixels(blocked) == drop2, "fixture: c carries drop2 again");
+    check(mk::restore_layers(layer_root, mask_root, sc2, idx, err), "restore c from sc2: " + err);
+    check(stencil_pixels(blocked) == std::vector<uint8_t>(64 * 48, 0),
+          "the drop layer the snapshot did not hold is zero, not drop2");
+    check(file_bytes(f.layer / "c.keep.png") == sc2.keep_png, "and the keep layer is the snapshot's");
+
+    // A snapshot whose layer does not fit the base is refused, not re-encoded
+    // as zero over the bytes it just put back.
+    mk::LayerSnapshot bad = sc2;
+    bad.had_drop = true;
+    mk::encode_gray_png(synth_mask(32, 24, 3).data(), 32, 24, bad.drop_png);
+    check(!mk::restore_layers(layer_root, mask_root, bad, idx, err) &&
+              err.find("c.drop.png") != std::string::npos &&
+              file_bytes(f.layer / "c.drop.png") == bad.drop_png,
+          "a mis-sized snapshot layer is reported and left as the snapshot's bytes: " + err);
+
+    // A base re-based after the snapshot: the entry takes the file's print.
+    mk::LayerSnapshot sc3;
+    check(mk::restore_layers(layer_root, mask_root, sc2, idx, err) &&
+              mk::snapshot_layers(layer_root, "c", idx, sc3, err) && sc3.had_entry, "snapshot before a rebase");
+    write_png_gray(f.layer / "c.base.png", 64, 48, synth_mask(64, 48, 7));
+    uint64_t rebased = 0;
+    mk::fingerprint_file((f.layer / "c.base.png").string(), rebased);
+    check(rebased != sc3.entry.base_fp && mk::restore_layers(layer_root, mask_root, sc3, idx, err) &&
+              idx.frames["c"].base_fp == rebased, "restore takes the rebased base's fingerprint: " + err);
+}
+
+// The operator's own masks are 255 = DROP, and .base.png is a byte copy in
+// that convention: a restore that skipped the flip would write the inverse.
+void test_snapshot_restore_flipped() {
+    Fixture f = make_dataset("snapshot_flipped", 64, 48, {"a", "c"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> d1 = box_layer(64, 48, 4, 4, 14, 14), k1 = box_layer(64, 48, 40, 20, 50, 30);
+    const std::vector<uint8_t> d2 = box_layer(64, 48, 20, 20, 30, 30), k2 = box_layer(64, 48, 0, 0, 5, 5);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    idx.mask_flipped = true;
+    std::string err;
+    mk::PropagateRefusal refused;
+    check(mk::propagate_to(layer_root, mask_root, "c", (f.images / "c.jpg").string(), 64, 48,
+                           d1.data(), k1.data(), idx, refused, err),
+          "flipped restore: first layers on c: " + err);
+    const std::vector<uint8_t> after_first = file_bytes(f.masks / "c.png");
+    // The file is 255 = DROP: d1's box reads 255 in it, k1's box reads 0.
+    std::vector<uint8_t> app_base = stencil_pixels(f.layer / "c.base.png"), app_want(app_base.size());
+    mk::flip_polarity(app_base.data(), app_base.size());
+    mk::composite(app_base.data(), d1.data(), k1.data(), app_base.size(), app_want.data());
+    mk::flip_polarity(app_want.data(), app_want.size());
+    const std::vector<uint8_t> first_px = stencil_pixels(f.masks / "c.png");
+    check(first_px == app_want && first_px[5 * 64 + 5] == 255 && first_px[25 * 64 + 45] == 0,
+          "flipped restore: propagate wrote c's base under the layers, in the file's polarity");
+    // What a restore that forgot the flip writes: the file's own pixels
+    // composited as if they were the app's, then flipped on the way out.
+    std::vector<uint8_t> raw = stencil_pixels(f.layer / "c.base.png"), wrong(raw.size());
+    mk::composite(raw.data(), d1.data(), k1.data(), raw.size(), wrong.data());
+    mk::flip_polarity(wrong.data(), wrong.size());
+    check(wrong != stencil_pixels(f.masks / "c.png"),
+          "flipped restore: fixture: a restore without the flip would write other pixels");
+    mk::LayerSnapshot sc;
+    check(mk::snapshot_layers(layer_root, "c", idx, sc, err) && sc.had_entry && sc.had_drop,
+          "flipped restore: c's snapshot has an entry, so restore takes its write path");
+    check(mk::propagate_to(layer_root, mask_root, "c", (f.images / "c.jpg").string(), 64, 48,
+                           d2.data(), k2.data(), idx, refused, err),
+          "flipped restore: second layers on c");
+    check(file_bytes(f.masks / "c.png") != after_first, "flipped restore: fixture: c changed");
+    check(mk::restore_layers(layer_root, mask_root, sc, idx, err), "flipped restore: restore c: " + err);
+    check(file_bytes(f.masks / "c.png") == after_first,
+          "flipped restore: c's mask file is the first propagate's, byte for byte");
+}
+
 // The eraser, through the same call the panel makes. The base drops a 16x12
 // block, so force-keep and clear give DIFFERENT kept counts over it -- which
 // is the only fixture shape that can tell the two readings of "eraser" apart.
@@ -5306,6 +5586,10 @@ int main() {
     test_derive_window_frame_scale();
     test_view_math_non_square_pane();
     test_session();
+    test_propagate_targets();
+    test_propagate_to();
+    test_snapshot_restore();
+    test_snapshot_restore_flipped();
     test_session_eraser();
     test_session_size_mismatch();
     test_session_flipped_polarity();

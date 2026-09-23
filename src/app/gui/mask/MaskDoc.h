@@ -120,9 +120,9 @@ public:
     // For ops. `drop_r` / `keep_r` are r.w()*r.h(), row-major.
     void read_rect(const Rect& r, std::vector<uint8_t>& drop_r,
                    std::vector<uint8_t>& keep_r) const;
-    // Copies verbatim -- no exclusivity check. Safe because its only caller,
-    // StrokeOp, only ever replays bytes a read_rect once captured from a
-    // valid document, never a caller-synthesized pair.
+    // Copies verbatim -- no exclusivity check. Both callers hand it an
+    // exclusive pair: StrokeOp replays what read_rect captured, propagate_to
+    // hands on another document's drop() and keep().
     void write_rect(const Rect& r, const uint8_t* drop_r, const uint8_t* keep_r);
     void paint_rect(Paint mode, const Stencil& st, const Rect& r);
 
@@ -143,6 +143,19 @@ private:
     size_t _bytes = 0;
     size_t _byte_cap = kMaxHistoryBytes;
 };
+
+// ---- propagate (plan 3) ----------------------------------------------------
+
+struct PropagateRefusal {
+    int w = 0, h = 0;   // the target's size, when the sizes differed
+};
+// Copies `drop` / `keep` (W x H) onto `key` over that frame's OWN base.
+// False with `refused` set and nothing written when the sizes differ; false
+// with `error` (a path) on a failed file or a mis-sized layer of its own.
+bool propagate_to(const std::string& layer_root, const std::string& mask_root,
+                  const std::string& key, const std::string& image_file, int W, int H,
+                  const uint8_t* drop, const uint8_t* keep, LayerIndex& idx,
+                  PropagateRefusal& refused, std::string& error);
 
 }  // namespace mask
 }  // namespace gui

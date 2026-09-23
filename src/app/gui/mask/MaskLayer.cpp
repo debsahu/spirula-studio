@@ -452,5 +452,72 @@ int revert_all(const std::string& layer_root, std::string& error) {
     return reverted;
 }
 
+bool frame_size(const std::string& layer_root, const std::string& mask_root,
+                const std::string& key, const std::string& image_file, int& w, int& h,
+                std::string& from) {
+    std::error_code ec;
+    from = layer_file(layer_root, key, Layer::Base);
+    if (fs::exists(from, ec)) return app::image_size(from, w, h);
+    from = mask_file(mask_root, key);
+    if (fs::exists(from, ec)) return app::image_size(from, w, h);
+    from = image_file;
+    return app::image_size(from, w, h);
+}
+
+bool snapshot_layers(const std::string& layer_root, const std::string& key,
+                     const LayerIndex& idx, LayerSnapshot& out, std::string& error) {
+    out = LayerSnapshot{};
+    out.key = key;
+    error.clear();
+    const auto it = idx.frames.find(key);
+    out.had_entry = it != idx.frames.end();
+    if (out.had_entry) out.entry = it->second;
+    std::error_code ec;
+    const std::string d = layer_file(layer_root, key, Layer::Drop);
+    const std::string k = layer_file(layer_root, key, Layer::Keep);
+    out.had_drop = fs::exists(d, ec);
+    out.had_keep = fs::exists(k, ec);
+    if (out.had_drop && !read_file(d, out.drop_png)) { error = d; return false; }
+    if (out.had_keep && !read_file(k, out.keep_png)) { error = k; return false; }
+    return true;
+}
+
+bool restore_layers(const std::string& layer_root, const std::string& mask_root,
+                    const LayerSnapshot& snap, LayerIndex& idx, std::string& error) {
+    if (!snap.had_entry) return revert_frame(layer_root, mask_root, snap.key, idx, error);
+    std::error_code ec;
+    const std::string d = layer_file(layer_root, snap.key, Layer::Drop);
+    const std::string k = layer_file(layer_root, snap.key, Layer::Keep);
+    if (snap.had_drop) {
+        if (!write_file_atomic(d, snap.drop_png.data(), snap.drop_png.size())) { error = d; return false; }
+    } else {
+        fs::remove(d, ec);
+    }
+    if (snap.had_keep) {
+        if (!write_file_atomic(k, snap.keep_png.data(), snap.keep_png.size())) { error = k; return false; }
+    } else {
+        fs::remove(k, ec);
+    }
+    idx.frames[snap.key] = snap.entry;
+    const std::string base_path = layer_file(layer_root, snap.key, Layer::Base);
+    if (!fs::exists(base_path, ec)) return idx.save(layer_root, error);
+    // The base may have been re-based since the snapshot; the file rules.
+    fingerprint_file(base_path, idx.frames[snap.key].base_fp);
+    int w = 0, h = 0;
+    std::vector<uint8_t> base;
+    if (!app::load_stencil(base_path, w, h, base)) { error = base_path; return false; }
+    if (idx.mask_flipped) flip_polarity(base.data(), base.size());   // as recomposite_frame
+    FrameLayers layers;
+    std::string warning;
+    // save_frame re-encodes what this reads: a misfit read as zero would
+    // overwrite the snapshot's bytes just written back.
+    if (!read_layers(layer_root, snap.key, w, h, layers, warning)) {
+        error = warning;
+        return false;
+    }
+    return save_frame(layer_root, mask_root, snap.key, w, h, base.data(), layers.drop.data(),
+                      layers.keep.data(), true, idx, error);
+}
+
 }  // namespace mask
 }  // namespace gui

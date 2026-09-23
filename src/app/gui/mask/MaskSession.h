@@ -59,6 +59,12 @@ void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
 // What Tab is showing: nothing, the bare photo (Tab), the bare mask (Shift+Tab).
 enum class Peek { None, Photo, Mask };
 enum class ViewMode { Overlay, MaskOnly, SideBySide };
+enum class PropagateScope { Next, Range, Camera };
+// Indices of the frames a propagate from `src` reaches: frames sharing
+// its camera key, never `src` itself. `lo`/`hi` are 0-based inclusive and
+// only read for Range.
+std::vector<int> propagate_targets(const std::vector<FrameRef>& frames, int src,
+                                   PropagateScope scope, int lo, int hi);
 
 // What pane 0 (left) or 1 (right, side by side only) shows under a peek.
 Style pane_style_for(Peek peek, ViewMode view, int pane);

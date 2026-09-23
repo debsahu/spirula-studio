@@ -333,5 +333,39 @@ bool MaskDoc::save(const std::string& layer_root, const std::string& mask_root,
     return true;
 }
 
+bool propagate_to(const std::string& layer_root, const std::string& mask_root,
+                  const std::string& key, const std::string& image_file, int W, int H,
+                  const uint8_t* drop, const uint8_t* keep, LayerIndex& idx,
+                  PropagateRefusal& refused, std::string& error) {
+    error.clear();
+    refused = PropagateRefusal{};
+    int w = 0, h = 0;
+    std::string from;
+    if (!frame_size(layer_root, mask_root, key, image_file, w, h, from)) {
+        error = from;
+        return false;
+    }
+    if (w != W || h != H) {
+        refused.w = w;
+        refused.h = h;
+        return false;
+    }
+    MaskDoc t;
+    std::string warning;
+    // `warning` names the target's own mis-sized layer file. The propagate
+    // would replace it anyway; refuse, so the file is looked at.
+    if (!t.load(layer_root, mask_root, key, w, h, idx, error, warning)) {
+        if (error.empty()) error = warning;
+        return false;
+    }
+    if (t.width() != W || t.height() != H) {
+        refused.w = t.width();
+        refused.h = t.height();
+        return false;
+    }
+    t.write_rect(Rect{0, 0, W, H}, drop, keep);
+    return t.save(layer_root, mask_root, idx, error);
+}
+
 }  // namespace mask
 }  // namespace gui

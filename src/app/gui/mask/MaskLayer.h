@@ -118,5 +118,33 @@ bool revert_frame(const std::string& layer_root, const std::string& mask_root,
 // load.
 int revert_all(const std::string& layer_root, std::string& error);
 
+// ---- propagate (plan 3) ----------------------------------------------------
+
+// The size a frame's correction has to be: its .base.png, else its mask,
+// else its image, which is the order MaskDoc::load resolves the base in.
+// `from` is the file the size came from, or the one that failed.
+bool frame_size(const std::string& layer_root, const std::string& mask_root,
+                const std::string& key, const std::string& image_file, int& w, int& h,
+                std::string& from);
+
+// What a target's layer files and entry were before a propagate, so it can
+// be put back. Absent files are recorded as absent.
+struct LayerSnapshot {
+    std::string key;
+    bool had_entry = false;
+    IndexEntry entry;
+    bool had_drop = false, had_keep = false;
+    std::vector<uint8_t> drop_png, keep_png;
+    size_t bytes() const { return drop_png.size() + keep_png.size(); }
+};
+// False with `error` set to the layer file whose read failed.
+bool snapshot_layers(const std::string& layer_root, const std::string& key,
+                     const LayerIndex& idx, LayerSnapshot& out, std::string& error);
+// Writes the snapshot's layers back (or removes them), re-derives the
+// composite over the frame's base, and restores the entry. A frame that
+// had no entry is reverted.
+bool restore_layers(const std::string& layer_root, const std::string& mask_root,
+                    const LayerSnapshot& snap, LayerIndex& idx, std::string& error);
+
 }  // namespace mask
 }  // namespace gui
