@@ -18,6 +18,16 @@ alongside its symbol or statement, so re-find it by that when the check
 fails: a citation that lands somewhere unrelated means the file moved, not
 that the claim did. Fix the number here and the row in the script together.
 
+**How to read this.** "What this is to take on" is for deciding whether to
+carry the branch. "Two levels" through "Painting", and "Path shape and
+livewire", are the design of the hand editor. "SAM assist: how it is built,
+and what not to undo" is the design of the SAM half, and holds the one rule
+that must not be broken: **one live `sam::Session` in the process**.
+Everything else -- the sections headed "Measured", "Task N", "Fix round",
+"Criterion" and "SAM assist: the measurement record" -- is evidence, kept with
+the machine, fixture and command behind each number. Read it when a claim
+needs checking, not to learn the design.
+
 ## What this is to take on
 
 For whoever has to decide whether to carry this. Each claim below is a command
@@ -28,17 +38,34 @@ you can run, so none of it has to be taken on trust.
 header and nothing was vendored in.
 
 **No new third-party dependency.** `cmake/SsApps.cmake` is the only build file
-the branch touches at all, and its whole diff is 25 insertions and 1 deletion
--- the deletion being the source-glob line it rewrites to add
-`${SS_SRC}/app/gui/mask/*.cpp`, so the new directory compiles into the GUI --
-plus two new test targets, `frame_mask_test` and `mask_doc_test`. No
-`find_package`, no `FetchContent`, no new library, no new link line.
-`git diff --name-only 66342882 HEAD` is 33 files, 20 added and 13 modified,
-and no manifest, lockfile or vendored tree is among them.
+the branch touches, and `git diff --stat 66342882 HEAD -- cmake/` is 43
+insertions and 1 deletion. The deletion is the source-glob line it rewrites to
+add `${SS_SRC}/app/gui/mask/*.cpp`, so the new directory compiles into the GUI;
+the rest is three test targets, `frame_mask_test`, `mask_doc_test` and
+`dataset_prep_test`, and `mask_doc_test`'s list growing by `MaskAdd.cpp` and
+`MaskSam.cpp`. No `find_package`, no `FetchContent`, no new library, no new
+link line: `git diff 66342882 HEAD -- cmake/` matches neither word. `assets/`
+is untouched, so the embedded fonts were not regenerated either.
+`git diff --name-only 66342882 HEAD` is 48 files, 28 added and 20 modified,
+and no manifest, lockfile or vendored tree is among them. Plans 1 to 3 made 33
+of them (20 added, 13 modified, at `84d32966`); plan 4, SAM assist, is
+`84d32966..HEAD`, which also carries the plan-3 review fixes that landed
+interleaved with it (`dataset_prep_test`, `tools/check_note_cites.sh`, the
+Revert-all confirmation).
+
+**SAM assist adds no dependency either.** It calls the segmentation module
+already in this tree (`src/sam/`), under the same `SS_BUILD_SAM` option the
+dataset screen uses, and downloads nothing the dataset screen did not already
+offer: the checkpoint, its download and its consent modal are the dataset
+screen's own. It changes two existing files outside the GUI, both by moving
+code, not by changing behaviour: `src/sam/MaskDilate.cpp` now calls the margin
+geometry it used to hold, which moved to `src/core/MaskMargin.h` (`Masker`'s
+written masks were byte-identical across the move, below), and
+`src/core/DistanceTransform.h` has a one-line comment changed to point there.
 
 **The readers are untouched.** `git diff --stat 66342882 HEAD -- src/data
-src/sfm src/kernels` is empty: nothing that parses a dataset, a reconstruction
-or a kernel changed.
+src/sfm src/kernels src/nn` is empty: nothing that parses a dataset, a
+reconstruction or a kernel, and nothing in the inference layer, changed.
 
 **The livewire is written from the paper, not ported.** Mortensen and Barrett,
 "Intelligent Scissors for Image Composition", SIGGRAPH 1995, is the source of
@@ -61,11 +88,22 @@ routine, one caller more.
 **Blast radius outside the new directory.** The feature is `src/app/gui/mask/`
 plus its catalog `src/i18n/catalog/MaskEdit.h`. Everything else it modifies is
 named here and nowhere else: `FrameMask`, `DatasetPrep`, `GuiApp`,
-`SegmentPanel`, `edit/SelectShape.cpp` and `i18n/catalog/Dataset.h` for the
-integration, and `tools/guictl.py` with `app/gui/Automation.cpp` for the
-shared GUI test harness -- the last two are a fix to pre-existing tooling,
-explained under "A pre-existing automation-tooling defect" below and flagged
-there because they sit outside the feature.
+`SegmentPanel`, `MaskPrompt`, `edit/SelectShape.cpp` and
+`i18n/catalog/Dataset.h` for the integration; `src/core/MaskMargin.h`,
+`src/core/PolygonFill.h`, `src/core/DistanceTransform.h` and
+`src/sam/MaskDilate.cpp` for the two moves; `build_develop.bash` with
+`tools/check_sam_guard.sh` and `tools/check_note_cites.sh` for two new lints;
+and `tools/guictl.py` with `app/gui/Automation.{h,cpp}` and
+`docs/notes/gui-automation.md` for the shared GUI test harness -- the last are
+fixes and additions to pre-existing tooling, explained where each was made
+("A pre-existing automation-tooling defect" below, and under Tasks 5 to 7), and
+flagged there because they sit outside the feature. SAM assist's changes to
+`SegmentPanel`, `GuiApp` and `MaskPrompt` are mostly moves, so the editor draws
+the dataset screen's own controls: the object list and one margin slider left
+`SegmentPanel`, and the checkpoint picker and the other margin slider left
+`GuiApp`, all for `MaskPrompt`. The dataset screen's object list was
+pixel-identical before and after (P13). The rest of `GuiApp`'s change is the
+one-session rule below.
 
 **Upstreaming.** Nothing here has been offered upstream and nothing has been
 pushed anywhere. This is a branch in this repository.
@@ -1373,8 +1411,8 @@ line and +38 where it wraps**, putting the real worst case at 900 px around
 parameterised on the measured `status_h` and not on any row of this table; it
 is the table's worst row that is not a bound. That is the third time in this
 section that measuring the strip has turned out to beat enumerating it. SAM mode
-adds the checkpoint picker's rows on top of these; its heights are under "SAM assist,
-Task 5" below.
+adds the checkpoint picker's rows on top of these; its heights are under Task 5 of "SAM assist:
+the measurement record" below.
 
 **The fix measures the strip instead of predicting it.** `draw()` records
 `ImGui::GetCursorPosY()` either side of `draw_status()` into `_status_h`, and
@@ -1873,7 +1911,316 @@ from a script at all, and this binding would have shipped unexercised. This is
 a change to test infrastructure outside the feature's file list, flagged here
 rather than folded in silently -- the same call the pen tool's fix round made.
 
-## SAM assist, Task 1: the seam, and what one add costs the history (2026-09-22)
+## SAM assist: how it is built, and what not to undo
+
+Plan 4 of the editor. In SAM mode a click on the canvas asks SAM for the
+object under it and drops it; Ctrl keeps it, Shift+Ctrl clears the
+corrections on it back to the base, a right click says "not this", and a
+typed phrase drops every match on the open frame. Each result is painted into
+the frame's own drop/keep layers through `MaskDoc::paint`, as one undo step,
+the way a brush stroke is. The on-disk format above does not change: SAM
+writes nothing of its own anywhere.
+
+This section is the architecture. The numbers behind it, with the conditions
+each was taken under, are in "SAM assist: the measurement record" below.
+
+### Using it
+
+Open the editor with **Correct masks** (Train screen, beside the
+dataset path; or the dataset screen, under Update Dataset, when the workspace's
+`masks/` is not itself an input). Press **G** or the **SAM** button at the right of
+the tool row. The status strip then shows the checkpoint picker (the dataset screen's
+own, over the same model id and download), the hint, and the last result. A click on
+the canvas drops the object under it; **Ctrl+click** keeps it; **Shift+Ctrl+click**
+clears the corrections on it back to the base -- the brush's grammar (on macOS the
+logical Ctrl is the Command key, as for every other Ctrl chord in the editor); **Esc**
+cancels a prompt in flight once its current step ends. With no cached checkpoint the button still arms, and the strip
+offers **Get the model** and the licence prompt; the consent modal is drawn from
+`frame()`, so it appears over the editor on any screen. The object list, the right
+click and the text row are described with their measurements under Tasks 6 and 7.
+
+### The files, and the boundary that shapes them
+
+```
+MaskAdd       the seam: detections -> Stencil + Rect for MaskDoc::paint.
+              No sam::, nn::, ImGui or GL.
+MaskSam       the guarded half: the checkpoint, the editor's own prompt
+              state, one job thread. Pimpl'd and sam::-free in its header.
+MaskSession   what the panel calls: stamps, the blocker, yield, the
+              retiring slot, replace-on-refine, the held detections.
+MaskPanel     the SAM button, the strip's rows, the click grammar.
+core/MaskMargin.h   the margin geometry, shared with sam::Masker.
+```
+
+**Why the split exists: `mask_doc_test`.** That test binary compiles
+`MaskSession.cpp` and everything it needs without `SS_BUILD_SAM` and without
+the inference layer, so the editor's logic is tested with no model and no GPU.
+`MaskSession.h` may therefore hold a `MaskSam` but must never see a `sam::`
+type. `MaskSam.h` is pimpl'd and names nothing from `sam/`; the model calls
+live in the `#ifdef SS_BUILD_SAM` branch of `MaskSam.cpp`. The `#ifndef` stub
+makes `available()` false and both prompts (`start_points`, `start_text`)
+refuse with `sam_unavailable_build` in `error()`; only `start_margin`, which
+needs no model, still runs, inline, so a `-DSS_BUILD_SAM=OFF` build shows a
+SAM button that never arms (P9). Everything that decides what happens to a
+result -- the stamp check, replace-on-refine, the held regions, what
+`release()` forgets -- is in the shared half and runs in both builds.
+`MaskSam::post_result` and `MaskSession::sam()` are public only so a test can
+stand in for the job.
+
+**Two gates keep it honest, and each sees what the other cannot.**
+
+- **PS1, the symbol gate.** Distinct, word-bounded names in `nm -jC` output:
+  `sam::` must be **0** in `build/mask_doc_test` and `build/dataset_prep_test`.
+  The positive control is the same count on `build/spirula`, which must stay
+  above 100, or the gate is satisfied by an empty binary. The command and
+  today's figures are under "Task 10: the closing lint battery" at the end of
+  the measurement record. The gate was
+  shown to move when Task 2 landed: a global `std::vector<sam::MaskOptions>`
+  in `MaskSam.cpp` read `sam::` 3, a `std::vector<nn::Image>` read `nn::` 2,
+  and `MaskSam::available()` disassembles to `mov w0,#1` in `spirula` and
+  `mov w0,#0` in `mask_doc_test`. Do not count with `grep -c 'nn::'`: 23 of
+  the 42 lines it finds in `mask_doc_test` are `knn::`.
+- **`tools/check_sam_guard.sh`**, run by `build_develop.bash`. PS1 sees only
+  what links: `#include "sam/Masking.h"` alone moved it by 0. The guard fails
+  on any `sam/` include under `src/app/gui/mask/` outside an
+  `#ifdef SS_BUILD_SAM` branch, following nesting and the `#else` of both
+  polarities. Ten probes, seven that must fire and three that must not, all
+  behaved. `nn/` is deliberately not checked: `app/Pano360.h` already reaches
+  `nn/io/Image.h`.
+
+### The job thread
+
+- **One `MaskSam`, one worker, one job at a time.** The UI thread starts a job
+  and later takes its result in `sam_pump()`; it never waits on one. Measured
+  with a throwaway probe (SAM 3 q4_0, 15520x7760, reverted): `sam_prompt_point`
+  0.04-0.08 ms, `go_to` during a job 0.01 ms, `set_sam_model` mid-job 0.01 ms,
+  `sam_pump` at most 0.00 ms over about 700 calls while a job ran.
+- **Cancel is read between stages, never inside one.** A load (about 2.5 s)
+  and `encode_image` with its upload (1.9 s) are single opaque calls, so Esc
+  lands when the current one ends. Cancel latency, same probe: **1.88-1.91 s**
+  worst case, issued 50 ms into a cold-frame job; 1.64 / 1.26 / 0.88 / 0.55 s
+  issued 300 / 700 / 1100 / 1400 ms in. Three consecutive runs read 3.3 s with
+  `encode_image` at 2.56 s on a byte-identical binary, on mains power with no
+  thermal warning; the cause was not found. This is why P7's bar moved.
+- **The open frame's pixels are co-owned.** `_rgb` is a
+  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:305`) and a job holds
+  its own reference, so moving to another frame, which replaces `_rgb` in
+  `pump()`, never frees what a job reads. The `const` element type makes a
+  refill in place a compile error. The plan's first draft copied `_rgb` on the
+  job thread while `pump()` could replace it: a use-after-free that a "does
+  not crash" check would have passed. The `frame pixels:` checks pin it.
+- **Every job is stamped with a generation and the frame key**
+  (`sam_frame_stamp()`, `"<gen>|<key>"`), and `sam_pump()` drops a result
+  whose stamp no longer matches, counting it in `sam_dropped`. The key alone
+  is not enough, because a revert reopens the same key. `_doc_gen` is bumped
+  at the one assignment of `_doc`, in `pump()` (`MaskSession.cpp:287`), so any
+  load path, present or future, bumps it by construction. Cost: SAM's encode
+  cache follows the stamp, so a revert or a return to a frame re-encodes
+  (about 1.9 s).
+- **The stencil is built on the job thread**, limited to the box each region
+  can reach, so the UI thread only paints. `publish_unless_cancelled()` builds,
+  *then* reads the cancel flag, then publishes, so an Esc during the build
+  still wins.
+- **A throw in a job becomes an error, not a terminate.** `run()` wraps the
+  stages in `run_guarded`. Probe: a `bad_alloc` injected at the frame copy
+  ended as `error='std::bad_alloc'`, exit 0; with the guard removed the process
+  aborted, exit 134.
+
+### THE RULE: one live `sam::Session` in the process
+
+**Read this before adding anything that starts inference.** Every inference
+user -- the editor's `sam::Session`, the dataset screen's mask preview, the
+depth preview's model, a dataset run -- allocates from the inference layer's
+one process-wide `VramPool` and records on one `vk::Stream`, and neither is
+synchronised between users. A dataset run also ends in `nn::shutdown()` (the
+`ReleaseDevice` guard in `DatasetPrep::run`), which frees the pool. A warm
+editor session that lives through either is holding weights in memory that
+was handed to someone else, or freed. Nothing errors when that happens.
+
+So the editor **yields**, and while it cannot yield it **refuses**:
+
+- **Yield.** `GuiApp::stop_inference_users()` (`GuiApp.cpp:1184-1187`) is
+  `close_native_previews()` followed by `_mask_editor.sam_yield()`, which
+  cancels, joins, unloads, drains the retiring slot and keeps the clicks. It
+  is called at the **seven** sites that start inference or tear it down:
+  `shutdown`, `launch_training`, `launch_batch_mesh`, `launch_dataset_job`
+  (the only caller of `_sfm.start` and `_colmap.start`), `open_mask_preview`,
+  `open_geometry_preview` and `start_meshing`. Sites that start no inference
+  -- opening a dataset or a splat, source edits, opening the editor itself --
+  stay on the bare `close_native_previews()`. **A new site that starts
+  inference must call `stop_inference_users()`, not the bare close.**
+- **Refuse.** Every frame, just before the editor draws, `GuiApp::frame()`
+  pushes `MaskSession::sam_blocker(mask preview open, depth preview open,
+  native_work_busy())`. A prompt while blocked is refused with
+  `sam_blocked_preview` or `sam_blocked_run` in `sam_error()`, and lifting the
+  block clears only that message. It is read there rather than at the top of
+  the frame, so a preview opened earlier in the same frame already counts.
+  Three conservative choices, each flagged when it was made: the depth preview
+  blocks too, all of `native_work_busy()` (training and meshing included)
+  counts as a run, and the mask preview blocks even with masking off.
+- The editor never builds a `sam::Tracker`, whose memory bank `unload()` does
+  not release.
+
+**What it costs.** A yield while an editor job runs freezes the UI for the
+join: **1931 ms** 50 ms into a cold-frame encode, **2140 ms** 800 ms into a
+cold load, **1117 ms** 1500 ms in (a later run: 1899 / 1448 / 707 ms). The
+worst case, a yield at the very start of a load, is derived at about 2.5 s and
+was not observed. After every yield `sam_vram_mib` read -1 and the pool
+0.0 MiB, and the next prompt reloaded (5.18 s to a result). The same thing
+driven in the app is "The cross-screen inference checks" under Task 5.
+
+### Decisions a maintainer must not undo
+
+1. **No `sam::Masker`.** The editor calls `Session::segmentVisual` and
+   `segmentConcept` directly, and `MaskSam.cpp:14` says so at the include.
+   The trap this avoids: to get "the object, as 255" out of `Masker` you set
+   `MaskOptions::keep_prompted = true`, and `MaskSettings::boundary_ratio()`
+   returns `keep_subject ? -shrink_ratio : dilate_ratio`
+   (`MaskSettings.h:36-38`) -- **negative under exactly that flag**. On the
+   dataset screen that is right: the margin always grows what is thrown away,
+   and there the kept subject is what survives. In the editor the prompted
+   object *is* what is thrown away, so through `Masker` the margin would eat
+   **into** the monopod, and nothing would error. Going direct makes the flip
+   structurally unreachable. Do not "simplify" toward `Masker`.
+2. **The margin lives in `core/MaskMargin.h`**, header-only and model-free,
+   and `sam::Masker` (`sam::dilate_radius_px`, `sam::accumulate_dilated`) and
+   the editor's seam (`build_add_stencil`) both call it. The editor grows
+   **drops only**: `drop_margin()` (`MaskAdd.h:57-59`) passes the ratio for a
+   `ForceDrop` and 0 for a keep or a clear, which take SAM's exact outline,
+   and the ratio is never signed, so no trim can reach the editor. The radius
+   comes from **the model's box, carried on every path** (`AddRegion::box`,
+   through `hold_region`); the inclusive mask extent stands in only when a
+   detection has no box. Exceptions are cleared **after** the margin, as
+   `sam::compose_hit` orders it (`Masking.h:94-95`), or the grown rim would
+   cover an exception again. `Masker`'s output was byte-identical across the
+   move (MD5s under Task 5, fix round 2).
+3. **Model state is shared with the dataset screen; prompt state is not.**
+   The checkpoint picker is the dataset screen's own
+   (`draw_mask_model_picker`), over the same model id, download and single
+   consent modal, and `GuiApp::frame()` pushes the selected path into the
+   editor every frame, so a pick on either screen or a finished download lands
+   at once. There is no second catalog entry, no second `ModelEntry` and no
+   editor-only model setting. **Do not give the editor its own model to
+   decouple the two**: the picker is one control over one state, on purpose.
+   The **prompt** -- clicks, objects, phrase, exceptions, margin -- lives in
+   `MaskSam::prompt()` and never in the dataset's `MaskSettings`. A dataset
+   `MaskClick` is keyed by `source` (the input's path), a source frame index,
+   a `position` through the capture and a camera; the editor holds a prepared
+   frame key and its own frame index, none of those. An editor click written
+   into the dataset's settings would carry the wrong `source` and frame, and
+   `SegmentPanel::start_job`'s filter (`mine(c) && c.frame == frame.index &&
+   c.camera == camera`, `SegmentPanel.cpp:335-336`) would silently never match
+   it: saved, and never used, with no error. Editor clicks carry an empty
+   `source`, and `object_points` sends only those. P13 read the dataset
+   screen's fields unchanged across an editor session of 9 clicks on 3 objects.
+4. **Replace-on-refine, and its undo cost.** A further click on the object
+   whose add is still the newest step on the frame (the stamp and
+   `MaskDoc::top_step()`) replaces that add instead of stacking another. The
+   history keeps one step per object, so **one Ctrl+Z removes the whole
+   object**, not only its last refinement. That was an explicit operator
+   trade-off, and the hint says so. Undo then redo puts the same add back on
+   top, so it still refines; any other edit, another object, a text prompt or
+   an edit to the object list ends it.
+5. **Release on close goes through a retiring slot, polled on the UI thread.**
+   Closing mid-job cancels the job and parks the `MaskSam` in
+   `_sam_retiring`; `GuiApp::frame()` calls `sam_poll_retiring()` every frame,
+   and once the job is idle that releases it, so the join is instant and the
+   unload runs on the UI thread. `sam_yield()` (and so every
+   `stop_inference_users()`), `open()`, the destructor and `shutdown()` drain
+   the slot first, blocking, so when any of them returns no `MaskSam`, live or
+   parked, is busy or holds a session. **Not an unload on the job's own
+   thread**: that would run beside a reopened editor's `loadModel` on the same
+   unsynchronised pool and stream, which is the one-session rule broken by the
+   teardown. Joining in `close()` instead froze the UI for the whole stage,
+   2887 ms mid-encode and 7805 ms mid-load. The `retire:` and `drain:` checks
+   pin this through injectable `SamOps`.
+
+### Deliberately absent, so nobody re-derives it
+
+- **The promote button** (spec §5.4, shape 3): *"Also mask this in the whole
+  capture"*, writing **text only** into the dataset's `MaskSettings::prompt`
+  with its consequence stated. In scope for the feature, out of this plan. A
+  click cannot be promoted: it has a frame and an input-relative coordinate
+  the editor does not hold, and a button offering it would promise something
+  `SegmentPanel::start_job`'s filter cannot honour.
+- **Tracker or memory-bank propagation** (spec §7.1). It would hold a tracker
+  across frame changes and encode every frame in order, so an operator jumping
+  to frame 40 would either get a wrong answer or be made to encode 4-39 first.
+- **A higher mask resolution.** Impossible on SAM 3, whose rotary tables ship
+  sized for the native grid (`SamModel.cpp:210-219` fails loudly on any other
+  input size); untested on SAM 2; and taking text prompts means taking SAM 3's
+  fixed 288 grid with them.
+- **Shape 1, one shared prompt state.** Ruled out on the `MaskClick` keying
+  above. Making it work needs a map from a prepared frame key back to the
+  input path, source frame index and camera, which does not exist and would be
+  its own plan.
+- **Slideshow exclusivity (P11).** Unwritable until plan 3 lands; there is no
+  slideshow to be exclusive with.
+- **Not absent after all, though the plan listed it:** the drop margin. The
+  plan expected going direct to lose `compose_hit`'s dilation and left
+  whether to restore it unasked. Review asked, and Task 5's fix round 2
+  restored it through `core/MaskMargin.h`, as decision 2 describes.
+- **Negative clicks were out of the first draft and are in** (amendment
+  2026-09-22): a click carries its label to SAM, the right button is "not
+  this", and a refinement replaces the object's add, at decision 4's cost.
+
+### Residual risk a maintainer should know
+
+- **The GUI is exercised only by in-app checklists.** `MaskPanel.cpp` and
+  `MaskPrompt.cpp` are in no test target (the `mask_doc_test` list in
+  `cmake/SsApps.cmake` names neither), so the button, the strip, the click
+  grammar's wiring and the picker are covered only by the runs recorded below,
+  driven through `tools/guictl.py`.
+- **Concurrency was reviewed by reading, not stressed.** No ThreadSanitizer
+  build was run. The job thread, the mutex around status, error and the
+  result, the stamp, the blocker and the retiring slot each have unit checks
+  of their decisions through the stub and `SamOps`; none of that exercises a
+  real race.
+- **Some SAM-only paths are covered only in the app or by reverted probes**:
+  `run_stages`, the `run()` to `run_guarded` wiring, the status and error text
+  during a real load, the cancel latency and the yield joins. `mask_doc_test`
+  must link no `sam::`, so it cannot hold them.
+- **A dataset-screen bug was seen and not fixed.** "Try masking" can show "No
+  frame could be read" on first open; pressing "Try it" clears it. It predates
+  this plan and has its own ticket.
+- **Two timing splits are unexplained**: the 3.3 s encodes above, and P1b's
+  samples, which fall into 5.7-6.0 s and 10.5-11.1 s.
+- **The new messages' translations** (13 languages) have not been read by a
+  fluent speaker.
+
+## SAM assist: the measurement record
+
+Each task's own record, in the order it landed, with the machine, the checkpoint,
+the fixture and the command or harness behind every number. Tasks 2 and 4 are
+measured in the architecture section above, where their numbers explain a
+decision. Where a later task changed an earlier ruling, the earlier text is kept
+and marked "Superseded", so the reason for the change stays readable.
+
+**The criteria at a glance.** One line each; the numbers and their conditions
+are in the task named. M5 Pro 24 GB, `sam3-q4_0`, the 15520x7760 fixture,
+unless the task says otherwise.
+
+| criterion | what it asks | result | where |
+|---|---|---|---|
+| P1 | first click on a new frame, warm | prompt to painted 4044-4194 ms, job 3577-3614 ms | Task 5 |
+| P1b | first prompt of a session | job 5716-11118 ms, split in two with no explanation; no bar judged on it | Task 5, misses |
+| P2 | further clicks on the same frame | 546-648 ms prompt to painted; 234 and 278 ms on the P3 clicks once the stencil moved to the job | Task 5 |
+| P2b | a text prompt | worst median 596.6 ms (five detections); bar 2386 ms | Task 7 |
+| P3 | three clicks, three independent regions | PASS: area == drop-layer pixels exactly, pairwise IoU 0.0000 | Task 5 |
+| P5 | bytes one add costs the history | 1,472 at 1552x776 (bar 2,944), 17,377 at 15520x7760 | Task 1 |
+| P6 | device memory, loaded and encoded | 2407.1 MiB, bar 2500: PASS | Task 8 |
+| P7 | Esc during a first encode | **bar re-baselined 2000 -> 4000 ms**; 3303 / 1733 / 3244 / 1773 ms | Task 8 |
+| P8a | a job outlives a frame change | co-owned `_rgb`; the `frame pixels:` checks | architecture |
+| P8b | leaving a frame mid-encode | the result is dropped, not painted; history 0 | Task 8 |
+| P9 | no checkpoint; a build without SAM | nothing runs, nothing written; the button never arms | Task 5 |
+| P10 | one click removes the operator's monopod | **5 of 5** frames, min IoU 0.8159, median 0.8475; the reference is loose, so this is partly slack | Task 9 |
+| P11 | slideshow exclusivity | unwritable until plan 3 lands | absent |
+| P12 | close hands the checkpoint back | pool 1895.1 -> 0.0 MiB; **reload half re-instrumented** from job time to `sam_loads`, 1 -> 2 | Task 8 |
+| P13 | the dataset screen is untouched | fields and object list identical | Task 6 |
+| P14-P18 | modes, the shared picker, the modal, the model switch, a download from the Train screen | as recorded | Task 5 |
+| P19 | a right click refines | CLI null 13.9 % apart; app within 0.016 % of the CLI | Task 6 |
+
+### Task 1: the seam, and what one add costs the history (2026-09-22)
 
 `app/gui/mask/MaskAdd.{h,cpp}` turns one SAM prompt's detections into the
 `Stencil` + `Rect` pair `MaskDoc::paint` takes, with no ImGui, GL, `sam::` or
@@ -1891,7 +2238,7 @@ under the centre rule. A region the seam resamples therefore covers the pixels
 the model's own overlay drew. `add stencil: a 3:2 resample follows
 sam::Masker's floor mapping` pins it.
 
-### P5: bytes one add costs the undo history
+#### P5: bytes one add costs the undo history
 
 Measured by `test_add_history_bytes` (1552x776) and `bench_add_history`
 (`SS_MASK_BENCH`, 15520x7760). One `ForceDrop` add of a disc of radius H/5
@@ -1922,7 +2269,7 @@ fresh document without the byte checks going blind. The paint time separates
 the two arms on either document (~11x at full size), but it is not asserted:
 it is a timing.
 
-## SAM assist, Task 3: does the device number fall on unload? (2026-09-22)
+### Task 3: does the device number fall on unload? (2026-09-22)
 
 **VERIFIED, M5 Pro 24 GB, MoltenVK 1.4.2, `sam3-q4_0.ggml`.** Yes, all of it,
 every time. A throwaway probe in `cmd_segment` (never committed; reverted)
@@ -1985,19 +2332,9 @@ returned to its pre-load value exactly. Measured on the visual-prompt path
 only: a text prompt fills `TextFeat` / `PromptFeat` / `FusionFeat`, which
 `unload()` also releases, but no text prompt ran here.
 
-## SAM assist, Task 5: the first usable slice (2026-09-22)
+### Task 5: the first usable slice (2026-09-22)
 
-**How to reach it.** Open the editor with **Correct masks** (Train screen, beside the
-dataset path; or the dataset screen, under Update Dataset, when the workspace's
-`masks/` is not itself an input). Press **G** or the **SAM** button at the right of
-the tool row. The status strip then shows the checkpoint picker (the dataset screen's
-own, over the same model id and download), the hint, and the last result. A click on
-the canvas drops the object under it; **Ctrl+click** keeps it; **Shift+Ctrl+click**
-clears the corrections on it back to the base -- the brush's grammar (on macOS the
-logical Ctrl is the Command key, as for every other Ctrl chord in the editor); **Esc**
-cancels a prompt in flight once its current step ends. With no cached checkpoint the button still arms, and the strip
-offers **Get the model** and the licence prompt; the consent modal is drawn from
-`frame()`, so it appears over the editor on any screen.
+**How to reach it** is now "Using it", at the top of the SAM section.
 
 **What changed underneath.** `CanvasMode {Shape, Eraser, Path, Sam}` replaces the
 eraser and pen flags, so two tools on at once is unrepresentable. The dataset screen's
@@ -2006,7 +2343,7 @@ is the ImGui-free `mask_picker_row`, pinned in `mask_doc_test`. `GuiApp::frame()
 the editor the app's checkpoint every frame, so a pick on either screen or a finished
 download lands at once.
 
-### Measured in the app (M5 Pro, offscreen 1600x950, `sam3-q4_0`, the 15520x7760 fixture)
+#### Measured in the app (M5 Pro, offscreen 1600x950, `sam3-q4_0`, the 15520x7760 fixture)
 
 Every GUI run used a throwaway `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` and its own
 automation port; the fixture was a copy of a 46-frame 360 photo dataset (images linked,
@@ -2050,7 +2387,7 @@ deleted nothing (the `mask_edits/` listing and an MD5 over every file in `masks/
 `mask_edits/` identical before and after). Esc now acts as Cancel: the modal closes and
 `mask_edits/` is untouched.
 
-### Fix round 1: the picture no longer moves under the cursor
+#### Fix round 1: the picture no longer moves under the cursor
 
 **The defect (found in review).** `draw_canvas` sized the canvas as the window minus
 last frame's strip height, and a 2:1 frame is height-limited, so every line the strip
@@ -2092,7 +2429,7 @@ reached (6594.8, 4171.3) and (6512.4, 4466.4).
 - `/ui/state` carries `app_ready`, false until the first frame has published the app's
   fields; `guictl.py launch` waits for it.
 
-### Fix round 2: the drop margin, and clicks off the picture
+#### Fix round 2: the drop margin, and clicks off the picture
 
 **The margin.** The dataset screen grows every detection by `dilate_ratio` (5% by
 default) so the rim of colour a tight outline leaves is covered; the editor called
@@ -2132,7 +2469,7 @@ picker's download rows, a base-state line, the pen's straight-line line -- keeps
 canvas smaller until the mode or the window width changes. That is cosmetic: a click
 maps through the layout that was drawn, whatever it is.
 
-### The strip and the tool row (after fix round 2)
+#### The strip and the tool row (after fix round 2)
 
 The SAM button widens tool row 1 by one button: `Done`'s right edge is **1172 px** (was
 1068), and the window refuses to be narrower than that row. `status_h`, read as
@@ -2267,7 +2604,7 @@ move the picture (canvas 444 px before, with it open, and after).
 physical Ctrl, which ImGui reads as Super there, so a second `text` appended. It now sends
 the logical Ctrl, as `key` already did.
 
-### Misses and open items
+### Tasks 5-7: misses and open items
 
 - **The P1b row is from model switches**, taken before closing the editor released the
   session (Task 8 below). Its samples split into 5.7-6.0 s and 10.5-11.1 s with no
@@ -2280,7 +2617,7 @@ the logical Ctrl, as `key` already did.
   the checkpoint combo; the harness finds it as the one unnamed on-screen item px(260)
   wide.
 
-## SAM assist, Task 8: lifetime and teardown (2026-09-22)
+### Task 8: lifetime and teardown (2026-09-22)
 
 **Closing the editor hands the checkpoint back.** With no job running, `close()`
 releases SAM first (join, `sam::Session::unload()`), then joins the load/save worker, so
@@ -2352,15 +2689,12 @@ Both figures include about 0.1 s of polling per round.
 next frame history 0 and kept 112,176,393, which equals its untouched count. `state` still
 answered.
 
-**A close during a job no longer freezes the UI.** Joining the job in `close()` cost the
-whole stage it was in, because a load cannot be cancelled and the flag is read only
-between stages. Now a busy `MaskSam` is cancelled and parked in `_sam_retiring`, and
-`GuiApp::frame()` polls it every frame (`sam_poll_retiring()`). Once the job is idle the
-poll releases it: the join is then instant and the unload runs on the UI thread, never
-beside another user. `sam_yield()` (so every `stop_inference_users()` caller), `open()`,
-the destructor and `shutdown()` drain the slot first, blocking. So when any of them returns,
-no `MaskSam`, live or parked, is busy or holds a session. `busy` and `release` go through
-injectable `SamOps`, and unit tests pin all of this. **The order of the idle release
+**A close during a job no longer freezes the UI.** Joining the job in `close()`
+cost the whole stage it was in, because a load cannot be cancelled and the flag
+is read only between stages. The retiring slot that replaced it, and why it is
+polled on the UI thread rather than unloaded on the job's own, is decision 5 of
+the architecture section. `busy` and `release` go through injectable `SamOps`,
+and unit tests pin all of it. **The order of the idle release
 against the worker join is not load-bearing:** the save worker never touches SAM or the
 device, and `release_device` joins the SAM thread before `unload`. The test pins that
 `close()` itself releases, not where in `close()`.
@@ -2392,14 +2726,14 @@ The wall figures include the harness, whose `move` + one-frame `wait` alone cost
 - `RegionBox`'s comment now says what a text box is: the detector's continuous box, not
   an inclusive pixel extent.
 
-## SAM assist, Task 9: P10, the monopod on the operator's own capture (2026-09-22)
+### Task 9: P10, the monopod on the operator's own capture (2026-09-22)
 
 **The question.** Does one SAM click remove the monopod the operator hand-painted out
 of their real 120 MP playroom capture? The reference is `work/osmo_playroom/masks_eq/`
 (SAM 3's output, 255 = DROP) against `masks_eq_edited/` (the operator's hand
 correction of it), both 15520x7760, in the parent slam repo. Both were only read.
 
-### Which frames can host P10 at all
+#### Which frames can host P10 at all
 
 The operator hand-painted a monopod in only **5 of 46 frames**. That is where
 `edited & ~sam` holds a real region: f00016, f00022, f00024, f00025 and f00026, each
@@ -2409,7 +2743,7 @@ click was tested on, cannot host P10.** SAM 3 had already dropped the whole mono
 there, so a monopod-region null would be about 1.0. Its "largest painted component"
 is a 2 px sliver, and dropping everything in that box would score 0.917.
 
-### The region, and the null
+#### The region, and the null
 
 **The monopod region is a construction, not something the reference labels.** It is
 the bounding box of the largest 8-connected component of `edited & ~sam`, which is
@@ -2429,7 +2763,7 @@ band and the person along with the pole.
 Each null sits 0.22-0.38 under the 0.80 bar, and so does dropping the whole box, so
 P10 can fail both ways. The null is not near 0.80, so P10 needs no redesign.
 
-### P10 in the app: PASS on all five monopod frames
+#### P10 in the app: PASS on all five monopod frames
 
 Setup: `build/spirula` from `29cd5991`, offscreen at 1600x950, `sam3-q4_0`, margin
 5%. The dataset was a two-frame scratch copy (the JPEGs, and `masks_eq` inverted to
@@ -2464,7 +2798,7 @@ IoU **0.5867**, `FAIL P10 ...`, and the harness exited 1. The unmodified mask sc
 0.5295 on f00016 and fails. The operator's own reference, fed in as the result,
 scores 1.0000 and passes.
 
-### What the pass does and does not establish
+#### What the pass does and does not establish
 
 - **The reference is loose.** The operator painted a cone a couple of hundred frame
   px wider than the pole on each side. So a pixel-exact pole outline scores below 1.0
@@ -2478,7 +2812,48 @@ scores 1.0000 and passes.
 - The margin stayed at 5%. A wider margin would cover more of the loose reference.
   That is tuning, and it was not tried.
 
+### Task 10: the closing lint battery (2026-09-22)
+
+Run on this checkout, M5 Pro, after `build_develop.bash -DSS_BACKEND=vulkan
+-DSS_ENABLE_PATENTED=ON` printed `Build complete: build/spirula`. That build
+also runs every lint below except the last two.
+
+| check | result |
+|---|---|
+| `check_i18n.sh` | all 3179 messages translated into every language |
+| `check_font_coverage.py` | 10994 characters across 5 fonts, none missing |
+| `check_comments.sh`, `check_file_macro.sh`, `check_ss_prefix.sh`, `check_private_paths.sh`, `check_sam_guard.sh` | all OK |
+| `check_note_cites.sh` | 85 citation checks pass |
+| `check_comment_length.py`, working tree | within budget |
+| the same, over every line `84d32966..HEAD` touched (4775 lines in 30 files) | within budget |
+| `mask_doc_test` / `frame_mask_test` / `dataset_prep_test` / `mask_dilate_test` | 1134 / 54 / 17 / 43 `ok`, 0 failures each |
+| `align_fit_test` | exit 1, `and its axes are the room's`: the known pre-existing failure, above |
+| every `guictl.py` invocation in the plan, re-parsed against `tools/guictl.py` | 114 parsed, 0 rejected |
+
+**PS1**, distinct word-bounded names:
+
+```
+count() { nm -jC "build/$1" | grep -E "(^|[^[:alnum:]_])$2" | sort -u | wc -l; }
+count mask_doc_test 'sam::'       # 0     nn::(Image|Tensor|vk): 0
+count dataset_prep_test 'sam::'   # 0     nn::(Image|Tensor|vk): 0
+count spirula 'sam::'             # 236   nn::(Image|Tensor|vk): 417 (the control)
+```
+
+**The comment budget over the committed range.** `check_comment_length.py`
+checks only uncommitted lines, so a clean tree proves nothing about what was
+committed. It was run with its `HEAD` swapped for `84d32966`, the commit
+before plan 4, which makes every line the plan committed count as changed.
+Two controls show that run can fail: against a base before `MaskPrompt.h`
+existed it flags that file's 17-line header, and a four-line comment appended
+to the end of `MaskAdd.h` is flagged as 4 lines of prose against a budget of 3.
+`--all` still lists standing debt in files plan 4 touched -- `GuiApp.cpp`,
+`GuiApp.h`, `DatasetPrep.cpp`, `SegmentPanel.cpp`, `MaskPrompt.{h,cpp}`,
+`cmake/SsApps.cmake` -- but none of it in a line the plan touched, and none in
+a file the plan added.
+
 ## Not in this phase
 
-Propagate, find-missing, slideshow, view modes and the peek key, session
+SAM assist's own deliberate absences, and why, are listed under "SAM assist:
+how it is built, and what not to undo". For the hand editor:
+propagate, find-missing, slideshow, view modes and the peek key, session
 persistence; vertex handles on a path; a Bezier path.

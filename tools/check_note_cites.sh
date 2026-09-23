@@ -126,6 +126,18 @@ row src/nn/vk/Memory.cpp 243-266 "void Allocator::free(DevicePtr ptr)" 243
 row src/nn/vk/Memory.cpp 243-266 "vkFreeMemory(ctx.device(), a.memory, nullptr);"
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::release(" 362
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::releaseAll()"
+# The SAM half's architecture: the one-session rule and the decisions not to undo.
+row src/app/gui/mask/MaskSession.h 305 "std::shared_ptr<const std::vector<uint8_t>> _rgb;"
+row src/app/gui/mask/MaskSession.cpp 287 "_doc_gen++;"
+row src/app/gui/GuiApp.cpp 1184-1187 "void GuiApp::stop_inference_users()" 1184
+row src/app/gui/GuiApp.cpp 1184-1187 "_mask_editor.sam_yield();"
+row src/app/gui/mask/MaskSam.cpp 14 "never sam::Masker"
+row src/app/gui/MaskSettings.h 36-38 "return keep_subject ? -shrink_ratio : dilate_ratio;"
+row src/app/gui/mask/MaskAdd.h 57-59 "mode == Paint::ForceDrop && ratio > 0.0f ? ratio : 0.0f"
+row src/sam/Masking.h 94-95 "void compose_hit(const Result& positive, const Result& negative,"
+row src/app/gui/SegmentPanel.cpp 335-336 "if (mine(c) && c.frame == frame.index && c.camera == camera)"
+row src/sam/model/SamModel.cpp 210-219 "if (h.family == Family::Sam3) {"
+row src/sam/model/SamModel.cpp 210-219 "rotary tables are exported"
 # P10's resolution floor.
 row src/sam/model/Hparams.h 48 "int32_t img_size = 1008;"
 row src/sam/model/Hparams.h 134 "int32_t mask_size() const { return grid() * 4; }                   // 288"
