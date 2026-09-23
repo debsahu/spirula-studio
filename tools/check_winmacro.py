@@ -22,7 +22,7 @@ MACROS = ["-Dnear=", "-Dfar=", "-Dsmall=char"]
 SOURCE_EXTS = (".cpp", ".cc")
 HEADER_EXTS = (".h", ".hpp")
 # The upstream commit feat/mask-editor is based on.
-DEFAULT_BASE = "fd1afca1"
+DEFAULT_BASE = "e6d38a2a"
 ERROR = re.compile(r"^(?P<path>[^:\s][^:]*):(?P<line>\d+):(?:\d+:)? (?:fatal )?error: (?P<msg>.*)$")
 
 
