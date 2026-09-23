@@ -6,6 +6,7 @@
 
 #include "app/FrameLook.h"
 #include "app/FrameMask.h"
+#include "i18n/catalog/Dataset.h"
 #include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
@@ -368,6 +369,7 @@ void MaskSession::revert_open_frame() {
         set_corrected((int)_index.frames.size());
     });
     _idx = -1;
+    sam_revert(i);
     load_frame(i);
 }
 
@@ -386,6 +388,7 @@ void MaskSession::revert_every_frame() {
         set_corrected((int)_index.frames.size());
     });
     _idx = -1;
+    sam_revert(-1);
     if (i >= 0) load_frame(i);
 }
 
@@ -784,9 +787,7 @@ void MaskSession::sam_prompt_started(float frame_x, float frame_y, bool positive
 // refused here: a job would pay a ~1.5 s encode to find nothing.
 bool MaskSession::sam_prompt_text(const std::string& phrases) {
     if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending) return false;
-    if (std::all_of(phrases.begin(), phrases.end(),
-                    [](char c) { return c == ';' || c == ' ' || c == '\t'; }))
-        return false;
+    if (sam_phrases_blank(phrases)) return false;
     if (!sam_gate_passes()) return false;
     if (!sam().start_text(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
                           phrases, sam_prompt().dilate_ratio))
@@ -794,6 +795,31 @@ bool MaskSession::sam_prompt_text(const std::string& phrases) {
     _sam_job_object = -1;
     _sam_t0 = std::chrono::steady_clock::now();
     return true;
+}
+
+bool MaskSession::sam_phrases_blank(const std::string& phrases) {
+    return std::all_of(phrases.begin(), phrases.end(),
+                       [](char c) { return c == ';' || c == ' ' || c == '\t'; });
+}
+
+bool MaskSession::sam_submit_text() {
+    return !sam_busy() && sam_prompt_text(sam_prompt().prompt);
+}
+
+std::string MaskSession::sam_text_refusal(bool has_model, bool text, const std::string& blocker,
+                                          bool busy, const std::string& phrases) {
+    if (!has_model) return spirula::i18n::msg::dataset::mask_model_first.get();
+    if (!text) return msg::sam_text_unsupported.get();
+    if (!blocker.empty()) return blocker;
+    if (busy) return msg::sam_working.get();
+    if (sam_phrases_blank(phrases)) return msg::sam_text_empty.get();
+    return {};
+}
+
+std::string MaskSession::sam_text_refused() const {
+    return sam_text_refusal(sam_has_model(), sam_text_supported(), _sam_blocker,
+                            sam_busy() || _sam_release_pending || _sam_margin_pending,
+                            _sam ? _sam->prompt().prompt : std::string());
 }
 
 Rect MaskSession::sam_pump() {
@@ -860,6 +886,26 @@ void MaskSession::sam_objects_edited() {
     _sam_add_object = -1;
     _sam_job_object = -1;
     _sam_held.clear();
+}
+
+// Kept, a reverted frame's clicks would re-prompt its next click with the
+// correction just discarded. The phrase and exceptions are not per frame.
+void MaskSession::sam_revert(int frame) {
+    sam_objects_edited();
+    _sam_add_key.clear();
+    _sam_margin_pending = false;
+    if (!_sam) return;
+    MaskSettings& p = _sam->prompt();
+    if (frame < 0) {
+        const MaskSettings fresh;
+        p.clicks.clear();
+        p.object_count = fresh.object_count;
+        p.current_object = fresh.current_object;
+        return;
+    }
+    p.clicks.erase(std::remove_if(p.clicks.begin(), p.clicks.end(),
+                                  [&](const MaskClick& c) { return c.frame == frame; }),
+                   p.clicks.end());
 }
 
 // The stamp names the document (a reload moves it) and the step names the add

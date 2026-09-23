@@ -20,6 +20,7 @@
 #include "core/MaskMargin.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
+#include "i18n/catalog/Dataset.h"
 #include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
@@ -4295,6 +4296,111 @@ void test_session_sam_empty_phrase() {
           "empty phrase: a list with one phrase in it reaches the job (the stub refuses it)");
 }
 
+// The editor's clicks on `frame` for `object`, as the object list counts them.
+int clicks_on(const gui::MaskSettings& p, long long frame, int object) {
+    int n = 0;
+    for (const gui::MaskClick& c : p.clicks) n += (c.frame == frame && c.object == object) ? 1 : 0;
+    return n;
+}
+
+// Operator report: a revert left the reverted frame's SAM clicks in the object
+// list, so the next click re-prompted with a correction just thrown away.
+void test_session_sam_revert_forgets_clicks() {
+    Fixture f = make_dataset("sam_revert_clicks", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam revert: open: " + err);
+    settle(s);
+    gui::MaskSettings& p = s.sam_prompt();
+    p.prompt = "door";
+    p.negative_prompt = "statue";
+    s.sam_prompt_started(10.0f, 10.0f, true);
+    s.sam_prompt_started(12.0f, 14.0f, false);
+    s.go_to(1);
+    settle(s);
+    s.sam_prompt_started(30.0f, 20.0f, true);
+    p.object_count = 2;
+    p.current_object = 1;
+    s.sam_prompt_started(40.0f, 30.0f, true);
+    s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 40.0f, 30.0f, 6.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    s.sam_margin_changed();
+    check(clicks_on(p, 0, 0) == 2 && clicks_on(p, 1, 0) == 1 && clicks_on(p, 1, 1) == 1 &&
+              s.sam_held_bytes() > 0 && s.sam_margin_reapplies(),
+          "sam revert: set up, clicks on two frames and a re-appliable add on frame 1");
+
+    s.revert_open_frame();
+    check(clicks_on(p, 1, 0) == 0 && clicks_on(p, 1, 1) == 0,
+          "sam revert frame: the reverted frame's clicks are gone");
+    check(clicks_on(p, 0, 0) == 2 && p.clicks.size() == 2 && p.clicks[0].x == 10.0f &&
+              !p.clicks[1].positive,
+          "sam revert frame: clicks on other frames stay, labels and all");
+    check(s.sam_held_bytes() == 0 && !s.sam_margin_reapplies(),
+          "sam revert frame: no held detection or margin re-apply outlives it");
+    check(p.object_count == 2 && p.current_object == 1 && p.prompt == "door" &&
+              p.negative_prompt == "statue",
+          "sam revert frame: the object list, the phrase and the exceptions stay");
+    settle(s);
+    p.current_object = 0;
+    check(s.sam().prompt_points(1, "", mk::SamPoint{33.0f, 21.0f, true}).size() == 1,
+          "sam revert frame: a new click on the reverted frame sends only itself");
+    const int h0 = s.doc()->history_size();
+    s.sam_prompt_started(33.0f, 21.0f, true);
+    s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 33.0f, 21.0f, 4.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.doc()->history_size() == h0 + 1 && clicks_on(p, 1, 0) == 1 &&
+              clicks_on(p, 0, 0) == 2,
+          "sam revert frame: that click adds, and the list reads 1 here, 2 elsewhere");
+
+    s.sam_margin_changed();
+    check(s.sam_held_bytes() > 0 && s.sam_margin_reapplies(),
+          "sam revert all: set up, a re-appliable add on the open frame");
+    s.revert_every_frame();
+    check(p.clicks.empty() && p.object_count == 1 && p.current_object == 0,
+          "sam revert all: every click is gone and the object list is fresh");
+    check(s.sam_held_bytes() == 0 && !s.sam_margin_reapplies(),
+          "sam revert all: no held detection or margin re-apply outlives it");
+    check(p.prompt == "door" && p.negative_prompt == "statue",
+          "sam revert all: the phrase and the exceptions stay");
+    settle(s);
+}
+
+// The Find button and Enter share one gate and one action (sam_submit_text).
+void test_session_sam_text_gate() {
+    namespace em = spirula::i18n::msg::maskedit;
+    using S = mk::MaskSession;
+    const std::string model_first = spirula::i18n::msg::dataset::mask_model_first.get();
+    check(S::sam_text_refusal(false, true, "", false, "door") == model_first,
+          "text gate: no model names the download");
+    check(S::sam_text_refusal(true, false, "", false, "door") == em::sam_text_unsupported.get(),
+          "text gate: a checkpoint with no text tower says so");
+    check(S::sam_text_refusal(true, true, "paused", false, "door") == "paused",
+          "text gate: a blocker is its own reason");
+    check(S::sam_text_refusal(true, true, "", true, "door") == em::sam_working.get(),
+          "text gate: a job or margin re-apply running refuses");
+    check(S::sam_text_refusal(true, true, "", false, "") == em::sam_text_empty.get() &&
+              S::sam_text_refusal(true, true, "", false, " ;\t; ") == em::sam_text_empty.get(),
+          "text gate: an empty or whitespace-only field refuses");
+    check(S::sam_text_refusal(true, true, "", false, " ; door").empty(),
+          "text gate: one phrase and nothing in the way is ready");
+    Fixture f = make_dataset("sam_text_gate", 64, 48, {"a"});
+    S s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "text gate: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    s.sam_prompt().prompt = " ;  ";
+    check(!s.sam_submit_text() && s.sam_error().empty(),
+          "text gate: submitting a blank field starts nothing");
+    s.sam_prompt().prompt = "door";
+    check(!s.sam_submit_text() && !s.sam_error().empty(),
+          "text gate: submitting a phrase reaches the job (the stub refuses it)");
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -4844,6 +4950,8 @@ int main() {
     test_session_sam_click_mode_shift();
     test_session_sam_refine_at_cap();
     test_session_sam_empty_phrase();
+    test_session_sam_revert_forgets_clicks();
+    test_session_sam_text_gate();
     test_publish_unless_cancelled();
     test_session_close_forgets_sam();
     test_session_sam_margin_after_undo_redo();

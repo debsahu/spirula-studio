@@ -628,21 +628,26 @@ void MaskSession::draw_sam_status() {
     if (pad > 0.0f) ImGui::Dummy(ImVec2(0.0f, pad));
 }
 
-// The phrase field on one row with the palette's button, or the reason there is
-// none (SAM 2 has no text tower), so the strip never grows. Enter runs it.
+// The phrase field on one row with Find and the palette's button, or the reason
+// there is none (SAM 2 has no text tower), so the strip never grows.
 void MaskSession::draw_sam_text() {
     MaskSettings& p = sam_prompt();
     const bool no_text = !sam_has_model() || !sam_text_supported();
     ImGui::BeginDisabled(no_text);
     ImGui::SetNextItemWidth(px(420.0f));
     if (ui::InputTextEnglish(msg::sam_text_label, "person; monopod", &p.prompt,
-                             ImGuiInputTextFlags_EnterReturnsTrue) &&
-        !sam_busy())
-        sam_prompt_text(p.prompt);
+                             ImGuiInputTextFlags_EnterReturnsTrue))
+        sam_submit_text();
     ImGui::EndDisabled();
     if (no_text)
         ui::help_on_hover_disabled(sam_has_model() ? msg::sam_text_unsupported
                                                    : dmsg::mask_model_first);
+    ImGui::SameLine();
+    const std::string why = sam_text_refused();
+    ImGui::BeginDisabled(!why.empty());
+    if (ui::Button(msg::sam_text_find)) sam_submit_text();
+    ImGui::EndDisabled();
+    ui::help_on_hover_raw(why.c_str(), ImGuiHoveredFlags_AllowWhenDisabled);
     if (!sam_has_model()) return;
     ImGui::SameLine();
     if (no_text) {

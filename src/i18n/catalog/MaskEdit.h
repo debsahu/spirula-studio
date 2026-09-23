@@ -986,6 +986,27 @@ SS_MSG(sam_text_label,
     RU("Текстовый запрос"),
     TR("Metin istemi"));
 
+SS_MSG(sam_text_find,
+    EN("Find"),       JA("検索"),       ZH_HANS("查找"),  ZH_HANT("尋找"),
+    KO("찾기"),       DE("Suchen"),     FR("Chercher"),
+    ES("Buscar"),     PT("Buscar"),     IT("Cerca"),
+    NL("Zoeken"),     RU("Найти"),      TR("Bul"));
+
+SS_MSG(sam_text_empty,
+    EN("Type what to drop first."),
+    JA("先に取り除くものを入力してください。"),
+    ZH_HANS("请先输入要剔除的内容。"),
+    ZH_HANT("請先輸入要剔除的內容。"),
+    KO("먼저 제거할 대상을 입력하세요."),
+    DE("Geben Sie zuerst ein, was entfernt werden soll."),
+    FR("Saisissez d'abord ce qu'il faut retirer."),
+    ES("Escriba primero qué quitar."),
+    PT("Digite primeiro o que remover."),
+    IT("Scrivi prima cosa rimuovere."),
+    NL("Typ eerst wat er weg moet."),
+    RU("Сначала введите, что убрать."),
+    TR("Önce neyin kaldırılacağını yazın."));
+
 SS_MSG(sam_text_unsupported,
     EN("This checkpoint has no text encoder. Use clicks instead."),
     JA("このチェックポイントにはテキストエンコーダーがありません。クリックを使ってください。"),

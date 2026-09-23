@@ -161,6 +161,13 @@ public:
     // Frame pixels of the open frame. False when nothing started.
     bool sam_prompt_point(float frame_x, float frame_y, Paint mode, bool positive = true);
     bool sam_prompt_text(const std::string& phrases);
+    // What Enter in the phrase field and the Find button both call.
+    bool sam_submit_text();
+    // Why Find is disabled, translated; "" when it can run. Blank = only `;` and spaces.
+    static bool sam_phrases_blank(const std::string& phrases);
+    static std::string sam_text_refusal(bool has_model, bool text, const std::string& blocker,
+                                        bool busy, const std::string& phrases);
+    std::string sam_text_refused() const;
     // Paints a finished result onto the open frame; the DISPLAYED rect changed.
     Rect sam_pump();
     // The paint half of sam_pump(): a re-prompt of the object whose add is still
@@ -288,6 +295,8 @@ private:
     bool sam_add_redoable() const;
     void close_sam();
     void sam_forget();
+    // A revert discards the frame's (or, at -1, every frame's) clicks and last add.
+    void sam_revert(int frame);
     Rect sam_land(SamResult res);
     void sam_start_margin();
     bool sam_gate_passes();   // the blocker, then the device gate

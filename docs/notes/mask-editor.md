@@ -413,7 +413,7 @@ screen px at this zoom), all plain drags (ForceDrop).
 
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
-(`MaskSession.cpp:397-408`, `if (r.empty()) return {};`) and `upload_rect`
+(`MaskSession.cpp:400-411`, `if (r.empty()) return {};`) and `upload_rect`
 does the same (in `upload_rect_to`, `MaskPanel.cpp:87`), so a
 coordinate-mapping bug that made every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
@@ -1168,9 +1168,9 @@ the two apart. Two checks settle it for the set. (a) Source: every frame load
 clears `_status` and resets the livewire, so the line can only come from a
 fresh `ensure_livewire()`. The two halves are in different functions, which an
 earlier draft of this note put both in `pump()`: `load_frame`'s worker clears
-`_status` as it publishes the loaded frame (`MaskSession.cpp:258`, inside the
-`enqueue` lambda that starts at `:238`), and `pump()` calls
-`_livewire.reset()` when it installs that frame on the UI thread (`:300`).
+`_status` as it publishes the loaded frame (`MaskSession.cpp:259`, inside the
+`enqueue` lambda that starts at `:239`), and `pump()` calls
+`_livewire.reset()` when it installs that frame on the UI thread (`:301`).
 The argument is unchanged by the correction -- the clear still happens before
 the frame is published and the reset still happens as it is installed -- but
 an inheritor who went looking for both in `pump()` would have found one.
@@ -1871,7 +1871,7 @@ and remains the only radius readout when the slider is hidden.
 Its arithmetic was re-inlined into `MaskPanel.cpp` at `6126a650`, leaving six
 tests pinning dead code -- the shape of defect this note keeps finding. `[`
 and `]` route through it again, and `clamp_brush` / `scale_brush` /
-`wheel_brush` join it in `MaskSession.cpp:415-440`, the file
+`wheel_brush` join it in `MaskSession.cpp:418-443`, the file
 `mask_doc_test` links, so every radius arithmetic both tools use is tested in
 one place. `clamp_brush` is a rejection test rather than `std::clamp` because
 `std::clamp` **propagates a NaN**, and a NaN radius rasterizes nothing while
@@ -1941,6 +1941,10 @@ cancels a prompt in flight once its current step ends. With no cached checkpoint
 offers **Get the model** and the licence prompt; the consent modal is drawn from
 `frame()`, so it appears over the editor on any screen. The object list, the right
 click and the text row are described with their measurements under Tasks 6 and 7.
+**Find**, beside the text field, does what Enter does (`sam_submit_text`, one path for
+both), and is disabled, with the reason on hover, until the phrase can run. **Revert
+frame** forgets the SAM clicks made on that frame, and **Revert all** (once confirmed)
+every click and object; the phrase and the exceptions stay. See "Operator fixes" below.
 
 ### The files, and the boundary that shapes them
 
@@ -2006,7 +2010,7 @@ stand in for the job.
   `encode_image` at 2.56 s on a byte-identical binary, on mains power with no
   thermal warning; the cause was not found. This is why P7's bar moved.
 - **The open frame's pixels are co-owned.** `_rgb` is a
-  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:333`) and a job holds
+  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:342`) and a job holds
   its own reference, so moving to another frame, which replaces `_rgb` in
   `pump()`, never frees what a job reads. The `const` element type makes a
   refill in place a compile error. **Host memory is a known, unmeasured
@@ -2020,7 +2024,7 @@ stand in for the job.
   (`sam_frame_stamp()`, `"<gen>|<key>"`), and `sam_pump()` drops a result
   whose stamp no longer matches, counting it in `sam_dropped`. The key alone
   is not enough, because a revert reopens the same key. `_doc_gen` is bumped
-  at the one assignment of `_doc`, in `pump()` (`MaskSession.cpp:287`), so any
+  at the one assignment of `_doc`, in `pump()` (`MaskSession.cpp:288`), so any
   load path, present or future, bumps it by construction. Cost: SAM's encode
   cache follows the stamp, so a revert or a return to a frame re-encodes
   (about 1.9 s).
@@ -2944,6 +2948,42 @@ to the end of `MaskAdd.h` is flagged as 4 lines of prose against a budget of 3.
 `GuiApp.h`, `DatasetPrep.cpp`, `SegmentPanel.cpp`, `MaskPrompt.{h,cpp}`,
 `cmake/SsApps.cmake` -- but none of it in a line the plan touched, and none in
 a file the plan added.
+
+### Operator fixes: revert forgets the clicks, and a Find button (2026-09-22)
+
+From the operator's hand test: *"revert frame or revert all doesn't clear objects already
+clicked for sam"*, and *"need a gui button to search by keyword for sam"*.
+
+**What a revert left behind.** Only the clicks. The replace stamp, the held detections
+and a pending margin re-apply were already dead: `_doc_gen` moves on the reload, so
+`sam_add_on_top` and `sam_add_redoable` fail, and `sam_pump()` drops the held crop on
+its next frame. The clicks lived in the editor's `MaskSettings`, keyed by frame index,
+which a revert never touched, so the next click on that object re-sent the discarded
+points. `sam_revert(frame)` now drops that frame's clicks (every click, and the object
+list back to one, for Revert all) and ends the last add, its held crop and any pending
+margin at once rather than a frame later. It is called from `revert_open_frame` and
+`revert_every_frame`, so the modal's Cancel and Esc, which call neither, clear nothing.
+A job in flight is left to finish; its stamp drops it. The phrase and the exception
+chips stay: they name what to find, not a correction on one frame.
+
+**Find.** `msg::sam_text_find`; the catalog had no fitting verb in 13 languages
+(`preview_try_it`, "Try it", reads as a preview, and this commits an undoable drop). Its
+hover reasons are `mask_model_first`, `sam_text_unsupported`, the blocker, `sam_working`,
+and one new message, `sam_text_empty`. It sits on the field's row, so the strip is no
+taller.
+
+| check (M5 Pro, `sam3-q4_0`, offscreen 1600x950, 2-frame 1600x1000 scratch dataset) | observed |
+|---|---|
+| `mask_doc_test`: `sam revert frame:` / `sam revert all:` / `text gate:` checks | pass; mutants killed by name below |
+| mutant: revert leaves clicks | `the reverted frame's clicks are gone`, `a new click ... sends only itself`, `every click is gone ...` FAIL |
+| mutant: revert frame clears every frame | `clicks on other frames stay, labels and all` FAIL |
+| mutant: revert keeps the held crop | `no held detection or margin re-apply outlives it` FAIL (both) |
+| mutant: only `""` is blank / busy ignored | `an empty or whitespace-only field refuses` / `a job or margin re-apply running refuses` FAIL |
+| app: clicks f1 ball, f1 box (object 2), f2 box; Revert frame on f2 | `mask_editor_clicks` 3 -> 2, objects 2; Object 2 "1 here, 1 elsewhere" -> "0 here, 1 elsewhere" |
+| app: Revert all, Esc / Cancel / Delete corrections | clicks 3 / 3 / **0**, objects 2 / 2 / **1**, "Object 1 (no clicks yet)" |
+| app: Find on an empty and a blank field | disabled, hover "Type what to drop first."; results 4 -> 4 |
+| app: "red ball", Find | busy, button disabled with "Segmenting..."; results 4 -> 5, 1 detection, 58,206 px, history 0 -> 1 |
+| app, Russian: the row's right edge | "Найти" and "Частые объекты" end at ~690 px, inside the 1180 px minimum |
 
 ## Plan 3, the workflow features: the measurement record
 
