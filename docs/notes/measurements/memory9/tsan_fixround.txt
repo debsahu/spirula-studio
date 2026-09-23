@@ -1,0 +1,12 @@
+# memory9 review fix round: TSan, scratch clone at 4c2c1a90 + the fix round, -O1 -g -fsanitize=thread
+# 30 iterations of the keeps-buffers test in one process (a scratch-only loop hook), decodes <= 100 + depth asserted
+with take() stepping the window: M9I failures 0; 0 warnings; decodes (count value):  1 101; 29 102;
+without it (the mutant):     M9I failures 10; 0 warnings; decodes (count value):  7 102; 13 103; 5 104; 5 105;
+  first failing check: FAIL keeps buffers: one decode a frame: 104 <= 100 + depth
+final state, 30 iterations again: M9I failures 0; 0 warnings
+final state, full mask_doc_test run 1: 0 warnings; 0 failure(s)
+final state, full mask_doc_test run 2: 0 warnings; 0 failure(s)
+control, bytes() without its lock: 1 warning(s):
+WARNING: ThreadSanitizer: data race (pid=69264)
+  Write of size 8 at 0x00016aeda730 by thread T820 (mutexes: write M0):
+    #0 gui::mask::SlidePrefetch::put_locked(int, gui::Picture&) MaskSlideshow.cpp:174

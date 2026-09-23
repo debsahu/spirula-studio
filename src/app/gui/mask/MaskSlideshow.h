@@ -86,8 +86,8 @@ public:
     void want(int from, int count);
     bool has(int index) const;
     // Swaps the picture into `out` and keeps out's old buffer, cleared, in the
-    // ring. Take the frame being shown and only then move the window past it:
-    // a window that steps first evicts it unshown.
+    // ring; taking the window's front steps the window past it. Take the frame
+    // shown, then want() the next window: a want() first evicts it unshown.
     bool take(int index, Picture& out);
     size_t bytes() const;
     int decoded() const;

@@ -142,9 +142,20 @@ else echo "FAIL start_slideshow marks the press frame (_slide_fresh = true)"; FA
 # texture it has; the decoder count is budgeted.
 has 1 'slideshow_tick(ImGui::GetTime(), side, _slide_pic)'
 has 1 'glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, _slide_pic.w, _slide_pic.h, GL_RGB, GL_UNSIGNED_BYTE, _slide_pic.rgb.data());'
-local_pic=$(awk '/^void MaskSession::draw_slideshow\(/{on=1} on&&/^}/{exit} on&&/^ *Picture pic;/{print}' "$F")
-if [ -z "$local_pic" ]; then echo "ok   draw_slideshow declares no local Picture"
-else echo "FAIL draw_slideshow declares no local Picture"; FAILS=$((FAILS + 1)); fi
+slide_fn=$(awk '/^void MaskSession::draw_slideshow\(/{on=1} on{print} on&&/^}/{exit}' "$F")
+if ! printf '%s\n' "$slide_fn" | command grep -qE '(^|[^_A-Za-z0-9])(gui::)?Picture[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*[;{(=]'; then
+    echo "ok   draw_slideshow declares no local Picture, of any name"
+else echo "FAIL draw_slideshow declares no local Picture, of any name"; FAILS=$((FAILS + 1)); fi
+sub_if=$(printf '%s\n' "$slide_fn" | awk '/glTexSubImage2D\(/{print p; exit} {p=$0}' | sed 's/^ *//')
+if [ "$sub_if" = 'if (_slide_pic.w == _slide_tex_w && _slide_pic.h == _slide_tex_h) {' ] &&
+   printf '%s\n' "$slide_fn" | command grep -qxE ' *_slide_tex_w = _slide_pic\.w;' &&
+   printf '%s\n' "$slide_fn" | command grep -qxE ' *_slide_tex_h = _slide_pic\.h;'; then
+    echo "ok   a same-size picture goes through glTexSubImage2D, and a re-specify records the size"
+else echo "FAIL a same-size picture goes through glTexSubImage2D, and a re-specify records the size"; FAILS=$((FAILS + 1)); fi
+stop_fn=$(awk '/^void MaskSession::stop_slideshow\(/{on=1} on{print} on&&/^}/{exit}' src/app/gui/mask/MaskSession.cpp)
+if printf '%s\n' "$stop_fn" | command grep -qxF '    _slide_pic = Picture{};'; then
+    echo "ok   stop_slideshow releases the picture on screen"
+else echo "FAIL stop_slideshow releases the picture on screen"; FAILS=$((FAILS + 1)); fi
 if command grep -qF '_slide_threads = mask::slide_threads(' src/app/gui/mask/MaskSession.cpp; then
     echo "ok   Play budgets its decoders"
 else echo "FAIL Play budgets its decoders"; FAILS=$((FAILS + 1)); fi

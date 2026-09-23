@@ -4130,8 +4130,8 @@ void bench_8k(const char* dir) {
         const double fps = (100.0 - kWarm) / s;
         const int decodes = p.decoded();
         p.stop();
-        // One decode a shown frame, plus the first tick's one re-pick and the
-        // window wrapping onto frames 0..depth-1 as the last ones are shown.
+        // One decode a shown frame and the window wrapping onto frames 0..depth-1
+        // as the last ones are shown; the + 1 keeps the bar the rows were set against.
         const int max_decodes = 100 + 1 + depth;
         std::printf("bench slideshow pool %s %4d  threads %d  depth %2d  %8.1f fps   longest wait %8.1f ms   "
                     "first frame %8.1f ms   decodes %3d   [bar: >= %.0f fps, wait <= 400 ms, "
@@ -7038,9 +7038,9 @@ void test_slide_prefetch_keeps_buffers() {
               std::to_string(threads + depth + 1));
     check(peak_cap <= (size_t)(depth + 1) * one,
           "keeps buffers: the ring holds " + std::to_string(peak_cap) + " bytes <= (depth + 1) pictures");
-    // Not bounded here: between a take and the next want() a decoder may pick the
-    // frame just taken again (timing, not buffers); the pool bench carries that bar.
-    std::printf("     keeps buffers: %d decodes for 100 frames\n", decodes);
+    // One decode a frame, plus the window wrapping onto frames 0..depth-1.
+    check(decodes <= 100 + depth, "keeps buffers: one decode a frame: " + std::to_string(decodes) +
+                                      " <= 100 + depth");
 
     // A window that jumps drops every held frame at once; those buffers stay.
     mk::SlidePrefetch j;
@@ -7459,6 +7459,36 @@ void test_session_slideshow_stop_reloads_full_resolution() {
           "full res: stop installs the whole 64x48 frame, not the 32x24 picture");
     check(s.doc() && s.doc()->width() == 64 && s.doc()->height() == 48,
           "full res: the document is loaded at the file's size");
+    s.close();
+}
+
+// The decoder budget follows the dataset's largest frame, not the one Play
+// starts on: two 1080p frames in the root, one 8K frame under cam1.
+void test_session_slideshow_threads_from_largest_frame() {
+    const fs::path root = scratch("slideshow_mixed");
+    const fs::path images = root / "images", masks = root / "masks";
+    const std::vector<uint8_t> hd((size_t)1920 * 1080 * 3, 90), big((size_t)7680 * 3840 * 3, 90);
+    write_jpg_rgb(images / "a.jpg", 1920, 1080, hd);
+    write_jpg_rgb(images / "b.jpg", 1920, 1080, hd);
+    write_jpg_rgb(images / "cam1" / "c.jpg", 7680, 3840, big);
+    std::error_code ec;
+    fs::create_directories(masks, ec);
+    const unsigned hw = std::thread::hardware_concurrency();
+    const int want = mk::slide_threads(7680, 3840, hw);
+    check(want != mk::slide_threads(1920, 1080, hw),
+          "mixed sizes: fixture: this machine budgets 8K and 1080p differently");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(root.string(), images.string(), masks.string(), false, err), "mixed sizes: open: " + err);
+    settle(s);
+    const auto px = s.frame_pixels();
+    check(s.doc() && s.doc()->width() == 1920 && px && px->size() == (size_t)1920 * 1080 * 3,
+          "mixed sizes: fixture: Play starts on a 1080p frame");
+    s.start_slideshow();
+    check(s.slideshow_playing() && s.slide_threads() == want,
+          "mixed sizes: Play on a 1080p frame budgets for the 8K one: " + std::to_string(s.slide_threads()));
+    s.stop_slideshow();
+    settle(s);
     s.close();
 }
 
@@ -8473,6 +8503,7 @@ int main() {
     test_slide_prefetch_halt();
     test_session_slideshow();
     test_session_slideshow_stop_reloads_full_resolution();
+    test_session_slideshow_threads_from_largest_frame();
     test_session_slideshow_flipped();
     test_session_slideshow_window();
     test_session_slideshow_stop_does_not_join();

@@ -1466,8 +1466,18 @@ void MaskSession::start_slideshow() {
     std::vector<SlideFrame> frames;
     for (const FrameRef& f : _frames)
         frames.push_back({f.file, mask_file(_mask_root, f.key), _mask_flipped});
+    // The largest frame sets the budget: one header per camera, whose frames share a size.
     int w = 0, h = 0;
-    app::image_size(_frames[(size_t)_idx].file, w, h);
+    std::vector<std::string> cameras;
+    for (const FrameRef& f : _frames) {
+        if (std::find(cameras.begin(), cameras.end(), f.camera) != cameras.end()) continue;
+        cameras.push_back(f.camera);
+        int fw = 0, fh = 0;
+        if (app::image_size(f.file, fw, fh) && (long long)fw * fh > (long long)w * h) {
+            w = fw;
+            h = fh;
+        }
+    }
     _slide_threads = mask::slide_threads(w, h, std::thread::hardware_concurrency());
     const auto t0 = std::chrono::steady_clock::now();
     _slide.start(std::move(frames), _slide_threads);   // joins a halted playback's leftovers
@@ -1500,6 +1510,7 @@ void MaskSession::stop_slideshow() {
     if (!_slide_playing) return;
     const auto t0 = std::chrono::steady_clock::now();
     _slide.halt();
+    _slide_pic = Picture{};
     _slide_stop_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     _slide_playing = false;

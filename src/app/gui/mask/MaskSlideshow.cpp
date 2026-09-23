@@ -97,9 +97,8 @@ bool SlidePrefetch::has(int index) const {
     return false;
 }
 
-// No notify: a worker waits on pick_locked(), which reads the window and the
-// held and in-flight sets, never the free bytes, and the caller's next call is
-// the want() that moves the window and notifies.
+// Taking the front of the window moves the window past it under this lock, so no
+// decoder re-picks the frame before the caller's want(), which then notifies.
 bool SlidePrefetch::take(int index, Picture& out) {
     std::lock_guard<std::mutex> lk(_mu);
     for (Slot& s : _slots)
@@ -108,6 +107,10 @@ bool SlidePrefetch::take(int index, Picture& out) {
             s.pic.rgb.clear();
             s.index = -1;
             _bytes -= out.bytes();
+            if (_count > 0 && index == _from) {
+                _from = (_from + 1) % (int)_frames.size();
+                _count--;
+            }
             return true;
         }
     return false;

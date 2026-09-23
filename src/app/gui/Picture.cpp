@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <memory>
 
 namespace gui {
 
@@ -65,6 +66,13 @@ bool load_depth_rgb(const std::string& path, int& w, int& h,
     app::depth_to_rgb(d.data(), n, /*skip_zero=*/true, rgb.data());
     return true;
 }
+
+// stb's buffer, freed however the scope is left: a resize that throws must not
+// strand an 84 MB decode.
+struct StbFree {
+    void operator()(unsigned char* p) const { stbi_image_free(p); }
+};
+using StbPixels = std::unique_ptr<unsigned char, StbFree>;
 
 // Sizes `out` for a w x h source at `max_side` without freeing its buffer, and
 // returns the box step: whole source pixels, never upscaling.
@@ -168,29 +176,23 @@ bool load_picture(const std::string& image_path, const std::string& mask_path,
         step = size_picture(w, h, max_side, out);
         box_photo(rgb.data(), w, h, step, out);
     } else {
-        unsigned char* rgb = stbi_load(image_path.c_str(), &w, &h, &comp, 3);
-        if (!rgb || w <= 0 || h <= 0) {
-            stbi_image_free(rgb);
-            return fail();
-        }
+        const StbPixels rgb(stbi_load(image_path.c_str(), &w, &h, &comp, 3));
+        if (!rgb || w <= 0 || h <= 0) return fail();
         step = size_picture(w, h, max_side, out);
-        box_photo(rgb, w, h, step, out);
-        stbi_image_free(rgb);
+        box_photo(rgb.get(), w, h, step, out);
     }
     if (mask_path.empty()) return true;
 
     // stb's buffer in place, unless the mask needs what load_stencil adds: an
     // EXR decode, or the EXIF turn a JPEG mask may carry.
     int mw = 0, mh = 0;
-    unsigned char* m = exr::is_exr(mask_path)
-                           ? nullptr
-                           : stbi_load(mask_path.c_str(), &mw, &mh, &comp, 1);
+    StbPixels m(exr::is_exr(mask_path) ? nullptr
+                                       : stbi_load(mask_path.c_str(), &mw, &mh, &comp, 1));
     if (m && app::photo_turn(mask_path).identity()) {
-        tint_blocks(m, mw, mh, w, h, step, mask_flipped, out);
-        stbi_image_free(m);
+        tint_blocks(m.get(), mw, mh, w, h, step, mask_flipped, out);
         return true;
     }
-    stbi_image_free(m);
+    m.reset();
     std::vector<uint8_t> stencil;
     if (app::load_stencil(mask_path, mw, mh, stencil))
         tint_blocks(stencil.data(), mw, mh, w, h, step, mask_flipped, out);

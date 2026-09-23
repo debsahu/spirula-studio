@@ -2024,25 +2024,28 @@ shape or pen path is half drawn; the key list is the frame slider's tooltip.
 the photo, in the mask folder's convention, `load_picture`) decoded into a
 ring of at most 12 pictures and 64 MB (FilmReel's constants; FilmReel itself
 is not reused: it has no accessor or select, follows the newest, and draws
-its own slider). The decoder count is `slide_threads`' byte budget, read from
-the first frame's header at Play: 300 MiB over what one stb decode holds, 4.5
-bytes a pixel, never more than `cores - 1` or 4 -- so 2 at 8K and 4 at 4K and
-below. `SlidePrefetch::start` clamps only to [1, 8]; the budget is the call
-site's. The ring clears and swaps pictures while playing and never frees one;
-memory9 has the measurements. Starting it releases the SAM session, as plan
-4's ruling 5 requires, and Play waits while a SAM job runs, while the worker
-is busy, and while a shape or pen path is half drawn: SAM and the pool want
-the same memory and never need it at once. The decode pool uses stb alone and
-is not an inference user. The document is released while it plays, a dirty
-frame is saved first and the first decode waits for that save, and the frame
-on screen is loaded on stop. The clock runs from the frame actually shown, so
-a rate the decoder cannot hold shows as a lower shown rate, never as skipped
-frames; a frame that cannot be decoded is counted as shown and skipped. Any
-click, wheel tick or key stops it; mouse motion does not. Stopping does not
-join the decode threads: `SlidePrefetch::halt()` drops the ring and leaves
-them to finish, and a quick re-Play or `close()` joins them. The measured
-freeze is the `stop freeze` row under "Measured floors".
-`GuiApp::animating()` keeps frames coming while it plays.
+its own slider). The decoder count is `slide_threads`' byte budget for the
+dataset's largest frame, read at Play from one header per camera (a camera's
+frames share a size): 300 MiB over what one stb decode holds, 4.5 bytes a
+pixel, never more than `cores - 1` or 4 -- so 2 at 8K and 4 at 4K and below.
+`SlidePrefetch::start` clamps only to [1, 8]; the budget is the call site's.
+The ring clears and swaps pictures while playing and never frees one, and
+taking the front of the window steps the window, so a decoder cannot re-pick
+the frame just taken; memory9 has the measurements. Starting it releases the
+SAM session, as plan 4's ruling 5 requires, and Play waits while a SAM job
+runs, while the worker is busy, and while a shape or pen path is half drawn:
+SAM and the pool want the same memory and never need it at once. The decode
+pool uses stb alone and is not an inference user. The document is released
+while it plays, a dirty frame is saved first and the first decode waits for
+that save, and the frame on screen is loaded on stop. The clock runs from the
+frame actually shown, so a rate the decoder cannot hold shows as a lower
+shown rate, never as skipped frames; a frame that cannot be decoded is
+counted as shown and skipped. Any click, wheel tick or key stops it; mouse
+motion does not. Stopping does not join the decode threads:
+`SlidePrefetch::halt()` drops the ring and leaves them to finish, and a quick
+re-Play or `close()` joins them. The measured freeze is the `stop freeze` row
+under "Measured floors". `GuiApp::animating()` keeps frames coming while it
+plays.
 
 **How far ahead it decodes, and why it is not a constant.** The window is
 `slide_depth(slide_picture_bytes(src, target))`: what 64 MB affords at the
@@ -3827,6 +3830,33 @@ is 2.5% under, the 4096 row 5.1% over). With the hook, three runs read
 the drop). On a copy of the 8K bench, editor overlay against playing, 40 x 40
 patches: medians within 1 level both ways, and the tinted set identical
 (100% / 0%) unflipped and flipped (`measurements/memory9/flip_polarity.txt`).
+
+**The review's fix round (2026-09-23).**
+- **I1, a re-decode race, pre-existing.** Between `take()` and the caller's
+  `want()` the frame just taken was still wanted and no longer held, so a
+  decoder could pick it again. `take()` now steps the window past its front
+  under the same lock. The keeps-buffers test asserts `decodes <= 100 + depth`
+  again: under TSan, 30 iterations read 0 failures with the fix (decodes
+  101-102) and 10 of 30 failures without it (102-105)
+  (`measurements/memory9/tsan_fixround.txt`).
+- **I2, the budget came from the frame on screen.** A dataset whose cameras
+  differ in size could run four decoders on 8K frames when Play started on a
+  1080p one. The budget now comes from the largest of one header per camera;
+  pinned by "mixed sizes" (two 1080p frames at the root, one 8K under
+  `cam1`, Play on the 1080p one: 2 decoders). A camera whose own frames
+  differ in size is still read from its first frame only. The 8K bench is
+  uniform, so #9's thread count (2) and readings are unchanged.
+- **M1:** Stop releases the picture on screen. **M3:** `load_picture`
+  holds stb's buffers in a `unique_ptr`, so a throwing resize frees them.
+  **M5:** `survivors.sh` now catches a local `Picture` of any name, a size
+  test that never matches, and a re-specify that does not record the size.
+- **Not changed, noted.** M2: within one Play the ring's buffer capacity
+  can ratchet past its 64 MB budget if the pane's target grows mid-play
+  (`_bytes` counts sizes, not capacity); the review's worst case at 8K is
+  15 x 21.1 MiB = 316 MiB, steady state 6 buffers. M4: a JPEG mask carrying an
+  EXIF turn is decoded twice (rare, time only). M6: the keeps-buffers
+  test's capacity check covers the ring's slots, not the decoders' or the
+  panel's pictures; `picture_allocs` covers those.
 
 **Decisions a maintainer must not undo.**
 - `load_picture` boxes the photo before it decodes the mask and copies neither.
