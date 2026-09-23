@@ -435,7 +435,7 @@ screen px at this zoom), all plain drags (ForceDrop).
 
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
-(`MaskSession.cpp:627-638`, `if (r.empty()) return {};`) and `upload_rect`
+(`MaskSession.cpp:643-654`, `if (r.empty()) return {};`) and `upload_rect`
 does the same (in `upload_rect_to`, `MaskPanel.cpp:87`), so a
 coordinate-mapping bug that made every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
@@ -1736,7 +1736,7 @@ keeps them apart. **The operator used it on a real 120 MP correction and asked
 for the opposite**: *"carry over eraser and brush size from each other, rather
 than keeping it independent."* Their experience of the task beats the
 generalisation, so `_eraser` is gone and `radius()` / `set_radius()`
-(`MaskSession.h:142-143`) address the one float. The slider, `[`/`]` and
+(`MaskSession.h:143-144`) address the one float. The slider, `[`/`]` and
 Alt+wheel all move it whichever tool is up.
 
 **The test was inverted, not deleted.** It guarded independence, which is now
@@ -1893,7 +1893,7 @@ and remains the only radius readout when the slider is hidden.
 Its arithmetic was re-inlined into `MaskPanel.cpp` at `6126a650`, leaving six
 tests pinning dead code -- the shape of defect this note keeps finding. `[`
 and `]` route through it again, and `clamp_brush` / `scale_brush` /
-`wheel_brush` join it in `MaskSession.cpp:645-670`, the file
+`wheel_brush` join it in `MaskSession.cpp:661-686`, the file
 `mask_doc_test` links, so every radius arithmetic both tools use is tested in
 one place. `clamp_brush` is a rejection test rather than `std::clamp` because
 `std::clamp` **propagates a NaN**, and a NaN radius rasterizes nothing while
@@ -2032,7 +2032,7 @@ stand in for the job.
   `encode_image` at 2.56 s on a byte-identical binary, on mains power with no
   thermal warning; the cause was not found. This is why P7's bar moved.
 - **The open frame's pixels are co-owned.** `_rgb` is a
-  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:385`) and a job holds
+  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:387`) and a job holds
   its own reference, so moving to another frame, which replaces `_rgb` in
   `pump()`, never frees what a job reads. The `const` element type makes a
   refill in place a compile error. **Host memory is a known, unmeasured
@@ -3162,8 +3162,11 @@ over `MaskPanel.cpp`; it anchors the pen commit on the whole statement, so a
 `propagate()` saves the source inside its own job, snapshots each target,
 writes it, and rolls back a failed write at once; every attempted target is
 counted. The session keeps one undo record, offered while the source is open,
-dropped when a target is opened or past 256 MB, and forgotten by `close()`
-and `open()`. Propagate waits for SAM work; Undo propagate does not.
+dropped when a target is opened, past 256 MB, or by Revert all, and forgotten
+by `close()` and `open()`. Revert all has to drop it: it removes every entry and
+`.base.png`, so an undo after it wrote the targets' old layers and entries back
+under masks it never recomposited, and the next open re-applied corrections
+Revert all had removed. Propagate waits for SAM work; Undo propagate does not.
 
 **A failed restore must not leave the editor and the disk disagreeing.** The
 layers go back before the composite is written, so a restore that stopped at
@@ -3172,8 +3175,15 @@ propagated entry: the frame read Unchanged, opened showing the undone
 picture, not dirty, while training read the propagated one. `restore_layers`
 now puts back the layers it found whenever the mask on disk is still the
 found entry's composite and not the snapshot's, so the frame stays wholly as
-the propagate left it. A target that would not go back stays in the record,
-and the status line names it and says Undo retries. Entering it still drops
+the propagate left it. A never-edited target is undone by `revert_frame`, which
+writes the mask before it removes the files; when a removal fails the entry
+stays, so the base, the layers and the mask read beforehand go back too. When
+only the index write fails the files are already gone and nothing goes back:
+the mask is the undone one. A target that would not go back stays in the record,
+and the status line names it and says to use Undo propagate again. A
+propagate names the first frame it could not put back, with the count, ahead
+of any stray-base or rolled-back failure, and promises a retry only when the
+record was kept. Entering it still drops
 the record, which is now safe: it opens showing what is on disk. The two
 rejected remedies: keeping the record alone leaves the disagreement until a
 retry, and marking the frame dirty on open is session state that
@@ -3195,6 +3205,17 @@ The propagate's load rebases it, so the undo gives the regenerated base under
 the target's own layers, which is what opening it would have shown, not the
 raw file that was on disk. `test_undo_propagate_regenerated_target` pins that
 and nothing asserts byte identity there.
+
+**Known and left, as in plan 1's `revert_all`.** A mask regenerated after the
+propagate (a CLI `spirula sam` run; the app's DatasetPrep rebases first) is
+overwritten by Undo propagate, and the regenerated file is kept nowhere.
+Calling `recomposite_frame` at the top of `restore_layers` would rebase it
+first; `revert_all` has the same gap, so both should change together. Not
+pinned by a test, all benign today: a propagate queued ahead of an Undo click
+(Task 7 disables both while the worker is busy), re-arming the whole record
+instead of the failed targets (a restored target restores again, idempotently),
+and undo order. The record copies each snapshot's PNG bytes once, and the
+whole record is built before the 256 MB cap decides whether to keep it.
 
 ## Not in this phase
 

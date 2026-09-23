@@ -406,8 +406,10 @@ void MaskSession::revert_every_frame() {
     const int i = _idx;
     _doc.reset();
     _rgb.reset();
+    drop_propagate_record();
     enqueue([this] {
         std::string err;
+        drop_propagate_record();   // one a propagate queued ahead of this may have set
         const bool flipped = _index.mask_flipped;
         if (mask::revert_all(_layer_root, err) < 0)
             post_error(spirula::i18n::format(msg::err_write, {err}), true);
@@ -447,6 +449,12 @@ void MaskSession::forget_workflow() {
     _prop = PropagateRecord{};
     _prop_undoable = false;
     _prop_report = PropagateReport{};
+}
+
+void MaskSession::drop_propagate_record() {
+    std::lock_guard<std::mutex> lk(_mu);
+    _prop = PropagateRecord{};
+    _prop_undoable = false;
 }
 
 void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
@@ -546,14 +554,17 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
             }
             // Written, or partly: the snapshot is what puts it back either way.
             rec.bytes += snap.bytes();
-            rec.targets.push_back(snap);
             if (ok) {
                 rep.done++;
-                continue;
+            } else {
+                fail(f.key, err, false);
+                std::string rerr;
+                if (!restore_layers(_layer_root, _mask_root, snap, _index, rerr) && !rep.unrestored++) {
+                    rep.unrestored_key = f.key;
+                    rep.unrestored_path = err;
+                }
             }
-            fail(f.key, err, false);
-            std::string rerr;
-            if (!restore_layers(_layer_root, _mask_root, snap, _index, rerr)) rep.unrestored++;
+            rec.targets.push_back(std::move(snap));
         }
         rep.bytes = rec.bytes;
         rep.undoable = !rec.targets.empty() && rec.bytes <= j->byte_cap;
@@ -563,10 +574,14 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
         _prop_undoable = rep.undoable;
         _prop = rep.undoable ? std::move(rec) : PropagateRecord{};
         _status = spirula::i18n::format(msg::prop_done, {rep.done, rep.refused, rep.failed});
-        // By priority, so a failure named in the loop is never clobbered.
-        if (rep.failed)
+        // By priority, so a failure named in the loop is never clobbered, and
+        // a frame left not put back is named before any that was.
+        if (rep.unrestored)
+            _error = spirula::i18n::format(rep.undoable ? msg::prop_failed_not_restored
+                                                        : msg::prop_failed_not_restored_final,
+                                           {rep.unrestored_key, rep.unrestored_path, rep.unrestored});
+        else if (rep.failed)
             _error = spirula::i18n::format(rep.failed_stray ? msg::prop_failed_stray_base
-                                           : rep.unrestored ? msg::prop_failed_not_restored
                                                             : msg::prop_failed_restored,
                                            {rep.failed_key, rep.failed_path});
         else if (rep.refused)
@@ -580,7 +595,7 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
 }
 
 // A target that would not go back stays in the record, so Undo retries it;
-// restore_layers left it wholly as the propagate did, so nothing disagrees.
+// restore_layers leaves its mask agreeing with its layers, bar a second fault.
 void MaskSession::undo_propagate() {
     if (!can_undo_propagate()) return;
     auto rec = std::make_shared<PropagateRecord>();
@@ -602,8 +617,9 @@ void MaskSession::undo_propagate() {
                 failed_path = err;
             }
             left.bytes += it->bytes();
-            left.targets.insert(left.targets.begin(), *it);
+            left.targets.push_back(std::move(*it));
         }
+        std::reverse(left.targets.begin(), left.targets.end());   // record order
         const int restored = (int)(rec->targets.size() - left.targets.size());
         set_corrected((int)_index.frames.size());
         std::lock_guard<std::mutex> lk(_mu);

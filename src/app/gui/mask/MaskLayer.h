@@ -142,7 +142,7 @@ bool snapshot_layers(const std::string& layer_root, const std::string& key,
                      const LayerIndex& idx, LayerSnapshot& out, std::string& error);
 // Writes the snapshot's layers back (or removes them), re-derives the composite
 // over the frame's base, restores the entry; a frame with no entry is reverted.
-// On failure the entry is as found, and so are the layers while the mask is.
+// A failure leaves the mask agreeing with the layers and entry, bar a second one.
 bool restore_layers(const std::string& layer_root, const std::string& mask_root,
                     const LayerSnapshot& snap, LayerIndex& idx, std::string& error);
 

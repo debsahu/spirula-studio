@@ -71,6 +71,7 @@ struct PropagateReport {
     std::string refused_key;            // the first refusal
     int refused_w = 0, refused_h = 0;   // its size
     std::string failed_key, failed_path;   // the first failure and the file that failed
+    std::string unrestored_key, unrestored_path;   // the first failure not put back
     bool failed_stray = false;          // that failure is a .base.png with no index entry
     int w = 0, h = 0;                   // the source's size
     bool undoable = false;
@@ -338,6 +339,7 @@ private:
     void close_sam();
     void sam_forget();
     void forget_workflow();          // plan 3's per-dataset state (Decision 23)
+    void drop_propagate_record();    // Decision 5's drops; guarded by _mu
     // A revert discards the frame's (or, at -1, every frame's) clicks and last add.
     void sam_revert(int frame);
     Rect sam_land(SamResult res);

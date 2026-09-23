@@ -2140,7 +2140,7 @@ void test_session_propagate() {
 
     s.undo_propagate();
     settle(s);
-    check(!s.can_undo_propagate(), "record consumed");
+    check(!s.can_undo_propagate() && s.last_propagate().done == 0, "record consumed, report reset");
     check(file_bytes(f.masks / "cam0" / "b.png") == original_b, "b's mask is byte-identical after undo");
     check(!fs::exists(f.layer / "cam0" / "b.drop.png") && !fs::exists(f.layer / "cam0" / "c.drop.png"),
           "targets' layers gone");
@@ -2273,8 +2273,9 @@ void test_session_propagate_failures() {
     check(r.done == 0 && r.failed == 1 && r.unrestored == 1, "a rollback that failed is counted");
     check(r.failed_path.find("c.base.png") != std::string::npos,
           "the failure names the base, not the image it was handed: " + r.failed_path);
-    check(s.error() == spirula::i18n::format(spirula::i18n::msg::maskedit::prop_failed_not_restored,
-                                             {r.failed_key, r.failed_path}),
+    check(r.unrestored_key == "cam0/c" &&
+              s.error() == spirula::i18n::format(spirula::i18n::msg::maskedit::prop_failed_not_restored,
+                                                 {r.unrestored_key, r.unrestored_path, 1}),
           "and the not-restored wording is the one shown: " + s.error());
     fs::remove(f.layer / "cam0" / "c.base.png", ec);
     s.undo_propagate();
@@ -2294,6 +2295,7 @@ void test_session_propagate_failures() {
     settle(s);
     r = s.last_propagate();
     check(r.done == 0 && r.refused == 0 && r.failed == 0, "a failed source save propagates nothing");
+    check(s.status().empty(), "and does not leave the working line up: " + s.status());
     check(s.error().find("a.drop.png") != std::string::npos, "the save's error survives: " + s.error());
     check(file_bytes(f.masks / "cam0" / "b.png") == original_b, "b untouched after the aborted propagate");
     check(!s.can_undo_propagate(), "nothing to undo");
@@ -2459,6 +2461,256 @@ void undo_failure_arm(bool flipped) {
 void test_undo_propagate_failure() {
     undo_failure_arm(false);
     undo_failure_arm(true);
+}
+
+// Opens `f` and drops a's box at (4,4)-(14,14), the source every fix-round test uses.
+void open_and_drop(mk::MaskSession& s, const Fixture& f, bool flipped, const std::string& tag) {
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), flipped, err), tag + "open: " + err);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+}
+
+void keep_box(mk::MaskSession& s) {
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+    s.commit_stroke(box, mk::Paint::ForceKeep, m);
+}
+
+// Revert all removes every correction; an Undo propagate after it would write
+// the targets' old layers and entries back under masks it never recomposites.
+void test_revert_all_drops_propagate_record() {
+    for (bool flipped : {false, true}) {
+        const std::string tag = flipped ? "revert all (flipped): " : "revert all (unflipped): ";
+        Fixture f = make_dataset(flipped ? "prop_revall_f" : "prop_revall_u", 64, 48, {"cam0/a", "cam0/b"});
+        const fs::path b_png = f.masks / "cam0" / "b.png";
+        const std::vector<uint8_t> original_b = file_bytes(b_png);
+        mk::MaskSession s;
+        open_and_drop(s, f, flipped, tag);
+        s.propagate(mk::PropagateScope::Next, 0, 0);
+        settle(s);
+        keep_box(s);
+        s.propagate(mk::PropagateScope::Next, 0, 0);
+        settle(s);
+        check(s.can_undo_propagate() && s.last_propagate().bytes > 0,
+              tag + "fixture: the record holds b's own corrections");
+        s.revert_every_frame();
+        settle(s);
+        check(s.doc() && s.doc()->key() == "cam0/a" && file_bytes(b_png) == original_b &&
+                  s.corrected_count() == 0, tag + "fixture: back at the source, every frame reverted");
+        check(!s.can_undo_propagate(), tag + "Undo propagate is not offered after Revert all");
+        s.undo_propagate();
+        settle(s);
+        check(file_bytes(b_png) == original_b && !fs::exists(f.layer / "cam0" / "b.drop.png") &&
+                  s.corrected_count() == 0, tag + "and an undo writes nothing");
+        s.close();
+    }
+}
+
+// A never-edited target: its undo is a revert_frame, which writes the mask and
+// then removes the files. A removal that fails must leave the mask propagated.
+void undo_failure_no_entry_arm(bool flipped) {
+    if (!chmod_injects()) return;
+    const std::string tag = flipped ? "undo failure, no entry (flipped): " : "undo failure, no entry (unflipped): ";
+    Fixture f = make_dataset(flipped ? "undo_fail_ne_f" : "undo_fail_ne_u", 64, 48, {"cam0/a", "cam0/b"});
+    const fs::path b_png = f.masks / "cam0" / "b.png", ro = f.layer / "cam0";
+    const std::vector<uint8_t> original_b = file_bytes(b_png);
+    mk::MaskSession s;
+    open_and_drop(s, f, flipped, tag);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const std::vector<uint8_t> b_prop = file_bytes(b_png);
+    const auto ro_was = fs::status(ro).permissions();
+    const auto undo_locked = [&] {
+        fs::permissions(ro, fs::perms::owner_read | fs::perms::owner_exec);
+        s.undo_propagate();
+        settle(s);
+        fs::permissions(ro, ro_was);
+    };
+    check(s.can_undo_propagate() && b_prop != original_b, tag + "fixture: b was propagated, no entry before");
+    undo_locked();
+    check(s.error().find("cam0/b") != std::string::npos && file_bytes(b_png) == b_prop &&
+              fs::exists(f.layer / "cam0" / "b.drop.png"),
+          tag + "b is left as the propagate left it, mask included: " + s.error());
+    check(s.can_undo_propagate(), tag + "Undo propagate is offered again");
+    s.undo_propagate();
+    settle(s);
+    check(file_bytes(b_png) == original_b && !fs::exists(f.layer / "cam0" / "b.base.png") &&
+              !s.can_undo_propagate(), tag + "the retry puts b back byte for byte");
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    undo_locked();
+    s.go_to(1);
+    settle(s);
+    std::vector<uint8_t> shown = s.doc() ? s.doc()->composite() : std::vector<uint8_t>();
+    if (flipped) mk::flip_polarity(shown.data(), shown.size());
+    check(s.doc() && !s.doc()->dirty() && shown == stencil_pixels(b_png) && file_bytes(b_png) == b_prop,
+          tag + "b opens showing the mask training reads");
+    s.close();
+}
+
+void test_undo_propagate_failure_no_entry() {
+    undo_failure_no_entry_arm(false);
+    undo_failure_no_entry_arm(true);
+}
+
+// The same undo failing only at its index write: the files are already gone,
+// so nothing is put back and masks/ already holds the undone mask.
+void test_undo_propagate_index_save_fails() {
+    if (!chmod_injects()) return;
+    Fixture f = make_dataset("undo_fail_index", 64, 48, {"cam0/a", "cam0/b"});
+    const fs::path b_png = f.masks / "cam0" / "b.png";
+    const std::vector<uint8_t> original_b = file_bytes(b_png);
+    mk::MaskSession s;
+    open_and_drop(s, f, false, "index save: ");
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const auto was = fs::status(f.layer).permissions();
+    fs::permissions(f.layer, fs::perms::owner_read | fs::perms::owner_exec);
+    s.undo_propagate();
+    settle(s);
+    fs::permissions(f.layer, was);
+    check(s.error().find("index.json") != std::string::npos, "index save: fixture: only index.json failed: " +
+                                                                 s.error());
+    check(file_bytes(b_png) == original_b && !fs::exists(f.layer / "cam0" / "b.base.png") &&
+              !fs::exists(f.layer / "cam0" / "b.drop.png"),
+          "index save: the files stay gone, not put back beside an index without b");
+    s.close();
+}
+
+// Several of each outcome in one camera, and a record whose second target is
+// the one opened: every rule a single-target fixture cannot tell apart.
+void test_propagate_camera_many() {
+    Fixture f = make_dataset("prop_many", 64, 48,
+                             {"cam0/a", "cam0/b", "cam0/c", "cam0/d", "cam0/e", "cam1/x"});
+    for (const char* k : {"f", "g"}) {
+        write_jpg_rgb(f.images / "cam0" / (std::string(k) + ".jpg"), 32, 24, synth_rgb(32, 24, 9));
+        write_png_gray(f.masks / "cam0" / (std::string(k) + ".png"), 32, 24, synth_mask(32, 24, 9));
+    }
+    std::error_code ec;
+    const fs::path d_drop = f.layer / "cam0" / "d.drop.png", e_keep = f.layer / "cam0" / "e.keep.png";
+    fs::create_directories(d_drop, ec);
+    fs::create_directories(e_keep, ec);
+    mk::MaskSession s;
+    open_and_drop(s, f, false, "many: ");
+    check(s.frame_count() == 8 && s.frames()[2].key == "cam0/c" && s.frames()[7].key == "cam1/x",
+          "many: fixture: a..g in cam0, x in cam1");
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    const mk::PropagateReport r = s.last_propagate();
+    check(r.done == 2 && r.failed == 2 && r.refused == 2 && r.unrestored == 0,
+          "many: two done, two failed, two refused, each counted");
+    check(!fs::exists(d_drop) && !fs::exists(e_keep) && !fs::exists(f.layer / "cam0" / "e.base.png"),
+          "many: both rollbacks cleared their obstacle and wrote no layer back");
+    s.go_to(7);
+    settle(s);
+    check(s.doc() && s.doc()->key() == "cam1/x" && !s.can_undo_propagate(),
+          "many: a frame that is neither source nor target is not offered the undo");
+    s.go_to(0);
+    settle(s);
+    check(s.can_undo_propagate(), "many: back at the source, the record is still there");
+    s.go_to(2);
+    settle(s);
+    s.go_to(0);
+    settle(s);
+    check(s.doc() && s.doc()->key() == "cam0/a" && !s.can_undo_propagate(),
+          "many: opening the second target dropped the record");
+    s.close();
+}
+
+// The status line names a frame left not put back even when a stray base or a
+// clean rollback came first, and promises a retry only while one is possible.
+void test_propagate_names_unrestored() {
+    Fixture f = make_dataset("prop_unrestored", 64, 48, {"cam0/a", "cam0/b", "cam0/c", "cam0/d"});
+    write_png_gray(f.layer / "cam0" / "b.base.png", 64, 48, synth_mask(64, 48, 50));
+    std::error_code ec;
+    const fs::path c_drop = f.layer / "cam0" / "c.drop.png", d_base = f.layer / "cam0" / "d.base.png";
+    mk::MaskSession s;
+    open_and_drop(s, f, false, "unrestored: ");
+    s.propagate(mk::PropagateScope::Range, 3, 3);
+    settle(s);
+    check(s.last_propagate().done == 1 && fs::exists(d_base), "unrestored: fixture: d has an entry");
+    const std::vector<uint8_t> junk(64, 0x7f);
+    mk::write_file_atomic(d_base.string(), junk.data(), junk.size());
+    using namespace spirula::i18n;
+    for (bool capped : {false, true}) {
+        const std::string tag = capped ? "unrestored (over the cap): " : "unrestored: ";
+        fs::create_directories(c_drop, ec);
+        s.set_propagate_byte_cap_for_test(capped ? 1 : mk::kMaxHistoryBytes);
+        s.propagate(mk::PropagateScope::Camera, 0, 0);
+        settle(s);
+        const mk::PropagateReport r = s.last_propagate();
+        check(r.failed == 3 && r.unrestored == 1 && r.failed_key == "cam0/b" && r.failed_stray &&
+                  r.unrestored_key == "cam0/d" && r.undoable == !capped,
+              tag + "fixture: b stray, c rolled back, d not put back");
+        check(s.error() == format(capped ? msg::maskedit::prop_failed_not_restored_final
+                                         : msg::maskedit::prop_failed_not_restored,
+                                  {r.unrestored_key, r.unrestored_path, 1}),
+              tag + "d is the frame named: " + s.error());
+    }
+    s.set_propagate_byte_cap_for_test(mk::kMaxHistoryBytes);
+    fs::remove(d_base, ec);
+    s.close();
+}
+
+// A rollback that fails after the propagate really wrote: c's drop went in,
+// its keep did not, and the rollback cannot read the keep back either.
+void test_propagate_unrestored_after_a_write() {
+    Fixture f = make_dataset("prop_wrote", 64, 48, {"cam0/a", "cam0/c"});
+    const fs::path c_drop = f.layer / "cam0" / "c.drop.png", c_keep = f.layer / "cam0" / "c.keep.png";
+    mk::MaskSession s;
+    open_and_drop(s, f, false, "wrote: ");
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const std::vector<uint8_t> drop_before = file_bytes(c_drop);
+    std::error_code ec;
+    fs::remove(c_keep, ec);
+    fs::create_directories(c_keep / "blocker", ec);
+    gui::ShapeStroke big;
+    big.kind = gui::ShapeKind::Box;
+    big.pts = {20.0f, 20.0f, 40.0f, 40.0f};
+    mk::Mapping m;
+    s.commit_stroke(big, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const mk::PropagateReport r = s.last_propagate();
+    check(r.failed == 1 && r.unrestored == 1 && r.unrestored_path.find("c.keep.png") != std::string::npos,
+          "wrote: the keep write failed, so the drop had been written, and the rollback failed: " +
+              r.unrestored_path);
+    check(file_bytes(c_drop) == drop_before, "wrote: the rollback still put c's drop back");
+    fs::remove_all(c_keep, ec);
+    s.close();
+}
+
+// Restore never reads the layer it is about to replace, so one that will not
+// read (mode 000 in a writable folder) does not stop the undo.
+void test_undo_propagate_unreadable_layer() {
+    if (!chmod_injects()) return;
+    Fixture f = make_dataset("prop_unreadable", 64, 48, {"cam0/a", "cam0/b"});
+    const fs::path b_png = f.masks / "cam0" / "b.png", b_drop = f.layer / "cam0" / "b.drop.png";
+    mk::MaskSession s;
+    open_and_drop(s, f, false, "unreadable: ");
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const std::vector<uint8_t> b_own = file_bytes(b_png);
+    keep_box(s);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    fs::permissions(b_drop, fs::perms::none);
+    std::vector<uint8_t> probe;
+    check(!mk::read_file(b_drop.string(), probe), "unreadable: fixture: b's drop layer will not read");
+    s.undo_propagate();
+    settle(s);
+    fs::permissions(b_drop, fs::perms::owner_read | fs::perms::owner_write);
+    check(file_bytes(b_png) == b_own && !s.can_undo_propagate(),
+          "unreadable: the undo still puts b back byte for byte: " + s.error());
+    s.close();
 }
 
 // A .base.png with no index entry: restore would revert through it, copying
@@ -6340,6 +6592,13 @@ int main() {
     test_session_propagate_flipped();
     test_propagate_forgotten_on_reopen();
     test_undo_propagate_failure();
+    test_revert_all_drops_propagate_record();
+    test_undo_propagate_failure_no_entry();
+    test_undo_propagate_index_save_fails();
+    test_propagate_camera_many();
+    test_propagate_names_unrestored();
+    test_propagate_unrestored_after_a_write();
+    test_undo_propagate_unreadable_layer();
     test_propagate_refuses_stray_base();
     test_undo_propagate_regenerated_target();
     test_session_eraser();

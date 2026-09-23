@@ -489,20 +489,8 @@ bool restore_layers(const std::string& layer_root, const std::string& mask_root,
     std::error_code ec;
     const std::string d = layer_file(layer_root, snap.key, Layer::Drop);
     const std::string k = layer_file(layer_root, snap.key, Layer::Keep);
-    // Orphan layers (no entry) read as a correction on the next open, so
-    // they are the target's state too: revert, then put them back.
-    if (!snap.had_entry) {
-        if (!revert_frame(layer_root, mask_root, snap.key, idx, error)) return false;
-        if (snap.had_drop && !write_file_atomic(d, snap.drop_png.data(), snap.drop_png.size())) {
-            error = d;
-            return false;
-        }
-        if (snap.had_keep && !write_file_atomic(k, snap.keep_png.data(), snap.keep_png.size())) {
-            error = k;
-            return false;
-        }
-        return true;
-    }
+    const std::string base_path = layer_file(layer_root, snap.key, Layer::Base);
+    const std::string mask_path = mask_file(mask_root, snap.key);
     auto put_one = [&](const std::string& path, bool had, const std::vector<uint8_t>& png) {
         if (had) return write_file_atomic(path, png.data(), png.size());
         fs::remove(path, ec);
@@ -514,11 +502,42 @@ bool restore_layers(const std::string& layer_root, const std::string& mask_root,
         else if (!put_one(k, s.had_keep, s.keep_png)) bad = k;
         return bad.empty();
     };
+    // What a failure puts back. Restoring never reads these, so one that will
+    // not read costs only the put-back, not the restore.
+    LayerSnapshot now;
+    std::string unused;
+    const bool can_put_back = snapshot_layers(layer_root, snap.key, idx, now, unused);
+    // Orphan layers (no entry) read as a correction on the next open, so
+    // they are the target's state too: revert, then put them back.
+    if (!snap.had_entry) {
+        // revert_frame writes the mask before it removes the files; a removal
+        // that fails keeps the entry, so the propagated files go back with it.
+        std::vector<uint8_t> found_mask, found_base;
+        const bool has_mask = fs::is_regular_file(mask_path, ec), has_base = fs::is_regular_file(base_path, ec);
+        const bool readable = can_put_back && (!has_mask || read_file(mask_path, found_mask)) &&
+                              (!has_base || read_file(base_path, found_base));
+        if (!revert_frame(layer_root, mask_root, snap.key, idx, error)) {
+            if (readable && idx.frames.count(snap.key)) {
+                std::string bad;
+                if (has_base) write_file_atomic(base_path, found_base.data(), found_base.size());
+                put(now, bad);
+                if (has_mask) write_file_atomic(mask_path, found_mask.data(), found_mask.size());
+            }
+            return false;
+        }
+        if (snap.had_drop && !write_file_atomic(d, snap.drop_png.data(), snap.drop_png.size())) {
+            error = d;
+            return false;
+        }
+        if (snap.had_keep && !write_file_atomic(k, snap.keep_png.data(), snap.keep_png.size())) {
+            error = k;
+            return false;
+        }
+        return true;
+    }
     const auto found = idx.frames.find(snap.key);
     const bool had = found != idx.frames.end();
     const IndexEntry prev = had ? found->second : IndexEntry{};
-    LayerSnapshot now;
-    if (!snapshot_layers(layer_root, snap.key, idx, now, error)) return false;
     // A failure puts back the entry found (the snapshot's over the propagated
     // mask would rebase the base) and, while the mask on disk is still that
     // entry's composite, the layers found, so a reopen shows what is on disk.
@@ -528,15 +547,14 @@ bool restore_layers(const std::string& layer_root, const std::string& mask_root,
         else idx.frames.erase(snap.key);
         uint64_t fp = 0;
         std::string ignored;
-        if (had && prev.composite_fp != snap.entry.composite_fp &&
-            fingerprint_file(mask_file(mask_root, snap.key), fp) && fp == prev.composite_fp)
+        if (can_put_back && had && prev.composite_fp != snap.entry.composite_fp &&
+            fingerprint_file(mask_path, fp) && fp == prev.composite_fp)
             put(now, ignored);
         return false;
     };
     std::string bad;
     if (!put(snap, bad)) return fail(bad);
     idx.frames[snap.key] = snap.entry;
-    const std::string base_path = layer_file(layer_root, snap.key, Layer::Base);
     if (!fs::exists(base_path, ec)) return idx.save(layer_root, error) || fail("");
     // The base may have been re-based since the snapshot; the file rules.
     fingerprint_file(base_path, idx.frames[snap.key].base_fp);
@@ -550,7 +568,7 @@ bool restore_layers(const std::string& layer_root, const std::string& mask_root,
     // overwrite the snapshot's bytes just written back.
     if (!read_layers(layer_root, snap.key, w, h, layers, warning)) return fail(warning);
     // A Missing frame gets its layers back and no mask, as MaskDoc::save.
-    const bool write_comp = fs::exists(mask_file(mask_root, snap.key), ec);
+    const bool write_comp = fs::exists(mask_path, ec);
     if (!save_frame(layer_root, mask_root, snap.key, w, h, base.data(), layers.drop.data(),
                     layers.keep.data(), write_comp, idx, error))
         return fail("");
