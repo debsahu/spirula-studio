@@ -26,7 +26,7 @@ mkdir -p "$D/images/cam1" "$D/masks/cam1"
 [ -f "$D/masks/cam1/f0002.png" ] || cp "$D/masks/f0002.png" "$D/masks/cam1/"
 
 # A minimal COLMAP text model, so a drop/open of $D routes to the Train
-# screen (DatasetPrep.cpp:895-901 needs sparse/ to exist) and actually parses
+# screen (DatasetPrep.cpp:917-923 needs sparse/ to exist) and actually parses
 # (ColmapParser.cpp:693-695: cameras+images are required, points3D is not).
 mkdir -p "$D/sparse/0"
 cat > "$D/sparse/0/cameras.txt" <<'EOF'
