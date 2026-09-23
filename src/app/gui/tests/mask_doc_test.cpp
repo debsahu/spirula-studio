@@ -16,6 +16,7 @@
 #include "app/gui/mask/PathTool.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "app/gui/mask/MaskSession.h"
+#include "app/gui/mask/MaskSlideshow.h"
 #include "app/gui/mask/MaskWindow.h"
 #include "core/ImageOrient.h"
 #include "core/MaskMargin.h"
@@ -2688,6 +2689,53 @@ void bench_8k(const char* dir) {
     const bool k8_ok = gui::load_picture(img0, msk0, 4096, pic);
     check(k8_ok && gui::load_picture(img0, "", 4096, bare) && pic.w == 3840 && pic.h == 1920 &&
               pic.rgb != bare.rgb, "bench: the 8K load decoded at 3840x1920 with its mask applied");
+    // Plan 3: the pool over 100 frames, four threads, at the window depth the
+    // session would ask for at this target. Reports the sustained rate, the
+    // longest wait once warm, and the cold first frame as its own number.
+    auto pool_rate = [&](const fs::path& im, const fs::path& mk_, const char* fmt, int files,
+                         int src_w, int src_h, int target, const char* label, double bar_fps) {
+        std::vector<mk::SlideFrame> frames;
+        for (int i = 0; i < 100; i++) {
+            char buf[16];
+            std::snprintf(buf, sizeof buf, fmt, i % files);
+            const std::string key(buf);
+            frames.push_back({(im / (key + ".jpg")).string(), (mk_ / (key + ".png")).string()});
+        }
+        const int depth = mk::slide_depth(mk::slide_picture_bytes(src_w, src_h, target), 100);
+        mk::SlidePrefetch p;
+        p.set_target(target);
+        p.start(frames, 4);
+        gui::Picture pic;
+        // The first kWarm takes fill an empty ring from cold. Timing them puts
+        // one cold 8K decode into a number the spec defines as a sustained rate.
+        const int kWarm = 8;
+        double max_gap = 0.0, first_ms = 0.0;
+        const auto t_cold = std::chrono::steady_clock::now();
+        auto t0 = t_cold, last = t_cold;
+        p.want(0, depth);
+        for (int i = 0; i < 100; i++) {
+            while (!p.take(i, pic)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            p.want((i + 1) % 100, depth);
+            const auto now = std::chrono::steady_clock::now();
+            if (i == 0) first_ms = std::chrono::duration<double, std::milli>(now - t_cold).count();
+            if (i < kWarm - 1) continue;
+            if (i == kWarm - 1) { t0 = now; last = now; continue; }
+            max_gap = std::max(max_gap, std::chrono::duration<double, std::milli>(now - last).count());
+            last = now;
+        }
+        const double s = std::chrono::duration<double>(last - t0).count();
+        const double fps = (100.0 - kWarm) / s;
+        const int decodes = p.decoded();
+        p.stop();
+        std::printf("bench slideshow pool %s %4d  depth %2d  %8.1f fps   longest wait %8.1f ms   "
+                    "first frame %8.1f ms   decodes %3d   [bar: >= %.0f fps, wait <= 400 ms] %s\n",
+                    label, target, depth, fps, max_gap, first_ms, decodes, bar_fps,
+                    (fps >= bar_fps && max_gap <= 400.0) ? "PASS" : "MISS");
+    };
+    pool_rate(images, masks, "f%04d", 3, 7680, 3840, 1024, "8K   ", 5.0);
+    pool_rate(images, masks, "f%04d", 3, 7680, 3840, 4096, "8K   ", 5.0);
+    pool_rate(hd_images, hd_masks, "h%04d", kHdFrames, 1920, 1080, 1024, "1080p", 30.0);
+    pool_rate(hd_images, hd_masks, "h%04d", kHdFrames, 1920, 1080, 4096, "1080p", 30.0);
     fs::remove_all(layer, ec);
     for (int i = 0; i < 3; i++) {
         const std::string key = "f000" + std::to_string(i);
@@ -4188,6 +4236,159 @@ void test_session_sam_empty_phrase() {
           "empty phrase: a list with one phrase in it reaches the job (the stub refuses it)");
 }
 
+// ---------------------------------------------------------------------------
+// Plan 3, Task 11: the slideshow's decoder ring and clock
+// ---------------------------------------------------------------------------
+
+bool wait_has(const mk::SlidePrefetch& p, int index, int ms = 3000) {
+    for (int i = 0; i < ms / 5; i++) {
+        if (p.has(index)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return p.has(index);
+}
+
+bool wait_decoded(const mk::SlidePrefetch& p, int n, int ms = 3000) {
+    for (int i = 0; i < ms / 5; i++) {
+        if (p.decoded() >= n) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return p.decoded() >= n;
+}
+
+void test_slide_prefetch() {
+    Fixture f = make_dataset("slide", 64, 48, {"a", "b", "c", "d", "e", "g"});
+    std::vector<mk::SlideFrame> frames;
+    for (const std::string& k : f.keys)
+        frames.push_back({(f.images / (k + ".jpg")).string(), (f.masks / (k + ".png")).string()});
+    // The last frame has no mask: the picture is the bare photo, not a failure.
+    fs::remove(f.masks / "g.png");
+    mk::SlidePrefetch p;
+    check(!p.running(), "not running before start");
+    p.set_target(32);
+    p.start(frames, 2);
+    check(p.running(), "running after start");
+    p.want(0, 4);
+    for (int i = 0; i < 4; i++) check(wait_has(p, i), "frame " + std::to_string(i) + " decoded");
+    check(!p.has(4) && !p.has(5), "outside the window is not decoded");
+    // A decode of an unwanted index lands nowhere, so has() cannot see one and
+    // only this counter can. Four wanted, four decodes, nothing speculative.
+    check(p.decoded() == 4, "four wanted, four decodes: " + std::to_string(p.decoded()));
+    check(p.bytes() <= gui::kReelBudget && p.bytes() > 0, "under the budget");
+    gui::Picture pic;
+    check(p.take(0, pic) && pic.w == 32 && pic.h == 24 && pic.src_w == 64, "take 0: 64x48 at a 32 target is 32x24");
+    // The mask was composed in: the corner of synth_mask is dropped, and
+    // Picture.cpp tints a dropped block r/3+150, so the red channel is >= 150.
+    check(pic.rgb[0] >= 150, "mask tinted into the picture");
+    // The operator's masks are 255 = DROP. Flipped, synth_mask's dropped corner
+    // is kept, so the same corner must come out untinted.
+    std::vector<mk::SlideFrame> flipped_frames = frames;
+    for (mk::SlideFrame& fr : flipped_frames) fr.flipped = true;
+    mk::SlidePrefetch fp;
+    fp.set_target(32);
+    fp.start(flipped_frames, 1);
+    fp.want(0, 1);
+    gui::Picture fpic;
+    check(wait_has(fp, 0) && fp.take(0, fpic) && fpic.rgb[0] < 150,
+          "flipped: the file's dropped corner is kept, so it is not tinted");
+    fp.stop();
+    check(!p.take(0, pic), "a taken frame is gone");
+    p.want(1, 4);
+    check(wait_has(p, 4), "the window moved: 4 decoded");
+    // Behind the window nothing is decoded and nothing is re-decoded: this is
+    // what makes one shown frame cost one decode.
+    const int settled = p.decoded();
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    check(p.decoded() == settled, "the pool stops when the window is full: " + std::to_string(p.decoded()));
+    check(!p.has(0), "the frame taken stays behind the window");
+    p.want(2, 4);
+    check(!p.has(1), "1 is behind the window and dropped without being taken");
+    check(wait_has(p, 5), "5 decoded");
+    p.want(4, 4);
+    check(wait_has(p, 0) && wait_has(p, 1) && wait_has(p, 5), "wraps at the end: 4,5,0,1");
+    check(p.take(5, pic) && !pic.empty() && pic.rgb[0] < 150, "no mask: the bare photo, untinted");
+    const int before = p.decoded();
+    p.stop();
+    const int after = p.decoded();
+    check(!p.running(), "not running after stop");
+    // A worker mid-decode finishes that one before it sees _stop, so the
+    // count may rise by at most one per thread; it must not rise after.
+    check(after >= before && after <= before + 2, "stop adds at most one decode a thread");
+    check(p.decoded() == after, "the count is stable once the threads are joined");
+    check(p.bytes() == 0, "stop drops the ring");
+
+    // The byte budget, with the real one overridden so it binds on a fixture
+    // that fits in a test: 5,000 bytes holds two 32x24 pictures, not three.
+    mk::SlidePrefetch b;
+    b.set_target(32);
+    b.set_byte_budget_for_test(5000);
+    b.start(frames, 1);
+    b.want(0, 4);
+    check(wait_decoded(b, 4), "budget arm: four decodes attempted");
+    size_t peak = 0;
+    for (int i = 0; i < 40; i++) {
+        peak = std::max(peak, b.bytes());
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    b.stop();
+    check(peak > 0 && peak <= 5000, "the ring never exceeds the byte budget: " + std::to_string(peak));
+    check(peak + 2304 > 5000, "fixture check: a third picture would not have fitted");
+
+    check(mk::slide_picture_bytes(7680, 3840, 4096) == 3840u * 1920u * 3u, "4096: an 8K frame steps by 2");
+    check(mk::slide_depth(mk::slide_picture_bytes(7680, 3840, 4096), 100) == 3, "4096: the budget holds three");
+    check(mk::slide_depth(mk::slide_picture_bytes(7680, 3840, 1024), 100) == (int)gui::kReelSlots - 1,
+          "1024: the slot count binds, not the budget");
+    check(mk::slide_depth(mk::slide_picture_bytes(7680, 3840, 1024), 4) == 3,
+          "never as wide as the dataset: the frame being shown is not in the window");
+    check(mk::slide_depth(mk::slide_picture_bytes(64, 48, 32), 2) == 1, "two frames: one frame ahead");
+    check(mk::slide_depth(64u << 20, 100) == 1, "one picture over half the budget: a window of one");
+
+    mk::SlideClock c;
+    c.fps = 10.0;
+    c.start(100.0);
+    check(!c.due(100.05), "not due before the period");
+    check(c.due(100.10), "due at the period");
+    check(!c.due(100.15), "the next period runs from the frame just shown");
+    check(c.due(100.50) && !c.due(100.55), "a late frame does not queue up a burst");
+    // 5 and 30 are the ends of the UI's range and the two rates criterion 8
+    // is judged at; a hard-coded 0.1 period passes the 10 fps rows alone.
+    mk::SlideClock c5;
+    c5.fps = 5.0;
+    c5.start(200.0);
+    check(!c5.due(200.15) && c5.due(200.20), "5 fps: a 200 ms period");
+    check(!c5.due(200.35) && c5.due(200.40), "5 fps: due() re-arms at 200 ms, not only start()");
+    mk::SlideClock c30;
+    c30.fps = 30.0;
+    c30.start(300.0);
+    check(!c30.due(300.030) && c30.due(300.034), "30 fps: a 33.3 ms period");
+    check(!c30.due(300.066) && c30.due(300.068), "30 fps: due() re-arms at 33.3 ms, not only start()");
+}
+
+// Over budget the ring evicts the frame needed LAST. Room for two of three
+// wanted keeps the front one held throughout, however the other two churn;
+// an eviction of the nearest drops frame 0 on every other put.
+void test_slide_prefetch_evicts_farthest() {
+    Fixture f = make_dataset("slide_evict", 64, 48, {"a", "b", "c", "d"});
+    std::vector<mk::SlideFrame> frames;
+    for (const std::string& k : f.keys)
+        frames.push_back({(f.images / (k + ".jpg")).string(), (f.masks / (k + ".png")).string()});
+    mk::SlidePrefetch p;
+    p.set_target(32);
+    p.set_byte_budget_for_test(5000);
+    p.start(frames, 1);
+    p.want(0, 3);
+    check(wait_has(p, 0) && wait_decoded(p, 6), "evict: the over-full window churns");
+    bool front_held = true;
+    for (int i = 0; i < 200 && front_held; i++) {
+        front_held = p.has(0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const int churned = p.decoded();
+    p.stop();
+    check(front_held, "evict: the front of the window is never the frame evicted");
+    check(churned > 6, "evict: puts kept arriving while the front was watched");
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -4746,6 +4947,8 @@ int main() {
     test_session_sam_release_pending_refuses();
     test_session_sam_margin_keeps_pause();
     test_session_sam_redo_after_dropped_margin();
+    test_slide_prefetch();
+    test_slide_prefetch_evicts_farthest();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();
