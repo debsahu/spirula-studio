@@ -140,9 +140,9 @@ struct LayerSnapshot {
 // False with `error` set to the layer file whose read failed.
 bool snapshot_layers(const std::string& layer_root, const std::string& key,
                      const LayerIndex& idx, LayerSnapshot& out, std::string& error);
-// Writes the snapshot's layers back (or removes them), re-derives the
-// composite over the frame's base, and restores the entry. A frame that
-// had no entry is reverted.
+// Writes the snapshot's layers back (or removes them), re-derives the composite
+// over the frame's base, restores the entry; a frame with no entry is reverted.
+// On failure the entry is as found, and so are the layers while the mask is.
 bool restore_layers(const std::string& layer_root, const std::string& mask_root,
                     const LayerSnapshot& snap, LayerIndex& idx, std::string& error);
 

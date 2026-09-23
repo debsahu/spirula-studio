@@ -435,7 +435,7 @@ screen px at this zoom), all plain drags (ForceDrop).
 
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
-(`MaskSession.cpp:417-428`, `if (r.empty()) return {};`) and `upload_rect`
+(`MaskSession.cpp:627-638`, `if (r.empty()) return {};`) and `upload_rect`
 does the same (in `upload_rect_to`, `MaskPanel.cpp:87`), so a
 coordinate-mapping bug that made every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
@@ -1190,9 +1190,9 @@ the two apart. Two checks settle it for the set. (a) Source: every frame load
 clears `_status` and resets the livewire, so the line can only come from a
 fresh `ensure_livewire()`. The two halves are in different functions, which an
 earlier draft of this note put both in `pump()`: `load_frame`'s worker clears
-`_status` as it publishes the loaded frame (`MaskSession.cpp:276`, inside the
-`enqueue` lambda that starts at `:256`), and `pump()` calls
-`_livewire.reset()` when it installs that frame on the UI thread (`:318`).
+`_status` as it publishes the loaded frame (`MaskSession.cpp:278`, inside the
+`enqueue` lambda that starts at `:258`), and `pump()` calls
+`_livewire.reset()` when it installs that frame on the UI thread (`:330`).
 The argument is unchanged by the correction -- the clear still happens before
 the frame is published and the reset still happens as it is installed -- but
 an inheritor who went looking for both in `pump()` would have found one.
@@ -1736,7 +1736,7 @@ keeps them apart. **The operator used it on a real 120 MP correction and asked
 for the opposite**: *"carry over eraser and brush size from each other, rather
 than keeping it independent."* Their experience of the task beats the
 generalisation, so `_eraser` is gone and `radius()` / `set_radius()`
-(`MaskSession.h:131-132`) address the one float. The slider, `[`/`]` and
+(`MaskSession.h:142-143`) address the one float. The slider, `[`/`]` and
 Alt+wheel all move it whichever tool is up.
 
 **The test was inverted, not deleted.** It guarded independence, which is now
@@ -1893,7 +1893,7 @@ and remains the only radius readout when the slider is hidden.
 Its arithmetic was re-inlined into `MaskPanel.cpp` at `6126a650`, leaving six
 tests pinning dead code -- the shape of defect this note keeps finding. `[`
 and `]` route through it again, and `clamp_brush` / `scale_brush` /
-`wheel_brush` join it in `MaskSession.cpp:435-460`, the file
+`wheel_brush` join it in `MaskSession.cpp:645-670`, the file
 `mask_doc_test` links, so every radius arithmetic both tools use is tested in
 one place. `clamp_brush` is a rejection test rather than `std::clamp` because
 `std::clamp` **propagates a NaN**, and a NaN radius rasterizes nothing while
@@ -2032,7 +2032,7 @@ stand in for the job.
   `encode_image` at 2.56 s on a byte-identical binary, on mains power with no
   thermal warning; the cause was not found. This is why P7's bar moved.
 - **The open frame's pixels are co-owned.** `_rgb` is a
-  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:358`) and a job holds
+  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:385`) and a job holds
   its own reference, so moving to another frame, which replaces `_rgb` in
   `pump()`, never frees what a job reads. The `const` element type makes a
   refill in place a compile error. **Host memory is a known, unmeasured
@@ -2046,7 +2046,7 @@ stand in for the job.
   (`sam_frame_stamp()`, `"<gen>|<key>"`), and `sam_pump()` drops a result
   whose stamp no longer matches, counting it in `sam_dropped`. The key alone
   is not enough, because a revert reopens the same key. `_doc_gen` is bumped
-  at the one assignment of `_doc`, in `pump()` (`MaskSession.cpp:305`), so any
+  at the one assignment of `_doc`, in `pump()` (`MaskSession.cpp:307`), so any
   load path, present or future, bumps it by construction. Cost: SAM's encode
   cache follows the stamp, so a revert or a return to a frame re-encodes
   (about 1.9 s).
@@ -3157,9 +3157,48 @@ one pane. `tools/mask_editor_checks/survivors.sh` is the structural tripwire
 over `MaskPanel.cpp`; it anchors the pen commit on the whole statement, so a
 `paint_for(..., false)` there fails two of its lines.
 
+### Task 6: propagate on the worker, and what a failed undo leaves (2026-09-23)
+
+`propagate()` saves the source inside its own job, snapshots each target,
+writes it, and rolls back a failed write at once; every attempted target is
+counted. The session keeps one undo record, offered while the source is open,
+dropped when a target is opened or past 256 MB, and forgotten by `close()`
+and `open()`. Propagate waits for SAM work; Undo propagate does not.
+
+**A failed restore must not leave the editor and the disk disagreeing.** The
+layers go back before the composite is written, so a restore that stopped at
+the mask write left the snapshot's layers under the propagated mask and the
+propagated entry: the frame read Unchanged, opened showing the undone
+picture, not dirty, while training read the propagated one. `restore_layers`
+now puts back the layers it found whenever the mask on disk is still the
+found entry's composite and not the snapshot's, so the frame stays wholly as
+the propagate left it. A target that would not go back stays in the record,
+and the status line names it and says Undo retries. Entering it still drops
+the record, which is now safe: it opens showing what is on disk. The two
+rejected remedies: keeping the record alone leaves the disagreement until a
+retry, and marking the frame dirty on open is session state that
+`forget_workflow()` clears, so after a reopen the disagreement would be
+silent.
+
+**A `.base.png` with no index entry refuses the target.** Undo reverts such a
+target through that base, copying it over whatever mask is on disk; a stale
+base (a first save that failed before its index write) would replace a
+regenerated mask. The target is counted failed and named, and nothing of it
+is written.
+
+**`snapshot_layers` tests `is_regular_file`, not `exists`.** `read_file`
+reads a directory as 0 bytes on macOS, so a directory at a layer path was
+recorded as an empty layer and written back as an unloadable 0-byte file.
+
+**Byte for byte does not cover a target regenerated before the propagate.**
+The propagate's load rebases it, so the undo gives the regenerated base under
+the target's own layers, which is what opening it would have shown, not the
+raw file that was on disk. `test_undo_propagate_regenerated_target` pins that
+and nothing asserts byte identity there.
+
 ## Not in this phase
 
 SAM assist's own deliberate absences, and why, are listed under "SAM assist:
 how it is built, and what not to undo". For the hand editor:
-propagate, find-missing, slideshow, session persistence; vertex handles on
+find-missing, slideshow, session persistence; vertex handles on
 a path; a Bezier path.

@@ -1797,14 +1797,16 @@ void test_snapshot_restore() {
     check(file_bytes(f.layer / "c.keep.png") == sc2.keep_png, "and the keep layer is the snapshot's");
 
     // A snapshot whose layer does not fit the base is refused, not re-encoded
-    // as zero over the bytes it just put back.
+    // as zero, and the layers restore found go back.
+    const std::vector<uint8_t> found_drop = file_bytes(f.layer / "c.drop.png");
     mk::LayerSnapshot bad = sc2;
     bad.had_drop = true;
     mk::encode_gray_png(synth_mask(32, 24, 3).data(), 32, 24, bad.drop_png);
     check(!mk::restore_layers(layer_root, mask_root, bad, idx, err) &&
               err.find("c.drop.png") != std::string::npos &&
-              file_bytes(f.layer / "c.drop.png") == bad.drop_png,
-          "a mis-sized snapshot layer is reported and left as the snapshot's bytes: " + err);
+              file_bytes(f.layer / "c.drop.png") == found_drop && found_drop != bad.drop_png &&
+              file_bytes(f.layer / "c.keep.png") == sc2.keep_png,
+          "a mis-sized snapshot layer is reported, and the layers restore found are put back: " + err);
 
     // A base re-based after the snapshot: the entry takes the file's print.
     mk::LayerSnapshot sc3;
@@ -1905,8 +1907,52 @@ void restore_failure_arm(bool flipped, Late step, const char* step_name) {
           tag + "recomposite: " + err);
     mk::MaskDoc doc;
     std::string warn;
-    doc.load(layer_root, mask_root, "cam0/c", 64, 48, idx, err, warn);
+    const bool loaded = doc.load(layer_root, mask_root, "cam0/c", 64, 48, idx, err, warn);
     check(file_bytes(base) == base_before, tag + ".base.png survives a reopen, byte for byte");
+    // The editor must not show one picture while training reads another.
+    std::vector<uint8_t> shown = doc.composite();
+    if (flipped) mk::flip_polarity(shown.data(), shown.size());
+    check(loaded && shown == stencil_pixels(f.masks / "cam0" / "c.png"),
+          tag + "a reopen shows the mask on disk: " + warn);
+}
+
+// A rollback after a propagate that wrote its drop and failed on its keep:
+// the mask is still the snapshot's, so a failed rollback keeps the snapshot's
+// layers rather than putting the half-propagated ones back.
+void test_restore_rollback_keeps_snapshot_layers() {
+    if (!chmod_injects()) return;
+    for (bool flipped : {false, true}) {
+        const std::string tag = flipped ? "rollback (flipped): " : "rollback (unflipped): ";
+        Fixture f = make_dataset(flipped ? "rollback_f" : "rollback_u", 64, 48, {"cam0/c"});
+        const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+        const std::vector<uint8_t> d1 = box_layer(64, 48, 4, 4, 14, 14), zero(64 * 48, 0);
+        const std::vector<uint8_t> d2 = box_layer(64, 48, 20, 20, 30, 30);
+        const fs::path drop = f.layer / "cam0" / "c.drop.png", ro = f.masks / "cam0";
+        mk::LayerIndex idx;
+        idx.mask_root = mask_root;
+        idx.mask_flipped = flipped;
+        std::string err;
+        mk::PropagateRefusal refused;
+        check(mk::propagate_to(layer_root, mask_root, "cam0/c", (f.images / "cam0" / "c.jpg").string(), 64,
+                               48, d1.data(), zero.data(), idx, refused, err), tag + "first layers: " + err);
+        mk::LayerSnapshot sc;
+        check(mk::snapshot_layers(layer_root, "cam0/c", idx, sc, err) && sc.had_entry, tag + "snapshot");
+        std::vector<uint8_t> png;
+        mk::encode_gray_png(d2.data(), 64, 48, png);
+        mk::write_file_atomic(drop.string(), png.data(), png.size());   // the half-written propagate
+        const auto ro_was = fs::status(ro).permissions();
+        fs::permissions(ro, fs::perms::owner_read | fs::perms::owner_exec);
+        const bool restored = mk::restore_layers(layer_root, mask_root, sc, idx, err);
+        fs::permissions(ro, ro_was);
+        check(!restored, tag + "fixture: the rollback fails on the mask write");
+        mk::MaskDoc doc;
+        std::string warn;
+        const bool loaded = doc.load(layer_root, mask_root, "cam0/c", 64, 48, idx, err, warn);
+        std::vector<uint8_t> shown = doc.composite();
+        if (flipped) mk::flip_polarity(shown.data(), shown.size());
+        check(loaded && doc.drop() == d1 && shown == stencil_pixels(f.masks / "cam0" / "c.png"),
+              tag + "the snapshot's layers stay, and a reopen shows the mask on disk");
+    }
 }
 
 void test_restore_failure_keeps_base() {
@@ -2052,6 +2098,441 @@ void test_snapshot_restore_edges() {
           "edges: orphan keep on p, propagated over, restored: " + err);
     check(file_bytes(f.layer / "p.keep.png") == orphan_keep && !fs::exists(f.layer / "p.drop.png"),
           "edges: p's orphan keep layer is back, byte for byte, and no drop layer");
+}
+
+// ---------------------------------------------------------------------------
+// Plan 3, Task 6: propagate through the session, and its undo
+// ---------------------------------------------------------------------------
+
+void test_session_propagate() {
+    Fixture f = make_dataset("session_prop", 64, 48, {"cam0/a", "cam0/b", "cam0/c", "cam1/d"});
+    write_jpg_rgb(f.images / "cam0" / "e.jpg", 32, 24, synth_rgb(32, 24, 9));
+    write_png_gray(f.masks / "cam0" / "e.png", 32, 24, synth_mask(32, 24, 9));
+    const std::vector<uint8_t> original_b = file_bytes(f.masks / "cam0" / "b.png");
+    const std::vector<uint8_t> original_d = file_bytes(f.masks / "cam1" / "d.png");
+    const std::vector<uint8_t> base_b = stencil_pixels(f.masks / "cam0" / "b.png");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
+    settle(s);
+    check(s.frame_count() == 5 && s.frames()[3].key == "cam0/e" && s.frames()[4].key == "cam1/d",
+          "five frames, e sorted into cam0");
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    const std::vector<uint8_t> drop_a = s.doc()->drop(), keep_a = s.doc()->keep();
+
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    const mk::PropagateReport r = s.last_propagate();
+    check(r.done == 2 && r.refused == 1 && r.refused_key == "cam0/e" && r.refused_w == 32 &&
+              r.refused_h == 24 && r.w == 64 && r.h == 48, "report: b and c done, e refused with sizes");
+    check(r.undoable && s.can_undo_propagate(), "undoable while the source is open");
+    std::vector<uint8_t> want(base_b.size());
+    mk::composite(base_b.data(), drop_a.data(), keep_a.data(), want.size(), want.data());
+    check(stencil_pixels(f.masks / "cam0" / "b.png") == want, "b's composite is b's base under a's layers");
+    check(file_bytes(f.masks / "cam1" / "d.png") == original_d, "the other camera is untouched");
+    check(s.corrected_count() == 3, "a, b, c corrected");
+    check(!s.doc()->dirty(), "the source was saved first");
+    check(s.error().find("cam0/e") != std::string::npos, "the refusal names the frame");
+
+    s.undo_propagate();
+    settle(s);
+    check(!s.can_undo_propagate(), "record consumed");
+    check(file_bytes(f.masks / "cam0" / "b.png") == original_b, "b's mask is byte-identical after undo");
+    check(!fs::exists(f.layer / "cam0" / "b.drop.png") && !fs::exists(f.layer / "cam0" / "c.drop.png"),
+          "targets' layers gone");
+    check(s.corrected_count() == 1, "only a remains corrected");
+
+    // Next, then entering the target drops the record.
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    check(s.last_propagate().done == 1 && s.can_undo_propagate(), "next: one target");
+    s.go_to(1);
+    settle(s);
+    check(s.doc() && s.doc()->key() == "cam0/b" && s.doc()->drop() == drop_a, "b opens with a's layers");
+    // The drop must be observed from the SOURCE. can_undo_propagate() is
+    // false at any other frame whether or not the record still exists.
+    s.go_to(0);
+    settle(s);
+    check(s.doc() && s.doc()->key() == "cam0/a" && !s.can_undo_propagate(),
+          "the record was dropped on entering a target, not merely unmatched");
+    s.go_to(1);
+    settle(s);
+    // Range from b covering c and e: c done, e refused.
+    s.propagate(mk::PropagateScope::Range, 2, 3);
+    settle(s);
+    check(s.last_propagate().done == 1 && s.last_propagate().refused == 1, "range: c done, e refused");
+    // No target in range. The text, not merely a non-empty _error: nothing
+    // clears _error between propagates, so the refusal above satisfies
+    // "not empty" on its own.
+    s.propagate(mk::PropagateScope::Range, 4, 4);
+    settle(s);
+    check(s.last_propagate().done == 0 &&
+              s.error() == spirula::i18n::msg::maskedit::prop_no_targets.get(),
+          "empty range reports its own message: " + s.error());
+
+    // The 256 MB drop, at a cap the fixture can reach. c carries layers now,
+    // so the record is not empty and the cap is what decides.
+    s.set_propagate_byte_cap_for_test(1);
+    s.propagate(mk::PropagateScope::Range, 2, 2);
+    settle(s);
+    const mk::PropagateReport big = s.last_propagate();
+    check(big.done == 1 && big.bytes > 1 && !big.undoable && !s.can_undo_propagate(),
+          "over the cap: propagated, and not offered for undo");
+    check(s.error() == spirula::i18n::format(spirula::i18n::msg::maskedit::prop_not_undoable,
+                                             {(int)(big.bytes >> 20)}),
+          "and the status line says why: " + s.error());
+    s.set_propagate_byte_cap_for_test(mk::kMaxHistoryBytes);
+    s.close();
+}
+
+// A directory where a layer file must land makes write_file_atomic's rename
+// fail on every platform, and only after save_frame wrote the .base.png:
+// the partial-write case, induced without touching any read path.
+void test_session_propagate_failures() {
+    Fixture f = make_dataset("session_prop_fail", 64, 48, {"cam0/a", "cam0/b", "cam0/c", "cam0/e"});
+    write_jpg_rgb(f.images / "cam0" / "e.jpg", 32, 24, synth_rgb(32, 24, 9));
+    write_png_gray(f.masks / "cam0" / "e.png", 32, 24, synth_mask(32, 24, 9));
+    const std::vector<uint8_t> original_b = file_bytes(f.masks / "cam0" / "b.png");
+    const std::vector<uint8_t> original_c = file_bytes(f.masks / "cam0" / "c.png");
+    const std::vector<uint8_t> base_b = stencil_pixels(f.masks / "cam0" / "b.png");
+    const fs::path obstacle = f.layer / "cam0" / "c.drop.png";
+    std::error_code ec;
+    fs::create_directories(obstacle, ec);
+    check(fs::is_directory(obstacle), "fixture: a directory blocks c's drop layer");
+
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    const std::vector<uint8_t> drop_a = s.doc()->drop(), keep_a = s.doc()->keep();
+
+    // Whole camera: b written, c fails mid-save and is rolled back, e refused.
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    mk::PropagateReport r = s.last_propagate();
+    check(r.done == 1 && r.refused == 1 && r.failed == 1 && r.unrestored == 0,
+          "report counts every attempted target: done 1, refused 1, failed 1");
+    check(r.failed_key == "cam0/c" && r.failed_path.find("c.drop.png") != std::string::npos,
+          "the failure names the frame and the file: " + r.failed_path);
+    check(s.error().find("cam0/c") != std::string::npos, "the failure survives to the error line");
+    check(file_bytes(f.masks / "cam0" / "c.png") == original_c, "c's mask is byte-identical: rolled back");
+    check(!fs::exists(f.layer / "cam0" / "c.base.png") && !fs::exists(f.layer / "cam0" / "c.keep.png") &&
+              !fs::exists(obstacle),
+          "c's half-written base is gone and the obstacle was cleared by the rollback");
+    std::vector<uint8_t> want(base_b.size());
+    mk::composite(base_b.data(), drop_a.data(), keep_a.data(), want.size(), want.data());
+    check(stencil_pixels(f.masks / "cam0" / "b.png") == want, "b was still propagated");
+    check(!s.doc()->dirty(), "the source was saved by the job");
+    check(s.corrected_count() == 2, "a and b corrected, c not");
+    check(r.undoable && s.can_undo_propagate(), "undoable: the record holds b and c");
+    s.undo_propagate();
+    settle(s);
+    check(file_bytes(f.masks / "cam0" / "b.png") == original_b && !fs::exists(f.layer / "cam0" / "b.drop.png"),
+          "undo restores b byte for byte");
+    check(file_bytes(f.masks / "cam0" / "c.png") == original_c && !fs::exists(f.layer / "cam0" / "c.drop.png"),
+          "undo leaves c as it was");
+    check(s.corrected_count() == 1 && !s.can_undo_propagate(), "only a remains; record consumed");
+
+    // The failed target alone: nothing done, yet the snapshot is in the
+    // record, so undo is offered and retries it.
+    fs::create_directories(obstacle, ec);
+    s.propagate(mk::PropagateScope::Range, 2, 2);
+    settle(s);
+    r = s.last_propagate();
+    check(r.done == 0 && r.failed == 1 && r.unrestored == 0, "range on c alone: failed 1");
+    check(r.undoable && s.can_undo_propagate(), "a failed target alone is still undoable");
+    check(s.error().find("cam0/c") != std::string::npos, "error names c");
+    s.undo_propagate();
+    settle(s);
+    check(!s.can_undo_propagate() && file_bytes(f.masks / "cam0" / "c.png") == original_c &&
+              !fs::exists(f.layer / "cam0" / "c.base.png"),
+          "undo after a lone failure leaves c clean");
+
+    // A rollback that cannot run. c is corrected first so its snapshot has
+    // an ENTRY and restore_layers takes its write path, not revert_frame's;
+    // a .base.png that is not a PNG then fails frame_size and load_stencil.
+    s.propagate(mk::PropagateScope::Range, 2, 2);
+    settle(s);
+    check(s.last_propagate().done == 1 && fs::exists(f.layer / "cam0" / "c.base.png"),
+          "fixture: c is corrected, so its snapshot has an entry");
+    const std::vector<uint8_t> junk(64, 0x7f);
+    check(mk::write_file_atomic((f.layer / "cam0" / "c.base.png").string(), junk.data(), junk.size()),
+          "fixture: c's base is not a PNG");
+    s.propagate(mk::PropagateScope::Range, 2, 2);
+    settle(s);
+    r = s.last_propagate();
+    check(r.done == 0 && r.failed == 1 && r.unrestored == 1, "a rollback that failed is counted");
+    check(r.failed_path.find("c.base.png") != std::string::npos,
+          "the failure names the base, not the image it was handed: " + r.failed_path);
+    check(s.error() == spirula::i18n::format(spirula::i18n::msg::maskedit::prop_failed_not_restored,
+                                             {r.failed_key, r.failed_path}),
+          "and the not-restored wording is the one shown: " + s.error());
+    fs::remove(f.layer / "cam0" / "c.base.png", ec);
+    s.undo_propagate();
+    settle(s);
+
+    // The SOURCE's own save fails: nothing is propagated and the save's
+    // error is what the status line shows.
+    const fs::path src_obstacle = f.layer / "cam0" / "a.drop.png";
+    fs::remove(src_obstacle, ec);
+    fs::create_directories(src_obstacle, ec);
+    gui::ShapeStroke box2;
+    box2.kind = gui::ShapeKind::Box;
+    box2.pts = {20.0f, 20.0f, 30.0f, 30.0f};
+    s.commit_stroke(box2, mk::Paint::ForceKeep, m);
+    check(s.doc()->dirty(), "fixture: the source is dirty again");
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    r = s.last_propagate();
+    check(r.done == 0 && r.refused == 0 && r.failed == 0, "a failed source save propagates nothing");
+    check(s.error().find("a.drop.png") != std::string::npos, "the save's error survives: " + s.error());
+    check(file_bytes(f.masks / "cam0" / "b.png") == original_b, "b untouched after the aborted propagate");
+    check(!s.can_undo_propagate(), "nothing to undo");
+    check(s.doc()->dirty(), "the source is still dirty");
+    fs::remove_all(src_obstacle, ec);
+    s.close();
+}
+
+// Undo propagate is the safety net for propagating over handheld stills, and
+// the operator's masks are 255 = DROP: it must put a flipped target back,
+// including one that had corrections of its own before the propagate.
+void test_session_propagate_flipped() {
+    Fixture f = make_dataset("session_prop_flipped", 64, 48, {"cam0/a", "cam0/b", "cam0/c"});
+    const std::vector<uint8_t> original_b = file_bytes(f.masks / "cam0" / "b.png");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), true, err),
+          "flipped propagate: open: " + err);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const std::vector<uint8_t> b_own = file_bytes(f.masks / "cam0" / "b.png");
+    check(s.last_propagate().done == 1 && b_own != original_b,
+          "flipped propagate: fixture: b carries corrections before the propagate under test");
+    gui::ShapeStroke box2 = box;
+    box2.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+    s.commit_stroke(box2, mk::Paint::ForceKeep, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    check(s.last_propagate().done == 1 && s.can_undo_propagate() &&
+              file_bytes(f.masks / "cam0" / "b.png") != b_own,
+          "flipped propagate: the propagate replaced b's corrections");
+    // In the file's polarity, 255 = DROP: a's drop box reads 255, its keep box 0.
+    const std::vector<uint8_t> px = stencil_pixels(f.masks / "cam0" / "b.png");
+    check(px[5 * 64 + 5] == 255 && px[30 * 64 + 40] == 0,
+          "flipped propagate: b's file reads a's drop as 255 and a's keep as 0");
+    s.undo_propagate();
+    settle(s);
+    check(file_bytes(f.masks / "cam0" / "b.png") == b_own,
+          "flipped propagate: undo puts b back to its own corrections, byte for byte");
+    s.close();
+}
+
+// Frame keys repeat across datasets. A propagate record that outlived close()
+// would write one dataset's layer bytes into another's files on Undo.
+void test_propagate_forgotten_on_reopen() {
+    Fixture x = make_dataset("prop_reopen_x", 64, 48, {"cam0/a", "cam0/b"});
+    Fixture y = make_dataset("prop_reopen_y", 64, 48, {"cam0/a", "cam0/b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(x.root.string(), x.images.string(), x.masks.string(), false, err),
+          "reopen: open x: " + err);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    gui::ShapeStroke box2 = box;
+    box2.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+    s.commit_stroke(box2, mk::Paint::ForceKeep, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    check(s.can_undo_propagate() && s.last_propagate().bytes > 0,
+          "reopen: fixture: x's record holds layer bytes an undo would write");
+    s.close();
+    const std::vector<uint8_t> y_b = file_bytes(y.masks / "cam0" / "b.png");
+    check(s.open(y.root.string(), y.images.string(), y.masks.string(), false, err),
+          "reopen: open y: " + err);
+    settle(s);
+    check(s.doc() && s.doc()->key() == "cam0/a",
+          "reopen: fixture: y opens on the key x's record names as its source");
+    check(!s.can_undo_propagate(), "reopen: another dataset is not offered x's undo");
+    s.undo_propagate();
+    settle(s);
+    check(file_bytes(y.masks / "cam0" / "b.png") == y_b &&
+              !fs::exists(y.layer / "cam0" / "b.drop.png"),
+          "reopen: an undo in y writes nothing into y's files");
+    check(s.last_propagate().done == 0, "reopen: the report was forgotten with the record");
+    s.close();
+}
+
+// An Undo propagate that cannot write a target's mask. The editor must not
+// then show one picture while training reads another, and Undo must retry.
+void undo_failure_arm(bool flipped) {
+    if (!chmod_injects()) return;
+    const std::string tag = flipped ? "undo failure (flipped): " : "undo failure (unflipped): ";
+    Fixture f = make_dataset(flipped ? "undo_fail_f" : "undo_fail_u", 64, 48, {"cam0/a", "cam0/b"});
+    const fs::path b_png = f.masks / "cam0" / "b.png", b_drop = f.layer / "cam0" / "b.drop.png",
+                   b_keep = f.layer / "cam0" / "b.keep.png", ro = f.masks / "cam0";
+    const auto ro_was = fs::status(ro).permissions();
+    const auto lock = [&] { fs::permissions(ro, fs::perms::owner_read | fs::perms::owner_exec); };
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), flipped, err), tag + "open: " + err);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const std::vector<uint8_t> b_own = file_bytes(b_png);
+    gui::ShapeStroke box2 = box;
+    box2.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+    s.commit_stroke(box2, mk::Paint::ForceKeep, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const std::vector<uint8_t> b_prop = file_bytes(b_png), drop_prop = file_bytes(b_drop),
+                               keep_prop = file_bytes(b_keep);
+    const uint8_t dropped = flipped ? 255 : 0, kept = flipped ? 0 : 255;
+    const std::vector<uint8_t> px = stencil_pixels(b_png);
+    check(s.can_undo_propagate() && b_prop != b_own && px[5 * 64 + 5] == dropped &&
+              px[30 * 64 + 40] == kept,
+          tag + "fixture: b holds a's drop and keep, in the file's polarity");
+    lock();
+    s.undo_propagate();
+    settle(s);
+    fs::permissions(ro, ro_was);
+    const std::string b_path = mk::mask_file(s.mask_root(), "cam0/b");
+    check(s.error() == spirula::i18n::format(spirula::i18n::msg::maskedit::prop_undo_failed,
+                                             {std::string("cam0/b"), b_path}),
+          tag + "the failure names the frame and the file: " + s.error());
+    check(file_bytes(b_png) == b_prop && file_bytes(b_drop) == drop_prop && file_bytes(b_keep) == keep_prop,
+          tag + "b is left wholly as the propagate left it, layers included");
+    check(s.can_undo_propagate(), tag + "Undo propagate is offered again, to retry");
+    s.undo_propagate();
+    settle(s);
+    check(file_bytes(b_png) == b_own && !s.can_undo_propagate(),
+          tag + "the retry puts b back to its own corrections, byte for byte");
+    const std::vector<uint8_t> back = stencil_pixels(b_png);
+    check(back[5 * 64 + 5] == dropped && back[30 * 64 + 40] == synth_mask(64, 48, 1)[30 * 64 + 40],
+          tag + "b's own drop reads dropped and a's keep is gone from it");
+
+    // Fail again, then open b: the record goes (Decision 5), and b shows
+    // exactly what is on disk.
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    lock();
+    s.undo_propagate();
+    settle(s);
+    fs::permissions(ro, ro_was);
+    s.go_to(1);
+    settle(s);
+    std::vector<uint8_t> shown = s.doc() ? s.doc()->composite() : std::vector<uint8_t>();
+    if (flipped) mk::flip_polarity(shown.data(), shown.size());
+    check(s.doc() && s.doc()->key() == "cam0/b" && !s.doc()->dirty() && shown == stencil_pixels(b_png),
+          tag + "b opens showing the mask training reads");
+    s.go_to(0);
+    settle(s);
+    check(!s.can_undo_propagate(), tag + "and entering b dropped the record");
+    s.close();
+}
+
+void test_undo_propagate_failure() {
+    undo_failure_arm(false);
+    undo_failure_arm(true);
+}
+
+// A .base.png with no index entry: restore would revert through it, copying
+// it over whatever mask is on disk. Such a target is not propagated at all.
+void test_propagate_refuses_stray_base() {
+    for (bool flipped : {false, true}) {
+        const std::string tag = flipped ? "stray base (flipped): " : "stray base (unflipped): ";
+        Fixture f = make_dataset(flipped ? "prop_stray_f" : "prop_stray_u", 64, 48, {"cam0/a", "cam0/b"});
+        const fs::path stray = f.layer / "cam0" / "b.base.png";
+        write_png_gray(stray, 64, 48, synth_mask(64, 48, 50));
+        const std::vector<uint8_t> b_mask = file_bytes(f.masks / "cam0" / "b.png"), b_base = file_bytes(stray);
+        check(b_mask != b_base, tag + "fixture: the stray base is not b's mask");
+        mk::MaskSession s;
+        std::string err;
+        check(s.open(f.root.string(), f.images.string(), f.masks.string(), flipped, err), tag + "open: " + err);
+        settle(s);
+        mk::Mapping m;
+        gui::ShapeStroke box;
+        box.kind = gui::ShapeKind::Box;
+        box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+        s.commit_stroke(box, mk::Paint::ForceDrop, m);
+        s.propagate(mk::PropagateScope::Next, 0, 0);
+        settle(s);
+        const mk::PropagateReport r = s.last_propagate();
+        check(r.done == 0 && r.failed == 1 && r.failed_key == "cam0/b" && r.failed_path.find("b.base.png") !=
+                  std::string::npos && !r.undoable, tag + "b is counted failed, named by its base");
+        check(file_bytes(f.masks / "cam0" / "b.png") == b_mask && file_bytes(stray) == b_base &&
+                  !fs::exists(f.layer / "cam0" / "b.drop.png"), tag + "and nothing of b was written");
+        check(s.error() == spirula::i18n::format(spirula::i18n::msg::maskedit::prop_failed_stray_base,
+                                                 {r.failed_key, r.failed_path}),
+              tag + "the status line says why: " + s.error());
+        s.close();
+    }
+}
+
+// Byte for byte does not hold for a target whose mask was regenerated before
+// the propagate: its load rebases it, so the undo gives what opening it would.
+void test_undo_propagate_regenerated_target() {
+    for (bool flipped : {false, true}) {
+        const std::string tag = flipped ? "regenerated (flipped): " : "regenerated (unflipped): ";
+        Fixture f = make_dataset(flipped ? "prop_regen_f" : "prop_regen_u", 64, 48, {"cam0/a", "cam0/b"});
+        mk::MaskSession s;
+        std::string err;
+        check(s.open(f.root.string(), f.images.string(), f.masks.string(), flipped, err), tag + "open: " + err);
+        settle(s);
+        mk::Mapping m;
+        gui::ShapeStroke box;
+        box.kind = gui::ShapeKind::Box;
+        box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+        s.commit_stroke(box, mk::Paint::ForceDrop, m);
+        const std::vector<uint8_t> d1 = s.doc()->drop(), k1 = s.doc()->keep();
+        s.propagate(mk::PropagateScope::Next, 0, 0);
+        settle(s);
+        const std::vector<uint8_t> regen = synth_mask(64, 48, 77);
+        write_png_gray(f.masks / "cam0" / "b.png", 64, 48, regen);
+        const std::vector<uint8_t> on_disk = file_bytes(f.masks / "cam0" / "b.png");
+        gui::ShapeStroke box2 = box;
+        box2.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+        s.commit_stroke(box2, mk::Paint::ForceKeep, m);
+        s.propagate(mk::PropagateScope::Next, 0, 0);
+        settle(s);
+        s.undo_propagate();
+        settle(s);
+        std::vector<uint8_t> app = regen, want(regen.size());
+        if (flipped) mk::flip_polarity(app.data(), app.size());
+        mk::composite(app.data(), d1.data(), k1.data(), app.size(), want.data());
+        if (flipped) mk::flip_polarity(want.data(), want.size());
+        check(file_bytes(f.layer / "cam0" / "b.base.png") == on_disk &&
+                  stencil_pixels(f.masks / "cam0" / "b.png") == want,
+              tag + "undo gives the regenerated base under b's own layers");
+        check(file_bytes(f.masks / "cam0" / "b.png") != on_disk,
+              tag + "which is not the file on disk before the propagate: excluded from byte for byte");
+        s.close();
+    }
 }
 
 // The eraser, through the same call the panel makes. The base drops a 16x12
@@ -5532,6 +6013,53 @@ void test_session_close_parks_busy_job() {
     check(fake.releases == 1, "retire: the poll releases once, not every frame");
 }
 
+// A SAM job, or a margin re-apply waiting to start, can still land on the
+// source after propagate snapshots it, so propagate waits. Undo never reads
+// the source, so it does not.
+void test_propagate_waits_for_sam() {
+    Fixture f = make_dataset("prop_sam", 64, 48, {"cam0/a", "cam0/b"});
+    const fs::path b_png = f.masks / "cam0" / "b.png";
+    const std::vector<uint8_t> original_b = file_bytes(b_png);
+    FakeSamOps fake;
+    mk::MaskSession s;
+    s.set_sam_ops(fake.ops());
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "prop sam: open: " + err);
+    settle(s);
+    s.sam();   // a SAM half exists, as after a first prompt
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    fake.busy = true;
+    check(s.sam_work_pending(), "prop sam: a running job is pending work");
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    check(file_bytes(b_png) == original_b && !fs::exists(f.layer / "cam0" / "b.drop.png") &&
+              !s.can_undo_propagate(),
+          "prop sam: nothing propagates while a SAM job runs");
+    fake.busy = false;
+    s.sam_margin_changed();
+    check(s.sam_work_pending(), "prop sam: a margin re-apply waiting to start is pending work");
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    check(file_bytes(b_png) == original_b, "prop sam: nothing propagates while a re-apply waits");
+    s.sam_pump();   // no add is held, so the waiting re-apply is dropped
+    check(!s.sam_work_pending(), "prop sam: fixture: nothing is pending after the pump");
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    check(file_bytes(b_png) != original_b && s.can_undo_propagate(),
+          "prop sam: with nothing pending it propagates");
+    fake.busy = true;
+    s.undo_propagate();
+    settle(s);
+    check(file_bytes(b_png) == original_b, "prop sam: a SAM job does not hold Undo propagate back");
+    fake.busy = false;
+    s.close();
+}
+
 // An idle session is released by close() itself, not left to ~MaskSam, and a
 // later close with no SAM reports 0 ms.
 void test_session_close_releases_idle() {
@@ -5804,8 +6332,16 @@ int main() {
     test_snapshot_restore();
     test_snapshot_restore_flipped();
     test_restore_failure_keeps_base();
+    test_restore_rollback_keeps_snapshot_layers();
     test_restore_writes_no_mask();
     test_snapshot_restore_edges();
+    test_session_propagate();
+    test_session_propagate_failures();
+    test_session_propagate_flipped();
+    test_propagate_forgotten_on_reopen();
+    test_undo_propagate_failure();
+    test_propagate_refuses_stray_base();
+    test_undo_propagate_regenerated_target();
     test_session_eraser();
     test_session_size_mismatch();
     test_session_flipped_polarity();
@@ -5894,6 +6430,7 @@ int main() {
     test_session_sam_margin_after_undo_redo();
     test_session_sam_vetoed_all();
     test_session_close_parks_busy_job();
+    test_propagate_waits_for_sam();
     test_session_close_releases_idle();
     test_session_retiring_drains();
     test_session_sam_held_other_frame();

@@ -65,6 +65,17 @@ enum class PropagateScope { Next, Range, Camera };
 // only read for Range.
 std::vector<int> propagate_targets(const std::vector<FrameRef>& frames, int src,
                                    PropagateScope scope, int lo, int hi);
+struct PropagateReport {
+    int done = 0, refused = 0, failed = 0;
+    int unrestored = 0;                 // failed targets that could not be put back
+    std::string refused_key;            // the first refusal
+    int refused_w = 0, refused_h = 0;   // its size
+    std::string failed_key, failed_path;   // the first failure and the file that failed
+    bool failed_stray = false;          // that failure is a .base.png with no index entry
+    int w = 0, h = 0;                   // the source's size
+    bool undoable = false;
+    size_t bytes = 0;                   // of the undo record
+};
 
 // What pane 0 (left) or 1 (right, side by side only) shows under a peek.
 Style pane_style_for(Peek peek, ViewMode view, int pane);
@@ -290,6 +301,21 @@ public:
     void revert_open_frame();
     void revert_every_frame();
 
+    // ---- propagate (plan 3) ----
+    // Saves the open frame, then copies its two layers onto the targets on
+    // the worker. `lo`/`hi` are 0-based inclusive and only read for Range.
+    void propagate(PropagateScope scope, int lo, int hi);
+    // Offered while the open frame is still the propagate's source.
+    bool can_undo_propagate() const;
+    void undo_propagate();
+    PropagateReport last_propagate() const;
+    // Test-only, as MaskDoc::set_history_byte_cap_for_test is:
+    // a record of never-edited targets is 0 bytes, so 256 MB is unreachable.
+    void set_propagate_byte_cap_for_test(size_t bytes) { _prop_byte_cap = bytes; }
+    // A SAM job runs, or a margin re-apply waits to start (Decision 21):
+    // propagate and Play wait for it. Asked through SamOps, as close() does.
+    bool sam_work_pending() const;
+
 private:
     struct Loaded {
         std::unique_ptr<MaskDoc> doc;
@@ -311,6 +337,7 @@ private:
     bool sam_add_redoable() const;
     void close_sam();
     void sam_forget();
+    void forget_workflow();          // plan 3's per-dataset state (Decision 23)
     // A revert discards the frame's (or, at -1, every frame's) clicks and last add.
     void sam_revert(int frame);
     Rect sam_land(SamResult res);
@@ -458,6 +485,15 @@ private:
     uint64_t _saved_rev = 0;         // guarded by _mu
     bool _saved_comp = false;        // guarded by _mu
     bool _saved_ready = false;       // guarded by _mu
+    struct PropagateRecord {
+        std::string source_key;
+        std::vector<LayerSnapshot> targets;
+        size_t bytes = 0;
+    };
+    PropagateRecord _prop;             // guarded by _mu
+    bool _prop_undoable = false;       // guarded by _mu
+    PropagateReport _prop_report;      // guarded by _mu
+    size_t _prop_byte_cap = kMaxHistoryBytes;   // UI thread; copied into the job
     std::string _status, _error;     // guarded by _mu
     bool _error_sticky = false;      // guarded by _mu
     int _corrected = 0;              // guarded by _mu

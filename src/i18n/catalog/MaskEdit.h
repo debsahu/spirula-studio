@@ -1435,6 +1435,36 @@ SS_MSG(prop_undone,
     RU("Распространение отменено: {0}"),
     TR("Yayma geri alındı: {0}"));
 
+SS_MSG(prop_undo_failed,
+    EN("Could not put {0} back: {1} could not be read or written. Undo propagate tries again."),
+    JA("{0} を元に戻せませんでした: {1} を読み書きできませんでした。伝播を元に戻すと再度試みます。"),
+    ZH_HANS("无法恢复 {0}：无法读写 {1}。撤销传播会再试一次。"),
+    ZH_HANT("無法恢復 {0}：無法讀寫 {1}。復原傳播會再試一次。"),
+    KO("{0}을(를) 되돌리지 못했습니다: {1}을(를) 읽거나 쓸 수 없습니다. 전파를 취소하면 다시 시도합니다."),
+    DE("{0} konnte nicht zurückgesetzt werden: {1} konnte nicht gelesen oder geschrieben werden. Übertragen rückgängig versucht es erneut."),
+    FR("Impossible de remettre {0} en état : impossible de lire ou d'écrire {1}. Annuler la propagation réessaie."),
+    ES("No se pudo restaurar {0}: no se pudo leer ni escribir {1}. Deshacer propagación lo reintenta."),
+    PT("Não foi possível repor {0}: não foi possível ler nem escrever {1}. Desfazer propagação tenta de novo."),
+    IT("Impossibile ripristinare {0}: impossibile leggere o scrivere {1}. Annulla propagazione riprova."),
+    NL("Kon {0} niet terugzetten: kon {1} niet lezen of schrijven. Doorvoeren ongedaan maken probeert het opnieuw."),
+    RU("Не удалось вернуть {0}: не удалось прочитать или записать {1}. Отмена распространения повторит попытку."),
+    TR("{0} geri alınamadı: {1} okunamadı veya yazılamadı. Yaymayı geri al yeniden dener."));
+
+SS_MSG(prop_failed_stray_base,
+    EN("Skipped {0}: {1} is a base with no index entry, so a propagate there could not be undone. That frame was left as it was."),
+    JA("{0} をスキップしました: {1} はインデックスに記録のないベースのため、そこへの伝播は元に戻せません。そのフレームは元のままです。"),
+    ZH_HANS("已跳过 {0}：{1} 是没有索引条目的底图，在此传播将无法撤销。该帧保持原状。"),
+    ZH_HANT("已略過 {0}：{1} 是沒有索引項目的底圖，在此傳播將無法復原。該影格保持原狀。"),
+    KO("{0} 건너뜀: {1}은(는) 인덱스 항목이 없는 베이스라서 그곳으로의 전파는 취소할 수 없습니다. 해당 프레임은 원래대로 두었습니다."),
+    DE("{0} übersprungen: {1} ist eine Basis ohne Indexeintrag, daher ließe sich ein Übertragen dorthin nicht rückgängig machen. Dieses Bild blieb, wie es war."),
+    FR("{0} ignorée : {1} est une base sans entrée d'index, une propagation n'y serait donc pas annulable. Cette image est restée telle quelle."),
+    ES("{0} omitido: {1} es una base sin entrada en el índice, así que una propagación ahí no se podría deshacer. Ese fotograma quedó como estaba."),
+    PT("{0} ignorado: {1} é uma base sem entrada no índice, então uma propagação ali não poderia ser desfeita. Esse quadro ficou como estava."),
+    IT("{0} saltato: {1} è una base senza voce nell'indice, quindi una propagazione lì non si potrebbe annullare. Quel fotogramma è rimasto com'era."),
+    NL("{0} overgeslagen: {1} is een basis zonder indexvermelding, dus doorvoeren daarheen zou niet ongedaan te maken zijn. Dat frame is gebleven zoals het was."),
+    RU("{0} пропущен: {1} — основа без записи в индексе, поэтому распространение на него нельзя было бы отменить. Этот кадр оставлен как был."),
+    TR("{0} atlandı: {1} dizinde kaydı olmayan bir taban, bu yüzden oraya yayma geri alınamazdı. O kare olduğu gibi bırakıldı."));
+
 // ===========================================================================
 // Find missing
 // ===========================================================================

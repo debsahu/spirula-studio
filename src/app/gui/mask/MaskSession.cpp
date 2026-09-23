@@ -144,6 +144,7 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
         _error_sticky = false;
         _corrected = (int)_index.frames.size();
     }
+    forget_workflow();
     _quit = false;
     _worker = std::thread([this] { worker_main(); });
     _open = true;
@@ -176,6 +177,7 @@ void MaskSession::close() {
     _doc.reset();
     _rgb.reset();
     sam_forget();
+    forget_workflow();
     _frames.clear();
     _idx = -1;
     _workspace.clear();
@@ -304,6 +306,16 @@ void MaskSession::pump() {
     _doc = std::move(l.doc);
     _doc_gen++;   // by construction: every _doc arrives here
     _shown_valid = false;
+    {
+        // A target opened for editing would diverge from its snapshot.
+        std::lock_guard<std::mutex> lk(_mu);
+        for (const LayerSnapshot& t : _prop.targets)
+            if (t.key == _doc->key()) {
+                _prop = PropagateRecord{};
+                _prop_undoable = false;
+                break;
+            }
+    }
     _rgb = std::make_shared<const std::vector<uint8_t>>(std::move(l.rgb));
     _fw = l.fw;
     _fh = l.fh;
@@ -407,6 +419,204 @@ void MaskSession::revert_every_frame() {
     _idx = -1;
     sam_revert(-1);
     if (i >= 0) load_frame(i);
+}
+
+// ---------------------------------------------------------------------------
+// Propagate
+// ---------------------------------------------------------------------------
+
+PropagateReport MaskSession::last_propagate() const {
+    std::lock_guard<std::mutex> lk(_mu);
+    return _prop_report;
+}
+
+bool MaskSession::can_undo_propagate() const {
+    if (!_doc) return false;
+    std::lock_guard<std::mutex> lk(_mu);
+    return _prop_undoable && _prop.source_key == _doc->key();
+}
+
+bool MaskSession::sam_work_pending() const {
+    return (_sam && _sam_ops.busy(*_sam)) || _sam_margin_pending;
+}
+
+// Frame keys repeat across datasets, so nothing keyed by one may outlive it:
+// a record that did would undo this dataset's layers into the next one's.
+void MaskSession::forget_workflow() {
+    std::lock_guard<std::mutex> lk(_mu);
+    _prop = PropagateRecord{};
+    _prop_undoable = false;
+    _prop_report = PropagateReport{};
+}
+
+void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
+    if (!_doc || _idx < 0 || sam_work_pending()) return;
+    const std::vector<int> targets = propagate_targets(_frames, _idx, scope, lo, hi);
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        _prop = PropagateRecord{};
+        _prop_undoable = false;
+        _prop_report = PropagateReport{};
+        _prop_report.w = _doc->width();
+        _prop_report.h = _doc->height();
+    }
+    if (targets.empty()) {
+        post_status(msg::prop_no_targets.get(), true);
+        return;
+    }
+    // The job saves the source itself: a queued save() would be a separate
+    // job whose failure this one could not see (Decision 18).
+    struct Job {
+        std::string source_key;
+        int W = 0, H = 0;
+        std::vector<uint8_t> base, drop, keep;
+        bool dirty = false, comp = false;
+        uint64_t rev = 0;
+        size_t byte_cap = 0;
+        std::vector<FrameRef> targets;
+    };
+    auto j = std::make_shared<Job>();
+    j->byte_cap = _prop_byte_cap;   // the setter is the UI thread's
+    j->source_key = _doc->key();
+    j->W = _doc->width();
+    j->H = _doc->height();
+    j->base = _doc->base();
+    j->drop = _doc->drop();
+    j->keep = _doc->keep();
+    j->dirty = _doc->dirty();
+    j->comp = _doc->base_state() != BaseState::Missing;
+    j->rev = _doc->revision();
+    for (int t : targets) j->targets.push_back(_frames[(size_t)t]);
+    post_status(msg::prop_working.get(), false);
+    enqueue([this, j] {
+        std::string err;
+        if (j->dirty) {
+            if (!save_frame(_layer_root, _mask_root, j->source_key, j->W, j->H, j->base.data(),
+                            j->drop.data(), j->keep.data(), j->comp, _index, err)) {
+                std::lock_guard<std::mutex> lk(_mu);
+                _status.clear();
+                _error = spirula::i18n::format(msg::err_write, {err});
+                return;
+            }
+            std::lock_guard<std::mutex> lk(_mu);
+            _saved_key = j->source_key;
+            _saved_rev = j->rev;
+            _saved_comp = j->comp;
+            _saved_ready = true;
+        }
+        PropagateRecord rec;
+        rec.source_key = j->source_key;
+        PropagateReport rep;
+        rep.w = j->W;
+        rep.h = j->H;
+        auto fail = [&rep](const std::string& key, const std::string& path, bool stray) {
+            rep.failed++;
+            if (!rep.failed_key.empty()) return;
+            rep.failed_key = key;
+            rep.failed_path = path;
+            rep.failed_stray = stray;
+        };
+        for (const FrameRef& f : j->targets) {
+            LayerSnapshot snap;
+            std::string serr;
+            // Without a snapshot nothing could be put back: skipped, counted.
+            if (!snapshot_layers(_layer_root, f.key, _index, snap, serr)) {
+                fail(f.key, serr, false);
+                continue;
+            }
+            // Undo would revert through a base no entry vouches for, copying
+            // it over the mask on disk, whatever wrote that since.
+            const std::string stray = layer_file(_layer_root, f.key, Layer::Base);
+            std::error_code ec;
+            if (!snap.had_entry && fs::exists(stray, ec)) {
+                fail(f.key, stray, true);
+                continue;
+            }
+            PropagateRefusal refused;
+            const bool ok = propagate_to(_layer_root, _mask_root, f.key, f.file, j->W, j->H,
+                                         j->drop.data(), j->keep.data(), _index, refused, err);
+            if (!ok && err.empty()) {
+                rep.refused++;
+                if (rep.refused_key.empty()) {
+                    rep.refused_key = f.key;
+                    rep.refused_w = refused.w;
+                    rep.refused_h = refused.h;
+                }
+                continue;
+            }
+            // Written, or partly: the snapshot is what puts it back either way.
+            rec.bytes += snap.bytes();
+            rec.targets.push_back(snap);
+            if (ok) {
+                rep.done++;
+                continue;
+            }
+            fail(f.key, err, false);
+            std::string rerr;
+            if (!restore_layers(_layer_root, _mask_root, snap, _index, rerr)) rep.unrestored++;
+        }
+        rep.bytes = rec.bytes;
+        rep.undoable = !rec.targets.empty() && rec.bytes <= j->byte_cap;
+        set_corrected((int)_index.frames.size());
+        std::lock_guard<std::mutex> lk(_mu);
+        _prop_report = rep;
+        _prop_undoable = rep.undoable;
+        _prop = rep.undoable ? std::move(rec) : PropagateRecord{};
+        _status = spirula::i18n::format(msg::prop_done, {rep.done, rep.refused, rep.failed});
+        // By priority, so a failure named in the loop is never clobbered.
+        if (rep.failed)
+            _error = spirula::i18n::format(rep.failed_stray ? msg::prop_failed_stray_base
+                                           : rep.unrestored ? msg::prop_failed_not_restored
+                                                            : msg::prop_failed_restored,
+                                           {rep.failed_key, rep.failed_path});
+        else if (rep.refused)
+            _error = spirula::i18n::format(msg::prop_refused_size,
+                                           {rep.refused_key, rep.refused_w, rep.refused_h, rep.w, rep.h});
+        else if (rep.done > 0 && !rep.undoable)
+            _error = spirula::i18n::format(msg::prop_not_undoable, {(int)(rep.bytes >> 20)});
+        else
+            _error.clear();
+    });
+}
+
+// A target that would not go back stays in the record, so Undo retries it;
+// restore_layers left it wholly as the propagate did, so nothing disagrees.
+void MaskSession::undo_propagate() {
+    if (!can_undo_propagate()) return;
+    auto rec = std::make_shared<PropagateRecord>();
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        *rec = std::move(_prop);
+        _prop = PropagateRecord{};
+        _prop_undoable = false;
+    }
+    enqueue([this, rec] {
+        PropagateRecord left;
+        left.source_key = rec->source_key;
+        std::string failed_key, failed_path;
+        for (auto it = rec->targets.rbegin(); it != rec->targets.rend(); ++it) {
+            std::string err;
+            if (restore_layers(_layer_root, _mask_root, *it, _index, err)) continue;
+            if (failed_key.empty()) {
+                failed_key = it->key;
+                failed_path = err;
+            }
+            left.bytes += it->bytes();
+            left.targets.insert(left.targets.begin(), *it);
+        }
+        const int restored = (int)(rec->targets.size() - left.targets.size());
+        set_corrected((int)_index.frames.size());
+        std::lock_guard<std::mutex> lk(_mu);
+        _prop_report = PropagateReport{};
+        _status = spirula::i18n::format(msg::prop_undone, {restored});
+        if (failed_key.empty()) {
+            _error.clear();
+            return;
+        }
+        _error = spirula::i18n::format(msg::prop_undo_failed, {failed_key, failed_path});
+        _prop = std::move(left);
+        _prop_undoable = true;
+    });
 }
 
 Rect MaskSession::shown_rect(const Rect& stored) const {
