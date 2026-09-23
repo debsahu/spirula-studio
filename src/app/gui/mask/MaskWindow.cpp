@@ -79,10 +79,15 @@ bool same_window(const Window& a, const Window& b) {
 namespace {
 
 // Picture.cpp's tint for a dropped pixel, then the two layers as 25% blends.
-void shade(int r, int g, int b, bool dropped, bool in_drop, bool in_keep, uint8_t* o) {
-    if (dropped) { r = r / 3 + 150; g = g / 3; b = b / 3; }
-    if (in_drop) { r = (r * 3 + 235) / 4; g = (g * 3 + 45) / 4; b = (b * 3 + 45) / 4; }
-    if (in_keep) { r = (r * 3 + 60) / 4; g = (g * 3 + 220) / 4; b = (b * 3 + 90) / 4; }
+// MaskOnly shows the composite as 230/30 grey; Photo shows the frame alone.
+void shade(Style style, int r, int g, int b, bool dropped, bool in_drop, bool in_keep,
+           uint8_t* o) {
+    if (style == Style::MaskOnly) r = g = b = dropped ? 30 : 230;
+    else if (style == Style::Overlay && dropped) { r = r / 3 + 150; g = g / 3; b = b / 3; }
+    if (style != Style::Photo) {
+        if (in_drop) { r = (r * 3 + 235) / 4; g = (g * 3 + 45) / 4; b = (b * 3 + 45) / 4; }
+        if (in_keep) { r = (r * 3 + 60) / 4; g = (g * 3 + 220) / 4; b = (b * 3 + 90) / 4; }
+    }
     o[0] = (uint8_t)std::clamp(r, 0, 255);
     o[1] = (uint8_t)std::clamp(g, 0, 255);
     o[2] = (uint8_t)std::clamp(b, 0, 255);
@@ -129,7 +134,7 @@ Rect derive_window(const Window& win, const Rect& part, const WindowSource& src,
                 uint8_t* o = &rgba[((size_t)ty * win.tw + (size_t)tx) * 4];
                 if (!cnt) { o[0] = o[1] = o[2] = 0; o[3] = 255; continue; }
                 // A decimated tie reads as dropped: hiding a correction is worse than over-showing one.
-                shade(acc[0] / cnt, acc[1] / cnt, acc[2] / cnt, dropped * 2 >= cnt,
+                shade(src.style, acc[0] / cnt, acc[1] / cnt, acc[2] / cnt, dropped * 2 >= cnt,
                       ld * 2 > cnt, lk * 2 > cnt, o);
             }
         }

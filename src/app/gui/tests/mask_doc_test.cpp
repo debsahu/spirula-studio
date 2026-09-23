@@ -1236,6 +1236,55 @@ void test_derive_window() {
     check(rgba[12] == 0 && rgba[15] == 255, "frame sampled to mask grid, no crash");
 }
 
+// ---------------------------------------------------------------------------
+// Plan 3, Task 1: the three display styles, pixel-exact
+// ---------------------------------------------------------------------------
+
+void test_window_styles() {
+    const uint8_t rgb[12] = {100, 200, 50, 100, 200, 50, 100, 200, 50, 100, 200, 50};
+    const uint8_t base[4] = {255, 0, 255, 0};
+    const uint8_t drop[4] = {0, 0, 255, 0};
+    const uint8_t keep[4] = {0, 0, 0, 255};
+    uint8_t comp[4];
+    mk::composite(base, drop, keep, 4, comp);
+    check(comp[0] == 255 && comp[1] == 0 && comp[2] == 0 && comp[3] == 255, "fixture composite");
+    mk::Window win;
+    win.r = {0, 0, 4, 1};
+    win.step = 1;
+    win.tw = 4;
+    win.th = 1;
+    mk::WindowSource src;
+    src.rgb = rgb;
+    src.fw = 4;
+    src.fh = 1;
+    src.composite = comp;
+    src.drop = drop;
+    src.keep = keep;
+    src.W = 4;
+    src.H = 1;
+    std::vector<uint8_t> rgba;
+    auto px = [&](int i, int r, int g, int b) {
+        return rgba[(size_t)i * 4] == r && rgba[(size_t)i * 4 + 1] == g &&
+               rgba[(size_t)i * 4 + 2] == b && rgba[(size_t)i * 4 + 3] == 255;
+    };
+    check(src.style == mk::Style::Overlay, "default style is Overlay");
+    mk::derive_window(win, win.r, src, rgba);
+    check(px(0, 100, 200, 50), "overlay: kept pixel is the photo");
+    check(px(1, 183, 66, 16), "overlay: dropped pixel is Picture.cpp's tint (r/3+150, g/3, b/3)");
+    check(px(2, 196, 60, 23), "overlay: drop layer blends 25% red over the tint");
+    check(px(3, 90, 205, 60), "overlay: keep layer blends 25% green over the photo");
+    src.style = mk::Style::MaskOnly;
+    mk::derive_window(win, win.r, src, rgba);
+    check(px(0, 230, 230, 230), "mask only: kept is light");
+    check(px(1, 30, 30, 30), "mask only: dropped is dark");
+    check(px(2, 81, 33, 33), "mask only: drop layer tints the dark");
+    check(px(3, 187, 227, 195), "mask only: keep layer tints the light");
+    src.style = mk::Style::Photo;
+    mk::derive_window(win, win.r, src, rgba);
+    for (int i = 0; i < 4; i++)
+        check(px(i, 100, 200, 50), "photo: pixel " + std::to_string(i) + " is the frame, no tint");
+}
+
 // The frame at twice the mask's size, every pixel distinct and every texel
 // kept, so each texel IS a frame pixel: skipping the scale reads another one.
 void test_derive_window_frame_scale() {
@@ -4612,6 +4661,7 @@ int main() {
     test_orientation_mapping();
     test_view_math();
     test_derive_window();
+    test_window_styles();
     test_derive_window_frame_scale();
     test_view_math_non_square_pane();
     test_session();

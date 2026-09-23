@@ -58,6 +58,11 @@ struct Window {
 Window window_for(const Mapping& m, int dw, int dh, float pane_w, float pane_h);
 bool same_window(const Window& a, const Window& b);
 
+// What a pane shows of the frame. Overlay: the photo, dropped pixels tinted,
+// the layers as tints. MaskOnly: the composite as light and dark under the
+// same layer tints. Photo: the frame and nothing else, for the peek.
+enum class Style { Overlay, MaskOnly, Photo };
+
 struct WindowSource {
     const uint8_t* rgb = nullptr;       // the frame as stored, fw x fh x 3
     int fw = 0, fh = 0;
@@ -66,6 +71,7 @@ struct WindowSource {
     const uint8_t* keep = nullptr;
     int W = 0, H = 0;
     sfm::ExifTransform turn;            // displayed -> stored
+    Style style = Style::Overlay;
 };
 
 // `rgba` is resized to win.tw*win.th*4; only the texels under `part`
