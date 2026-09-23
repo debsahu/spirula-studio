@@ -149,9 +149,9 @@ private:
 struct PropagateRefusal {
     int w = 0, h = 0;   // the target's size, when the sizes differed
 };
-// Copies `drop` / `keep` (W x H) onto `key` over that frame's OWN base.
-// False with `refused` set and nothing written when the sizes differ; false
-// with `error` (a path) on a failed file or a mis-sized layer of its own.
+// Copies `drop` / `keep` (W x H) onto `key` over that frame's OWN base. False
+// with `refused` set on a size mismatch, before any write unless the load rebased
+// a mask regenerated at a new size; false with `error` (a path) on a failure.
 bool propagate_to(const std::string& layer_root, const std::string& mask_root,
                   const std::string& key, const std::string& image_file, int W, int H,
                   const uint8_t* drop, const uint8_t* keep, LayerIndex& idx,

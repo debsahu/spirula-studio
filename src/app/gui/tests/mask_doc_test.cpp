@@ -1698,6 +1698,14 @@ void test_propagate_to() {
           "a mis-sized layer file is a failure that names itself: " + err);
     check(file_bytes(f2.masks / "cam0" / "b.png") == b2_before && idx2.frames.count("cam0/b") == 0,
           "and b's mask is untouched");
+
+    // A size read that fails names the file it failed on, not the image.
+    const fs::path junk = f2.layer / "cam0" / "a.base.png";
+    const uint8_t not_png[] = {'n', 'o', 't', ' ', 'p', 'n', 'g'};
+    mk::write_file_atomic(junk.string(), not_png, sizeof not_png);
+    check(!mk::propagate_to(lr2, mr2, "cam0/a", (f2.images / "cam0" / "a.jpg").string(), 64, 48,
+                            drop.data(), keep.data(), idx2, refused, err) &&
+              err == junk.string() && refused.w == 0, "a corrupt base is named as the failure: " + err);
 }
 
 void test_snapshot_restore() {
@@ -1839,6 +1847,157 @@ void test_snapshot_restore_flipped() {
     check(mk::restore_layers(layer_root, mask_root, sc, idx, err), "flipped restore: restore c: " + err);
     check(file_bytes(f.masks / "c.png") == after_first,
           "flipped restore: c's mask file is the first propagate's, byte for byte");
+}
+
+// A restore that fails late must leave the entry it found: a snapshot entry
+// over the propagated mask reads Regenerated, and a reopen rebases .base.png.
+enum class Late { BaseUnreadable, LayerMisfit, MaskWrite, IndexSave };
+
+void restore_failure_arm(bool flipped, Late step, const char* step_name) {
+    const std::string tag = std::string("restore failure (") + (flipped ? "flipped" : "unflipped") +
+                            ", " + step_name + "): ";
+    Fixture f = make_dataset(flipped ? "restore_fail_f" : "restore_fail_u", 64, 48, {"cam0/a", "cam0/c"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> d1 = box_layer(64, 48, 4, 4, 14, 14), k1 = box_layer(64, 48, 40, 20, 50, 30);
+    const std::vector<uint8_t> d2 = box_layer(64, 48, 20, 20, 30, 30), k2 = box_layer(64, 48, 0, 0, 5, 5);
+    const fs::path base = f.layer / "cam0" / "c.base.png", img = f.images / "cam0" / "c.jpg";
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    idx.mask_flipped = flipped;
+    std::string err;
+    mk::PropagateRefusal refused;
+    check(mk::propagate_to(layer_root, mask_root, "cam0/c", img.string(), 64, 48, d1.data(), k1.data(),
+                           idx, refused, err), tag + "first layers: " + err);
+    const std::vector<uint8_t> base_before = file_bytes(base);
+    mk::LayerSnapshot sc;
+    check(mk::snapshot_layers(layer_root, "cam0/c", idx, sc, err) && sc.had_entry, tag + "snapshot");
+    check(mk::propagate_to(layer_root, mask_root, "cam0/c", img.string(), 64, 48, d2.data(), k2.data(),
+                           idx, refused, err), tag + "second layers: " + err);
+    const mk::IndexEntry before = idx.frames["cam0/c"];
+    check(before.composite_fp != sc.entry.composite_fp, tag + "fixture: the snapshot's entry is stale");
+    const fs::path ro = step == Late::MaskWrite ? f.masks / "cam0" : f.layer;
+    const auto ro_was = fs::status(ro).permissions();
+    if (step == Late::BaseUnreadable) fs::permissions(base, fs::perms::none);
+    if (step == Late::LayerMisfit) mk::encode_gray_png(synth_mask(32, 24, 3).data(), 32, 24, sc.drop_png);
+    if (step == Late::MaskWrite || step == Late::IndexSave)
+        fs::permissions(ro, fs::perms::owner_read | fs::perms::owner_exec);
+    const bool restored = mk::restore_layers(layer_root, mask_root, sc, idx, err);
+    fs::permissions(base, fs::perms::owner_read | fs::perms::owner_write);
+    fs::permissions(ro, ro_was);
+    check(!restored && !err.empty(), tag + "restore fails: " + err);
+    const mk::IndexEntry& now = idx.frames["cam0/c"];
+    check(now.composite_fp == before.composite_fp && now.base_fp == before.base_fp &&
+              now.saved_at == before.saved_at, tag + "the entry is the one restore found");
+    mk::BaseState st;
+    check(mk::recomposite_frame(layer_root, mask_root, "cam0/c", idx, st, err) || step == Late::LayerMisfit,
+          tag + "recomposite: " + err);
+    mk::MaskDoc doc;
+    std::string warn;
+    doc.load(layer_root, mask_root, "cam0/c", 64, 48, idx, err, warn);
+    check(file_bytes(base) == base_before, tag + ".base.png survives a reopen, byte for byte");
+}
+
+void test_restore_failure_keeps_base() {
+    for (bool flipped : {false, true}) {
+        restore_failure_arm(flipped, Late::BaseUnreadable, "base unreadable");
+        restore_failure_arm(flipped, Late::LayerMisfit, "layer misfit");
+        restore_failure_arm(flipped, Late::MaskWrite, "mask write");
+        restore_failure_arm(flipped, Late::IndexSave, "index save");
+    }
+}
+
+// Missing (an entry, no mask on disk) stays Missing through an undo, as it
+// does through the propagate.
+void test_restore_writes_no_mask() {
+    for (bool flipped : {false, true}) {
+        const std::string tag = flipped ? "no mask (flipped): " : "no mask (unflipped): ";
+        Fixture f = make_dataset(flipped ? "restore_nomask_f" : "restore_nomask_u", 64, 48, {"a", "m"});
+        const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+        const std::vector<uint8_t> d1 = box_layer(64, 48, 4, 4, 14, 14), k1 = box_layer(64, 48, 40, 20, 50, 30);
+        const std::vector<uint8_t> d2 = box_layer(64, 48, 20, 20, 30, 30), k2 = box_layer(64, 48, 0, 0, 5, 5);
+        mk::LayerIndex idx;
+        idx.mask_root = mask_root;
+        idx.mask_flipped = flipped;
+        std::string err;
+        mk::PropagateRefusal refused;
+        const std::string img = (f.images / "m.jpg").string();
+        check(mk::propagate_to(layer_root, mask_root, "m", img, 64, 48, d1.data(), k1.data(), idx, refused, err),
+              tag + "first layers");
+        fs::remove(f.masks / "m.png");
+        mk::LayerSnapshot sm;
+        check(mk::snapshot_layers(layer_root, "m", idx, sm, err) && sm.had_entry &&
+                  mk::base_state(mask_root, "m", idx) == mk::BaseState::Missing, tag + "fixture: m is Missing");
+        check(mk::propagate_to(layer_root, mask_root, "m", img, 64, 48, d2.data(), k2.data(), idx, refused, err) &&
+                  !fs::exists(f.masks / "m.png"), tag + "propagate conjures no mask");
+        check(mk::restore_layers(layer_root, mask_root, sm, idx, err), tag + "restore: " + err);
+        check(!fs::exists(f.masks / "m.png"), tag + "restore conjures no mask");
+        check(file_bytes(f.layer / "m.drop.png") == sm.drop_png && file_bytes(f.layer / "m.keep.png") == sm.keep_png,
+              tag + "and the layers are the snapshot's");
+    }
+}
+
+// The layer arms test_snapshot_restore does not reach: an absent keep, a
+// snapshot read failure, an entry with no base, and orphan layers.
+void test_snapshot_restore_edges() {
+    Fixture f = make_dataset("snapshot_edges", 64, 48, {"a", "c", "o"});
+    fs::remove(f.masks / "a.png");
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    const std::vector<uint8_t> d1 = box_layer(64, 48, 4, 4, 14, 14), k1 = box_layer(64, 48, 40, 20, 50, 30);
+    const std::vector<uint8_t> d2 = box_layer(64, 48, 20, 20, 30, 30), k2 = box_layer(64, 48, 0, 0, 5, 5);
+    mk::LayerIndex idx;
+    idx.mask_root = mask_root;
+    std::string err;
+    mk::PropagateRefusal refused;
+    auto prop = [&](const char* key, const std::vector<uint8_t>& d, const std::vector<uint8_t>& k) {
+        return mk::propagate_to(layer_root, mask_root, key, (f.images / (std::string(key) + ".jpg")).string(),
+                                64, 48, d.data(), k.data(), idx, refused, err);
+    };
+
+    check(prop("c", d1, k1), "edges: first layers on c");
+    fs::remove(f.layer / "c.keep.png");
+    mk::LayerSnapshot sc;
+    check(mk::snapshot_layers(layer_root, "c", idx, sc, err) && sc.had_drop && !sc.had_keep,
+          "edges: snapshot of an entry whose keep layer is gone");
+    check(prop("c", d2, k2) && stencil_pixels(f.layer / "c.keep.png") == k2, "edges: c carries k2");
+    check(mk::restore_layers(layer_root, mask_root, sc, idx, err) &&
+              stencil_pixels(f.layer / "c.keep.png") == std::vector<uint8_t>(64 * 48, 0),
+          "edges: the keep layer the snapshot did not hold is zero, not k2");
+
+    const fs::path drop_c = f.layer / "c.drop.png";
+    fs::permissions(drop_c, fs::perms::none);
+    mk::LayerSnapshot unreadable;
+    const bool snapped = mk::snapshot_layers(layer_root, "c", idx, unreadable, err);
+    fs::permissions(drop_c, fs::perms::owner_read | fs::perms::owner_write);
+    check(!snapped && err == drop_c.string(), "edges: a snapshot read failure names the layer file: " + err);
+
+    // a has no mask and so no base: restore puts back the entry and saves it.
+    check(prop("a", d1, k1) && !fs::exists(f.layer / "a.base.png"), "edges: a takes layers only");
+    mk::LayerSnapshot sa;
+    check(mk::snapshot_layers(layer_root, "a", idx, sa, err) && sa.had_entry, "edges: snapshot of a");
+    sa.entry.saved_at = "2000-01-01T00:00:00Z";
+    check(prop("a", d2, k2), "edges: second layers on a");
+    check(mk::restore_layers(layer_root, mask_root, sa, idx, err) &&
+              idx.frames["a"].saved_at == sa.entry.saved_at, "edges: a's entry is the snapshot's: " + err);
+    mk::LayerIndex reread;
+    check(reread.load(layer_root, err) && reread.frames.count("a") == 1 &&
+              reread.frames["a"].saved_at == sa.entry.saved_at, "edges: and it reached index.json");
+    check(file_bytes(f.layer / "a.drop.png") == sa.drop_png && !fs::exists(f.masks / "a.png"),
+          "edges: a's layers are the snapshot's, still with no mask");
+
+    // Orphan layers (no entry) are what the target carried; undo keeps them.
+    const std::vector<uint8_t> original_o = file_bytes(f.masks / "o.png");
+    std::vector<uint8_t> orphan;
+    mk::encode_gray_png(box_layer(64, 48, 8, 8, 20, 20).data(), 64, 48, orphan);
+    mk::write_file_atomic((f.layer / "o.drop.png").string(), orphan.data(), orphan.size());
+    mk::LayerSnapshot so;
+    check(mk::snapshot_layers(layer_root, "o", idx, so, err) && !so.had_entry && so.had_drop && !so.had_keep,
+          "edges: snapshot of an orphan drop layer");
+    check(prop("o", d2, k2), "edges: propagate onto o");
+    check(mk::restore_layers(layer_root, mask_root, so, idx, err), "edges: restore o: " + err);
+    check(file_bytes(f.layer / "o.drop.png") == orphan && !fs::exists(f.layer / "o.keep.png"),
+          "edges: o's orphan drop layer is back, byte for byte, and no keep layer");
+    check(file_bytes(f.masks / "o.png") == original_o && idx.frames.count("o") == 0 &&
+              !fs::exists(f.layer / "o.base.png"), "edges: o's mask, entry and base are as before");
 }
 
 // The eraser, through the same call the panel makes. The base drops a 16x12
@@ -5590,6 +5749,9 @@ int main() {
     test_propagate_to();
     test_snapshot_restore();
     test_snapshot_restore_flipped();
+    test_restore_failure_keeps_base();
+    test_restore_writes_no_mask();
+    test_snapshot_restore_edges();
     test_session_eraser();
     test_session_size_mismatch();
     test_session_flipped_polarity();
