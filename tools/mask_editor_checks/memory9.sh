@@ -1,19 +1,18 @@
 #!/bin/bash
 # Criterion #9 in the app: resident memory 10 s into playback of an 8K dataset,
 # minus the Train-screen baseline, bar 600 MB. One fresh launch per call.
-# usage: memory9.sh <arm C|S|C0> <run n> <bench dir> <out dir>
+# usage: memory9.sh <arm C|S> <run n> <bench dir> <out dir>
 #   C   control: one stroke, then Play      S   SAM loaded and one click first
-#   C0  C with SS_STB_PAGE_ALLOC=0 in the app's environment (the A/B arm)
 # S needs MEC_SAM_MODEL (env.sh). Raw readings go to <out dir>/<arm><n>.raw.
 
 ARM=$1; N=$2; BENCH=$3; OUT=$4
-case "$ARM" in C|S|C0) ;; *) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;; esac
+case "$ARM" in C|S) ;; *) sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;; esac
 [ -n "$N" ] && [ -d "$BENCH" ] && [ -n "$OUT" ] || { sed -n '4p' "$0" | sed 's/^# //'; exit 2; }
 [ "$ARM" = S ] && [ -z "$MEC_SAM_MODEL" ] && { echo "memory9: arm S needs MEC_SAM_MODEL" >&2; exit 2; }
 mkdir -p "$OUT/w$ARM"
 OUT=$(cd "$OUT" && pwd); BENCH=$(cd "$BENCH" && pwd)
 export MEC_WORK=$OUT/w$ARM
-case "$ARM" in C) export MEC_PORT=7931 ;; S) export MEC_PORT=7932 ;; C0) export MEC_PORT=7933 ;; esac
+case "$ARM" in C) export MEC_PORT=7931 ;; S) export MEC_PORT=7932 ;; esac
 source "$(dirname "$0")/env.sh"
 cd "$MEC_TOOLS/../.." || exit 1
 RAW=$OUT/$ARM$N.raw
@@ -37,17 +36,14 @@ step() {
 field() { command grep "^STEP $1 " "$RAW" | sed "s/.*| $2 \([^ |]*\).*/\1/"; }
 
 [ -f "$MEC_WORK/gui.pid" ] && bash "$MEC_TOOLS/stop.sh" > /dev/null
-[ "$ARM" = C0 ] && export SS_STB_PAGE_ALLOC=0
 # App Nap off through the argument domain; the dataset through the in-app folder dialog.
 gc launch --exe build/spirula --offscreen --port "$MEC_PORT" --wait 60 --log "$G/gui.log" -- -NSAppSleepDisabled YES |
     python3 -c "import json,sys; print(json.load(sys.stdin)['pid'])" > "$MEC_WORK/gui.pid" || exit 1
-unset SS_STB_PAGE_ALLOC
-KNOB=$(ps -E -p "$(PID)" -o command= | command grep -o 'SS_STB_PAGE_ALLOC=[^ ]*')
 gc click home_open_dataset > /dev/null; gc wait --frames 5 > /dev/null
 gc text --at "$(tree_centre '##path')" "$BENCH" > /dev/null; gc wait --frames 5 > /dev/null
 gc click fd_use_this_folder > /dev/null; gc wait --frames 30 > /dev/null
 gc wait --frames 30 > /dev/null; sleep 3
-echo "$ARM$N pid $(PID) pri $(pri) screen $(st screen) binary_md5 $(md5 -q build/spirula) knob ${KNOB:-unset}" | tee -a "$RAW"
+echo "$ARM$N pid $(PID) pri $(pri) screen $(st screen) binary_md5 $(md5 -q build/spirula)" | tee -a "$RAW"
 step baseline
 
 gc click correct_masks > /dev/null

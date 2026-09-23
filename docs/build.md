@@ -238,17 +238,6 @@ the torch extension build is not supported on Windows, and a broken torch
 install aborts configure from inside `TorchConfig.cmake` (which `QUIET` cannot
 suppress).
 
-**stb_image's allocator.** `src/external/stb_image_impl.cpp` routes stb through
-`src/core/PageAlloc.h`. A thread that holds a `spirula::PageAllocScope` (today
-only the mask editor's slideshow decoders) gets its stb buffers of 1 MiB and up
-from `mmap` / `VirtualAlloc`, unmapped the moment stb frees them; every other
-thread, the training loader included, gets plain `malloc` as before. Each block
-carries a 64-byte header naming how it was made, so it is freed correctly on any
-thread. `SS_STB_PAGE_ALLOC=0` maps nothing anywhere; it is read once per process
-and exists for the memory A/B (`docs/notes/mask-editor.md`, memory9).
-`page_alloc_test` covers both: run it plain and as
-`SS_STB_PAGE_ALLOC=0 page_alloc_test --hook-off`.
-
 ## Packaging
 
 Only macOS has a packaging step, because only macOS has a form the binary is

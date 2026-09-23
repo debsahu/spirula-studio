@@ -20,7 +20,6 @@
 #include "app/gui/mask/MaskWindow.h"
 #include "core/ImageOrient.h"
 #include "core/MaskMargin.h"
-#include "core/PageAlloc.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
 #include "i18n/catalog/Dataset.h"
@@ -4052,9 +4051,7 @@ void bench_8k(const char* dir) {
                 median_ms([&] { d.save(layer.string(), masks.string(), idx, err); }));
     std::printf("bench undo x20                   %8.1f ms\n",
                 median_ms([&] { for (int k = 0; k < 20; k++) d.undo(); for (int k = 0; k < 20; k++) d.redo(); }, 1));
-    // Plan 3: what the slideshow decodes per frame, single-threaded, on a
-    // thread that page-allocates stb's buffers as the slideshow's decoders do.
-    spirula::PageAllocScope pages;
+    // Plan 3: what the slideshow decodes per frame, single-threaded.
     gui::Picture pic;
     const std::string img0 = (images / "f0000.jpg").string(), msk0 = (masks / "f0000.png").string();
     const double p1024 = median_ms([&] { gui::load_picture(img0, msk0, 1024, pic); });

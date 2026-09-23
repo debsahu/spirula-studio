@@ -2,8 +2,6 @@
 
 #include "app/gui/mask/MaskSlideshow.h"
 
-#include "core/PageAlloc.h"
-
 #include <algorithm>
 #include <utility>
 
@@ -183,10 +181,9 @@ void SlidePrefetch::put_locked(int index, Picture& pic) {
     _bytes += pick->pic.bytes();
 }
 
-// Each decoder page-allocates stb's buffers (core/PageAlloc.h) and keeps one
-// picture for its lifetime, swapped with the ring's on every put.
+// Each decoder keeps one picture for its lifetime, swapped with the ring's on
+// every put.
 void SlidePrefetch::worker() {
-    spirula::PageAllocScope pages;
     Picture mine;
     for (;;) {
         int index = -1;
