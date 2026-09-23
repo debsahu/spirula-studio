@@ -69,6 +69,9 @@ public:
     // load answers for itself.
     void set_model(const std::string& path, bool text_prompts);
     const std::string& model_path() const;
+    // The device the app froze for inference, passed to every load.
+    void set_device(const std::string& selector);
+    const std::string& device() const;
     bool has_model() const;
     bool text_supported() const;
     bool busy() const;
@@ -134,6 +137,10 @@ private:
     static SamResult remargin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
                               int doc_h, float margin);
     static void publish(State& s, SamResult r);
+    // A margin job's status, in both builds. It leaves error() alone unless it
+    // fails itself: a slider release must not wipe a pause's reason.
+    static void margin_begin(State& s);
+    static void margin_end(State& s, const std::string& job_error);
     static void run(State& s, Job job);
     static void run_stages(State& s, Job job,
                            const std::function<void(const std::string&)>& finish);

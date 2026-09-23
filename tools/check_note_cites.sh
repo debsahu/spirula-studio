@@ -127,7 +127,11 @@ row src/nn/vk/Memory.cpp 243-266 "vkFreeMemory(ctx.device(), a.memory, nullptr);
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::release(" 362
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::releaseAll()"
 # The SAM half's architecture: the one-session rule and the decisions not to undo.
-row src/app/gui/mask/MaskSession.h 305 "std::shared_ptr<const std::vector<uint8_t>> _rgb;"
+row src/app/gui/mask/MaskSession.h 310 "std::shared_ptr<const std::vector<uint8_t>> _rgb;"
+row src/app/gui/DatasetPrep.cpp 389-393 "std::vector<MaskClick> clicks_for(" 389
+row src/app/gui/DatasetPrep.cpp 389-393 "if (c.source.empty() || c.source == in.path)"
+row src/app/gui/mask/MaskSam.cpp 419 "p.device = j.device;"
+row src/app/gui/mask/MaskSam.cpp 452 "img.data.assign(j.rgb->begin(), j.rgb->end());"
 row src/app/gui/mask/MaskSession.cpp 287 "_doc_gen++;"
 row src/app/gui/GuiApp.cpp 1184-1187 "void GuiApp::stop_inference_users()" 1184
 row src/app/gui/GuiApp.cpp 1184-1187 "_mask_editor.sam_yield();"

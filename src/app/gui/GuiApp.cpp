@@ -5420,6 +5420,17 @@ void GuiApp::open_mask_editor(const std::string& workspace, const std::string& i
     _mask_editor.set_model_picker([this] {
         draw_mask_model_picker(_model_id, _download, [this] { request_model_download(); });
     });
+    // SAM loads on the device every other inference user freezes, never nn's
+    // default; a failed freeze refuses the prompt with the same sentence.
+    _mask_editor.set_sam_device_gate([this](std::string& device, std::string& error) {
+        if (!freeze_native_device()) {
+            error = _native_device_error.empty() ? msg::no_device_found.get()
+                                                 : _native_device_error;
+            return false;
+        }
+        device = _native_device_uuid;
+        return true;
+    });
     std::string err;
     if (!_mask_editor.open(workspace, image_dir, mask_dir, mask_flipped, err)) log(err);
 }

@@ -595,9 +595,8 @@ std::string MaskSession::sam_blocker(bool mask_preview, bool depth_preview, bool
     return {};
 }
 
-// Joins on the UI thread, up to one stage of a running job: the price of the
-// other user never sharing the device's unsynchronised stream with this one.
-// A lifted pause takes its own message with it and nothing else.
+// Records why SAM is paused; never joins or yields (stop_inference_users()
+// does that). A lifted pause takes its own message with it and nothing else.
 void MaskSession::set_sam_blocker(const std::string& reason) {
     if (reason == _sam_blocker) return;
     if (_sam && !_sam_blocker.empty()) _sam->clear_error_if(_sam_blocker);
@@ -699,10 +698,7 @@ bool MaskSession::sam_prompt_point(float frame_x, float frame_y, Paint mode, boo
     if (!_doc || !_rgb || _idx < 0 || !sam_has_model() || _sam_release_pending) return false;
     if (!(frame_x >= 0.0f && frame_y >= 0.0f && frame_x < (float)_fw && frame_y < (float)_fh))
         return false;
-    if (!_sam_blocker.empty()) {
-        sam().refuse(_sam_blocker);
-        return false;
-    }
+    if (!sam_gate_passes()) return false;
     _sam_click_x = frame_x;
     _sam_click_y = frame_y;
     MaskSam& sam = this->sam();
@@ -713,6 +709,23 @@ bool MaskSession::sam_prompt_point(float frame_x, float frame_y, Paint mode, boo
                           std::move(points), mode, sam_prompt().dilate_ratio))
         return false;
     sam_prompt_started(frame_x, frame_y, positive);
+    return true;
+}
+
+// A refusal lands in sam_error(); the device is frozen only once no blocker
+// stands, so a paused prompt never commits the app to a device.
+bool MaskSession::sam_gate_passes() {
+    if (!_sam_blocker.empty()) {
+        sam().refuse(_sam_blocker);
+        return false;
+    }
+    if (!_sam_device_gate) return true;
+    std::string device, error;
+    if (!_sam_device_gate(device, error)) {
+        sam().refuse(error);
+        return false;
+    }
+    sam().set_device(device);
     return true;
 }
 
@@ -730,10 +743,7 @@ bool MaskSession::sam_prompt_text(const std::string& phrases) {
     if (std::all_of(phrases.begin(), phrases.end(),
                     [](char c) { return c == ';' || c == ' ' || c == '\t'; }))
         return false;
-    if (!_sam_blocker.empty()) {
-        sam().refuse(_sam_blocker);
-        return false;
-    }
+    if (!sam_gate_passes()) return false;
     if (!sam().start_text(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
                           phrases, sam_prompt().dilate_ratio))
         return false;
@@ -771,6 +781,9 @@ Rect MaskSession::sam_pump() {
 Rect MaskSession::sam_land(SamResult res) {
     if (res.frame_key != sam_frame_stamp() || (res.margin_job && !sam_add_on_top(_sam_add_object))) {
         _sam_dropped++;
+        // An undone add a redo can still bring back gets its detections back too.
+        if (res.margin_job && res.frame_key == sam_frame_stamp() && sam_add_redoable())
+            _sam_held = std::move(res.held);
         return {};
     }
     if (res.margin_job) {
@@ -797,8 +810,11 @@ void MaskSession::sam_start_margin() {
         _sam_margin_starts++;
 }
 
+// A job in flight lands as a plain add: the list's numbers now name other
+// objects, so nothing may replace it (and drop its redo tail) later.
 void MaskSession::sam_objects_edited() {
     _sam_add_object = -1;
+    _sam_job_object = -1;
     _sam_held.clear();
 }
 

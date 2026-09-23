@@ -46,8 +46,9 @@ the rest is three test targets, `frame_mask_test`, `mask_doc_test` and
 `MaskSam.cpp`. No `find_package`, no `FetchContent`, no new library, no new
 link line: `git diff 66342882 HEAD -- cmake/` matches neither word. `assets/`
 is untouched, so the embedded fonts were not regenerated either.
-`git diff --name-only 66342882 HEAD` is 48 files, 28 added and 20 modified,
-and no manifest, lockfile or vendored tree is among them. Plans 1 to 3 made 33
+`git diff --name-only 66342882 HEAD` is 63 files, 42 added and 21 modified,
+and no manifest, lockfile or vendored tree is among them; 14 of the added
+files are the scripts in `tools/mask_editor_checks/`. Plans 1 to 3 made 33
 of them (20 added, 13 modified, at `84d32966`); plan 4, SAM assist, is
 `84d32966..HEAD`, which also carries the plan-3 review fixes that landed
 interleaved with it (`dataset_prep_test`, `tools/check_note_cites.sh`, the
@@ -93,7 +94,9 @@ named here and nowhere else: `FrameMask`, `DatasetPrep`, `GuiApp`,
 `src/core/PolygonFill.h`, `src/core/DistanceTransform.h` and
 `src/sam/MaskDilate.cpp` for the two moves; `build_develop.bash` with
 `tools/check_sam_guard.sh` and `tools/check_note_cites.sh` for two new lints;
-and `tools/guictl.py` with `app/gui/Automation.{h,cpp}` and
+`tools/mask_editor_checks/` for the in-app harnesses, and
+`tools/check_private_paths.sh`, whose pattern now also catches macOS home
+paths; and `tools/guictl.py` with `app/gui/Automation.{h,cpp}` and
 `docs/notes/gui-automation.md` for the shared GUI test harness -- the last are
 fixes and additions to pre-existing tooling, explained where each was made
 ("A pre-existing automation-tooling defect" below, and under Tasks 5 to 7), and
@@ -103,7 +106,7 @@ the dataset screen's own controls: the object list and one margin slider left
 `SegmentPanel`, and the checkpoint picker and the other margin slider left
 `GuiApp`, all for `MaskPrompt`. The dataset screen's object list was
 pixel-identical before and after (P13). The rest of `GuiApp`'s change is the
-one-session rule below.
+one-session rule and the device freeze, below.
 
 **Upstreaming.** Nothing here has been offered upstream and nothing has been
 pushed anywhere. This is a branch in this repository.
@@ -2003,10 +2006,14 @@ stand in for the job.
   `encode_image` at 2.56 s on a byte-identical binary, on mains power with no
   thermal warning; the cause was not found. This is why P7's bar moved.
 - **The open frame's pixels are co-owned.** `_rgb` is a
-  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:305`) and a job holds
+  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:310`) and a job holds
   its own reference, so moving to another frame, which replaces `_rgb` in
   `pump()`, never frees what a job reads. The `const` element type makes a
-  refill in place a compile error. The plan's first draft copied `_rgb` on the
+  refill in place a compile error. **Host memory is a known, unmeasured
+  cost.** The job still copies the frame into its own `nn::Image`
+  (`MaskSam.cpp:452`), 361 MB at 15520x7760, and during a frame change the old
+  frame stays alive beside it, so the peak is about twice that. It was never
+  measured. The plan's first draft copied `_rgb` on the
   job thread while `pump()` could replace it: a use-after-free that a "does
   not crash" check would have passed. The `frame pixels:` checks pin it.
 - **Every job is stamped with a generation and the frame key**
@@ -2058,6 +2065,21 @@ So the editor **yields**, and while it cannot yield it **refuses**:
   Three conservative choices, each flagged when it was made: the depth preview
   blocks too, all of `native_work_busy()` (training and meshing included)
   counts as a run, and the mask preview blocks even with masking off.
+- **Freeze the device first.** Every other inference start calls
+  `freeze_native_device()` before it loads anything; the editor does too, at
+  every prompt, through a gate `GuiApp::open_mask_editor` installs
+  (`MaskSession::set_sam_device_gate`, checked in `sam_gate_passes` after the
+  blocker, so a paused prompt never commits the app to a device). The frozen
+  selector is handed to `MaskSam::set_device` and from there to
+  `ModelParams::device` on every load (`MaskSam.cpp:419`), explicitly, rather
+  than trusting `sam::freeze_device("")` to inherit the global. A failed freeze
+  refuses the prompt with the same sentence the other sites show. Without it,
+  on a machine with two GPUs and a non-default choice, the editor's load took
+  nn's **default** device, and every later freeze then failed with
+  `device_conflict`: training, dataset runs and both previews refused until a
+  restart. **The multi-GPU path is untested: this Mac has one GPU.** What is
+  pinned is the gate's contract (`device gate:` checks); that `GuiApp`
+  installs it is read, not tested, as `GuiApp.cpp` is in no test target.
 - The editor never builds a `sam::Tracker`, whose memory bank `unload()` does
   not release.
 
@@ -2103,16 +2125,24 @@ driven in the app is "The cross-screen inference checks" under Task 5.
    editor-only model setting. **Do not give the editor its own model to
    decouple the two**: the picker is one control over one state, on purpose.
    The **prompt** -- clicks, objects, phrase, exceptions, margin -- lives in
-   `MaskSam::prompt()` and never in the dataset's `MaskSettings`. A dataset
-   `MaskClick` is keyed by `source` (the input's path), a source frame index,
-   a `position` through the capture and a camera; the editor holds a prepared
-   frame key and its own frame index, none of those. An editor click written
-   into the dataset's settings would carry the wrong `source` and frame, and
-   `SegmentPanel::start_job`'s filter (`mine(c) && c.frame == frame.index &&
-   c.camera == camera`, `SegmentPanel.cpp:335-336`) would silently never match
-   it: saved, and never used, with no error. Editor clicks carry an empty
-   `source`, and `object_points` sends only those. P13 read the dataset
-   screen's fields unchanged across an editor session of 9 clicks on 3 objects.
+   `MaskSam::prompt()` and never in the dataset's `MaskSettings`, because an
+   editor click cannot be expressed as a dataset click. A dataset `MaskClick`
+   is keyed by `source` (the input's path), a source frame index, a `position`
+   through the capture and a camera; the editor holds a prepared frame key and
+   its own frame index, none of those. **Nothing makes a leaked click harmless.**
+   An editor click carries an empty `source`, and a dataset run reads an empty
+   `source` as **every input** (`clicks_for`, `DatasetPrep.cpp:389-393`; the
+   Update Dataset check in `GuiApp.cpp` reads it the same way): a click that
+   reached the dataset's settings would prompt the whole capture, at a frame
+   index that means something else there. Only `SegmentPanel::start_job`'s
+   preview filter (`mine(c) && c.frame == frame.index && c.camera == camera`,
+   `SegmentPanel.cpp:335-336`) would ignore it. So the safety is the
+   separation itself: no path writes an editor click into the dataset's
+   `MaskSettings`, and one must not be added. (An earlier revision of this
+   note, and of `MaskSam::object_points`' comment, said the empty `source`
+   made a leak harmless; that was true of the preview only.) P13 read the
+   dataset screen's fields unchanged across an editor session of 9 clicks on
+   3 objects.
 4. **Replace-on-refine, and its undo cost.** A further click on the object
    whose add is still the newest step on the frame (the stamp and
    `MaskDoc::top_step()`) replaces that add instead of stacking another. The
@@ -2120,7 +2150,11 @@ driven in the app is "The cross-screen inference checks" under Task 5.
    object**, not only its last refinement. That was an explicit operator
    trade-off, and the hint says so. Undo then redo puts the same add back on
    top, so it still refines; any other edit, another object, a text prompt or
-   an edit to the object list ends it.
+   an edit to the object list ends it. An edit to the list also covers a job
+   **already in flight**: `sam_objects_edited()` resets the job's object too,
+   so its result lands as a plain add. Before the final review's fix it landed
+   as replaceable, and the next click on the same number replaced it and
+   dropped the redo tail, losing the first drop for good.
 5. **Release on close goes through a retiring slot, polled on the UI thread.**
    Closing mid-job cancels the job and parks the `MaskSam` in
    `_sam_retiring`; `GuiApp::frame()` calls `sam_poll_retiring()` every frame,
@@ -2183,6 +2217,10 @@ driven in the app is "The cross-screen inference checks" under Task 5.
 - **A dataset-screen bug was seen and not fixed.** "Try masking" can show "No
   frame could be read" on first open; pressing "Try it" clears it. It predates
   this plan and has its own ticket.
+- **The multi-GPU device path is untested** for want of a second GPU; see
+  "Freeze the device first" above.
+- **Host memory per job is unmeasured**: about 2 x 361 MB at 15520x7760 during
+  a frame change; see "The job thread".
 - **Two timing splits are unexplained**: the 3.3 s encodes above, and P1b's
   samples, which fall into 5.7-6.0 s and 10.5-11.1 s.
 - **The new messages' translations** (13 languages) have not been read by a
@@ -2219,6 +2257,34 @@ unless the task says otherwise.
 | P13 | the dataset screen is untouched | fields and object list identical | Task 6 |
 | P14-P18 | modes, the shared picker, the modal, the model switch, a download from the Train screen | as recorded | Task 5 |
 | P19 | a right click refines | CLI null 13.9 % apart; app within 0.016 % of the CLI | Task 6 |
+
+#### The in-app harnesses, and which numbers each produced
+
+Tasks 8 and 9's in-app numbers were taken by scripts that now live in
+`tools/mask_editor_checks/`, moved out of session scratch in the final review's
+fix round. Every path is an argument or an environment variable: `MEC_WORK`
+(the scratch directory; `HOME` and `XDG_*` move under it, and `gui.conf` gets
+`native_dialogs=0`), `MEC_SAM_MODEL` (linked into the scratch cache),
+`MEC_DATASET` and `P10_REF`. `launch.sh` records the app's PID and `stop.sh`
+kills that PID only, and only if it is still a spirula process. No dataset,
+screenshot or result ships with them. They are macOS-only (`md5`, `footprint`).
+
+| script | produced |
+|---|---|
+| `battery.sh` | Task 8's asserted P12 / P6, P7, P8b and close-freeze rows (fix rounds 1 and 2) |
+| `p7.sh`, `p8b.sh`, `p12a.sh`-`p12c.sh`, `freeze.sh` | Task 8's first, unasserted pass: P7's 3303 ms row was hand-read from `p7.sh` |
+| `p10.sh` with `p10_score.py`, `p10_roi.py` | Task 9's P10 table and the blanket mutant; `p10_roi.py` alone, the null table |
+| `points_ext.txt` | the pole points for f00024-f00026, written down before any run |
+
+The f00016 and f00022 points were chosen by eye in the same way but never
+written to a file; they are the "click" column of the P10 table. The scripts
+were adapted only in their paths and in the screen points, which default to
+the recorded fixture's and are overridable (`MEC_PREV`, `MEC_NEXT`,
+`MEC_PRINTER`, `MEC_CHAIR`). Since the move they have been run only to
+`--help`, a dry run of `launch.sh -n`, and `p10_score.py` on a synthetic
+400x200 reference (a passing and a failing mask, scored 0.8788 and 0.7639);
+not against the app. Tasks 5 to 7's in-app checks were driven by hand through
+`tools/guictl.py`, and no script for them was kept.
 
 ### Task 1: the seam, and what one add costs the history (2026-09-22)
 
@@ -2619,6 +2685,9 @@ the logical Ctrl, as `key` already did.
 
 ### Task 8: lifetime and teardown (2026-09-22)
 
+Measured with `tools/mask_editor_checks/battery.sh` (see "The in-app harnesses"
+above).
+
 **Closing the editor hands the checkpoint back.** With no job running, `close()`
 releases SAM first (join, `sam::Session::unload()`), then joins the load/save worker, so
 the weights go back before a pending save lands. With a job running it cancels the job
@@ -2652,7 +2721,9 @@ counter as a second witness, and agreed in every run.
 | build | `sam_loads` across the reload | strip | battery |
 |---|---|---|---|
 | fix round 2 | 1 -> 2 | `sam_first_load` | exit 0 |
-| no-release mutant (`close()` neither releases nor forgets) | **1 -> 1** | `Segmenting...` | exit 5: "P12 reload pays a real model load", both pool halves and both retired-pool checks FAIL | `session -1` after close is expected and proves nothing. Nothing
+| no-release mutant (`close()` neither releases nor forgets) | **1 -> 1** | `Segmenting...` | exit 5: "P12 reload pays a real model load", both pool halves and both retired-pool checks FAIL |
+
+`session -1` after close is expected and proves nothing. Nothing
 else allocated from the pool across the close: opening the editor closes the native
 previews, and a run bars it.
 
@@ -2765,7 +2836,7 @@ P10 can fail both ways. The null is not near 0.80, so P10 needs no redesign.
 
 #### P10 in the app: PASS on all five monopod frames
 
-Setup: `build/spirula` from `29cd5991`, offscreen at 1600x950, `sam3-q4_0`, margin
+Run with `tools/mask_editor_checks/p10.sh`. Setup: `build/spirula` from `29cd5991`, offscreen at 1600x950, `sam3-q4_0`, margin
 5%. The dataset was a two-frame scratch copy (the JPEGs, and `masks_eq` inverted to
 255 = KEEP). Each frame got **one click on the pole and no retries**. The point was
 picked by eye from the photo, not from the diff. The saved `masks/<frame>.png` was
@@ -2812,10 +2883,33 @@ scores 1.0000 and passes.
 - The margin stayed at 5%. A wider margin would cover more of the loose reference.
   That is tuning, and it was not tried.
 
+### The final review's fix round (2026-09-22)
+
+The whole-branch review found nothing critical and two important defects,
+both fixed and each pinned by a check that fails by name on its mutant. Every
+mutant below was applied, rebuilt, run, seen failing by the name shown, and
+reverted; the reverted build read 0 failures.
+
+| defect | fix | check that pins it | mutant, and what failed |
+|---|---|---|---|
+| **I1** A Clear while a job runs did not stick: the result landed replaceable, and the next click on that number replaced it and dropped the redo tail | `sam_objects_edited()` also resets the job's object | `clear in flight:` | the reset removed: "the next click on the same number adds, it does not replace", "one undo takes the new add and leaves the first drop" |
+| **I2** The editor's load skipped `freeze_native_device()` | the device gate, under "Freeze the device first" | `device gate:` | gate skipped: all four; the selector not handed to SAM: "a frozen device is handed to SAM before the job starts"; the gate asked before the blocker: "a paused prompt never freezes the device" |
+| A prompt between a model change and its release was not pinned | none needed | `release pending:` | the click's refusal removed: "a click before the release never reaches the job"; the phrase's: "a phrase before the release never reaches the job" |
+| A slider release wiped a pause's reason (real build only) | `margin_begin` / `margin_end`, shared by both builds, leave `error` alone | `margin pause:` | either helper clearing `error`: "the re-apply leaves the pause's reason standing" |
+| An undo while a margin re-apply ran lost the add's detections for good | a dropped margin landing hands them back while a redo can still reach the add | `dropped margin:` | the hand-back removed: "the redone add has its detections back and can re-apply" |
+
+Also fixed: `set_sam_blocker`'s comment claimed a join it no longer does;
+decision 3's safety argument (above) was wrong; the P12 mutant table had a
+fifth cell. `tools/check_private_paths.sh` did not catch macOS home paths
+(`/Users/<name>/`), although the harnesses above were written on one; its
+pattern now does, shown by a probe file that failed it and was removed. That
+is a change to a shared lint outside the feature, made to strengthen it.
+
 ### Task 10: the closing lint battery (2026-09-22)
 
 Run on this checkout, M5 Pro, after `build_develop.bash -DSS_BACKEND=vulkan
--DSS_ENABLE_PATENTED=ON` printed `Build complete: build/spirula`. That build
+-DSS_ENABLE_PATENTED=ON` printed `Build complete: build/spirula`, and re-run
+after the final review's fix round; the figures are the re-run's. That build
 also runs every lint below except the last two.
 
 | check | result |
@@ -2823,10 +2917,10 @@ also runs every lint below except the last two.
 | `check_i18n.sh` | all 3179 messages translated into every language |
 | `check_font_coverage.py` | 10994 characters across 5 fonts, none missing |
 | `check_comments.sh`, `check_file_macro.sh`, `check_ss_prefix.sh`, `check_private_paths.sh`, `check_sam_guard.sh` | all OK |
-| `check_note_cites.sh` | 85 citation checks pass |
+| `check_note_cites.sh` | 89 citation checks pass |
 | `check_comment_length.py`, working tree | within budget |
-| the same, over every line `84d32966..HEAD` touched (4775 lines in 30 files) | within budget |
-| `mask_doc_test` / `frame_mask_test` / `dataset_prep_test` / `mask_dilate_test` | 1134 / 54 / 17 / 43 `ok`, 0 failures each |
+| the same, over every line `84d32966..HEAD` touched (5412 lines in 44 files) | within budget |
+| `mask_doc_test` / `frame_mask_test` / `dataset_prep_test` / `mask_dilate_test` | 1155 / 54 / 17 / 43 `ok`, 0 failures each |
 | `align_fit_test` | exit 1, `and its axes are the room's`: the known pre-existing failure, above |
 | every `guictl.py` invocation in the plan, re-parsed against `tools/guictl.py` | 114 parsed, 0 rejected |
 

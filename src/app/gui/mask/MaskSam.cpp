@@ -27,6 +27,7 @@ namespace msg = spirula::i18n::msg::maskedit;
 
 struct MaskSam::State {
     std::string model;
+    std::string device;              // the app's frozen selector; "" = nn's own
     bool text_hint = false;
     MaskSettings prompt;             // the EDITOR'S own, never the dataset screen's
     mutable std::mutex mu;
@@ -54,6 +55,8 @@ void MaskSam::set_model(const std::string& path, bool text_prompts) {
 }
 
 const std::string& MaskSam::model_path() const { return _s->model; }
+void MaskSam::set_device(const std::string& selector) { _s->device = selector; }
+const std::string& MaskSam::device() const { return _s->device; }
 bool MaskSam::has_model() const { return !_s->model.empty(); }
 MaskSettings& MaskSam::prompt() { return _s->prompt; }
 const MaskSettings& MaskSam::prompt() const { return _s->prompt; }
@@ -70,8 +73,9 @@ void MaskSam::add_click(long long frame, const std::string& camera, float x, flo
     _s->prompt.clicks.push_back(std::move(c));
 }
 
-// `source` stays empty: an editor click is never handed to a dataset run, so it
-// needs no input path, and empty keeps SegmentPanel's filter from ever matching.
+// `source` stays empty: the editor has no input path to give. Empty is NOT
+// safe: a dataset run reads it as every input, so an editor click must never
+// reach the dataset's MaskSettings, or it would prompt the whole capture.
 std::vector<SamPoint> MaskSam::object_points(long long frame, const std::string& camera) const {
     std::vector<SamPoint> out;
     for (const MaskClick& c : _s->prompt.clicks)
@@ -163,6 +167,17 @@ void MaskSam::publish(State& s, SamResult r) {
     s.status.clear();
 }
 
+void MaskSam::margin_begin(State& s) {
+    std::lock_guard<std::mutex> lk(s.mu);
+    s.status = msg::sam_working.get();
+}
+
+void MaskSam::margin_end(State& s, const std::string& job_error) {
+    std::lock_guard<std::mutex> lk(s.mu);
+    s.status.clear();
+    if (!job_error.empty()) s.error = job_error;
+}
+
 void MaskSam::post_result(std::string frame_key, std::vector<AddRegion> regions, int doc_w,
                           int doc_h, Paint mode, float margin, float score, double ms,
                           const std::vector<AddRegion>& veto) {
@@ -202,7 +217,7 @@ void MaskSam::refuse(const std::string& reason) {
 #ifdef SS_BUILD_SAM
 
 struct MaskSam::Job {
-    std::string model, frame_key, phrases, negative;
+    std::string model, device, frame_key, phrases, negative;
     std::shared_ptr<const std::vector<uint8_t>> rgb;
     int fw = 0, fh = 0, doc_w = 0, doc_h = 0;
     std::vector<SamPoint> points;
@@ -311,11 +326,7 @@ bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, 
                            int doc_h, float margin) {
     if (busy() || held.empty()) return false;
     if (_s->worker.joinable()) _s->worker.join();
-    {
-        std::lock_guard<std::mutex> lk(_s->mu);
-        _s->error.clear();
-        _s->status = msg::sam_working.get();
-    }
+    margin_begin(*_s);
     _s->cancel = false;
     _s->running = true;
     State* s = _s.get();
@@ -323,17 +334,13 @@ bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, 
         _s->worker = std::thread([s, key = std::move(frame_key), held = std::move(held), doc_w,
                                   doc_h, margin]() mutable {
             auto finish = [s](const std::string& error) {
-                {
-                    std::lock_guard<std::mutex> lk(s->mu);
-                    s->status.clear();
-                    s->error = error;
-                }
+                margin_end(*s, error);
                 s->running = false;
             };
             run_guarded(
                 [&] {
                     const auto t0 = std::chrono::steady_clock::now();
-                    const bool published = publish_unless_cancelled(
+                    publish_unless_cancelled(
                         [&] {
                             SamResult r =
                                 remargin(std::move(key), std::move(held), doc_w, doc_h, margin);
@@ -343,8 +350,7 @@ bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, 
                         },
                         [s] { return s->cancel.load(); },
                         [s](SamResult r) { publish(*s, std::move(r)); });
-                    if (published) s->running = false;
-                    else finish(std::string());
+                    finish(std::string());
                 },
                 finish);
         });
@@ -364,6 +370,7 @@ bool MaskSam::launch(Job j) {
         return false;
     if (_s->worker.joinable()) _s->worker.join();
     j.model = _s->model;
+    j.device = _s->device;
     const bool warm = _s->session && _s->loaded_model == j.model;
     {
         std::lock_guard<std::mutex> lk(_s->mu);
@@ -409,6 +416,7 @@ void MaskSam::run_stages(State& s, Job j, const std::function<void(const std::st
         s.encoded_key.clear();
         sam::ModelParams p;
         p.model_path = j.model;
+        p.device = j.device;
         g_loads++;
         if (!s.session->loadModel(p)) {
             const std::string e = s.session->lastError();
@@ -555,7 +563,9 @@ bool MaskSam::start_text(const std::string&, std::shared_ptr<const std::vector<u
 bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
                            int doc_h, float margin) {
     if (held.empty()) return false;
+    margin_begin(*_s);
     publish(*_s, remargin(std::move(frame_key), std::move(held), doc_w, doc_h, margin));
+    margin_end(*_s, std::string());
     return true;
 }
 

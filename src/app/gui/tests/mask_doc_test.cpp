@@ -4449,6 +4449,145 @@ void test_session_sam_held_other_frame() {
           "held other frame: another frame's edit with the same serial does not keep it");
 }
 
+// A Clear while a job runs: the job's result lands as a plain add, so the next
+// click on the same number adds beside it instead of replacing it for good.
+void test_session_sam_clear_in_flight() {
+    Fixture f = make_dataset("sam_clear_in_flight", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "clear in flight: open: " + err);
+    settle(s);
+    const size_t first = (size_t)20 * 64 + 12, second = (size_t)24 * 64 + 48;
+    const int h0 = s.doc()->history_size();
+    s.sam_prompt_started(12.0f, 20.0f, true);
+    s.sam_objects_edited();
+    s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 12.0f, 20.0f, 5.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.doc()->drop()[first] == 255, "clear in flight: the in-flight result still lands");
+    s.sam_prompt_started(48.0f, 24.0f, true);
+    s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 48.0f, 24.0f, 5.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam_pump();
+    check(s.doc()->history_size() == h0 + 2 && s.doc()->drop()[first] == 255 &&
+              s.doc()->drop()[second] == 255,
+          "clear in flight: the next click on the same number adds, it does not replace");
+    s.doc()->undo();
+    check(s.doc()->drop()[first] == 255 && s.doc()->drop()[second] == 0,
+          "clear in flight: one undo takes the new add and leaves the first drop");
+}
+
+// Every prompt asks GuiApp's device gate first, and loads on what it names; a
+// failed freeze refuses with its own sentence, and a paused prompt never asks.
+void test_session_sam_device_gate() {
+    namespace em = spirula::i18n::msg::maskedit;
+    Fixture f = make_dataset("sam_device_gate", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "device gate: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    int asked = 0;
+    bool frozen = false;
+    s.set_sam_device_gate([&](std::string& device, std::string& error) {
+        asked++;
+        if (!frozen) {
+            error = "device conflict";
+            return false;
+        }
+        device = "uuid:0123";
+        return true;
+    });
+    check(!s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop) &&
+              s.sam_error() == "device conflict" && asked == 1 && s.sam_click_count() == 0,
+          "device gate: a failed freeze refuses the click with its own sentence");
+    check(!s.sam_prompt_text("door") && s.sam_error() == "device conflict" && asked == 2,
+          "device gate: a failed freeze refuses a phrase too");
+    s.set_sam_blocker(em::sam_blocked_run.get());
+    s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop);
+    check(asked == 2, "device gate: a paused prompt never freezes the device");
+    s.set_sam_blocker("");
+    frozen = true;
+    s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop);
+    check(asked == 3 && s.sam().device() == "uuid:0123" &&
+              s.sam_error() == em::sam_unavailable_build.get(),
+          "device gate: a frozen device is handed to SAM before the job starts");
+}
+
+// Between a model change and its release no prompt may start: its job would
+// run on the new model and its result be counted as the old one's, dropped.
+void test_session_sam_release_pending_refuses() {
+    Fixture f = make_dataset("sam_release_pending", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "release pending: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    s.sam();
+    s.set_sam_model("/m/b.ggml", true);
+    check(!s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop) && s.sam_error().empty() &&
+              s.sam_click_count() == 0,
+          "release pending: a click before the release never reaches the job");
+    check(!s.sam_prompt_text("door") && s.sam_error().empty(),
+          "release pending: a phrase before the release never reaches the job");
+    s.sam_pump();
+    check(!s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop) &&
+              s.sam_error() == spirula::i18n::msg::maskedit::sam_unavailable_build.get(),
+          "release pending: once released, the click reaches the job");
+}
+
+// A slider release while SAM is paused re-applies the margin and leaves the
+// pause's reason standing in the error line.
+void test_session_sam_margin_keeps_pause() {
+    namespace em = spirula::i18n::msg::maskedit;
+    Fixture f = make_dataset("sam_margin_pause", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "margin pause: open: " + err);
+    settle(s);
+    s.set_sam_model("/m/a.ggml", true);
+    s.sam_prompt().dilate_ratio = 0.0f;
+    sam_add(s, disc_region(64, 48, 30.0f, 24.0f, 6.0f), 0);
+    const int64_t tight = s.sam_last_area();
+    const std::string run = em::sam_blocked_run.get();
+    s.set_sam_blocker(run);
+    s.sam_prompt_point(1.0f, 1.0f, mk::Paint::ForceDrop);
+    check(s.sam_error() == run, "margin pause: the paused click put its reason in error");
+    s.sam_prompt().dilate_ratio = 0.4f;
+    reapply(s);
+    check(s.sam_last_area() > tight, "margin pause: the margin re-applied while paused");
+    check(s.sam_error() == run, "margin pause: the re-apply leaves the pause's reason standing");
+}
+
+// An undo while a margin re-apply is in flight drops its landing; the redo that
+// brings the add back must find its detections again.
+void test_session_sam_redo_after_dropped_margin() {
+    Fixture f = make_dataset("sam_redo_dropped_margin", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "dropped margin: open: " + err);
+    settle(s);
+    s.sam_prompt().dilate_ratio = 0.0f;
+    sam_add(s, disc_region(64, 48, 30.0f, 24.0f, 6.0f), 0);
+    s.sam_prompt().dilate_ratio = 0.4f;
+    s.sam_margin_changed();
+    s.sam_pump();
+    check(s.sam_held_bytes() == 0, "dropped margin: the detections went into the margin job");
+    const int dropped = s.sam_dropped();
+    s.undo();
+    s.sam_pump();
+    check(s.sam_dropped() == dropped + 1, "dropped margin: the landing after an undo is dropped");
+    s.redo();
+    s.sam_pump();
+    check(s.sam_held_bytes() > 0 && s.sam_margin_reapplies(),
+          "dropped margin: the redone add has its detections back and can re-apply");
+}
+
 int main() {
     test_fnv();
     test_composite_truth_table();
@@ -4557,6 +4696,11 @@ int main() {
     test_session_close_releases_idle();
     test_session_retiring_drains();
     test_session_sam_held_other_frame();
+    test_session_sam_clear_in_flight();
+    test_session_sam_device_gate();
+    test_session_sam_release_pending_refuses();
+    test_session_sam_margin_keeps_pause();
+    test_session_sam_redo_after_dropped_margin();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

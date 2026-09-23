@@ -179,6 +179,10 @@ public:
     // GuiApp's sam_blocker() answer, every frame before draw(); a blocked
     // prompt is refused with it in sam_error().
     void set_sam_blocker(const std::string& reason);
+    // GuiApp's freeze_native_device(), asked before every prompt so SAM loads on
+    // the device the app chose: false refuses the prompt with `error`.
+    using DeviceGate = std::function<bool(std::string& device, std::string& error)>;
+    void set_sam_device_gate(DeviceGate gate) { _sam_device_gate = std::move(gate); }
     // Cancels, joins and unloads, before another inference user starts; drains
     // the retiring slot too. Keeps the clicks. Returns the milliseconds joined.
     double sam_yield();
@@ -268,6 +272,7 @@ private:
     void sam_forget();
     Rect sam_land(SamResult res);
     void sam_start_margin();
+    bool sam_gate_passes();   // the blocker, then the device gate
     // MaskPanel.cpp
     // How a tool is chosen, so the toolbar and the key handler cannot drift
     // apart over what else a switch cancels. The mode itself is one value.
@@ -358,6 +363,7 @@ private:
     bool _shown_valid = false;       // cleared wherever a new document arrives
     StripReserve _strip;
     std::string _sam_blocker;
+    DeviceGate _sam_device_gate;
     uint64_t _doc_gen = 0;           // bumped where pump() installs a _doc; never reset
     double _livewire_ms = 0.0;
 
