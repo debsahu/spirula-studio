@@ -3846,6 +3846,10 @@ patches: medians within 1 level both ways, and the tinted set identical
   `cam1`, Play on the 1080p one: 2 decoders). A camera whose own frames
   differ in size is still read from its first frame only. The 8K bench is
   uniform, so #9's thread count (2) and readings are unchanged.
+- **Tint polarity at `678bd5d8`, in the app** on the 8K bench, flipped: the
+  file-dropped corner plays kept and untinted (17, 24, 158), the file-kept
+  ellipse plays dropped and tinted (192, 40, 9), matching the editor overlay;
+  unflipped the reverse (`measurements/memory9/flip_polarity_fixround.txt`).
 - **M1:** Stop releases the picture on screen. **M3:** `load_picture`
   holds stb's buffers in a `unique_ptr`, so a throwing resize frees them.
   **M5:** `survivors.sh` now catches a local `Picture` of any name, a size
