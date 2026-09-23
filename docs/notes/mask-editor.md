@@ -19,10 +19,11 @@ fails: a citation that lands somewhere unrelated means the file moved, not
 that the claim did. Fix the number here and the row in the script together.
 
 **How to read this.** "What this is to take on" is for deciding whether to
-carry the branch. "Two levels" through "Painting", and "Path shape and
-livewire", are the design of the hand editor. "SAM assist: how it is built,
-and what not to undo" is the design of the SAM half, and holds the one rule
-that must not be broken: **one live `sam::Session` in the process**.
+carry the branch. "Two levels" through "Painting", "Path shape and
+livewire", and "Workflow" are the design of the hand editor. "SAM assist:
+how it is built, and what not to undo" is the design of the SAM half, and
+holds the one rule that must not be broken: **one live `sam::Session` in the
+process**.
 Everything else -- the sections headed "Measured", "Task N", "Fix round",
 "Criterion" and "SAM assist: the measurement record" -- is evidence, kept with
 the machine, fixture and command behind each number. Read it when a claim
@@ -106,7 +107,10 @@ the dataset screen's own controls: the object list and one margin slider left
 `SegmentPanel`, and the checkpoint picker and the other margin slider left
 `GuiApp`, all for `MaskPrompt`. The dataset screen's object list was
 pixel-identical before and after (P13). The rest of `GuiApp`'s change is the
-one-session rule and the device freeze, below.
+one-session rule and the device freeze, below. Plan 3 adds
+`app/gui/Picture.{h,cpp}` (a defaulted `mask_flipped` on `load_picture`, so
+the slideshow tints in the mask folder's convention; `FilmReel`'s calls
+unchanged) and `tools/mask_editor_checks/workflow_bench.sh`.
 
 **Upstreaming.** Nothing here has been offered upstream and nothing has been
 pushed anywhere. This is a branch in this repository.
@@ -227,6 +231,15 @@ three repeats each, median.
 | slideshow pool 1080p -> 1024, 4 threads | 379.6 fps | depth 11; longest wait 10.6 ms. PASS (>= 30) |
 | slideshow pool 1080p -> 4096, 4 threads | 406.9 fps | 1920x1080 at step 1; depth 10; longest wait 10.5 ms. PASS (>= 30) |
 | resident memory, one 8K frame open | 387.3 MB above baseline | out-of-band `/usr/bin/time -l` peak RSS, not part of the committed bench; see note below; bar 600 MB |
+| slideshow pool, the four rows re-run at `f1552535` (Task 13) | 31.1 / 19.9 / 381.5 / 405.1 fps | 8K -> 1024, 8K -> 4096, 1080p -> 1024, 1080p -> 4096; medians of three runs, each row PASS in all three. **The criterion 8 gate.** |
+| in-app SHOWN rate, 8K, set 5 fps (Task 13) | 4.83 fps | display cadence, not the gate: bounded above by the set rate; longest gap 218.9 ms |
+| in-app SHOWN rate, 8K, set 30 fps (Task 13) | 20.11 fps | display cadence, not the gate; the pool row at 4096 is 19.9; longest gap 75.5 ms; window 3 |
+| in-app SHOWN rate, 1080p, set 30 fps (Task 13) | 27.03 fps | display cadence, not the gate; the app loop ran 54 frames/s, so each 33.3 ms period lands on a second tick; longest gap 38.4 ms |
+| resident memory WHILE PLAYING, 8K, SAM released (Task 13) | 1238 MB above baseline | **the criterion 9 gate: MISS** (bar 600); `sam_vram_mib` -1 in every sample; see Task 13 |
+| resident memory after a stop, one frame open, ring empty (Task 13) | 1252 MB above baseline | not a gate; the easy case, see Task 13 |
+| stop freeze, `mask_slide_stop_ms` (Task 13) | 0.006 ms | not a gate; beside `load_picture 8K -> 4096` above, because the stop no longer joins a decode |
+| first frame after an edit, 8K, Play to picture (Task 13) | 0.93 s | not a gate; the first decode waits for the save of the edited frame |
+| canvas top `y0` / height floors at 1600 px, 4 rows + 1 strip line (Task 13) | 204 / 430 brush, 474 pen, 704 SAM, 734 SAM without a checkpoint | Decision 24's predictions 204 / 430 / 496 / 704 / 734: PASS except pen, see Task 13 |
 
 M5 Pro, 18 cores, macOS 26.6.2, load average ~2.96/18 during measurement (quiet,
 not idle). Fixture: 7680x3840, three synthetic frames. Three repeats of the
@@ -250,6 +263,11 @@ in its status strip ("Last stroke"); see the in-app measurement below.
 Criterion 9 of the plan (resident memory <= 600 MB above baseline with one 8K
 frame open): measured at 387.3 MB above baseline. PASS, by the out-of-band
 `/usr/bin/time -l` method described above, not by anything in `bench_8k`.
+**Superseded as the gate by plan 3** (spec §14 amended): the criterion is
+"with the slideshow prefetch full", which only playback populates, and the
+`ps` reading of the running app while it plays is 1238 MB above baseline, a
+MISS. Most of it is freed memory the allocator keeps resident, not the ring;
+see Task 13 under plan 3's measurement record.
 
 Criterion 8 of the plan (>= 5 fps at 8K on four threads, >= 30 fps at
 1080p): the single-thread decode floors are 124.2 ms through load_picture
@@ -1936,6 +1954,99 @@ from a script at all, and this binding would have shipped unexercised. This is
 a change to test infrastructure outside the feature's file list, flagged here
 rather than folded in silently -- the same call the pen tool's fix round made.
 
+## Workflow
+
+**View modes.** Overlay, Mask only, Side by side (bare photo left, mask
+right, one view, both panes take strokes and SAM clicks). The display style
+is a field on `WindowSource`; the right pane has its own window texture, and
+a pane off screen is forgotten so it is derived afresh when it returns. A
+click maps through the pane it landed in, using the layout that drew it, so
+a SAM click reaches the same frame pixel from either pane; a click in the gap
+reaches none. `V` cycles. The status strip's reserve is keyed on the canvas
+mode and the view mode together, because the two peek hints wrap
+differently.
+
+**Peek.** Tab held shows the bare photo, Shift+Tab the bare mask, while the
+canvas is hovered or a stroke is active and no text field has focus. The
+canvas owns Tab (`ImGui::SetItemKeyOwner`), which is what keeps imgui's
+keyboard nav from tabbing the focus: `NavUpdateCreateTabbingRequest` polls
+Tab with `ImGuiKeyOwner_NoOwner`. A Tab that arrives in the same frame the
+pointer first enters the canvas tabs once. Each press and release re-derives
+the whole window (the "derive 4096x3840 window" row under "Measured
+floors"). Fallbacks, in order, if a platform disagrees:
+`ImGuiWindowFlags_NoNavInputs` on the editor window; a held `H`.
+
+**Propagate.** Copies the two layers of the open frame, never its mask,
+onto the next frame, a range, or every frame of the same camera key; each
+target's composite is its own base under the layers. It **replaces** the
+corrections a target already had, and it copies pixels: an object that moves
+between frames, as the monopod does on handheld stills, is not followed. The
+operator ruled to keep all three scopes and say so, in a line under the
+row that is always visible. A target whose `.base.png` / mask / image is
+another size is skipped and named. One session-level undo record holds each
+target's previous layer files; it is offered while the source frame is
+open, dropped when a target is opened, when it exceeds 256 MB, by Revert
+all, and on every close and open (frame keys repeat across datasets, and an
+undo resolves the dataset's folders when it runs). It restores in the mask
+folder's own convention, which for this project's masks is 255 = drop. This
+is not a `MaskOp`: the per-frame history is dropped on frame change and an
+op acts on one document. Propagate waits while a SAM job or a margin
+re-apply is pending, since either could land on the source after it was
+copied; Undo propagate does not wait, since it never touches the source.
+
+**Find missing.** A frame is missing when it has no mask file or its kept
+fraction is outside [min, max] (default 5% to 98%, inclusive). Kept
+fractions are counted in the mask folder's convention, decoded once on a
+scan thread (not the worker, so navigation stays live) and cached in
+`mask_edits/kept.json` by the mask's fingerprint and that convention; a
+second open reads the cache and rewrites nothing. The cache is not in
+`index.json` because an entry there means "corrected". The scan creates
+`mask_edits/` on a dataset nobody has corrected; `workspace_artifacts` does
+not list it. The scan never publishes a read that a worker job overlapped,
+and every job that writes a mask (a save, a propagate, its undo, Revert
+frame, Revert all, a load that rebased a regenerated mask) refreshes the
+frames it wrote. `M` / `Shift+M` jump; arrows, PageUp/Down, Home/End step;
+the keys, the find buttons, `<`, `>` and the frame slider stand down while a
+shape or pen path is half drawn; the key list is the frame slider's tooltip.
+
+**Slideshow.** 5 to 30 fps off pane-sized `Picture`s (composite tinted over
+the photo, in the mask folder's convention, `load_picture`) decoded into a
+ring of at most 12 pictures and 64 MB (FilmReel's constants; FilmReel itself
+is not reused: it has no accessor or select, follows the newest, and draws
+its own slider). The thread count is the *session's* choice, `clamp(cores -
+1, 1, 4)`; `SlidePrefetch::start` clamps only to [1, 8] and enforces nothing
+narrower, so the four of criterion 8 is a property of the call site, not of
+the class. Starting it releases the SAM session, as plan 4's ruling 5
+requires, and Play waits while a SAM job runs, while the worker is busy, and
+while a shape or pen path is half drawn: SAM and the pool want the same
+memory and never need it at once. The decode pool uses stb alone and is not
+an inference user. The document is released while it plays, a dirty frame is
+saved first and the first decode waits for that save, and the frame on
+screen is loaded on stop. The clock runs from the frame actually shown, so a
+rate the decoder cannot hold shows as a lower shown rate, never as skipped
+frames; a frame that cannot be decoded is counted as shown and skipped. Any
+click, wheel tick or key stops it; mouse motion does not. Stopping does not
+join the decode threads: `SlidePrefetch::halt()` drops the ring and leaves
+them to finish, and a quick re-Play or `close()` joins them. The measured
+freeze is the `stop freeze` row under "Measured floors".
+`GuiApp::animating()` keeps frames coming while it plays.
+
+**How far ahead it decodes, and why it is not a constant.** The window is
+`slide_depth(slide_picture_bytes(src, target))`: what 64 MB affords at the
+size a picture will actually be, capped at 11 and never including the frame
+being shown. At a 1024 px target an 8K picture is 1.3 MiB and the slot count
+binds (11); at the 4096 px target a full-screen pane asks for it is 21.1 MiB
+and the budget binds (3). A fixed window of 11 was the original design and
+it evicts on every insert at 4096, while the evicted index is still wanted,
+so the pool re-decodes it: four threads spinning for the whole of playback.
+The window also starts at the frame *after* the one shown, and the frame is
+taken out of the ring before the window moves; a window whose front is the
+frame on screen costs two decodes for every one displayed.
+
+**What the rows cost.** Four toolbar rows and one strip line; the height
+floors and minimum width after them are the Step 2a rows under "Measured
+floors", beside plan 4's.
+
 ## SAM assist: how it is built, and what not to undo
 
 Plan 4 of the editor. In SAM mode a click on the canvas asks SAM for the
@@ -2214,8 +2325,10 @@ driven in the app is "The cross-screen inference checks" under Task 5.
   above. Making it work needs a map from a prepared frame key back to the
   input path, source frame index and camera, which does not exist and would be
   its own plan.
-- **Slideshow exclusivity (P11).** Unwritable until plan 3 lands; there is no
-  slideshow to be exclusive with.
+- **Slideshow exclusivity (P11).** No longer absent: plan 3 wrote it.
+  Starting a slideshow releases the session (sam_yield) and Play waits while
+  a job or a margin re-apply is pending; see "Workflow", and P11 under its
+  measurements.
 - **Not absent after all, though the plan listed it:** the drop margin. The
   plan expected going direct to lose `compose_hit`'s dilation and left
   whether to restore it unasked. Review asked, and Task 5's fix round 2
@@ -3373,6 +3486,229 @@ the stop's own UI time; `mask_slide_join_ms` is the last of those two joins.
 **On Windows the stop-without-join, Play-waits-for-the-worker and
 stop-opens-the-frame-on-screen tests are compiled out**: they hold a decode or
 a load in flight with a FIFO at the mask path (`mkfifo`, `#ifndef _WIN32`).
+
+### Task 13: the criteria in the app (2026-09-23)
+
+Measured at `f1552535`, with no code changed. `build_develop.bash` rebuilt
+`build/spirula` from the clean tree, because its configure step re-stamped
+the version. M5 Pro, 18 cores, 24 GB, macOS 26.7, on mains power. The app ran
+offscreen at 1600x950 with `HOME` and the XDG dirs isolated and native dialogs
+off. `sam3-q4_0` was linked into the isolated cache from the operator's cache.
+Datasets were scratch copies from `workflow_bench.sh` (`root 3 cam1 1`, 4
+frames), plus its 16-frame 1080p fixture with a hand-written `sparse/0`.
+
+**Priority, and why earlier in-app numbers ran slow.** The app got PRI 4
+because App Nap throttles an app with no visible window: its priority read 46
+at 10 s and 20 s and 4 at 30 s, and `taskpolicy -B` does not lift App Nap.
+Every timed step here launched with `-NSAppSleepDisabled YES`, which AppKit
+reads from the argument domain. The dataset was then opened through the
+in-app folder dialog, because every argv is a drop path, and a dataset drop
+must be the only one. With that, the process read PRI 46 at every timed step,
+and during a playback more than 40 s in, the threads read 46 (2) and 31 (26),
+none at 4. The `defaults` domain is not an option: it ignores `HOME` and
+would write the operator's own preferences.
+
+| criterion | gate | measured | verdict |
+|---|---|---|---|
+| #8 slideshow | the pool rows, three runs | 31.1 / 19.9 / 381.5 / 405.1 fps (bars 5 / 5 / 30 / 30) | **PASS** |
+| #8, shown in the app | no bar | 8K: 4.83 at set 5, 20.11 at set 30; 1080p: 27.03 at set 30 | observation |
+| #9 memory | `playing` minus baseline <= 600 MB, `sam_vram_mib` -1 | 1238 MB (979 / 1238 / 1286); -1 in every sample | **MISS** |
+| #9, after a stop | no bar | 1252 MB, one frame open, ring empty | observation |
+| stop freeze | no bar; reopen above ~1.5 s | 0.006 ms (0.0080 / 0.0065 / 0.0044) | observation |
+| P11 release | pool falls >= 1652.2 MiB and lands within 1 MiB of fresh; session -1; playing; `sam_loads` + 1 | 1895.1 -> 0.0 MiB, fresh 0.0; -1; True; 1 -> 2, in 6 of 6 | **PASS** |
+| #14 Tab peek, macOS | Task 3's arms 1 and 2 | canvas Tab: peek +1, `nav_visible` false; toolbar Tab: `nav_visible` true, ring shown | **PASS** |
+| #14, Linux and Windows | none | not measured (no machine) | not measured |
+| C2, a SAM click per pane | c3 = c1 within 1 px, c3 != c2 | c1 = c3 = (3809.03, 1684.65), c2 = (5047.74, 3047.23) | **PASS** |
+| canvas top `y0` | 204, predicted | 204 (`D_rows` 112) | **PASS** |
+| floor: box, brush, eraser | 430, both views | 430, 430, 430 in Overlay and Side by side | **PASS** |
+| floor: pen | 496, both views | 474 settled; 496 only on the first path entry, while the edge map builds | **MISS**, attributed below |
+| floor: SAM with a checkpoint | 704, both views | 704, 704 | **PASS** |
+| floor: SAM without a checkpoint | 734, both views | 734, 734 (second launch, empty model cache) | **PASS** |
+| SAM floor by dragging | at 714: `canvas_h` 74, hint whole; at 694: 64, hint clipped | 74, hint whole; 64, hint clipped and a scrollbar | **PASS** |
+| canvas holds still, 5 states | all five equal | brush 584 x5; SAM 310 x5 | **PASS** |
+| minimum width fold | only a check if a workflow row outgrows row 1 | no language does it | untestable here |
+| checklist | each item | see below | 9 of 9 ticked |
+
+The table has 12 gated rows: 10 PASS and 2 MISS, #9 and the pen floor.
+
+**#8.** The pool rows ran on the committed `mask_doc_test` with
+`SS_MASK_BENCH` pointed at a scratch dir, in three runs. Each row printed PASS
+in all three, and `decodes` stayed within its `100 + 1 + depth` bar. The
+single-thread `load_picture 8K -> 4096` in the same runs was 138.3 ms. The
+in-app runs are three 20 s wall-clock runs per rate, on a 1584x584 Overlay
+pane with window 3 at 8K and 11 at 1080p. The app loop ran 54 frames/s while
+playing.
+- **8K at set 30:** the app shows 20.11, and the pool at 4096 gives 19.9.
+  Nothing between the pool and the screen costs throughput.
+- **1080p at set 30:** the app shows 27.03 against a pool of 405. The display
+  cadence binds, not the decoder: a 33.3 ms period at 54 ticks/s lands on
+  the second tick, 37 ms. The longest gap, 38.4 ms, is that tick pair.
+- **8K at set 5:** the app shows 4.83, with a longest gap of 218.9 ms. That
+  is 11 ticks.
+
+**#9, a MISS, and what it is made of.** There were six fresh launches on the
+8K bench. Each loaded SAM with one click on the canvas centre (`sam_vram_mib`
+2407.1), made one stroke, and pressed Play at 10 fps. RSS was read after
+10 s.
+- **Baseline:** 105 MB, editor closed on the Train screen.
+- **Playing:** +1286, +1196, +1238, +1194, +979 and +1309 MB.
+- **The gate:** the median of the first three runs whose stroke changed pixels
+  (R1, R3, R5) is 1238 MB. In R2 and R4 the stroke fell on pixels already
+  dropped, so it left the history at 0.
+- **`sam_vram_mib`:** -1 in every playing sample, and the graphics footprint
+  fell from 2571 to 100 MB.
+- **Without SAM:** six more launches read +737 to +738 MB, still a MISS.
+
+`vmmap` while playing attributes it. Live `MALLOC_LARGE` is 172 to 218 MB, or
+164 MB without SAM. `MALLOC_LARGE (empty)` is 705 MB to 1.0 GB, or 540 MB
+without SAM: memory that was freed but that the allocator keeps resident. That
+is the released document, and SAM's host buffers when SAM ran. The ring and
+the in-flight decodes are the live part, well inside 600 MB. The gate reads
+`ps`, and `ps` counts the freed pages. Recorded as a MISS, as the gate is
+written. Whether the gate should read live allocations, or the app should
+hand freed pages back, is not this task's call.
+
+**Stop freeze and joins.** `mask_slide_stop_ms` read 0.002 to 0.011 ms over
+21 stops (9 timed runs, 12 memory runs), because the stop no longer joins
+(`halt()`). The Task 12 figures of 321 to 536 ms were the synchronous join,
+measured at PRI 4. A join still happens elsewhere:
+- Play's own join (`start()`, `mask_slide_join_ms`) reads 0.036 to 0.061 ms;
+- closing the window while a decode was in flight read 58.7 ms once and
+  0.27 ms another time.
+
+**P11** passed in all six loaded runs. The readings were the same in every
+run:
+- fresh pool 0.0;
+- loaded: pool 1895.1, session 2407.1, `sam_loads` 1;
+- playing: pool 0.0, session -1, `mask_slideshow` True;
+- the next prompt after the stop: `sam_loads` 1 -> 2.
+
+This sequence put one stroke between the load and Play, which the Step 3b
+script does not do. The stroke does not touch the pool.
+
+**The pen floor, attributed.** On the session's first entry to Path mode,
+the strip carries the "building" line while the edge map builds. Then:
+- first entry: canvas 518, floor 496;
+- settled: canvas 540, floor 474, in both views.
+
+Plan 4's pen `status_h` of 198 matches the first-entry state of its own
+tree, not the settled one. Task 3's 630, and its 652 at `750572fe`, fit the
+same reading, and Task 4 had already noted that 600 was the first entry. So
+the prediction inherits a transient. The settled floor sits 22 px *below*
+the prediction, which gives more canvas. That the plan-4 figure was a
+first-entry reading is an inference from these numbers; nobody re-ran plan
+4's tree.
+
+**The minimum width.** Dragged to 700 px wide in English, the window stopped
+at 1180, and the canvas's right edge was 1172, row 1's `Done`. The workflow
+rows' right edges were read in all 13 languages, row C's and row D's text
+ink from a screenshot. The widest was Russian, with row B at 816 px and row D's
+text at 930 px, against its own row 1 at 1280. No language makes a workflow
+row the widest, so `note_row_width()`'s fold is untestable on this machine,
+not passed.
+
+**The stillness readings** were taken on these five states: idle, Range
+selected, `Scanning masks: 1 / 4` (screenshot) then `Missing: 0`, the line
+`Propagated: 1, refused: 0, failed: 0`, and `No missing frame in that
+direction.`
+
+**Interaction checklist.** All nine items are ticked.
+1. **Views.** The Overlay, Mask only and Side by side radios set `mask_view`
+   to overlay, mask and side. The canvas differs by a mean absolute 63 to 72
+   levels between views, and by 0.0 from itself. `V` from Overlay cycles
+   mask, side, overlay.
+2. **Side by side.**
+   - **Strokes.** A stroke on the photo pane and its twin on the mask pane
+     each change `kept` by -70,207. The mask pane is identical between the
+     two, 0.00, and the photo pane is unchanged, 0.00. **Corrected from the
+     plan's wording:** a stroke from either pane shows in the mask pane only,
+     since the left pane is the bare photo by Decision 2. Seeing it over the
+     photo is what Shift+Tab is for.
+   - **Wheel.** The wheel over either pane zooms both, and the reverse tick
+     restores both to 0.00. Alt+wheel took the brush from 24 to 28 px on the
+     right pane and to 33 px on the left, with no zoom.
+   - **Tab.** Tab over the photo pane and Shift+Tab over the mask pane each
+     raised `mask_peek_total` by 1 with `nav_visible` false. That is
+     `nav_visible` cleared by a click first: an earlier arm read true on
+     entry, left over from an earlier step. The per-pane look is
+     `pane_style_for`'s unit test plus the operator's hold.
+3. **The stale pane.** Painted in Overlay and shown in Side by side, the
+   stroke changes 1,591 pixels in the mask pane and 0 in the photo pane.
+4. **C2.** The click dots draw in both panes (see the table).
+5. **Tab focus.** Tab with the pointer on the toolbar sets `nav_visible` true,
+   and a focus ring draws on the last-clicked radio. On the canvas, Tab does
+   not.
+6. **Propagate**, on a fresh bench:
+   - Next frame from `f0002` gives `No other frame of this camera to
+     propagate to.`
+   - Range 1 to 4 from frame 1 gives `Propagated: 2, refused: 0, failed: 0`.
+     The md5 changed for `f0001` and `f0002` only, not `cam1/f0002`.
+   - Undo propagate is enabled after the propagate and greyed after visiting
+     `f0001` and coming back.
+   - The warning line draws in every state.
+   - With `sam_busy` true, Propagate is greyed and Undo propagate is not.
+7. **Find missing**, with `masks/f0001.png` deleted:
+   - `Missing: 1` (scan 286 ms);
+   - `M` lands on 1:`f0001`, and `Shift+M` and `M` from there both give `No
+     missing frame in that direction.`;
+   - Home 0, PageDown 3 (clamped), PageUp 0, End 3, Left 2, Right 3;
+   - with two pen anchors down, Right and a Next missing click both leave
+     frame 0 with 2 anchors;
+   - after Esc, Right steps to 1;
+   - the slider's tooltip is the key list.
+8. **Slideshow.**
+   - **Stopping.** Mouse moves leave it playing. A wheel tick, a canvas click
+     (history stays 0), `x` (the mode stays shape: the key only stops) and Tab
+     each stop it. Tab over the canvas is Task 12's M-2 reading:
+     `mask_slideshow` false, `nav_visible` false, and `mask_peek_total` +1,
+     so the stopping Tab also peeks one frame.
+   - **The frame that opens.** In five stops, the frame that opened was the
+     `mask_slide_index` read after the stop, every time (3, 1, 2, 0, 2).
+   - **Greying.** While it plays, Revert frame, Revert all, `<`, `>`, the
+     slider and all four find buttons draw greyed. Revert all is enabled after
+     the stop, on a bench with corrections. Play is greyed during a SAM job,
+     and a click on it there did not start playback.
+   - **Close and quit.** Closing the window while it plays closed the editor
+     with the pool joined. File > Quit then exited the process, with no crash
+     report.
+   - Propagate is not greyed while playing, but a click on it only stops the
+     slideshow: the status line showed the slideshow's stats and no
+     propagate ran.
+9. **State fields.** `state` reports `mask_view`, `mask_slideshow`,
+   `mask_slide_stop_ms`, `mask_peek`, `mask_peek_total` and `nav_visible`,
+   and plan 4's `sam_*` fields are unchanged (`sam_vram_mib`, `sam_pool_mib`,
+   `sam_loads`, `sam_click`, `sam_close_ms`, `sam_retiring`,
+   `sam_held_bytes`).
+
+**Carried from earlier tasks.**
+- **The slideshow on a flipped dataset (Task 12).** Flip masks was on, on a
+  fresh bench. In the editor's overlay, the file-kept ellipse, now dropped,
+  reads (192, 41, 33), and a file-dropped corner, now kept, reads (14, 24,
+  45). Four playback screenshots read (192, 41, 33) and (14, 24, 44-46).
+  Unflipped, the same two points read (127, 125, 100) and (154, 8, 15) in the
+  editor, and (127, 125, 99-101) and (154, 8, 14-15) playing. The tint is
+  correct in both conventions, within 3 levels.
+- **Playing right after an edit (Task 12, I2).** A drop stroke went through
+  the ellipse on `f0000` at 5 fps, and the canvas was screenshotted every
+  17 ms from the Play click. In 3 of 3 runs the first picture shows the edit:
+  - the stroke pixel plays tinted, (192, 41, 35), where frames 1 to 3 show the
+    unedited (127, 125, 107);
+  - it arrived 0.924, 0.928 and 0.962 s after the click, 0.93 s at the
+    median;
+  - the last blank sample was 0.885 to 0.940 s after the click.
+- **Row D's tooltips mid pen path (Task 9).** With two anchors down, First,
+  Previous missing, Next missing, Last, `<`, `>` and the frame slider each
+  show `Finish the shape, or press Esc to cancel it, before changing
+  frames.` After Esc, the slider shows the key list.
+- **The first drag after opening sometimes did nothing.** This turned out to
+  be a stroke over pixels already dropped: no pixel changes, so there is no
+  history entry. It is not a defect.
+
+**Owed by the operator, not done here:** hold Tab down over the canvas by hand
+on macOS, in Overlay and in Side by side, and confirm three things. The photo
+(or the overlay in the mask pane) shows while it is held, the view returns on
+release, and no focus ring appears. The harness releases a key after one
+frame, so this was not simulated, and it is not recorded as done.
 
 ## Not in this phase
 
