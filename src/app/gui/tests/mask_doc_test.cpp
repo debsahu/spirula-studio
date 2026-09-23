@@ -3502,6 +3502,140 @@ void test_click_maps_by_clicked_pane() {
     s.close();
 }
 
+// The pane under a canvas x: each pane_w wide, gap apart; none in a gap or past the end.
+void test_pane_at() {
+    const float w = 300.0f, g = 6.0f;
+    check(mk::pane_at(10.0f, 2, w, g) == 0 && mk::pane_at(299.9f, 2, w, g) == 0,
+          "pane at: inside the left pane");
+    check(mk::pane_at(300.0f, 2, w, g) == -1 && mk::pane_at(303.0f, 2, w, g) == -1,
+          "pane at: the gap, from the pane's right edge, is no pane");
+    check(mk::pane_at(306.0f, 2, w, g) == 1 && mk::pane_at(605.9f, 2, w, g) == 1,
+          "pane at: inside the right pane");
+    check(mk::pane_at(606.0f, 2, w, g) == -1 && mk::pane_at(-0.5f, 2, w, g) == -1,
+          "pane at: off either end is no pane");
+    check(mk::pane_at(450.0f, 1, 600.0f, 0.0f) == 0, "pane at: one pane is pane 0");
+    check(mk::pane_left(1, w, g) == 306.0f && mk::pane_left(0, w, g) == 0.0f,
+          "pane at: the right pane starts a pane and a gap in");
+}
+
+// A held button stays with the pane it pressed in; anything else maps through
+// the pane under the pointer, so a click-placed point lands where it was aimed.
+void test_bind_pane() {
+    mk::MaskSession s;
+    check(s.bind_pane(0, true, true, 2) == 0, "bind pane: a press takes the pane under it");
+    check(s.bind_pane(1, false, true, 2) == 0,
+          "bind pane: a drag into the other pane stays in the pane it pressed in");
+    check(s.bind_pane(-1, false, true, 2) == 0, "bind pane: a drag over the gap stays too");
+    check(s.bind_pane(1, false, false, 2) == 0,
+          "bind pane: the release frame still belongs to the pressed pane");
+    check(s.bind_pane(1, false, false, 2) == 1,
+          "bind pane: released, the hover maps through the pane under it");
+    check(s.bind_pane(1, true, true, 2) == 1,
+          "bind pane: a click placed in the other pane maps through that pane");
+    check(s.bind_pane(0, false, true, 1) == 0,
+          "bind pane: a held pane that left the layout lets go");
+    s.bind_pane(0, false, false, 1);
+    check(s.bind_pane(-1, false, false, 2) == 0, "bind pane: off every pane, pane 0");
+}
+
+// The pen across side by side, fed as MaskPanel.cpp feeds it: an anchor on the
+// photo pane and the next on the mask pane close into one polygon in pane pixels.
+void test_pen_across_panes() {
+    Fixture f = make_dataset("pen_panes", 64, 32, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "pen panes: open: " + err);
+    settle(s);
+    const float w = 300.0f, g = 6.0f;
+    const mk::Mapping m = mk::mapping(mk::View{}, 64, 32, w, 150.0f);
+    mk::PathTool t;
+    t.set_space(s.path_space(m));
+    std::vector<float> out, an, co, li;
+    bool consumed = false;
+    // cx is canvas px; pressed is this frame's left press, down the button held.
+    auto feed = [&](float cx, float y, bool pressed, bool down) {
+        const int p = s.bind_pane(mk::pane_at(cx, 2, w, g), pressed, down, 2);
+        gui::ViewportInput in = at(cx - mk::pane_left(p, w, g), y);
+        in.clicked = pressed;
+        in.down = down;
+        in.released = !down && !pressed;
+        return t.update(in, out, consumed);
+    };
+    feed(40.0f, 30.0f, true, true);                 // photo pane
+    feed(40.0f, 30.0f, false, false);
+    feed(306.0f + 200.0f, 30.0f, false, false);     // hovering the mask pane
+    t.overlay(an, co, li);
+    check(!li.empty() && std::fabs(li[li.size() - 2] - 200.0f) < 1e-3f,
+          "pen panes: the live segment follows the cursor into the mask pane");
+    feed(306.0f + 200.0f, 30.0f, true, true);       // mask pane
+    feed(306.0f + 200.0f, 30.0f, false, false);
+    feed(306.0f + 120.0f, 120.0f, true, true);
+    feed(306.0f + 120.0f, 120.0f, false, false);
+    t.overlay(an, co, li);
+    check(same_points(an, {40, 30, 200, 30, 120, 120}, 1e-3f),
+          "pen panes: an anchor on either pane lands where that pane shows it");
+    check(feed(306.0f + 41.0f, 31.0f, true, true), "pen panes: the first anchor, clicked on the mask pane, closes");
+    check(same_points(out, {40, 30, 200, 30, 120, 120}, 1e-3f),
+          "pen panes: the polygon is all in one pane's pixels");
+    s.close();
+}
+
+// V and the radios wait for a shape mid-stroke: its points are pane pixels, and
+// the pane width is part of the mapping. The pen keeps frame pixels, so it may.
+void test_switch_view() {
+    using V = mk::ViewMode;
+    const mk::View v;
+    const mk::Mapping one = mk::mapping(v, 64, 32, 600.0f, 150.0f);
+    const mk::Mapping two = mk::mapping(v, 64, 32, 297.0f, 150.0f);
+    check(std::fabs(one.to_mask_x(40.0f) - two.to_mask_x(40.0f)) > 1.0f,
+          "switch view: fixture: one pane pixel is another mask pixel in the other layout");
+    check(mk::switch_view(V::Overlay, V::SideBySide, false) == V::SideBySide,
+          "switch view: idle, the view changes");
+    check(mk::switch_view(V::Overlay, V::SideBySide, true) == V::Overlay,
+          "switch view: a shape mid-stroke keeps one pane");
+    check(mk::switch_view(V::SideBySide, V::MaskOnly, true) == V::SideBySide,
+          "switch view: a shape mid-stroke keeps two panes");
+    check(mk::switch_view(V::Overlay, V::MaskOnly, true) == V::Overlay,
+          "switch view: a shape mid-stroke keeps even a same-width view");
+}
+
+// The pen may switch views mid-path: its anchors are frame pixels, so a new
+// pane width re-maps them and the path closes over the same frame pixels.
+void test_pen_survives_view_switch() {
+    Fixture f = make_dataset("pen_view", 64, 32, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "pen view: open: " + err);
+    settle(s);
+    const mk::View v;
+    const mk::Mapping one = mk::mapping(v, 64, 32, 600.0f, 150.0f);
+    const mk::Mapping two = mk::mapping(v, 64, 32, 297.0f, 150.0f);
+    mk::PathTool t;
+    t.set_space(s.path_space(one));
+    std::vector<float> out;
+    bool consumed = false;
+    const float pts[3][2] = {{250.0f, 40.0f}, {350.0f, 40.0f}, {300.0f, 110.0f}};
+    float want[6];
+    for (int i = 0; i < 3; i++) {
+        t.update(click_at(pts[i][0], pts[i][1]), out, consumed);
+        s.path_space(one).to_frame(pts[i][0], pts[i][1], want[2 * i], want[2 * i + 1]);
+    }
+    t.set_space(s.path_space(two));
+    check(t.commit_pending(out) && out.size() == 6, "pen view: the path closes after the switch");
+    bool same = out.size() == 6;
+    for (int i = 0; same && i < 3; i++) {
+        float fx = 0.0f, fy = 0.0f;
+        s.path_space(two).to_frame(out[2 * i], out[2 * i + 1], fx, fy);
+        same = std::fabs(fx - want[2 * i]) < 1e-2f && std::fabs(fy - want[2 * i + 1]) < 1e-2f;
+    }
+    check(same, "pen view: the closed polygon covers the frame pixels it was drawn over");
+    check(std::fabs(out[0] - pts[0][0]) > 1.0f,
+          "pen view: fixture: the new layout moved the anchor in pane pixels");
+    s.close();
+}
+
 // Every peek in every view: side by side shows photo and mask bare, and a peek
 // turns exactly one pane into the overlay. One pane ignores the pane index.
 void test_pane_style_for() {
@@ -4921,6 +5055,11 @@ int main() {
     test_strip_reserve();
     test_click_maps_by_shown_layout();
     test_click_maps_by_clicked_pane();
+    test_pane_at();
+    test_bind_pane();
+    test_pen_across_panes();
+    test_switch_view();
+    test_pen_survives_view_switch();
     test_pane_style_for();
     test_plan_derive();
     test_session_sam_paint_modes();

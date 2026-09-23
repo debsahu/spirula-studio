@@ -1116,6 +1116,21 @@ SS_MSG(view_help,
     RU("Наложение подкрашивает убранные пиксели поверх фото. Только маска показывает маску с подкрашенными исправлениями. Рядом показывает слева чистое фото, справа маску; рисовать можно на обеих. V переключает виды."),
     TR("Bindirme, atılan pikselleri fotoğrafın üzerinde renklendirir. Yalnızca maske, düzeltmeleri renklendirilmiş maskeyi gösterir. Yan yana solda çıplak fotoğrafı, sağda maskeyi gösterir; ikisine de çizilebilir. V görünümleri değiştirir."));
 
+SS_MSG(view_locked,
+    EN("Finish the shape, or press Esc to cancel it, before changing the view."),
+    JA("表示を切り替える前に、図形を完成させるか Esc で取り消してください。"),
+    ZH_HANS("切换视图前，请先完成图形，或按 Esc 取消。"),
+    ZH_HANT("切換檢視前，請先完成圖形，或按 Esc 取消。"),
+    KO("보기를 바꾸기 전에 도형을 완성하거나 Esc 키로 취소하세요."),
+    DE("Die Form fertigstellen oder mit Esc abbrechen, bevor die Ansicht gewechselt wird."),
+    FR("Terminez la forme, ou appuyez sur Esc pour l'annuler, avant de changer de vue."),
+    ES("Termina la forma, o pulsa Esc para cancelarla, antes de cambiar la vista."),
+    PT("Termine a forma, ou pressione Esc para cancelá-la, antes de mudar a vista."),
+    IT("Completa la forma, o premi Esc per annullarla, prima di cambiare vista."),
+    NL("Maak de vorm af, of druk op Esc om hem te annuleren, voordat je de weergave wisselt."),
+    RU("Закончите фигуру или нажмите Esc, чтобы отменить её, прежде чем менять вид."),
+    TR("Görünümü değiştirmeden önce şekli tamamlayın ya da Esc ile iptal edin."));
+
 SS_MSG(peek_hint,
     EN("Hold {0} over the picture to see the bare photo, Shift+{0} the bare mask."),
     JA("画像の上で {0} を押し続けると元の写真、Shift+{0} で元のマスクが見えます。"),

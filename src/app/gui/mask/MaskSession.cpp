@@ -535,6 +535,27 @@ PaneDerive plan_derive(bool dirty, const Window& want, ViewMode view, Peek peek,
     return d;
 }
 
+int pane_at(float x, int panes, float pane_w, float gap) {
+    const float stride = pane_w + gap;
+    if (panes < 1 || x < 0.0f || stride <= 0.0f) return -1;
+    const int p = (int)std::floor(x / stride);
+    if (p >= panes || x - (float)p * stride >= pane_w) return -1;
+    return p;
+}
+
+ViewMode switch_view(ViewMode cur, ViewMode want, bool shape_in_progress) {
+    return shape_in_progress ? cur : want;
+}
+
+// Cleared after the release frame is answered: that frame ends the drag.
+int MaskSession::bind_pane(int hover, bool pressed, bool down, int panes) {
+    if (_held_pane >= panes) _held_pane = -1;
+    if (pressed && hover >= 0) _held_pane = hover;
+    const int p = _held_pane >= 0 ? _held_pane : std::max(0, hover);
+    if (!down) _held_pane = -1;
+    return p;
+}
+
 // Pane px -> displayed mask px (the mapping) -> stored mask px (the EXIF
 // turn) -> stored frame px (the mask-to-frame scale), and back.
 void MaskSession::note_shown(const Mapping& m, float origin_x, float origin_y, int panes,
@@ -552,10 +573,9 @@ bool MaskSession::shown_to_frame(float screen_x, float screen_y, float& fx, floa
     if (!_shown_valid || !_doc) return false;
     float x = screen_x - _shown_x;
     if (_shown_panes > 1) {
-        const float stride = _shown_pane_w + _shown_gap;
-        const int p = (int)std::floor(x / stride);
-        if (p < 0 || p >= _shown_panes || x - (float)p * stride >= _shown_pane_w) return false;
-        x -= (float)p * stride;
+        const int p = pane_at(x, _shown_panes, _shown_pane_w, _shown_gap);
+        if (p < 0) return false;
+        x -= pane_left(p, _shown_pane_w, _shown_gap);
     }
     path_space(_shown).to_frame(x, screen_y - _shown_y, fx, fy);
     return true;

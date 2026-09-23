@@ -397,7 +397,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:195` and `:491`), and
+does (both call the identical function, `MaskPanel.cpp:195` and `:490`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -524,7 +524,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:195` (`ui::Button(msg::undo)`) and `:491`
+   worked. `MaskPanel.cpp:195` (`ui::Button(msg::undo)`) and `:490`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -1714,7 +1714,7 @@ keeps them apart. **The operator used it on a real 120 MP correction and asked
 for the opposite**: *"carry over eraser and brush size from each other, rather
 than keeping it independent."* Their experience of the task beats the
 generalisation, so `_eraser` is gone and `radius()` / `set_radius()`
-(`MaskSession.h:119-120`) address the one float. The slider, `[`/`]` and
+(`MaskSession.h:125-126`) address the one float. The slider, `[`/`]` and
 Alt+wheel all move it whichever tool is up.
 
 **The test was inverted, not deleted.** It guarded independence, which is now
@@ -1834,7 +1834,7 @@ eraser ever does move into `ToolId`, the key comes with it.
 
 ### Alt+wheel over the canvas
 
-`MaskPanel.cpp:341-349`. The bare wheel is already the zoom, and Shift/Ctrl
+`MaskPanel.cpp:335-343`. The bare wheel is already the zoom, and Shift/Ctrl
 are the paint modes, so Alt is what was left; it is read by no mask tool and
 by no view gesture. The factor is `1.18^wheel` -- the **reciprocal** of the
 grow step, not the bracket's 0.85 -- so a notch back exactly undoes a notch,
@@ -2010,7 +2010,7 @@ stand in for the job.
   `encode_image` at 2.56 s on a byte-identical binary, on mains power with no
   thermal warning; the cause was not found. This is why P7's bar moved.
 - **The open frame's pixels are co-owned.** `_rgb` is a
-  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:342`) and a job holds
+  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:352`) and a job holds
   its own reference, so moving to another frame, which replaces `_rgb` in
   `pump()`, never frees what a job reads. The `const` element type makes a
   refill in place a compile error. **Host memory is a known, unmeasured
@@ -2991,7 +2991,7 @@ taller.
 
 Hold **Tab** over the canvas to see the bare photo, **Shift+Tab** the bare
 mask; release and the overlay returns. The canvas owns Tab while hovered or
-active (`SetItemKeyOwner`, `MaskPanel.cpp:297-302`), which is what stops
+active (`SetItemKeyOwner`, `MaskPanel.cpp:300-305`), which is what stops
 imgui's nav from tabbing: the tabbing request polls Tab with
 `ImGuiKeyOwner_NoOwner` (`_deps/imgui-src/imgui.cpp:14152`) and stands down
 when the key has an owner. The hint is one strip line after `hint_view` in
@@ -3066,9 +3066,11 @@ fixed point.
 
 A third toolbar row: **Overlay**, **Mask only**, **Side by side**; `V` cycles
 them. Side by side is the bare photo left and the mask right over one `View`,
-6 px apart, each pane with its own window and texture. A stroke, a pen path or
-a SAM click maps through the pane it landed in, and a click in the gap is
-none. The pure decisions live in `MaskSession.cpp`, where `mask_doc_test`
+6 px apart, each pane with its own window and texture. Both panes share one
+`Mapping`, so a pane pixel is the same frame pixel in either. A held button
+stays with the pane it pressed in, so a drag never jumps the gap; every other
+input, including each click of a Polygon or a pen path, maps through the pane
+under the pointer (`bind_pane`), and a click in the gap is none. The pure decisions live in `MaskSession.cpp`, where `mask_doc_test`
 reaches them: `pane_style_for` (every peek in every view, 18 checks) and
 `plan_derive` (which pane re-derives, 12 checks); `MaskPanel.cpp` only calls
 them. `shown_to_frame` gained the pane split (6 checks).
@@ -3101,6 +3103,37 @@ bench):
 The left pane is the bare photo, so a stroke shows only in the mask pane.
 Seeing it over the photo is the peek: Tab turns the mask pane into the
 overlay, Shift+Tab the photo pane.
+
+#### Fix round 1: click-placed points and a view switch mid-shape
+
+Two defects the review found. **The pen and the Polygon bound every later
+click to the pane the shape started in**, so an anchor clicked on the other
+pane landed a pane width plus the gap to the side, off the frame and clipped
+out of sight; the wheel mid-path zoomed about the same wrong point. The pane
+is now bound only while the left button is held (`MaskSession::bind_pane`),
+and the tool's overlay, the brush ring included, draws in every pane at the
+same pane pixels, so a ring over the photo shows where the stroke lands in
+the mask pane. **`V` or a radio mid-Polygon changed the pane width under
+points stored in pane pixels.** `switch_view` refuses while a shape is in
+progress, and the radios grey out with `view_locked` on hover. The pen stays
+free to switch: it keeps its anchors in frame pixels and re-maps them through
+the current `PathSpace` every frame ("the pen may switch views mid-path" in
+`mask_doc_test`).
+
+Measured in the app on the two-frame bench, side by side, the same triangle
+drawn three ways and each arm undone before the next. Pixels made drop:
+
+| tool | all on the photo pane | photo, then mask pane | all on the mask pane |
+|---|---|---|---|
+| Polygon | 123,424 | 123,424 | 123,424 |
+| pen | 80,840 | 80,840 | 80,840 |
+
+With the old binding restored in the panel, the cross-pane arms read 151,063
+(Polygon) and 100,495 (pen). `V` pressed mid-Polygon leaves side by side on
+screen; with the lock removed at the `V` site, the same press switches to
+one pane. `tools/mask_editor_checks/survivors.sh` is the structural tripwire
+over `MaskPanel.cpp`; it anchors the pen commit on the whole statement, so a
+`paint_for(..., false)` there fails two of its lines.
 
 ## Not in this phase
 

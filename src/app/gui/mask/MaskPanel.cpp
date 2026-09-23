@@ -265,15 +265,18 @@ void MaskSession::note_row_width() {
 
 // Row A: the view. Tasks 7, 9 and 12 add rows B to D and Play (Decision 24).
 void MaskSession::draw_workflow_row() {
-    if (ui::RadioButton(msg::view_overlay, _view_mode == ViewMode::Overlay))
-        _view_mode = ViewMode::Overlay;
-    ImGui::SameLine();
-    if (ui::RadioButton(msg::view_mask_only, _view_mode == ViewMode::MaskOnly))
-        _view_mode = ViewMode::MaskOnly;
-    ImGui::SameLine();
-    if (ui::RadioButton(msg::view_side_by_side, _view_mode == ViewMode::SideBySide))
-        _view_mode = ViewMode::SideBySide;
-    ui::help_on_hover(msg::view_help);
+    const bool locked = _tool.in_progress();
+    const spirula::i18n::Msg* names[3] = {&msg::view_overlay, &msg::view_mask_only,
+                                          &msg::view_side_by_side};
+    ImGui::BeginDisabled(locked);
+    for (int i = 0; i < 3; i++) {
+        if (i > 0) ImGui::SameLine();
+        if (ui::RadioButton(*names[i], (int)_view_mode == i))
+            _view_mode = switch_view(_view_mode, (ViewMode)i, locked);
+        if (locked) ui::help_on_hover_disabled(msg::view_locked);
+        else ui::help_on_hover(msg::view_help);
+    }
+    ImGui::EndDisabled();
     note_row_width();
 }
 
@@ -304,6 +307,7 @@ void MaskSession::draw_canvas() {
     dl->AddRectFilled(origin, far_corner, IM_COL32(24, 24, 24, 255));
     if (!_doc) {
         _shown_valid = false;
+        _held_pane = -1;
         dl->AddText(ImVec2(origin.x + px(8.0f), origin.y + px(8.0f)),
                     IM_COL32(200, 200, 200, 255), msg::working.get());
         return;
@@ -316,25 +320,15 @@ void MaskSession::draw_canvas() {
     }
     const ImGuiIO& io = ImGui::GetIO();
     const bool space = ImGui::IsKeyDown(ImGuiKey_Space);
-    // One pane, or two over one view with a gap. A stroke or a path is fed
-    // one pane's pixels, so it belongs to the pane it started in.
+    // One pane, or two over one view with a gap.
     const int npanes = _view_mode == ViewMode::SideBySide ? 2 : 1;
     const float gap = npanes == 2 ? px(6.0f) : 0.0f;
     const float pane_w = (size.x - gap * (float)(npanes - 1)) / (float)npanes;
-    int hover_pane = -1;
-    for (int p = 0; hovered && p < npanes; p++) {
-        const float x0 = origin.x + (float)p * (pane_w + gap);
-        if (io.MousePos.x >= x0 && io.MousePos.x < x0 + pane_w) hover_pane = p;
-    }
+    const int hover_pane = hovered ? pane_at(io.MousePos.x - origin.x, npanes, pane_w, gap) : -1;
     const bool over = hover_pane >= 0;
-    if ((_tool.in_progress() || _path.in_progress()) && _stroke_pane >= npanes) {
-        _tool.cancel();
-        _path.cancel();
-    }
-    const int active = _tool.in_progress() || _path.in_progress() ? _stroke_pane
-                                                                  : std::max(0, hover_pane);
-    const ImVec2 porg(origin.x + (float)active * (pane_w + gap), origin.y);
-    const ImVec2 pfar(porg.x + pane_w, far_corner.y);
+    const int active = bind_pane(hover_pane, ImGui::IsMouseClicked(ImGuiMouseButton_Left),
+                                 ImGui::IsMouseDown(ImGuiMouseButton_Left), npanes);
+    const ImVec2 porg(origin.x + pane_left(active, pane_w, gap), origin.y);
     // The view. Never while a stroke is in progress: its points are pane pixels.
     if (!_tool.in_progress()) {
         const Mapping m0 = mapping(_view, _dw, _dh, pane_w, size.y);
@@ -374,14 +368,20 @@ void MaskSession::draw_canvas() {
         }
         dl->PopClipRect();
     }
-    dl->PushClipRect(porg, pfar, true);
+    // Every pane draws the tool at the same pane pixels: a stroke over the photo
+    // lands in the mask pane, so the ring has to show in both.
+    auto in_each_pane = [&](auto&& draw) {
+        for (int p = 0; p < npanes; p++) {
+            const ImVec2 o(origin.x + pane_left(p, pane_w, gap), origin.y);
+            dl->PushClipRect(o, ImVec2(o.x + pane_w, far_corner.y), true);
+            draw(o);
+            dl->PopClipRect();
+        }
+    };
 
     // The tool, fed pane pixels, the left button only. The modifiers are
     // read from the frame the stroke completes, as EditSession does.
     const bool can_stroke = over && !space && !_panning;
-    if (!_tool.in_progress() && !_path.in_progress() && can_stroke &&
-        ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-        _stroke_pane = hover_pane;
     _tool.set_brush_radius(radius() * m.scale);
     ViewportInput in;
     in.hovered = can_stroke;
@@ -424,7 +424,7 @@ void MaskSession::draw_canvas() {
             upload_rect(commit_stroke(stroke, paint_now(_path.mode_shift(), _path.mode_ctrl()), m));
             _last_commit_ms = now_ms() - t0;
         }
-        draw_path_overlay(dl, porg, _path);
+        in_each_pane([&](const ImVec2& o) { draw_path_overlay(dl, o, _path); });
     } else {
         ShapeStroke stroke;
         bool consumed = false;
@@ -433,9 +433,8 @@ void MaskSession::draw_canvas() {
             upload_rect(commit_stroke(stroke, paint_now(in.shift, in.ctrl), m));
             _last_commit_ms = now_ms() - t0;
         }
-        _tool.draw_overlay(dl, porg);
+        in_each_pane([&](const ImVec2& o) { _tool.draw_overlay(dl, o); });
     }
-    dl->PopClipRect();
     note_shown(m, origin.x, origin.y, npanes, pane_w, gap);
     handle_keys(m);
 }
@@ -494,7 +493,8 @@ void MaskSession::handle_keys(const Mapping& m) {
     const ImGuiInputFlags route = ImGuiInputFlags_RouteFocused |
                                   ImGuiInputFlags_RouteFromRootWindow;
     if (!io.KeyCtrl && ImGui::Shortcut(ImGuiKey_V, route))
-        _view_mode = (ViewMode)(((int)_view_mode + 1) % 3);
+        _view_mode = switch_view(_view_mode, (ViewMode)(((int)_view_mode + 1) % 3),
+                                 _tool.in_progress());
 }
 
 // Names what goes -- the corrected-frame count, and the open frame's unsaved

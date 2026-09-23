@@ -67,6 +67,12 @@ struct PaneDerive { bool left = false, right = false; };
 // The right pane is forgotten off screen: upload_rect keeps it current only there.
 PaneDerive plan_derive(bool dirty, const Window& want, ViewMode view, Peek peek, Window& win0,
                        Style& style0, Window& win1, Style& style1);
+// The pane of `panes`, pane_w wide and gap apart, holding canvas x; -1 in a gap or off the end.
+int pane_at(float x, int panes, float pane_w, float gap);
+inline float pane_left(int pane, float pane_w, float gap) { return (float)pane * (pane_w + gap); }
+// `want`, unless a shape is mid-stroke: its points are pane pixels, and the pane
+// width is part of the mapping. The pen keeps frame pixels, so it may switch.
+ViewMode switch_view(ViewMode cur, ViewMode want, bool shape_in_progress);
 
 class MaskSession {
 public:
@@ -132,6 +138,10 @@ public:
     void note_shown(const Mapping& m, float origin_x, float origin_y, int panes = 1,
                     float pane_w = 0.0f, float gap = 0.0f);
     bool shown_to_frame(float screen_x, float screen_y, float& fx, float& fy) const;
+    // The pane the pointer maps through this frame: a held button keeps the pane it
+    // pressed in, so a drag never jumps the gap; else the pane under it (`hover`, -1
+    // for none). Both panes show one view, so a pane pixel is a frame pixel either way.
+    int bind_pane(int hover, bool pressed, bool down, int panes);
     // The open frame's pixels, co-owned: a holder keeps them past a frame change.
     std::shared_ptr<const std::vector<uint8_t>> frame_pixels() const { return _rgb; }
 
@@ -422,7 +432,7 @@ private:
     Window _win2;
     Style _win2_style = Style::MaskOnly;
     std::vector<uint8_t> _rgba2;
-    int _stroke_pane = 0;
+    int _held_pane = -1;             // the pane a held left button pressed in
     int _slider_idx = 0;
     bool _close_requested = false;
     bool _revert_all_ask = false;    // Revert all was clicked; open its confirmation
