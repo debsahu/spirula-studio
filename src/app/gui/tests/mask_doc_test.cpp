@@ -9,6 +9,7 @@
 #include "app/gui/mask/Livewire.h"
 #include "app/gui/mask/MaskAdd.h"
 #include "app/gui/MaskPrompt.h"
+#include "app/gui/Picture.h"
 #include "app/gui/MaskSettings.h"
 #include "app/gui/mask/MaskSam.h"
 #include "app/gui/mask/MaskDoc.h"
@@ -2561,6 +2562,10 @@ double median_ms(F&& f, int repeats = 3) {
     return t[t.size() / 2];
 }
 
+// More 1080p frames than the ring's biggest window (kReelSlots - 1 = 11), so
+// the 1080p arm measures decoding rather than a cache of the whole dataset.
+constexpr int kHdFrames = 16;
+
 void bench_8k(const char* dir) {
     const int W = 7680, H = 3840;
     const fs::path root(dir), images = root / "images", masks = root / "masks";
@@ -2643,6 +2648,46 @@ void bench_8k(const char* dir) {
                 median_ms([&] { d.save(layer.string(), masks.string(), idx, err); }));
     std::printf("bench undo x20                   %8.1f ms\n",
                 median_ms([&] { for (int k = 0; k < 20; k++) d.undo(); for (int k = 0; k < 20; k++) d.redo(); }, 1));
+    // Plan 3: what the slideshow decodes per frame, single-threaded.
+    gui::Picture pic;
+    const std::string img0 = (images / "f0000.jpg").string(), msk0 = (masks / "f0000.png").string();
+    const double p1024 = median_ms([&] { gui::load_picture(img0, msk0, 1024, pic); });
+    std::printf("bench load_picture 8K -> 1024    %8.1f ms   (%dx%d picture, %.1f MB; 1 thread = %.1f fps)\n",
+                p1024, pic.w, pic.h, pic.bytes() / 1048576.0, 1000.0 / p1024);
+    const double p2048 = median_ms([&] { gui::load_picture(img0, msk0, 2048, pic); });
+    std::printf("bench load_picture 8K -> 2048    %8.1f ms   (%dx%d picture, %.1f MB)\n",
+                p2048, pic.w, pic.h, pic.bytes() / 1048576.0);
+    // The app's own target on a full-screen pane, so the row the in-app
+    // reading of criterion 8 has to be read against.
+    const double p4096 = median_ms([&] { gui::load_picture(img0, msk0, 4096, pic); });
+    std::printf("bench load_picture 8K -> 4096    %8.1f ms   (%dx%d picture, %.1f MB; 1 thread = %.1f fps)\n",
+                p4096, pic.w, pic.h, pic.bytes() / 1048576.0, 1000.0 / p4096);
+    const fs::path hd = root / "hd", hd_images = hd / "images", hd_masks = hd / "masks";
+    fs::create_directories(hd_images, ec);
+    fs::create_directories(hd_masks, ec);
+    for (int i = 0; i < kHdFrames; i++) {
+        char buf[16];
+        std::snprintf(buf, sizeof buf, "h%04d", i);
+        const std::string key(buf);
+        if (!fs::exists(hd_images / (key + ".jpg")))
+            write_jpg_rgb(hd_images / (key + ".jpg"), 1920, 1080, synth_rgb(1920, 1080, (uint32_t)i));
+        if (!fs::exists(hd_masks / (key + ".png")))
+            write_png_gray(hd_masks / (key + ".png"), 1920, 1080, synth_mask(1920, 1080, (uint32_t)i));
+    }
+    const double h1024 = median_ms([&] {
+        gui::load_picture((hd_images / "h0000.jpg").string(), (hd_masks / "h0000.png").string(), 1024, pic);
+    });
+    std::printf("bench load_picture 1080p -> 1024 %8.1f ms   (1 thread = %.1f fps)\n", h1024, 1000.0 / h1024);
+    // load_picture takes an absent mask as silently as a present one, so pin
+    // that each timed load returned, at its step size, with the tint laid on.
+    gui::Picture bare;
+    const std::string hd0 = (hd_images / "h0000.jpg").string(), hd0m = (hd_masks / "h0000.png").string();
+    const bool hd_ok = gui::load_picture(hd0, hd0m, 1024, pic);
+    check(hd_ok && gui::load_picture(hd0, "", 1024, bare) && pic.w == 960 && pic.h == 540 &&
+              pic.rgb != bare.rgb, "bench: the 1080p load decoded at 960x540 with its mask applied");
+    const bool k8_ok = gui::load_picture(img0, msk0, 4096, pic);
+    check(k8_ok && gui::load_picture(img0, "", 4096, bare) && pic.w == 3840 && pic.h == 1920 &&
+              pic.rgb != bare.rgb, "bench: the 8K load decoded at 3840x1920 with its mask applied");
     fs::remove_all(layer, ec);
     for (int i = 0; i < 3; i++) {
         const std::string key = "f000" + std::to_string(i);
