@@ -434,7 +434,9 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/FrameMask.cpp
         ${SS_SRC}/app/FrameLook.cpp
         ${SS_SRC}/app/gui/mask/Livewire.cpp
-        ${SS_SRC}/app/gui/mask/PathTool.cpp)
+        ${SS_SRC}/app/gui/mask/PathTool.cpp
+        ${SS_SRC}/app/gui/Picture.cpp
+        ${SS_SRC}/app/gui/mask/MaskSlideshow.cpp)
     ss_configure_app(mask_doc_test)
 
     # DatasetPrep's two seams with the mask editor's layer folder, run for

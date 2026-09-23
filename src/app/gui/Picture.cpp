@@ -124,7 +124,7 @@ void make_picture(const uint8_t* rgb, int w, int h, const uint8_t* mask,
 }
 
 bool load_picture(const std::string& image_path, const std::string& mask_path,
-                  int max_side, Picture& out) {
+                  int max_side, Picture& out, bool mask_flipped) {
     out = Picture{};
     int w = 0, h = 0;
     std::vector<uint8_t> rgb;
@@ -147,6 +147,8 @@ bool load_picture(const std::string& image_path, const std::string& mask_path,
         }
         mask.swap(fit);
     }
+    if (mask_flipped)
+        for (uint8_t& v : mask) v = (uint8_t)(255 - v);
     make_picture(rgb.data(), w, h,
                  mask.size() == (size_t)w * h ? mask.data() : nullptr, max_side,
                  out);
