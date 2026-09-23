@@ -58,6 +58,17 @@ void check(bool ok, const std::string& what) {
     if (!ok) g_failures++;
 }
 
+// A chmod can inject a read or write failure only for a non-root POSIX user.
+bool chmod_injects() {
+#ifndef _WIN32
+    if (geteuid() != 0) return true;
+#endif
+    static bool said = false;
+    if (!said) std::printf("skip chmod failure-injection arms: skipped (Windows/root)\n");
+    said = true;
+    return false;
+}
+
 fs::path scratch(const char* name) {
     const fs::path d = fs::temp_directory_path() / "spirula_mask_doc_test" / name;
     std::error_code ec;
@@ -1854,6 +1865,7 @@ void test_snapshot_restore_flipped() {
 enum class Late { BaseUnreadable, LayerMisfit, MaskWrite, IndexSave };
 
 void restore_failure_arm(bool flipped, Late step, const char* step_name) {
+    if (step != Late::LayerMisfit && !chmod_injects()) return;
     const std::string tag = std::string("restore failure (") + (flipped ? "flipped" : "unflipped") +
                             ", " + step_name + "): ";
     Fixture f = make_dataset(flipped ? "restore_fail_f" : "restore_fail_u", 64, 48, {"cam0/a", "cam0/c"});
@@ -1939,8 +1951,9 @@ void test_restore_writes_no_mask() {
 // The layer arms test_snapshot_restore does not reach: an absent keep, a
 // snapshot read failure, an entry with no base, and orphan layers.
 void test_snapshot_restore_edges() {
-    Fixture f = make_dataset("snapshot_edges", 64, 48, {"a", "c", "o"});
+    Fixture f = make_dataset("snapshot_edges", 64, 48, {"a", "c", "o", "p", "cam0/n"});
     fs::remove(f.masks / "a.png");
+    fs::remove(f.masks / "cam0" / "n.png");
     const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
     const std::vector<uint8_t> d1 = box_layer(64, 48, 4, 4, 14, 14), k1 = box_layer(64, 48, 40, 20, 50, 30);
     const std::vector<uint8_t> d2 = box_layer(64, 48, 20, 20, 30, 30), k2 = box_layer(64, 48, 0, 0, 5, 5);
@@ -1963,12 +1976,29 @@ void test_snapshot_restore_edges() {
               stencil_pixels(f.layer / "c.keep.png") == std::vector<uint8_t>(64 * 48, 0),
           "edges: the keep layer the snapshot did not hold is zero, not k2");
 
-    const fs::path drop_c = f.layer / "c.drop.png";
-    fs::permissions(drop_c, fs::perms::none);
-    mk::LayerSnapshot unreadable;
-    const bool snapped = mk::snapshot_layers(layer_root, "c", idx, unreadable, err);
-    fs::permissions(drop_c, fs::perms::owner_read | fs::perms::owner_write);
-    check(!snapped && err == drop_c.string(), "edges: a snapshot read failure names the layer file: " + err);
+    if (chmod_injects()) {
+        for (const char* name : {"c.drop.png", "c.keep.png"}) {
+            const fs::path layer = f.layer / name;
+            fs::permissions(layer, fs::perms::none);
+            mk::LayerSnapshot unreadable;
+            const bool snapped = mk::snapshot_layers(layer_root, "c", idx, unreadable, err);
+            fs::permissions(layer, fs::perms::owner_read | fs::perms::owner_write);
+            check(!snapped && err == layer.string(),
+                  std::string("edges: a snapshot read failure names ") + name + ": " + err);
+        }
+    }
+
+    // A late failure on a key the index has lost leaves it lost, not the
+    // snapshot's entry; the misfit layer needs no chmod.
+    mk::LayerSnapshot lost;
+    check(mk::snapshot_layers(layer_root, "c", idx, lost, err) && lost.had_entry, "edges: snapshot of c");
+    mk::encode_gray_png(synth_mask(32, 24, 3).data(), 32, 24, lost.drop_png);
+    lost.had_drop = true;
+    const mk::IndexEntry c_entry = idx.frames["c"];
+    idx.frames.erase("c");
+    check(!mk::restore_layers(layer_root, mask_root, lost, idx, err) && idx.frames.count("c") == 0,
+          "edges: a failed restore does not invent an entry the index did not have");
+    idx.frames["c"] = c_entry;
 
     // a has no mask and so no base: restore puts back the entry and saves it.
     check(prop("a", d1, k1) && !fs::exists(f.layer / "a.base.png"), "edges: a takes layers only");
@@ -1983,6 +2013,21 @@ void test_snapshot_restore_edges() {
               reread.frames["a"].saved_at == sa.entry.saved_at, "edges: and it reached index.json");
     check(file_bytes(f.layer / "a.drop.png") == sa.drop_png && !fs::exists(f.masks / "a.png"),
           "edges: a's layers are the snapshot's, still with no mask");
+    if (chmod_injects()) {
+        // cam0/n's layers sit in cam0/, so only index.json's write is blocked.
+        check(prop("cam0/n", d1, k1) && !fs::exists(f.layer / "cam0" / "n.base.png"), "edges: n takes layers only");
+        mk::LayerSnapshot sn;
+        check(mk::snapshot_layers(layer_root, "cam0/n", idx, sn, err) && sn.had_entry, "edges: snapshot of n");
+        sn.entry.saved_at = "2000-01-01T00:00:00Z";
+        check(prop("cam0/n", d2, k2), "edges: second layers on n");
+        const mk::IndexEntry n_found = idx.frames["cam0/n"];
+        const auto was = fs::status(f.layer).permissions();
+        fs::permissions(f.layer, fs::perms::owner_read | fs::perms::owner_exec);
+        const bool ok = mk::restore_layers(layer_root, mask_root, sn, idx, err);
+        fs::permissions(f.layer, was);
+        check(!ok && idx.frames["cam0/n"].saved_at == n_found.saved_at,
+              "edges: a failed index save with no base puts back the entry it found");
+    }
 
     // Orphan layers (no entry) are what the target carried; undo keeps them.
     const std::vector<uint8_t> original_o = file_bytes(f.masks / "o.png");
@@ -1998,6 +2043,15 @@ void test_snapshot_restore_edges() {
           "edges: o's orphan drop layer is back, byte for byte, and no keep layer");
     check(file_bytes(f.masks / "o.png") == original_o && idx.frames.count("o") == 0 &&
               !fs::exists(f.layer / "o.base.png"), "edges: o's mask, entry and base are as before");
+    std::vector<uint8_t> orphan_keep;
+    mk::encode_gray_png(box_layer(64, 48, 30, 10, 40, 20).data(), 64, 48, orphan_keep);
+    mk::write_file_atomic((f.layer / "p.keep.png").string(), orphan_keep.data(), orphan_keep.size());
+    mk::LayerSnapshot sp;
+    check(mk::snapshot_layers(layer_root, "p", idx, sp, err) && !sp.had_entry && !sp.had_drop && sp.had_keep &&
+              prop("p", d2, k2) && mk::restore_layers(layer_root, mask_root, sp, idx, err),
+          "edges: orphan keep on p, propagated over, restored: " + err);
+    check(file_bytes(f.layer / "p.keep.png") == orphan_keep && !fs::exists(f.layer / "p.drop.png"),
+          "edges: p's orphan keep layer is back, byte for byte, and no drop layer");
 }
 
 // The eraser, through the same call the panel makes. The base drops a 16x12
