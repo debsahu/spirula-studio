@@ -126,6 +126,9 @@ row src/nn/vk/Memory.cpp 243-266 "void Allocator::free(DevicePtr ptr)" 243
 row src/nn/vk/Memory.cpp 243-266 "vkFreeMemory(ctx.device(), a.memory, nullptr);"
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::release(" 362
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::releaseAll()"
+# P10's resolution floor.
+row src/sam/model/Hparams.h 48 "int32_t img_size = 1008;"
+row src/sam/model/Hparams.h 134 "int32_t mask_size() const { return grid() * 4; }                   // 288"
 
 # Coverage, both ways. A bare `:N` continues the paragraph's last cited file;
 # `.md` citations point outside the repo (session briefs) and are not checked.

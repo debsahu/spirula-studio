@@ -2392,6 +2392,83 @@ The wall figures include the harness, whose `move` + one-frame `wait` alone cost
 - `RegionBox`'s comment now says what a text box is: the detector's continuous box, not
   an inclusive pixel extent.
 
+## SAM assist, Task 9: P10, the monopod on the operator's own capture (2026-09-22)
+
+**The question.** Does one SAM click remove the monopod the operator hand-painted out
+of their real 120 MP playroom capture? The reference is `work/osmo_playroom/masks_eq/`
+(SAM 3's output, 255 = DROP) against `masks_eq_edited/` (the operator's hand
+correction of it), both 15520x7760, in the parent slam repo. Both were only read.
+
+### Which frames can host P10 at all
+
+The operator hand-painted a monopod in only **5 of 46 frames**. That is where
+`edited & ~sam` holds a real region: f00016, f00022, f00024, f00025 and f00026, each
+0.48-1.33% of the frame. The other frames add at most 0.021%, which is the rim
+around the person, or nothing. **f00000 (`CAM_..._0066`), the frame the 3D-printer
+click was tested on, cannot host P10.** SAM 3 had already dropped the whole monopod
+there, so a monopod-region null would be about 1.0. Its "largest painted component"
+is a 2 px sliver, and dropping everything in that box would score 0.917.
+
+### The region, and the null
+
+**The monopod region is a construction, not something the reference labels.** It is
+the bounding box of the largest 8-connected component of `edited & ~sam`, which is
+the stroke the operator painted onto the pole. The box is padded by 10% of its own
+size on each side. Drop masks are scored by IoU inside that box. The whole-frame
+script from criterion #13 cannot answer this question, because it scores the nadir
+band and the person along with the pole.
+
+| frame | box (x0,y0,x1,y1) | null: unmodified SAM mask | drop the whole box |
+|---|---|---|---|
+| f00016 | 9634,4897,12494,7252 | **0.5295** | 0.5093 |
+| f00022 | 10112,5305,12756,7215 | **0.5612** | 0.4430 |
+| f00024 | 7673,5398,12319,7206 | 0.4994 | 0.3872 |
+| f00025 | 10446,5589,11625,7189 | 0.5792 | 0.5951 |
+| f00026 | 8532,5689,11848,7180 | 0.4195 | 0.4207 |
+
+Each null sits 0.22-0.38 under the 0.80 bar, and so does dropping the whole box, so
+P10 can fail both ways. The null is not near 0.80, so P10 needs no redesign.
+
+### P10 in the app: PASS on both frames run
+
+Setup: `build/spirula` from `29cd5991`, offscreen at 1600x950, `sam3-q4_0`, margin
+5%. The dataset was a two-frame scratch copy (the JPEGs, and `masks_eq` inverted to
+255 = KEEP). Each frame got **one click on the pole and no retries**. The point was
+picked by eye from the photo, not from the diff. The saved `masks/<frame>.png` was
+scored after Save. The harness exits non-zero on any miss, and it checks that the file
+it scores was rewritten by this run.
+
+| frame | click (frame px) | job | score | added in box | outside the reference | IoU | bar |
+|---|---|---|---|---|---|---|---|
+| f00016 | 11448, 5698 | 11,309 ms (first load) | 0.68 | 1,108,140 px | **0** | **0.8475** | >= 0.80 PASS |
+| f00022 | 11588, 5907 | 3,576 ms | 0.82 | 573,194 px | **0** | **0.8159** | >= 0.80 PASS |
+
+Neither click changed a single pixel outside its box, so scoring inside the box
+hides nothing. Neither click removed any of SAM's existing drops either. Because
+nothing spilled outside the reference, **the IoU equals the fraction of the operator's
+painted region that ended up dropped**. The shortfall (476,567 and 400,975 px) is
+under-coverage only.
+
+**An in-app mutant, killed by name.** On f00022, an undo, then one click on the pink
+blanket beside the pole. The blanket region swallowed the pole too, 12.4 M px in all:
+IoU **0.5867**, `FAIL P10 ...`, and the harness exited 1. The unmodified mask scores
+0.5295 on f00016 and fails. The operator's own reference, fed in as the result,
+scores 1.0000 and passes.
+
+### What the pass does and does not establish
+
+- **The reference is loose.** The operator painted a cone a couple of hundred frame
+  px wider than the pole on each side. So a pixel-exact pole outline scores below 1.0
+  here, and the 0.80 bar is partly measuring the reference's slack. The size of that
+  slack was not measured, because nothing labels the pole itself.
+- **The resolution floor is anisotropic.** SAM sees the frame squashed to 1008x1008
+  (`src/sam/model/Hparams.h:48`). The decoder's mask is 288x288 (`:134`). That is
+  53.9 frame px per cell across a 15520-wide frame, but 26.9 px down it.
+- **Two frames of five were run**, each with one click at one chosen point. f00024,
+  f00025 and f00026 have their nulls measured and were not clicked.
+- The margin stayed at 5%. A wider margin would cover more of the loose reference.
+  That is tuning, and it was not tried.
+
 ## Not in this phase
 
 Propagate, find-missing, slideshow, view modes and the peek key, session
