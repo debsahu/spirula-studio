@@ -56,6 +56,9 @@ enum class CanvasMode { Shape, Eraser, Path, Sam };
 void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
                   float& dx, float& dy);
 
+// What Tab is showing: nothing, the bare photo (Tab), the bare mask (Shift+Tab).
+enum class Peek { None, Photo, Mask };
+
 class MaskSession {
 public:
     MaskSession();
@@ -108,6 +111,8 @@ public:
     void set_radius(float r) { _brush = clamp_brush(r); }
     View& view() { return _view; }
     WindowSource window_source() const;
+    Peek peek() const { return _peek; }
+    int peek_total() const { return _peek_total; }
     // Pane px <-> frame px: the view, the EXIF turn, the mask-to-frame scale.
     PathSpace path_space(const Mapping& m) const;
     // The layout the last drawn frame used, pane origin in screen px. A click
@@ -292,6 +297,7 @@ private:
     void handle_keys(const Mapping& m);
     void ensure_window(const Mapping& m, float pane_w, float pane_h);
     void upload_rect(const Rect& shown);
+    Style pane_style(int pane) const;                             // MaskPanel.cpp
     // The pen tool (MaskPanel.cpp drives it; this and path_space have no ImGui).
     void ensure_livewire();
 
@@ -378,6 +384,9 @@ private:
     Window _win;
     bool _win_dirty = true;
     std::vector<uint8_t> _rgba;
+    Style _win_style = Style::Overlay;   // what _rgba / _tex were derived with
+    Peek _peek = Peek::None;
+    int _peek_total = 0;
     int _slider_idx = 0;
     bool _close_requested = false;
     bool _revert_all_ask = false;    // Revert all was clicked; open its confirmation

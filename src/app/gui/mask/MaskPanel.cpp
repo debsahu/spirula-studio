@@ -55,11 +55,15 @@ void MaskSession::destroy_gl() {
 
 void MaskSession::ensure_window(const Mapping& m, float pane_w, float pane_h) {
     const Window want = window_for(m, _dw, _dh, pane_w, pane_h);
-    if (!_win_dirty && same_window(want, _win)) return;
+    const Style style = pane_style(0);
+    if (!_win_dirty && same_window(want, _win) && style == _win_style) return;
     _win = want;
+    _win_style = style;
     _win_dirty = false;
     if (_win.r.empty()) return;
-    derive_window(_win, _win.r, window_source(), _rgba);
+    WindowSource src = window_source();
+    src.style = _win_style;
+    derive_window(_win, _win.r, src, _rgba);
     if (!_tex) glGenTextures(1, &_tex);
     glBindTexture(GL_TEXTURE_2D, _tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -74,7 +78,9 @@ void MaskSession::ensure_window(const Mapping& m, float pane_w, float pane_h) {
 
 void MaskSession::upload_rect(const Rect& shown) {
     if (!_tex || _win.r.empty() || shown.empty()) return;
-    const Rect t = derive_window(_win, shown, window_source(), _rgba);
+    WindowSource src = window_source();
+    src.style = _win_style;
+    const Rect t = derive_window(_win, shown, src, _rgba);
     if (t.empty()) return;
     glBindTexture(GL_TEXTURE_2D, _tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -82,6 +88,12 @@ void MaskSession::upload_rect(const Rect& shown) {
     glTexSubImage2D(GL_TEXTURE_2D, 0, t.x0, t.y0, t.w(), t.h(), GL_RGBA, GL_UNSIGNED_BYTE,
                     _rgba.data() + ((size_t)t.y0 * _win.tw + (size_t)t.x0) * 4);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+}
+
+Style MaskSession::pane_style(int) const {
+    if (_peek == Peek::Photo) return Style::Photo;
+    if (_peek == Peek::Mask) return Style::MaskOnly;
+    return Style::Overlay;
 }
 
 void MaskSession::draw() {
@@ -251,6 +263,15 @@ void MaskSession::draw_canvas() {
     ui::InvisibleButtonRaw("##maskcanvas", size,
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
     const bool hovered = ImGui::IsItemHovered();
+    // Owning Tab stops imgui's nav tabbing (it polls Tab with NoOwner). Not
+    // while a text field has focus: the canvas still reads hovered then, and
+    // owning Tab kept the focus in the field and peeked instead of tabbing out.
+    const bool typing = ImGui::GetIO().WantTextInput;
+    if (!typing) ImGui::SetItemKeyOwner(ImGuiKey_Tab);
+    const bool tab = !typing && (hovered || ImGui::IsItemActive()) &&
+                     ImGui::IsKeyDown(ImGuiKey_Tab);
+    _peek = !tab ? Peek::None : ImGui::GetIO().KeyShift ? Peek::Mask : Peek::Photo;
+    if (_peek != Peek::None) _peek_total++;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(origin, far_corner, IM_COL32(24, 24, 24, 255));
     if (!_doc) {
@@ -477,6 +498,7 @@ void MaskSession::draw_status() {
         if (!_path.snapping()) ui::TextDisabledWrapped(msg::path_straight);
     }
     ui::TextDisabledWrapped(msg::hint_view);
+    ui::TextDisabledWrapped(msg::peek_hint, {"Tab"});
 }
 
 // The editor's clicks on this frame, as SegmentPanel draws them: the object's
