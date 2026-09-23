@@ -13,4 +13,23 @@ fi
 mkdir -p "$D/images/cam1" "$D/masks/cam1"
 [ -f "$D/images/cam1/f0002.jpg" ] || cp "$D/images/f0002.jpg" "$D/images/cam1/"
 [ -f "$D/masks/cam1/f0002.png" ] || cp "$D/masks/f0002.png" "$D/masks/cam1/"
+
+# A minimal COLMAP text model, so a drop/open of $D routes to the Train
+# screen (DatasetPrep.cpp:895-901 needs sparse/ to exist) and actually parses
+# (ColmapParser.cpp:693-695: cameras+images are required, points3D is not).
+mkdir -p "$D/sparse/0"
+cat > "$D/sparse/0/cameras.txt" <<'EOF'
+1 PINHOLE 7680 3840 5000 5000 3840 1920
+EOF
+cat > "$D/sparse/0/images.txt" <<'EOF'
+1 1 0 0 0 0 0 0 1 f0000.jpg
+
+2 1 0 0 0 -1 0 0 1 f0001.jpg
+
+3 1 0 0 0 -2 0 0 1 f0002.jpg
+
+4 1 0 0 0 0 -1 0 1 cam1/f0002.jpg
+
+EOF
+
 echo "root $(ls "$D"/images/*.jpg | wc -l | tr -d ' ') cam1 $(ls "$D"/images/cam1/*.jpg | wc -l | tr -d ' ')"

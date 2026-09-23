@@ -45,6 +45,31 @@ if printf '%s' "$gate" | command grep -qF 'msg::prop_go)' &&
    ! printf '%s' "$gate" | command grep -qF 'msg::prop_undo)'; then
     echo "ok   the SAM gate holds Propagate and not Undo propagate"
 else echo "FAIL the SAM gate holds Propagate and not Undo propagate"; FAILS=$((FAILS + 1)); fi
+# Fix round 1 (task-7-review.md I1/I2/I3): the row gate, the warning's
+# placement, and the disabled-aware tooltip were each defeatable without
+# tripping any check above; anchored past the identical revert-frame gate.
+row_gate=$(awk '
+/\/\/ Row B: propagate\. Row C: its warning, drawn whether or not B is enabled\./ { getline; print; exit }
+' "$F")
+if printf '%s' "$row_gate" | command grep -qF 'ImGui::BeginDisabled(!_doc || !idle());'; then
+    echo "ok   row B/C gated by !_doc || !idle() on the line right after the Row B/C comment"
+else
+    echo "FAIL row B/C gated by !_doc || !idle() on the line right after the Row B/C comment"
+    FAILS=$((FAILS + 1))
+fi
+warn_order=$(awk '
+{ line=$0; gsub(/^[ \t]+|[ \t]+$/, "", line)
+  if (line == "ui::TextDisabled(msg::prop_warn_moves);") { print p2; print p1; exit }
+  p2=p1; p1=line }
+' "$F")
+if [ "$warn_order" = "$(printf 'ImGui::EndDisabled();\nnote_row_width();')" ]; then
+    echo "ok   prop_warn_moves immediately follows the row's EndDisabled(); note_row_width(): warning stays outside the row gate"
+else
+    echo "FAIL prop_warn_moves immediately follows the row's EndDisabled(); note_row_width(): warning stays outside the row gate"
+    FAILS=$((FAILS + 1))
+fi
+has 1 'ui::help_on_hover_disabled(msg::prop_go_help);'
+has 1 'ui::help_on_hover_disabled(msg::prop_undo_help);'
 none '_path_mode'
 none 'paint_for('
 none '_status_h > 0.0f'
