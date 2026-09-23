@@ -25,21 +25,21 @@ WEIGHTS=${MEC_WEIGHTS:-1652.2}
 
 echo "== P12 / P6"
 FRESH=$(st sam_pool_mib); echo "fresh: loads $(st sam_loads) pool $FRESH session $(st sam_vram_mib) editor_open $(st mask_editor_open)"
-assert "P12 fresh pool is a number before any SAM use" "$FRESH == 0.0"
+assert "fresh pool is a number before any SAM use" "$FRESH == 0.0"
 open_editor
 N=$(st sam_results); gc click --at $PRINTER >/dev/null; wait_results $N
 LOADED=$(st sam_pool_mib); VRAM=$(st sam_vram_mib)
 echo "loaded: pool $LOADED session $VRAM job $(st sam_last_job_ms) ms area $(st sam_last_area)"
-assert "P6 sam_vram_mib <= 2500 MiB (q4_0)" "$VRAM <= 2500 and $VRAM > 0"
+assert "sam_vram_mib <= 2500 MiB (q4_0)" "$VRAM <= 2500 and $VRAM > 0"
 sleep 3
 echo "P6 ps rss KiB, LABEL: does not measure device memory: $(ps -o rss= -p $PID)"
 footprint -p $PID 2>/dev/null | command grep -E "unmapped\) \(graphics\)" | sed 's/^/loaded footprint: /'
 gc click done >/dev/null; gc wait --frames 10 >/dev/null
-wait_not_retiring || fail "P12 retiring slot never emptied"
+wait_not_retiring || fail "retiring slot never emptied"
 CLOSED=$(st sam_pool_mib)
 echo "closed: open $(st mask_editor_open) pool $CLOSED session $(st sam_vram_mib) close_ms $(st sam_close_ms) retiring $(st sam_retiring)"
-assert "P12 pool drop >= weights ($WEIGHTS MiB)" "$LOADED - $CLOSED >= $WEIGHTS"
-assert "P12 pool after close == pool before open, within 1 MiB" "abs($CLOSED - $FRESH) <= 1.0"
+assert "pool drop >= weights ($WEIGHTS MiB)" "$LOADED - $CLOSED >= $WEIGHTS"
+assert "pool after close == pool before open, within 1 MiB" "abs($CLOSED - $FRESH) <= 1.0"
 sleep 3
 footprint -p $PID 2>/dev/null | command grep -E "unmapped\) \(graphics\)" | sed 's/^/closed+3s footprint: /'
 open_editor
@@ -48,7 +48,7 @@ N=$(st sam_results); gc click --at $PRINTER >/dev/null; gc wait --frames 3 >/dev
 STATUS=$(st sam_status); echo "reload status (second witness, not asserted): '$STATUS'"
 wait_results $N; JOB=$(st sam_last_job_ms); L1=$(st sam_loads)
 echo "reload job $JOB ms (logged, not asserted); sam_loads $L0 -> $L1"
-assert "P12 reload pays a real model load: sam_loads +1" "$L1 == $L0 + 1"
+assert "reload pays a real model load: sam_loads +1" "$L1 == $L0 + 1"
 
 echo "== P7 (bar: 4000 ms, re-baselined from 2000)"
 goto f1 $NEXT
@@ -61,8 +61,8 @@ W=$(python3 -c "print(round(($(now) - $T0) * 1000))")
 echo "P7 wait $W ms (includes ~0.1 s of polling per round)"
 gc wait --frames 10 >/dev/null
 echo "INFO P7 against the retired 2000 ms bar: $([ $W -le 2000 ] && echo under || echo OVER) (not asserted)"
-assert "P7 idle within the re-baselined 4000 ms bar" "$W <= 4000"
-assert "P7 kept, history and results unchanged" "'$(st mask_editor_kept)' == '$K' and '$(st mask_editor_history)' == '$H' and '$(st sam_results)' == '$N'"
+assert "idle within the re-baselined 4000 ms bar" "$W <= 4000"
+assert "kept, history and results unchanged" "'$(st mask_editor_kept)' == '$K' and '$(st mask_editor_history)' == '$H' and '$(st sam_results)' == '$N'"
 
 echo "== P8b"
 KNEXT=$(st mask_editor_kept); echo "f1 untouched kept $KNEXT"
@@ -73,11 +73,11 @@ echo "busy right after leaving: $(st sam_busy)"
 while [ "$(st sam_busy)" = "True" ]; do gc wait --frames 2 >/dev/null; done
 gc wait --frames 10 >/dev/null
 echo "dropped $D -> $(st sam_dropped) results $N -> $(st sam_results) key $(st mask_editor_key) history $(st mask_editor_history) kept $(st mask_editor_kept)"
-assert "P8b stale result dropped" "$(st sam_dropped) == $D + 1"
-assert "P8b results unchanged" "$(st sam_results) == $N"
-assert "P8b new frame history 0" "$(st mask_editor_history) == 0"
-assert "P8b new frame kept == untouched" "$(st mask_editor_kept) == $KNEXT"
-gc state >/dev/null && pass "P8b state still answers" || fail "P8b state still answers"
+assert "stale result dropped" "$(st sam_dropped) == $D + 1"
+assert "results unchanged" "$(st sam_results) == $N"
+assert "new frame history 0" "$(st mask_editor_history) == 0"
+assert "new frame kept == untouched" "$(st mask_editor_kept) == $KNEXT"
+gc state >/dev/null && pass "state still answers" || fail "state still answers"
 
 freeze() {  # $1 label: Done while a job runs
   N=$(st sam_results); gc click --at $PRINTER >/dev/null; gc wait --frames 2 >/dev/null

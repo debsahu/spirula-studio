@@ -52,7 +52,7 @@ outside = int((extra & ~r).sum())
 print(f"INFO added px inside ref {inside}, outside ref {outside}; "
       f"ref-only px SAM missed {int((r & ~s).sum())}; left undropped {int((r & ~o).sum())}")
 print(f"INFO outside-ROI change px {int((ours ^ sam).sum() - (o ^ s).sum())}")
-check("P10 SAM add vs hand-painted monopod region >= 0.80", p10 >= 0.80,
+check("SAM add vs hand-painted monopod region >= 0.80", p10 >= 0.80,
       f"IoU {p10:.4f}  (null {null:.4f})")
 json.dump(dict(frame=f, box=[x0, y0, x1, y1], null=null, p10=p10, added=added, inside=inside,
                outside=outside, md5=md5), open(f"p10_{f}.json", "w"), indent=1)
