@@ -246,13 +246,13 @@ void MaskSession::draw_canvas() {
                                            : 8.0f * ImGui::GetTextLineHeightWithSpacing();
     const ImVec2 size(std::max(avail.x, px(64.0f)), std::max(avail.y - status_h, px(64.0f)));
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    const ImVec2 far(origin.x + size.x, origin.y + size.y);
+    const ImVec2 far_corner(origin.x + size.x, origin.y + size.y);
     _canvas_h = size.y;
     ui::InvisibleButtonRaw("##maskcanvas", size,
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
     const bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(origin, far, IM_COL32(24, 24, 24, 255));
+    dl->AddRectFilled(origin, far_corner, IM_COL32(24, 24, 24, 255));
     if (!_doc) {
         _shown_valid = false;
         dl->AddText(ImVec2(origin.x + px(8.0f), origin.y + px(8.0f)),
@@ -292,7 +292,7 @@ void MaskSession::draw_canvas() {
     const Mapping m = mapping(_view, _dw, _dh, size.x, size.y);
     ensure_window(m, size.x, size.y);
 
-    dl->PushClipRect(origin, far, true);
+    dl->PushClipRect(origin, far_corner, true);
     if (_tex && !_win.r.empty()) {
         const ImVec2 a(origin.x + m.to_screen_x((float)_win.r.x0),
                        origin.y + m.to_screen_y((float)_win.r.y0));

@@ -1041,14 +1041,14 @@ void test_orientation_mapping() {
             gui::rasterize_shape(st, W, H, sten);
             int sx, sy;
             mk::to_stored(t, W, H, dx, dy, sx, sy);
-            size_t count = 0, near = 0;
+            size_t count = 0, adjacent = 0;
             for (int y = 0; y < H; y++)
                 for (int x = 0; x < W; x++)
                     if (sten.at(x, y)) {
                         count++;
-                        near += std::abs(x - sx) + std::abs(y - sy) <= 1;
+                        adjacent += std::abs(x - sx) + std::abs(y - sy) <= 1;
                     }
-            check(count == 5 && near == 5 && sten.at(sx, sy),
+            check(count == 5 && adjacent == 5 && sten.at(sx, sy),
                   "brush point lands on the mapped stored pixel (plus its 4 neighbours), orientation " +
                       std::to_string(o));
             const mk::Rect b = mk::stroke_bounds(st, W, H);
@@ -2114,11 +2114,11 @@ void test_livewire_mapping() {
     check(gx == 1 && gy == 1, "frame (3,2) is grid (1,1)");
 
     // An explicit cap.
-    mk::Livewire small;
-    small.build(step_edge_rgb(200, 120).data(), 200, 120, 50);
-    check(small.step() == 4 && small.width() == 50 && small.height() == 30,
+    mk::Livewire small_lw;
+    small_lw.build(step_edge_rgb(200, 120).data(), 200, 120, 50);
+    check(small_lw.step() == 4 && small_lw.width() == 50 && small_lw.height() == 30,
           "cap 50 on 200x120 gives step 4, 50x30");
-    small.to_frame(25, 15, fx, fy);
+    small_lw.to_frame(25, 15, fx, fy);
     check(std::fabs(fx - 102.0f) < 1e-4f && std::fabs(fy - 62.0f) < 1e-4f,
           "block centre at step 4: (25.5*4, 15.5*4)");
 }
@@ -3614,7 +3614,7 @@ void test_session_sam_add_replaces() {
     const mk::AddRegion big = disc_region(64, 48, 20.0f, 20.0f, 10.0f);
     // Not a subset of `big`: an additive re-prompt would change pixels and
     // record a step of its own, so every count below separates the two rules.
-    const mk::AddRegion small = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
+    const mk::AddRegion small_add = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
     auto drop_is = [&](const std::vector<uint8_t>& plane) {   // drop0 | plane, exactly
         const std::vector<uint8_t>& d = s.doc()->drop();
         for (size_t i = 0; i < d.size(); i++)
@@ -3622,23 +3622,23 @@ void test_session_sam_add_replaces() {
         return true;
     };
     std::vector<uint8_t> both = big.mask;
-    for (size_t i = 0; i < both.size(); i++) both[i] |= small.mask[i];
-    check(!drop_is(big.mask) && !drop_is(small.mask) && both != big.mask && both != small.mask,
+    for (size_t i = 0; i < both.size(); i++) both[i] |= small_add.mask[i];
+    check(!drop_is(big.mask) && !drop_is(small_add.mask) && both != big.mask && both != small_add.mask,
           "sam replace: neither disc is already dropped, and neither holds the other");
     sam_add(s, big, 0);
-    const mk::Rect shrunk = sam_add(s, small, 0);
+    const mk::Rect shrunk = sam_add(s, small_add, 0);
     check(s.doc()->history_size() == h0 + 1, "sam replace: refining the top object is one step");
     const mk::Rect was = extent(big.mask, 64, 48);
     check(shrunk.x0 <= was.x0 && shrunk.y0 <= was.y0 && shrunk.x1 >= was.x1 && shrunk.y1 >= was.y1,
           "sam replace: the redrawn rect covers what the first add painted, not only the refinement");
-    check(drop_is(small.mask), "sam replace: the refinement replaced the first add, pixel for pixel");
+    check(drop_is(small_add.mask), "sam replace: the refinement replaced the first add, pixel for pixel");
     s.doc()->undo();
     check(s.doc()->composite() == comp0, "sam replace: one undo removes the object's add entirely");
 
     sam_add(s, big, 0);
     s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 50, 5, 60, 15), mk::Rect{50, 5, 60, 15});
     const int h1 = s.doc()->history_size();
-    sam_add(s, small, 0);
+    sam_add(s, small_add, 0);
     check(s.doc()->history_size() == h1 + 1 && s.doc()->keep()[(size_t)10 * 64 + 55] == 255,
           "sam replace: an edit in between makes a re-prompt add, and the edit survives");
     sam_add(s, disc_region(64, 48, 44.0f, 30.0f, 4.0f), 1);
@@ -3665,7 +3665,7 @@ void test_session_sam_add_replaces() {
     r.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 50, 30, 60, 40), mk::Rect{50, 30, 60, 40});
     const int h4 = r.doc()->history_size();
     check(r.doc()->revision() == 1, "sam replace: the reloaded frame's edit is revision 1 too");
-    sam_add(r, small, 0);
+    sam_add(r, small_add, 0);
     check(r.doc()->history_size() == h4 + 1 && r.doc()->keep()[(size_t)35 * 64 + 55] == 255,
           "sam replace: a frame change forgets the stamp, so a reload cannot collide with it");
 }
@@ -3862,12 +3862,12 @@ void test_session_sam_prompt_bookkeeping() {
     settle(s);
     const int h0 = s.doc()->history_size();
     const mk::AddRegion big = disc_region(64, 48, 20.0f, 20.0f, 10.0f);
-    const mk::AddRegion small = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
+    const mk::AddRegion small_add = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
     s.sam_prompt_started(20.0f, 20.0f, true);
     s.sam().post_result(s.sam_frame_stamp(), {big}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
     s.sam_pump();
     s.sam_prompt_started(14.0f, 20.0f, false);
-    s.sam().post_result(s.sam_frame_stamp(), {small}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    s.sam().post_result(s.sam_frame_stamp(), {small_add}, 64, 48, mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
     s.sam_pump();
     check(s.doc()->history_size() == h0 + 1 && s.doc()->drop()[(size_t)20 * 64 + 12] == 0,
           "sam bookkeeping: a prompt's result replaces its object's add through sam_pump");
@@ -4039,11 +4039,11 @@ void test_session_sam_redo_then_refine() {
     const int h0 = s.doc()->history_size();
     const std::vector<uint8_t> comp0 = s.doc()->composite();
     const mk::AddRegion big = disc_region(64, 48, 20.0f, 20.0f, 10.0f);
-    const mk::AddRegion small = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
+    const mk::AddRegion small_add = disc_region(64, 48, 27.0f, 20.0f, 5.0f);
     sam_add(s, big, 0);
     s.undo();
     s.redo();
-    sam_add(s, small, 0);
+    sam_add(s, small_add, 0);
     check(s.doc()->history_size() == h0 + 1, "redo refine: after undo and redo a refinement replaces");
     s.undo();
     check(s.doc()->composite() == comp0, "redo refine: one undo removes the object entirely");
@@ -4051,7 +4051,7 @@ void test_session_sam_redo_then_refine() {
     s.undo();
     s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 50, 5, 60, 15), mk::Rect{50, 5, 60, 15});
     const int h1 = s.doc()->history_size();
-    sam_add(s, small, 0);
+    sam_add(s, small_add, 0);
     check(s.doc()->history_size() == h1 + 1 && s.doc()->keep()[(size_t)10 * 64 + 55] == 255,
           "redo refine: an undo and a new edit in its place makes a re-prompt add");
 }
