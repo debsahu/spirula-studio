@@ -453,7 +453,7 @@ screen px at this zoom), all plain drags (ForceDrop).
 
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
-(`MaskSession.cpp:843-854`, `if (r.empty()) return {};`) and `upload_rect`
+(`MaskSession.cpp:854-865`, `if (r.empty()) return {};`) and `upload_rect`
 does the same (in `upload_rect_to`, `MaskPanel.cpp:89`), so a
 coordinate-mapping bug that made every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
@@ -1911,7 +1911,7 @@ and remains the only radius readout when the slider is hidden.
 Its arithmetic was re-inlined into `MaskPanel.cpp` at `6126a650`, leaving six
 tests pinning dead code -- the shape of defect this note keeps finding. `[`
 and `]` route through it again, and `clamp_brush` / `scale_brush` /
-`wheel_brush` join it in `MaskSession.cpp:861-886`, the file
+`wheel_brush` join it in `MaskSession.cpp:872-897`, the file
 `mask_doc_test` links, so every radius arithmetic both tools use is tested in
 one place. `clamp_brush` is a rejection test rather than `std::clamp` because
 `std::clamp` **propagates a NaN**, and a NaN radius rasterizes nothing while
@@ -1990,9 +1990,15 @@ all, and on every close and open (frame keys repeat across datasets, and an
 undo resolves the dataset's folders when it runs). It restores in the mask
 folder's own convention, which for this project's masks is 255 = drop. This
 is not a `MaskOp`: the per-frame history is dropped on frame change and an
-op acts on one document. Propagate waits while a SAM job or a margin
-re-apply is pending, since either could land on the source after it was
-copied; Undo propagate does not wait, since it never touches the source.
+op acts on one document. Propagate waits while a SAM job, a SAM result not
+yet taken, or a margin re-apply is pending, since any of them could land on
+the source after it was copied; Undo propagate does not wait, since it never
+touches the source. Both forget the SAM clicks made on the target frames, as
+Revert frame does for its frame: the targets' corrections were replaced, and a
+kept click would re-prompt SAM with the one just discarded. The clicks go for
+every target named, including one later skipped for its size. A Range whose
+From is after its To says the range is empty, not that the camera has no
+other frame.
 
 **Find missing.** A frame is missing when it has no mask file or its kept
 fraction is outside [min, max] (default 5% to 98%, inclusive). Kept
@@ -2005,7 +2011,9 @@ second open reads the cache and rewrites nothing. The cache is not in
 not list it. The scan never publishes a read that a worker job overlapped,
 and every job that writes a mask (a save, a propagate, its undo, Revert
 frame, Revert all, a load that rebased a regenerated mask) refreshes the
-frames it wrote. `M` / `Shift+M` jump; arrows, PageUp/Down, Home/End step;
+frames it wrote. `M` / `Shift+M` jump; while the scan is still counting, a
+jump that finds nothing says so rather than "none that way", since the
+unscanned frames are not yet known. Arrows, PageUp/Down, Home/End step;
 the keys, the find buttons, `<`, `>` and the frame slider stand down while a
 shape or pen path is half drawn; the key list is the frame slider's tooltip.
 
@@ -2077,7 +2085,8 @@ click and the text row are described with their measurements under Tasks 6 and 7
 **Find**, beside the text field, does what Enter does (`sam_submit_text`, one path for
 both), and is disabled, with the reason on hover, until the phrase can run. **Revert
 frame** forgets the SAM clicks made on that frame, and **Revert all** (once confirmed)
-every click and object; the phrase and the exceptions stay. See "Operator fixes" below.
+every click and object; the phrase and the exceptions stay. Propagate and Undo propagate
+forget the target frames' clicks the same way. See "Operator fixes" below.
 
 ### The files, and the boundary that shapes them
 
@@ -2143,7 +2152,7 @@ stand in for the job.
   `encode_image` at 2.56 s on a byte-identical binary, on mains power with no
   thermal warning; the cause was not found. This is why P7's bar moved.
 - **The open frame's pixels are co-owned.** `_rgb` is a
-  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:475`) and a job holds
+  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:479`) and a job holds
   its own reference, so moving to another frame, which replaces `_rgb` in
   `pump()`, never frees what a job reads. The `const` element type makes a
   refill in place a compile error. **Host memory is a known, unmeasured
@@ -3490,6 +3499,14 @@ the stop's own UI time; `mask_slide_join_ms` is the last of those two joins.
 stop-opens-the-frame-on-screen tests are compiled out**: they hold a decode or
 a load in flight with a FIFO at the mask path (`mkfifo`, `#ifndef _WIN32`).
 
+**Not measured on Windows: a save racing a reader of the same mask.** The scan
+and a halted slideshow's leftover decodes hold a `masks/*.png` open while the
+worker may rename a new composite over it. On Windows a rename over a file
+open without `FILE_SHARE_DELETE` fails, and `write_file_atomic` does not retry,
+so that save reports a sticky write error. The layers stay on disk and are
+read again on the next open, so nothing is lost silently. It needs the save to
+hit the exact frame being read; a retry on the rename is the fix if it shows.
+
 ### Task 13: the criteria in the app (2026-09-23)
 
 Measured at `f1552535`, with no code changed. `build_develop.bash` rebuilt
@@ -3555,6 +3572,11 @@ playing.
 10 s.
 - **Baseline:** 105 MB, editor closed on the Train screen.
 - **Playing:** +1286, +1196, +1238, +1194, +979 and +1309 MB.
+- **Provenance:** these deltas and the baseline are as Task 13 recorded
+  them. The raw `ps` readings behind them are not recoverable: the run printed
+  them to its terminal and kept no log, and R1's `vmmap` summary was not
+  saved. The `vmmap` summaries kept for R2 to R6 read about 1.2 GB over
+  baseline, which corroborates the deltas but does not re-derive them.
 - **The gate:** the median of the first three runs whose stroke changed pixels
   (R1, R3, R5) is 1238 MB. In R2 and R4 the stroke fell on pixels already
   dropped, so it left the history at 0.
@@ -3674,9 +3696,11 @@ direction.`
    - **Close and quit.** Closing the window while it plays closed the editor
      with the pool joined. File > Quit then exited the process, with no crash
      report.
-   - Propagate is not greyed while playing, but a click on it only stops the
-     slideshow: the status line showed the slideshow's stats and no
-     propagate ran.
+   - Propagate is greyed while playing. Its mean colour read (72, 96, 123) at
+     idle and (47, 48, 50) while playing (Task 14). Row B's gate asks for the
+     document, and Play releases it, so the row greys through `!_doc`; the
+     `_slide_playing` clause Task 14 added changes nothing today and is a
+     safeguard should Play ever keep the document.
 9. **State fields.** `state` reports `mask_view`, `mask_slideshow`,
    `mask_slide_stop_ms`, `mask_peek`, `mask_peek_total` and `nav_visible`,
    and plan 4's `sam_*` fields are unchanged (`sam_vram_mib`, `sam_pool_mib`,
@@ -3712,6 +3736,26 @@ on macOS, in Overlay and in Side by side, and confirm three things. The photo
 (or the overlay in the mask pane) shows while it is held, the view returns on
 release, and no focus ring appears. The harness releases a key after one
 frame, so this was not simulated, and it is not recorded as done.
+
+### Plan 3's final review: the fix round (2026-09-23)
+
+Every mutant below was applied, rebuilt, run, and seen failing by the name
+shown, then reverted; the reverted build read 0 failures.
+
+| finding | fix | check | mutant, and what failed |
+|---|---|---|---|
+| **C1** the Windows-macro check failed any clone without the base commit, so a `--depth 1` CI checkout went red | an unreachable base, no `.git`, or no touched source compiled here prints a skip and exits 0 | run by hand | the old script in a `--depth 1` clone: `cannot diff against fd1afca1`, exit 2; the new one: the skip line, exit 0. A tarball: skip, 0. A Ninja tree compiling nothing touched: old exit 2, new skip, 0. A `near` local planted in a touched file still fails in the full clone |
+| **I1** Propagate and its undo kept the targets' SAM clicks | both forget the clicks on the frames they replace or restore, through `sam_revert`'s per-frame erase | `propagate clicks:`, both polarities | erase skipped in propagate: "propagate forgets the target's clicks"; in the undo: "undo propagate forgets the target's clicks" |
+| **m1** a result published but not taken was not pending SAM work | `sam_work_pending()` also asks `MaskSam::has_result()` | `sam ready:` | the clause removed: "a result not yet taken is pending work", "propagate is refused while it waits", "Play is refused and the result is kept" |
+| **m2** propagate's own failed save of the source was not sticky | sticky, as `save()`'s is | `prop source fail:` | not sticky: "the failure outlives a later load", "close() reports it" |
+| **m3** the pen-path half of Play's guard had no test | a session-level test through `path_for_test()` | `slide path:` | `_path.in_progress()` removed from `start_slideshow()`: "Play is refused with a pen path open" |
+| **m5** "plays the edit" timed out under TSan, and one paint check passed on an empty picture | the save is held on the worker while ticks run, deadlines are seconds, both paint checks need a picture | `plays the edit:` | first tick not waiting: "no frame is shown while Play's save is held on the worker"; a tick that never shows: both paint checks, where one used to pass. Under TSan (`-O1`): 0 failures and 0 warnings in two runs |
+| **m7** two messages misled | "the scan is still running", and "the range is empty", in all 13 languages | `why:` | the old message back: "M mid-scan says the scan is still running"; "an inverted Range says the range is empty" |
+
+The undo's erase has no path through the interface: propagate has already
+erased the targets' clicks, and opening a target drops the record, so its check
+plants the click. `workflow_bench.sh` takes `BUILD_DIR`, else `build/`, else
+the first `build_*` holding `spirula`.
 
 ## Not in this phase
 

@@ -5,7 +5,8 @@
 empty and `small` as `char`, so a local of that name fails only on Windows.
 Each touched .cpp is re-run with -fsyntax-only and the three macros; only
 errors located in touched files count, since upstream's own names are not
-this branch's to rename. Needs a configured Ninja tree.
+this branch's to rename. Needs a configured Ninja tree. A tarball, a shallow
+clone without the base, or no touched source compiled here is a skip, not a fail.
 
 Usage:  python3 tools/check_winmacro.py [--build DIR] [--base REV]
 """
@@ -26,8 +27,18 @@ ERROR = re.compile(r"^(?P<path>[^:\s][^:]*):(?P<line>\d+):(?:\d+:)? (?:fatal )?e
 
 
 def git(root, *args):
-    p = subprocess.run(["git", "-C", root, *args], capture_output=True, text=True)
+    try:
+        p = subprocess.run(["git", "-C", root, *args], capture_output=True, text=True)
+    except OSError:
+        return None
     return p.stdout if p.returncode == 0 else None
+
+
+def base_reachable(root, base):
+    top = git(root, "rev-parse", "--show-toplevel")
+    if top is None or os.path.realpath(top.strip()) != os.path.realpath(root):
+        return False
+    return git(root, "rev-parse", "--verify", "--quiet", base + "^{commit}") is not None
 
 
 def touched_files(root, base):
@@ -87,6 +98,9 @@ def main():
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     build = os.path.join(root, opts["--build"])
+    if not base_reachable(root, opts["--base"]):
+        print(f"check_winmacro: skipped, {opts['--base']} is not reachable (no .git, or a shallow clone)")
+        return 0
     touched = touched_files(root, opts["--base"])
     if touched is None:
         print(f"check_winmacro: cannot diff against {opts['--base']}")
@@ -101,9 +115,9 @@ def main():
     for p in sources:
         if p not in commands:
             print(f"skip  {p} (not compiled in this tree)")
-    if sources and not runnable:
-        print("check_winmacro: none of the touched sources has a compile command")
-        return 2
+    if not runnable:
+        print("check_winmacro: skipped, no touched source is compiled in this tree")
+        return 0
 
     failed = 0
     with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as pool:

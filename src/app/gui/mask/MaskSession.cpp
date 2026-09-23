@@ -490,7 +490,7 @@ bool MaskSession::can_undo_propagate() const {
 }
 
 bool MaskSession::sam_work_pending() const {
-    return (_sam && _sam_ops.busy(*_sam)) || _sam_margin_pending;
+    return (_sam && (_sam_ops.busy(*_sam) || _sam->has_result())) || _sam_margin_pending;
 }
 
 // Frame keys repeat across datasets, so nothing keyed by one may outlive it:
@@ -530,9 +530,11 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
         _prop_report.h = _doc->height();
     }
     if (targets.empty()) {
-        post_status(msg::prop_no_targets.get(), true);
+        const bool inverted = scope == PropagateScope::Range && lo > hi;
+        post_status((inverted ? msg::prop_range_empty : msg::prop_no_targets).get(), true);
         return;
     }
+    sam_forget_clicks(targets);
     // The job saves the source itself: a queued save() would be a separate
     // job whose failure this one could not see (Decision 18).
     struct Job {
@@ -565,6 +567,7 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
                 std::lock_guard<std::mutex> lk(_mu);
                 _status.clear();
                 _error = spirula::i18n::format(msg::err_write, {err});
+                _error_sticky = true;
                 return;
             }
             std::lock_guard<std::mutex> lk(_mu);
@@ -670,6 +673,12 @@ void MaskSession::undo_propagate() {
         _prop = PropagateRecord{};
         _prop_undoable = false;
     }
+    std::map<std::string, int> at;
+    for (size_t i = 0; i < _frames.size(); i++) at[_frames[i].key] = (int)i;
+    std::vector<int> frames;
+    for (const LayerSnapshot& t : rec->targets)
+        if (at.count(t.key)) frames.push_back(at[t.key]);
+    sam_forget_clicks(frames);
     enqueue([this, rec] {
         std::vector<std::string> touched;   // before the loop moves the failures out
         for (const LayerSnapshot& t : rec->targets) touched.push_back(t.key);
@@ -738,13 +747,15 @@ int MaskSession::missing_count() const {
 // the frame before it, and searching from there would land on it again.
 bool MaskSession::go_to_missing(int dir) {
     std::vector<FrameHealth> v;
+    bool scanning = false;
     {
         std::lock_guard<std::mutex> lk(_mu);
         v = _health;
+        scanning = _scanned < (int)_frames.size();
     }
     const int j = next_missing(v, _nav >= 0 ? _nav : _idx, dir, _band_lo, _band_hi);
     if (j < 0) {
-        post_status(msg::find_none.get(), true);
+        post_status((scanning ? msg::find_none_scanning : msg::find_none).get(), true);
         return false;
     }
     if (j == _idx && !_doc) load_frame(j);   // go_to() skips its own index
@@ -1366,8 +1377,18 @@ void MaskSession::sam_revert(int frame) {
         p.current_object = fresh.current_object;
         return;
     }
+    sam_forget_clicks({frame});
+}
+
+// sam_revert's per-frame half: only those frames' clicks, the object list kept.
+void MaskSession::sam_forget_clicks(const std::vector<int>& frames) {
+    if (!_sam) return;
+    MaskSettings& p = _sam->prompt();
     p.clicks.erase(std::remove_if(p.clicks.begin(), p.clicks.end(),
-                                  [&](const MaskClick& c) { return c.frame == frame; }),
+                                  [&](const MaskClick& c) {
+                                      return std::find(frames.begin(), frames.end(), c.frame) !=
+                                             frames.end();
+                                  }),
                    p.clicks.end());
 }
 

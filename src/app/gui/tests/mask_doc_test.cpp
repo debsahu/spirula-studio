@@ -7241,13 +7241,19 @@ void test_session_slideshow_close_while_playing() {
 }
 
 // Play queues the edited frame's save; a decode beating it plays the pre-edit
-// composite. 4000 x 3000 makes the save slow enough to lose that race, and both
-// boxes paint the opposite of the file's state, so a stale picture fails both.
+// composite. The save is held on the worker until the ticks have seen it, and
+// both boxes paint the opposite of the file's state, so a stale picture fails both.
 void test_session_slideshow_plays_the_edit(bool flipped) {
     const std::string arm = flipped ? "plays the edit (flipped): " : "plays the edit: ";
     Fixture f = make_dataset(flipped ? "slideshow_edit_f" : "slideshow_edit", 4000, 3000,
                              {"a", "b", "c", "d"});
+    std::atomic<bool> hold{false}, held{false};
     mk::MaskSession s;
+    s.set_worker_hook_for_test([&](bool end) {
+        if (end || !hold.load()) return;
+        held = true;
+        while (hold.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
     std::string err;
     check(s.open(f.root.string(), f.images.string(), f.masks.string(), flipped, err), arm + "open: " + err);
     settle(s);
@@ -7258,22 +7264,35 @@ void test_session_slideshow_plays_the_edit(bool flipped) {
     corner.pts = {0.0f, 0.0f, 300.0f, 300.0f};
     s.commit_stroke(centre, flipped ? mk::Paint::ForceKeep : mk::Paint::ForceDrop, m);
     s.commit_stroke(corner, flipped ? mk::Paint::ForceDrop : mk::Paint::ForceKeep, m);
+    hold = true;
     s.start_slideshow();
+    // Seconds, not a spin count: TSan at -O1 took longer than 2000 x 2 ms.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+    for (int i = 0; i < 30000 && !held.load(); i++)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     gui::Picture pic;
     bool shown = false;
-    for (int i = 0; i < 2000 && !shown; i++) {
+    for (int i = 0; i < 500 && !shown; i++) {
+        shown = s.slideshow_tick(100.0, 400, pic);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    check(held.load() && s.slideshow_playing() && !shown,
+          arm + "no frame is shown while Play's save is held on the worker");
+    hold = false;
+    while (!shown && std::chrono::steady_clock::now() < deadline) {
         shown = s.slideshow_tick(100.0, 400, pic);
         if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     check(shown && pic.w == 400 && pic.h == 300, arm + "first frame shown at 400 x 300");
     // Tinted is r/3+150 >= 150; synth_rgb's red is 127 at the centre, 3 at the corner.
     const size_t mid = ((size_t)150 * 400 + 200) * 3, cor = ((size_t)5 * 400 + 5) * 3;
-    const bool mid_tinted = pic.rgb.size() > mid && pic.rgb[mid] >= 150;
-    const bool cor_tinted = pic.rgb.size() > cor && pic.rgb[cor] >= 150;
-    check(mid_tinted == !flipped, arm + "the centre plays as painted: red " +
-                                      std::to_string(pic.rgb.size() > mid ? pic.rgb[mid] : -1));
-    check(cor_tinted == flipped, arm + "the corner plays as painted: red " +
-                                     std::to_string(pic.rgb.size() > cor ? pic.rgb[cor] : -1));
+    const bool painted = !pic.empty() && pic.rgb.size() > std::max(mid, cor);
+    const bool mid_tinted = painted && pic.rgb[mid] >= 150;
+    const bool cor_tinted = painted && pic.rgb[cor] >= 150;
+    check(painted && mid_tinted == !flipped,
+          arm + "the centre plays as painted: red " + std::to_string(painted ? pic.rgb[mid] : -1));
+    check(painted && cor_tinted == flipped,
+          arm + "the corner plays as painted: red " + std::to_string(painted ? pic.rgb[cor] : -1));
     s.stop_slideshow();
     settle(s);
     s.close();
@@ -7833,6 +7852,189 @@ void test_session_sam_redo_after_dropped_margin() {
           "dropped margin: the redone add has its detections back and can re-apply");
 }
 
+// ab4cefc4's ruling for revert, for propagate and its undo: a target's layers
+// are replaced, so its clicks would re-prompt SAM with the correction just lost.
+void propagate_forgets_clicks_arm(bool flipped) {
+    const std::string tag = flipped ? "propagate clicks (flipped): " : "propagate clicks: ";
+    Fixture f = make_dataset(flipped ? "prop_clicks_f" : "prop_clicks", 64, 48,
+                             {"cam0/a", "cam0/b", "cam0/c"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), flipped, err),
+          tag + "open: " + err);
+    settle(s);
+    gui::MaskSettings& p = s.sam_prompt();
+    for (int i : {1, 2, 0}) {
+        s.go_to(i);
+        settle(s);
+        s.sam_prompt_started(10.0f + (float)i, 12.0f, true);
+    }
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    check(s.frame_index() == 0 && clicks_on(p, 0, 0) == 1 && clicks_on(p, 1, 0) == 1 &&
+              clicks_on(p, 2, 0) == 1,
+          tag + "fixture: one click on each of a, b and c, a open and edited");
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    check(s.can_undo_propagate(), tag + "fixture: a propagated onto b");
+    check(clicks_on(p, 1, 0) == 0, tag + "propagate forgets the target's clicks");
+    check(clicks_on(p, 0, 0) == 1 && clicks_on(p, 2, 0) == 1 && p.clicks.size() == 2,
+          tag + "propagate keeps the source's and other frames' clicks");
+    // No UI path puts a click on b now (opening b drops the record), so the
+    // undo's own erase is pinned with a planted one.
+    gui::MaskClick planted = p.clicks.front();
+    planted.frame = 1;
+    p.clicks.push_back(planted);
+    s.undo_propagate();
+    settle(s);
+    check(!s.can_undo_propagate() && s.error().empty(), tag + "fixture: the undo ran: " + s.error());
+    check(clicks_on(p, 1, 0) == 0, tag + "undo propagate forgets the target's clicks");
+    check(clicks_on(p, 0, 0) == 1 && clicks_on(p, 2, 0) == 1 && p.clicks.size() == 2,
+          tag + "undo propagate keeps the source's and other frames' clicks");
+    s.close();
+}
+
+void test_propagate_forgets_clicks() {
+    propagate_forgets_clicks_arm(false);
+    propagate_forgets_clicks_arm(true);
+}
+
+// A result published but not yet taken is SAM work: Play would discard it and
+// propagate would copy the source without it.
+void test_sam_result_ready_is_pending() {
+    Fixture f = make_dataset("sam_ready", 64, 48, {"cam0/a", "cam0/b"});
+    const fs::path b_png = f.masks / "cam0" / "b.png";
+    const std::vector<uint8_t> original_b = file_bytes(b_png);
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "sam ready: open: " + err);
+    settle(s);
+    s.sam_prompt_started(30.0f, 24.0f, true);
+    s.sam().post_result(s.sam_frame_stamp(), {disc_region(64, 48, 30.0f, 24.0f, 6.0f)}, 64, 48,
+                        mk::Paint::ForceDrop, 0.0f, 0.9f, 1.0);
+    check(!s.sam_busy() && s.sam().has_result(), "sam ready: fixture: a result waits, no job runs");
+    check(s.sam_work_pending(), "sam ready: a result not yet taken is pending work");
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    check(file_bytes(b_png) == original_b && !s.can_undo_propagate(),
+          "sam ready: propagate is refused while it waits");
+    s.start_slideshow();
+    check(!s.slideshow_playing() && s.sam().has_result(),
+          "sam ready: Play is refused and the result is kept");
+    s.stop_slideshow();   // a no-op unless Play wrongly started
+    settle(s);
+    const int h0 = s.doc() ? s.doc()->history_size() : -1;
+    s.sam_pump();
+    check(!s.sam_work_pending() && s.doc() && s.doc()->history_size() == h0 + 1,
+          "sam ready: once taken it lands and nothing is pending");
+    s.close();
+}
+
+// Propagate's own save of the source is a save: a failure outlives the loads
+// after it, as save()'s does, and close() still reports it.
+void test_propagate_source_save_failure_sticks() {
+    Fixture f = make_dataset("prop_src_fail", 64, 48, {"cam0/a", "cam0/b"});
+    mk::MaskSession s;
+    std::string err, logged;
+    s.set_log([&logged](const std::string& t) { logged = t; });
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "prop source fail: open: " + err);
+    settle(s);
+    wait_scanned(s);
+    for (int i = 0; i < 2000 && !fs::exists(f.layer / mk::kKeptFileName); i++)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::error_code ec;
+    fs::remove_all(f.layer, ec);
+    fs::create_directories(f.layer.parent_path(), ec);
+    const std::vector<uint8_t> one = {'x'};
+    check(mk::write_file_atomic(f.layer.string(), one.data(), one.size()),
+          "prop source fail: fixture: the layer root is a file");
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const std::string failed = s.error();
+    check(failed.find(f.layer.string()) != std::string::npos && !s.can_undo_propagate(),
+          "prop source fail: fixture: the source's save failed, nothing propagated: " + failed);
+    fs::remove(f.layer, ec);   // writable again, so only the load below can clear it
+    fs::create_directories(f.layer, ec);
+    s.revert_open_frame();
+    settle(s);
+    check(s.doc() && !s.doc()->dirty() && s.error() == failed,
+          "prop source fail: the failure outlives a later load: " + s.error());
+    s.close();
+    check(logged == failed, "prop source fail: close() reports it: " + logged);
+}
+
+// The Polygon half of Play's gate is the panel's (EditTool needs ImGui); the
+// pen's is the session's own.
+void test_slideshow_refuses_open_path() {
+    Fixture f = make_dataset("slide_path", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "slide path: open: " + err);
+    settle(s);
+    gui::ViewportInput in;
+    in.hovered = in.clicked = true;
+    in.x = 10.0f;
+    in.y = 12.0f;
+    std::vector<float> out;
+    bool consumed = false;
+    s.path_for_test().update(in, out, consumed);
+    check(s.path_anchors() == 1, "slide path: fixture: one anchor down, the pen path open");
+    s.start_slideshow();
+    check(!s.slideshow_playing() && s.doc() != nullptr,
+          "slide path: Play is refused with a pen path open");
+    s.path_for_test().cancel();
+    s.start_slideshow();
+    check(s.slideshow_playing(), "slide path: with the path gone it plays");
+    s.stop_slideshow();
+    settle(s);
+    s.close();
+}
+
+// While the scan counts, "none that way" is not yet known; an inverted Range
+// is not "no other frame of this camera".
+void test_workflow_messages_say_why() {
+    Fixture f = make_dataset("why_msgs", 64, 48, {"cam0/a", "cam0/b", "cam0/c"});
+    std::atomic<bool> hold{true}, held{false};
+    mk::MaskSession s;
+    s.set_scan_hook_for_test([&](int i, bool read) {
+        if (read || i != 1) return;
+        held = true;
+        for (int k = 0; k < 20000 && hold.load(); k++)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "why: open: " + err);
+    settle(s);
+    for (int k = 0; k < 5000 && !held.load(); k++) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    check(held.load() && s.scanned_count() == 1, "why: fixture: the scan is held after frame 1 of 3");
+    check(!s.go_to_missing(+1) &&
+              s.error() == spirula::i18n::msg::maskedit::find_none_scanning.get(),
+          "why: M mid-scan says the scan is still running: " + s.error());
+    hold = false;
+    wait_scanned(s);
+    check(!s.go_to_missing(+1) && s.error() == spirula::i18n::msg::maskedit::find_none.get(),
+          "why: M after the scan says there is none: " + s.error());
+    s.propagate(mk::PropagateScope::Range, 2, 1);
+    check(s.error() == spirula::i18n::msg::maskedit::prop_range_empty.get(),
+          "why: an inverted Range says the range is empty: " + s.error());
+    s.propagate(mk::PropagateScope::Range, 0, 0);
+    check(s.error() == spirula::i18n::msg::maskedit::prop_no_targets.get(),
+          "why: a Range holding only the source still says no other frame: " + s.error());
+    s.close();
+}
+
 int main() {
     test_fnv();
     test_composite_truth_table();
@@ -8013,6 +8215,11 @@ int main() {
     test_undo_refresh_after_index_failure();
     test_band_edit();
     test_kept_cache_refuses_a_relative_root();
+    test_propagate_forgets_clicks();
+    test_sam_result_ready_is_pending();
+    test_propagate_source_save_failure_sticks();
+    test_slideshow_refuses_open_path();
+    test_workflow_messages_say_why();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

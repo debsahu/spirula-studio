@@ -3,12 +3,23 @@
 # (f0000..f0002), plus cam1/f0002 copied from f0002 so a second camera exists
 # for the cross-camera refusal. Idempotent. Prints the frame count per camera;
 # callers assert it rather than assume it.
-# usage: workflow_bench.sh [dir]     (default /tmp/spirula_mask_bench)
+# usage: [BUILD_DIR=dir] workflow_bench.sh [dir]     (default /tmp/spirula_mask_bench)
+# BUILD_DIR defaults to ./build, else the first build_* holding spirula.
 
 D=${1:-/tmp/spirula_mask_bench}
 cd "$(dirname "$0")/../.." || exit 1
+B=${BUILD_DIR:-}
+if [ -z "$B" ]; then
+    for d in build build_*; do
+        [ -x "$d/spirula" ] && { B=$d; break; }
+    done
+fi
+if [ -z "$B" ] || [ ! -x "$B/mask_doc_test" ]; then
+    echo "workflow_bench: no mask_doc_test in '${B:-build, build_*}'; set BUILD_DIR" >&2
+    exit 1
+fi
 if [ ! -f "$D/images/f0002.jpg" ] || [ ! -f "$D/masks/f0002.png" ]; then
-    SS_MASK_BENCH="$D" ./build/mask_doc_test > /dev/null || exit 1
+    SS_MASK_BENCH="$D" "$B/mask_doc_test" > /dev/null || exit 1
 fi
 mkdir -p "$D/images/cam1" "$D/masks/cam1"
 [ -f "$D/images/cam1/f0002.jpg" ] || cp "$D/images/f0002.jpg" "$D/images/cam1/"

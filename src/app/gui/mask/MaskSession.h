@@ -360,8 +360,10 @@ public:
     // Test-only, as MaskDoc::set_history_byte_cap_for_test is:
     // a record of never-edited targets is 0 bytes, so 256 MB is unreachable.
     void set_propagate_byte_cap_for_test(size_t bytes) { _prop_byte_cap = bytes; }
-    // A SAM job runs, or a margin re-apply waits to start (Decision 21):
-    // propagate and Play wait for it. Asked through SamOps, as close() does.
+    PathTool& path_for_test() { return _path; }
+    // A SAM job runs, its result waits for sam_pump(), or a margin re-apply
+    // waits to start (Decision 21): propagate and Play wait for it, since Play
+    // drops a waiting result. The job is asked through SamOps, as close() does.
     bool sam_work_pending() const;
 
     // ---- slideshow (plan 3) ----
@@ -372,8 +374,9 @@ public:
     bool animating() const { return _slide_playing; }
     float slide_fps() const { return _slide_fps; }
     void set_slide_fps(float f) { _slide_fps = std::clamp(f, 5.0f, 30.0f); }
-    // Refused while SAM work, the worker or a pen path is pending; otherwise
-    // releases the SAM session and the document (saving a dirty frame).
+    // Refused while SAM work, the worker or a pen path is pending (a half-drawn
+    // Polygon is the panel's gate: EditTool needs ImGui); otherwise releases
+    // the SAM session and the document (saving a dirty frame).
     void start_slideshow();
     // Stops the pool and loads the frame on screen, never one still decoding.
     void stop_slideshow();
@@ -425,6 +428,7 @@ private:
     void drop_propagate_record();    // Decision 5's drops; guarded by _mu
     // A revert discards the frame's (or, at -1, every frame's) clicks and last add.
     void sam_revert(int frame);
+    void sam_forget_clicks(const std::vector<int>& frames);
     Rect sam_land(SamResult res);
     void sam_start_margin();
     bool sam_gate_passes();   // the blocker, then the device gate

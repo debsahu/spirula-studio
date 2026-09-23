@@ -57,8 +57,8 @@ row _deps/imgui-src/imgui.cpp 1850-1856 "ImGuiKey_LeftCtrl)  { key = ImGuiKey_Le
 row _deps/imgui-src/imgui.cpp 1957-1967 "Convert Ctrl(Super)+Left click into Right-click"
 row src/app/gui/mask/MaskPanel.cpp 197 "ui::Button(msg::undo)"
 row src/app/gui/mask/MaskPanel.cpp 631 "io.KeyShift ? redo() : undo()"
-row src/app/gui/mask/MaskSession.cpp 843-854 "MaskSession::commit_stroke" 843
-row src/app/gui/mask/MaskSession.cpp 843-854 "if (r.empty()) return {};" 854
+row src/app/gui/mask/MaskSession.cpp 854-865 "MaskSession::commit_stroke" 854
+row src/app/gui/mask/MaskSession.cpp 854-865 "if (r.empty()) return {};" 865
 row src/app/gui/mask/MaskPanel.cpp 89 "shown.empty()) return;"
 row src/app/gui/mask/MaskPanel.cpp 700 "msg::status_kept"
 row src/app/gui/mask/MaskLayer.cpp 341-375 "bool recomposite_frame" 341
@@ -101,11 +101,11 @@ row cmake/SsApps.cmake 414-431 "ss_configure_app(mask_doc_test)" 431
 row src/app/gui/mask/MaskPanel.cpp 244-258 "ImGuiSliderFlags_Logarithmic"
 row src/app/gui/mask/MaskPanel.cpp 244-258 "erasing() || (mode() == CanvasMode::Shape && _tool.id() == ToolId::Brush)" 244
 row src/app/gui/mask/MaskPanel.cpp 435-443 "io.KeyAlt) set_radius(wheel_brush(radius(), io.MouseWheel))"
-row src/app/gui/mask/MaskSession.cpp 861-886 "// Plain and Shift drop, Ctrl keeps" 861
-row src/app/gui/mask/MaskSession.cpp 861-886 "const bool keep = ctrl != erasing;"
-row src/app/gui/mask/MaskSession.cpp 861-886 "if (!(r > kMinBrush)) return kMinBrush;"
-row src/app/gui/mask/MaskSession.cpp 861-886 "std::pow(1.18f, wheel)"
-row src/app/gui/mask/MaskSession.cpp 861-886 "}" 886
+row src/app/gui/mask/MaskSession.cpp 872-897 "// Plain and Shift drop, Ctrl keeps" 872
+row src/app/gui/mask/MaskSession.cpp 872-897 "const bool keep = ctrl != erasing;"
+row src/app/gui/mask/MaskSession.cpp 872-897 "if (!(r > kMinBrush)) return kMinBrush;"
+row src/app/gui/mask/MaskSession.cpp 872-897 "std::pow(1.18f, wheel)"
+row src/app/gui/mask/MaskSession.cpp 872-897 "}" 897
 row src/app/gui/mask/MaskSession.h 164-165 "float radius() const { return _brush; }"
 row src/app/gui/mask/MaskSession.h 164-165 "set_radius(float r) { _brush = clamp_brush(r); }"
 row src/app/gui/mask/MaskDoc.cpp 176-180 "case Paint::ForceKeep: _keep[i] = 255; _drop[i] = 0; break;"
@@ -127,7 +127,7 @@ row src/nn/vk/Memory.cpp 243-266 "vkFreeMemory(ctx.device(), a.memory, nullptr);
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::release(" 362
 row src/nn/vk/Memory.cpp 362-395 "void VramPool::releaseAll()"
 # The SAM half's architecture: the one-session rule and the decisions not to undo.
-row src/app/gui/mask/MaskSession.h 475 "std::shared_ptr<const std::vector<uint8_t>> _rgb;"
+row src/app/gui/mask/MaskSession.h 479 "std::shared_ptr<const std::vector<uint8_t>> _rgb;"
 row src/app/gui/DatasetPrep.cpp 398-402 "std::vector<MaskClick> clicks_for(" 398
 row src/app/gui/DatasetPrep.cpp 398-402 "if (c.source.empty() || c.source == in.path)"
 row src/app/gui/mask/MaskSam.cpp 419 "p.device = j.device;"

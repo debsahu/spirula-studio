@@ -1420,6 +1420,21 @@ SS_MSG(prop_no_targets,
     RU("Нет других кадров этой камеры, на которые можно распространить."),
     TR("Bu kameranın yayılacak başka karesi yok."));
 
+SS_MSG(prop_range_empty,
+    EN("The range is empty: From is after To."),
+    JA("範囲が空です：「開始」が「終了」より後にあります。"),
+    ZH_HANS("范围为空：“从”在“到”之后。"),
+    ZH_HANT("範圍為空：「從」在「到」之後。"),
+    KO("범위가 비어 있습니다: '시작'이 '끝'보다 뒤에 있습니다."),
+    DE("Der Bereich ist leer: „Von“ liegt nach „Bis“."),
+    FR("La plage est vide : « De » est après « À »."),
+    ES("El rango está vacío: «Desde» es posterior a «Hasta»."),
+    PT("O intervalo está vazio: \"De\" vem depois de \"Até\"."),
+    IT("L'intervallo è vuoto: «Da» viene dopo «A»."),
+    NL("Het bereik is leeg: 'Van' ligt na 'Tot'."),
+    RU("Диапазон пуст: «С» идёт после «По»."),
+    TR("Aralık boş: 'Başlangıç', 'Bitiş'ten sonra."));
+
 SS_MSG(prop_not_undoable,
     EN("Propagated, but the record is too large to undo: {0} MB."),
     JA("伝播しましたが、記録が大きすぎて元に戻せません: {0} MB。"),
@@ -1648,6 +1663,21 @@ SS_MSG(find_none,
     NL("Geen ontbrekend frame in die richting."),
     RU("В этом направлении нет пропущенных кадров."),
     TR("O yönde eksik kare yok."));
+
+SS_MSG(find_none_scanning,
+    EN("No missing frame in that direction yet: the scan is still running."),
+    JA("その方向にはまだ欠落フレームがありません。走査はまだ続いています。"),
+    ZH_HANS("该方向暂无缺失的帧：扫描仍在进行。"),
+    ZH_HANT("該方向暫無缺失的影格：掃描仍在進行。"),
+    KO("그 방향에는 아직 누락된 프레임이 없습니다. 검사가 아직 진행 중입니다."),
+    DE("In dieser Richtung noch kein fehlendes Bild: Die Prüfung läuft noch."),
+    FR("Aucune image manquante dans cette direction pour l'instant : l'analyse est toujours en cours."),
+    ES("Aún no hay fotograma faltante en esa dirección: el examen sigue en curso."),
+    PT("Nenhum quadro faltante nessa direção ainda: a verificação ainda está em andamento."),
+    IT("Ancora nessun fotogramma mancante in quella direzione: la scansione è ancora in corso."),
+    NL("Nog geen ontbrekend frame in die richting: het scannen loopt nog."),
+    RU("В этом направлении пока нет пропущенных кадров: проверка ещё идёт."),
+    TR("O yönde henüz eksik kare yok: tarama hâlâ sürüyor."));
 
 // ===========================================================================
 // Slideshow

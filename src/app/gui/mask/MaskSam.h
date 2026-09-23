@@ -113,6 +113,8 @@ public:
                       float margin);
     // One finished job, or false with `out` untouched.
     bool take_result(SamResult& out);
+    // A finished job take_result() has not handed over yet.
+    bool has_result() const;
 
     std::string status() const;
     std::string error() const;

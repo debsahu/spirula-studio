@@ -571,5 +571,10 @@ bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, 
 
 #endif  // !SS_BUILD_SAM
 
+bool MaskSam::has_result() const {
+    std::lock_guard<std::mutex> lk(_s->mu);
+    return _s->ready;
+}
+
 }  // namespace mask
 }  // namespace gui
