@@ -531,8 +531,8 @@ void MaskSession::draw_canvas() {
     handle_keys(m);
 }
 
-// Any input stops it on the frame shown. The first frame is exempt for a
-// KEYBOARD Play: ImGui::Button fires on mouse release, so the starting click is
+// Any input stops it on the frame shown. The frame Play fired on is exempt for
+// a KEYBOARD Play: ImGui::Button fires on mouse release, so the starting click is
 // never seen here, but the Space or Enter that pressed it is.
 void MaskSession::draw_slideshow(ImDrawList* dl, float ox, float oy, float w, float h) {
     const ImGuiIO& io = ImGui::GetIO();
@@ -540,7 +540,9 @@ void MaskSession::draw_slideshow(ImDrawList* dl, float ox, float oy, float w, fl
     for (int b = 0; b < ImGuiMouseButton_COUNT; b++) input = input || ImGui::IsMouseClicked((ImGuiMouseButton)b);
     for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; k++)
         input = input || ImGui::IsKeyPressed((ImGuiKey)k, false);
-    if (!_slide_first && input) {
+    const bool fresh = _slide_fresh;
+    _slide_fresh = false;
+    if (!fresh && input) {
         stop_slideshow();
         return;
     }

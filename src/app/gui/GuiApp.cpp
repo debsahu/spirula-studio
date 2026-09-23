@@ -2703,6 +2703,7 @@ std::string GuiApp::state_json() {
     out += "\",\"mask_slideshow\":";
     out += _mask_editor.slideshow_playing() ? "true" : "false";
     out += ",\"mask_slide_stop_ms\":" + std::to_string(_mask_editor.slide_stop_ms());
+    out += ",\"mask_slide_join_ms\":" + std::to_string(_mask_editor.slide_join_ms());
     out += ",\"mask_slide_shown_fps\":" + std::to_string(_mask_editor.slide_shown_fps());
     out += ",\"mask_slide_gap_ms\":" + std::to_string(_mask_editor.slide_max_gap_ms());
     out += ",\"mask_slide_window\":" + std::to_string(_mask_editor.slide_window());

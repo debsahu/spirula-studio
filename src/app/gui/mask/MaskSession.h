@@ -368,19 +368,25 @@ public:
     // Refused while SAM work, the worker or a pen path is pending; otherwise
     // releases the SAM session and the document (saving a dirty frame).
     void start_slideshow();
-    // Stops the pool and loads the frame shown.
+    // Stops the pool and loads the frame on screen, never one still decoding.
     void stop_slideshow();
     int slide_index() const { return _slide_index; }
     double slide_shown_fps() const;
     double slide_max_gap_ms() const { return _slide_max_gap; }
     // Decodes since play began: one a shown frame is the window's whole point.
     int slide_decoded() const { return _slide.decoded(); }
+    bool slide_pool_running() const { return _slide.running(); }
     // The depth the last window was asked for: slide_depth's, never a count.
     int slide_window() const { return _slide_window; }
     // How long the last stop blocked the UI thread, ms; -1 before a stop.
     double slide_stop_ms() const { return _slide_stop_ms; }
-    // True when the picture of the frame now shown is in `pic`. `now` is
-    // seconds; `target_side` the pane's long edge.
+    // How long the last join of decode threads blocked the UI thread, ms: the
+    // one in start_slideshow() (a halted playback's leftovers) or close(). -1 before.
+    double slide_join_ms() const { return _slide_join_ms; }
+    // The frame slider's value; follows the frame shown while playing.
+    int slider_index() const { return _slider_idx; }
+    // True when the next frame is due and its picture is in `pic`; an empty
+    // picture is an undecodable frame, counted and skipped. `now` is seconds.
     bool slideshow_tick(double now, int target_side, Picture& pic);
 
 private:
@@ -550,13 +556,16 @@ private:
     SlidePrefetch _slide;
     SlideClock _slide_clock;
     bool _slide_playing = false;
-    bool _slide_need = false;        // waiting for the picture of _slide_index
-    int _slide_index = -1;
+    bool _slide_need = false;        // waiting for the picture of _slide_pending
+    int _slide_index = -1;           // the frame on screen: what a stop opens
+    int _slide_pending = -1;         // the frame last asked for; ahead while it decodes
+    bool _slide_fresh = false;       // MaskPanel.cpp: the frame Play was pressed on
     float _slide_fps = 10.0f;
     double _slide_started = 0.0, _slide_last_shown = 0.0, _slide_now = 0.0;
     bool _slide_first = true;        // no tick has run since start_slideshow
     double _slide_max_gap = 0.0;
     double _slide_stop_ms = -1.0;    // -1 = no stop measured yet
+    double _slide_join_ms = -1.0;    // -1 = no join measured yet
     int _slide_shown = 0;
     int _slide_window = 0;
     // The last picture's source size: the window's depth comes from the bytes

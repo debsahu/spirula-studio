@@ -93,7 +93,8 @@ else echo "FAIL the SAM strip is drawn greyed while playing"; FAILS=$((FAILS + 1
 order=$(awk '/dl->AddRectFilled\(origin, far_corner,/{a=NR} /draw_slideshow\(dl, origin.x, origin.y, size.x, size.y\);/{b=NR} /^    if \(!_doc\) \{$/{c=NR} END{print (a && b && c && a < b && b < c) ? "yes" : "no"}' "$F")
 if [ "$order" = yes ]; then echo "ok   the slideshow branch sits between the canvas fill and !_doc"
 else echo "FAIL the slideshow branch sits between the canvas fill and !_doc"; FAILS=$((FAILS + 1)); fi
-has 1 'if (!_slide_first && input) {'
+has 1 'if (!fresh && input) {'
+has 1 '_slide_fresh = false;'
 if command grep -qF '_path.in_progress())' src/app/gui/mask/MaskSession.cpp &&
    command grep -qF 'bool animating() const { return _compare.animating() || _mask_editor.animating(); }' src/app/gui/GuiApp.h; then
     echo "ok   start_slideshow refuses a pen path; GuiApp::animating() asks the editor"

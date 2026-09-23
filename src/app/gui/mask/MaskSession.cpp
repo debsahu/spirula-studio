@@ -173,7 +173,13 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
 void MaskSession::close() {
     if (!_open && !_worker.joinable()) return;
     stop_scan();
-    _slide.stop();   // also joins the threads a halted slideshow left finishing
+    {
+        // Also joins the threads a halted slideshow left finishing.
+        const auto t0 = std::chrono::steady_clock::now();
+        _slide.stop();
+        _slide_join_ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    }
     _slide_playing = false;
     if (_doc && _doc->dirty()) save();
     close_sam();   // order vs the worker join is free: the save never touches SAM
@@ -497,7 +503,7 @@ void MaskSession::forget_workflow() {
         _scanned = 0;
         _scan_ms = -1.0;
     }
-    _slide_index = -1;
+    _slide_index = _slide_pending = -1;
     _slide_shown = 0;
     _slide_max_gap = 0.0;
     _slide_stop_ms = -1.0;
@@ -1430,13 +1436,17 @@ void MaskSession::start_slideshow() {
     // Both want the same memory and never need it at once (plan 4, ruling 5).
     sam_yield();
     if (_doc && _doc->dirty()) save();
-    _slide_index = _idx;
+    _slide_index = _slide_pending = _idx;
     std::vector<SlideFrame> frames;
     for (const FrameRef& f : _frames)
         frames.push_back({f.file, mask_file(_mask_root, f.key), _mask_flipped});
     const int threads = std::clamp((int)std::thread::hardware_concurrency() - 1, 1, 4);
-    _slide.start(std::move(frames), threads);
+    const auto t0 = std::chrono::steady_clock::now();
+    _slide.start(std::move(frames), threads);   // joins a halted playback's leftovers
+    _slide_join_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     _slide_playing = true;
+    _slide_fresh = true;
     _slide_need = false;
     _slide_started = _slide_last_shown = _slide_now = 0.0;
     _slide_first = true;
@@ -1483,28 +1493,32 @@ bool MaskSession::slideshow_tick(double now, int target_side, Picture& pic) {
     _slide.set_target(target_side);
     _slide_clock.fps = _slide_fps;
     if (_slide_first) {
+        // Play queued this frame's save: a decode before it lands plays the
+        // composite from before the edit, and holds the file the save renames over.
+        if (!idle()) return false;
         _slide_first = false;
         _slide_started = now;
         // The one window that includes the frame shown: nothing is decoded yet.
-        _slide.want(_slide_index, depth);
+        _slide.want(_slide_pending, depth);
         _slide_need = true;
     } else if (!_slide_need && _slide_clock.due(now)) {
-        _slide_index = (_slide_index + 1) % n;
+        _slide_pending = (_slide_pending + 1) % n;
         _slide_need = true;
     }
-    if (!_slide_need || !_slide.take(_slide_index, pic)) return false;
+    if (!_slide_need || !_slide.take(_slide_pending, pic)) return false;
     _slide_need = false;
     // Only after the take: a window moved first would drop this picture unshown.
-    _slide.want((_slide_index + 1) % n, depth);
+    _slide.want((_slide_pending + 1) % n, depth);
     if (!pic.empty()) {
         _slide_src_w = pic.src_w;
         _slide_src_h = pic.src_h;
+        _slide_index = _slide_pending;
+        _slider_idx = _slide_index;
     }
     if (_slide_shown > 0) _slide_max_gap = std::max(_slide_max_gap, 1000.0 * (now - _slide_last_shown));
     _slide_last_shown = now;
     _slide_shown++;
     _slide_clock.start(now);
-    _slider_idx = _slide_index;
     return true;
 }
 

@@ -6716,6 +6716,7 @@ void test_session_slideshow() {
     check(!s.animating() && !s.slideshow_playing(), "not animating before play");
     s.start_slideshow();
     check(s.animating() && s.slideshow_playing() && s.doc() == nullptr, "playing, document released");
+    check(s.frame_pixels() == nullptr, "playing, the frame's pixels are released");
     settle(s);
     check(fs::exists(f.layer / "a.drop.png"), "the dirty frame was saved on play");
     gui::Picture pic;
@@ -6744,6 +6745,7 @@ void test_session_slideshow() {
     // achieved 5 fps, not the set one.
     for (int k = 1; k < 6; k++)
         show_at(100.0 + 0.2 * k, "frame " + std::to_string(k % 4) + " at the driven cadence");
+    check(s.slider_index() == s.slide_index(), "the frame slider follows the frame shown");
     const double fps = s.slide_shown_fps();
     check(fps > 4.95 && fps < 5.05, "shown fps is the driven cadence: " + std::to_string(fps));
     const double gap = s.slide_max_gap_ms();
@@ -6772,6 +6774,20 @@ void test_session_slideshow() {
     const int last = shown_i;
     check(s.doc() && s.frame_index() == last && s.doc()->key() == f.keys[(size_t)last],
           "stop lands on the frame shown");
+    // A second playback, at a rate that is no default: it restarts from the
+    // frame stopped on, follows the new clock, and forgets the last one's gap.
+    s.set_slide_fps(20.0f);
+    s.start_slideshow();
+    check(s.slideshow_playing() && s.frame_pixels() == nullptr, "second play: playing");
+    check(s.slide_join_ms() >= 0.0, "second play: the start's join was timed: " + std::to_string(s.slide_join_ms()));
+    shown_i = (last + 3) % 4;
+    show_at(200.0, "second play: starts on the frame it stopped on");
+    check(!s.slideshow_tick(200.04, 32, pic), "second play: not due after 40 ms at 20 fps");
+    show_at(200.06, "second play: due after 50 ms at 20 fps");
+    check(s.slide_max_gap_ms() > 55.0 && s.slide_max_gap_ms() < 65.0,
+          "second play: the gap starts again from zero: " + std::to_string(s.slide_max_gap_ms()));
+    s.stop_slideshow();
+    settle(s);
     s.close();
     check(s.slide_stop_ms() < 0.0 && s.slide_max_gap_ms() == 0.0 && s.slide_shown_fps() == 0.0,
           "close forgets the last playback's numbers");
@@ -6884,6 +6900,141 @@ void test_session_slideshow_stop_does_not_join() {
     check(s.doc() && s.doc()->key() == "a", "slideshow stop: lands on a, the frame shown");
     s.close();
 #endif
+}
+
+// The pending frame is not the frame on screen: a stop while b is still
+// decoding must open a, which is what the operator is looking at.
+void test_session_slideshow_stop_on_screen() {
+#ifndef _WIN32
+    Fixture f = make_dataset("slideshow_on_screen", 64, 48, {"a", "b", "c"});
+    const fs::path fifo = f.masks / "b.png";
+    fs::remove(fifo);
+    check(mkfifo(fifo.c_str(), 0600) == 0, "on screen: fixture: b's mask is a FIFO");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "on screen: open: " + err);
+    settle(s);
+    s.start_slideshow();
+    gui::Picture pic;
+    bool shown = false;
+    for (int i = 0; i < 400 && !shown; i++) {
+        shown = s.slideshow_tick(100.0, 32, pic);
+        if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    bool in_flight = false;
+    for (int i = 0; i < 3000 && !in_flight; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) { in_flight = true; close(fd); }
+        else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const bool due = s.slideshow_tick(100.2, 32, pic);
+    check(shown && in_flight && !due, "on screen: fixture: a shown, b due and still decoding");
+    check(s.slide_index() == 0 && s.slider_index() == 0, "on screen: a is still the frame shown");
+    s.stop_slideshow();
+    settle(s);
+    check(s.doc() && s.doc()->key() == "a", "on screen: stop opens a, not b still decoding");
+    for (int i = 0; i < 300; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    s.close();
+#endif
+}
+
+// An undecodable frame is counted as shown and skipped (Decision 14): the
+// picture on screen stays the last good one, and playback moves on.
+void test_session_slideshow_skips_undecodable() {
+    Fixture f = make_dataset("slideshow_skip", 64, 48, {"a", "b", "c"});
+    {
+        std::FILE* bad = std::fopen((f.images / "b.jpg").string().c_str(), "wb");
+        std::fputs("not a jpeg", bad);
+        std::fclose(bad);
+    }
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "skip: open: " + err);
+    settle(s);
+    s.start_slideshow();
+    gui::Picture pic;
+    auto tick_at = [&](double at) {
+        bool got = false;
+        for (int i = 0; i < 400 && !got; i++) {
+            got = s.slideshow_tick(at, 32, pic);
+            if (!got) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return got;
+    };
+    check(tick_at(100.0) && !pic.empty() && s.slide_index() == 0, "skip: a shown");
+    check(tick_at(100.1) && pic.empty() && s.slide_index() == 0,
+          "skip: b cannot be decoded: counted, and a stays on screen");
+    check(tick_at(100.2) && !pic.empty() && s.slide_index() == 2, "skip: c follows the skipped frame");
+    s.stop_slideshow();
+    settle(s);
+    s.close();
+}
+
+// Closing mid-playback (the OS window, not ImGui input) must end playback: a
+// reopen must not come up in the slideshow branch against the old pool.
+void test_session_slideshow_close_while_playing() {
+    Fixture f = make_dataset("slideshow_close", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "close playing: open: " + err);
+    settle(s);
+    s.start_slideshow();
+    check(s.slideshow_playing(), "close playing: fixture: playing");
+    s.close();
+    check(!s.slideshow_playing() && !s.animating(), "close playing: close ends playback");
+    check(!s.slide_pool_running(), "close playing: the decode pool is stopped");
+    check(s.slide_join_ms() >= 0.0, "close playing: close timed its join: " + std::to_string(s.slide_join_ms()));
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "close playing: reopen: " + err);
+    settle(s);
+    check(!s.slideshow_playing() && s.doc() != nullptr, "close playing: a reopen opens a frame, not a slideshow");
+    s.close();
+}
+
+// Play queues the edited frame's save; a decode beating it plays the pre-edit
+// composite. 4000 x 3000 makes the save slow enough to lose that race, and both
+// boxes paint the opposite of the file's state, so a stale picture fails both.
+void test_session_slideshow_plays_the_edit(bool flipped) {
+    const std::string arm = flipped ? "plays the edit (flipped): " : "plays the edit: ";
+    Fixture f = make_dataset(flipped ? "slideshow_edit_f" : "slideshow_edit", 4000, 3000,
+                             {"a", "b", "c", "d"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), flipped, err), arm + "open: " + err);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke centre, corner;
+    centre.kind = corner.kind = gui::ShapeKind::Box;
+    centre.pts = {1800.0f, 1300.0f, 2200.0f, 1700.0f};
+    corner.pts = {0.0f, 0.0f, 300.0f, 300.0f};
+    s.commit_stroke(centre, flipped ? mk::Paint::ForceKeep : mk::Paint::ForceDrop, m);
+    s.commit_stroke(corner, flipped ? mk::Paint::ForceDrop : mk::Paint::ForceKeep, m);
+    s.start_slideshow();
+    gui::Picture pic;
+    bool shown = false;
+    for (int i = 0; i < 2000 && !shown; i++) {
+        shown = s.slideshow_tick(100.0, 400, pic);
+        if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    check(shown && pic.w == 400 && pic.h == 300, arm + "first frame shown at 400 x 300");
+    // Tinted is r/3+150 >= 150; synth_rgb's red is 127 at the centre, 3 at the corner.
+    const size_t mid = ((size_t)150 * 400 + 200) * 3, cor = ((size_t)5 * 400 + 5) * 3;
+    const bool mid_tinted = pic.rgb.size() > mid && pic.rgb[mid] >= 150;
+    const bool cor_tinted = pic.rgb.size() > cor && pic.rgb[cor] >= 150;
+    check(mid_tinted == !flipped, arm + "the centre plays as painted: red " +
+                                      std::to_string(pic.rgb.size() > mid ? pic.rgb[mid] : -1));
+    check(cor_tinted == flipped, arm + "the corner plays as painted: red " +
+                                     std::to_string(pic.rgb.size() > cor ? pic.rgb[cor] : -1));
+    s.stop_slideshow();
+    settle(s);
+    s.close();
 }
 
 // A load still on the worker would install a document mid-playback.
@@ -7597,6 +7748,11 @@ int main() {
     test_session_slideshow_flipped();
     test_session_slideshow_window();
     test_session_slideshow_stop_does_not_join();
+    test_session_slideshow_stop_on_screen();
+    test_session_slideshow_skips_undecodable();
+    test_session_slideshow_close_while_playing();
+    test_session_slideshow_plays_the_edit(false);
+    test_session_slideshow_plays_the_edit(true);
     test_session_slideshow_waits_for_worker();
     test_slideshow_releases_sam();
     test_kept_cache();
