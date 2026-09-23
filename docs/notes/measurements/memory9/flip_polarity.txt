@@ -1,0 +1,17 @@
+# Tint polarity on a copy of the 8K bench, binary d4f6e48a (f7e0a1f6), Overlay, 1600x950 offscreen.
+# Flip masks toggled in All Options > Dataset between the two runs. Single points (x,y on the window):
+unflipped editor f0000: 300,260=(155, 8, 53) 800,480=(127, 120, 28)
+unflipped playing shot 1 (index ~3, threads 2): 300,260=(155, 8, 53) 800,480=(126, 119, 30)
+unflipped playing shot 2 (index ~1, threads 2): 300,260=(155, 8, 52) 800,480=(126, 120, 28)
+unflipped playing shot 3 (index ~3, threads 2): 300,260=(155, 8, 53) 800,480=(126, 119, 30)
+unflipped playing shot 4 (index ~1, threads 2): 300,260=(155, 8, 52) 800,480=(126, 120, 28)
+flipped editor f0000: 300,260=(42, 21, 140) 800,480=(192, 40, 9)
+flipped playing shot 1 (index ~3, threads 2): 300,260=(17, 24, 160) 800,480=(192, 39, 10)
+flipped playing shot 2 (index ~1, threads 2): 300,260=(17, 24, 158) 800,480=(192, 40, 9)
+flipped playing shot 3 (index ~3, threads 2): 300,260=(17, 24, 160) 800,480=(192, 39, 10)
+flipped playing shot 4 (index ~1, threads 2): 300,260=(17, 24, 158) 800,480=(192, 40, 9)
+# 40x40 patches, editor shot vs playing shot 2 (the single outside point in the flipped run differs by 25 levels; probably a mask speckle that the editor window and the picture box rule sample differently -- an inference, not checked):
+unflipped outside (file drops): editor median (156, 8, 41), playing median (155, 7, 41); tinted (R>=150) editor 100% playing 100%; pixels within 3 levels 95.2%
+unflipped inside (file keeps): editor median (127, 120, 127), playing median (127, 119, 127); tinted (R>=150) editor 0% playing 0%; pixels within 3 levels 93.6%
+flipped outside (file drops): editor median (18, 24, 125), playing median (17, 23, 125); tinted (R>=150) editor 0% playing 0%; pixels within 3 levels 92.4%
+flipped inside (file keeps): editor median (192, 40, 42), playing median (192, 39, 42); tinted (R>=150) editor 100% playing 100%; pixels within 3 levels 94.9%

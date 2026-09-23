@@ -240,6 +240,9 @@ three repeats each, median.
 | stop freeze, `mask_slide_stop_ms` (Task 13) | 0.006 ms | not a gate; beside `load_picture 8K -> 4096` above, because the stop no longer joins a decode |
 | first frame after an edit, 8K, Play to picture (Task 13) | 0.93 s | not a gate; the first decode waits for the save of the edited frame |
 | canvas top `y0` / height floors at 1600 px, 4 rows + 1 strip line (Task 13) | 204 / 430 brush, 474 pen, 704 SAM, 734 SAM without a checkpoint | Decision 24's predictions 204 / 430 / 496 / 704 / 734: PASS except pen, see Task 13 |
+| load_picture 8K -> 1024 / 4096 / 1080p -> 1024, memory9 | 126.8 / 155.4 / 10.7 ms | stb's buffers in place, on a page-allocating thread as the decoders run it; medians of three (`measurements/memory9/bench8_after_run{1,2,3}.txt`). Before: 120.0 / 138.2 / 9.7 |
+| slideshow pool, memory9 (**the criterion 8 gate**) | 15.1 fps (2 threads) / 12.5 (2) / 350.7 (4) / 398.7 (4) | 8K -> 1024, 8K -> 4096, 1080p -> 1024, 1080p -> 4096; medians of three, each row PASS in all three; longest waits 134.3 / 162.8 / 12.1 / 10.6 ms. Before, all at 4 threads: 31.1 / 20.1 / 379.4 / 405.8 |
+| resident memory WHILE PLAYING, 8K, memory9 (**the criterion 9 gate**) | +489 MB control; +227 SAM | medians of three fresh launches each: control +481 / +489 / +489, SAM +227 / +1046 / +227; bar 600: **PASS**. A/B with the hook off +243 / +563 / +243. See "memory9" |
 
 M5 Pro, 18 cores, macOS 26.6.2, load average ~2.96/18 during measurement (quiet,
 not idle). Fixture: 7680x3840, three synthetic frames. Three repeats of the
@@ -2021,10 +2024,12 @@ shape or pen path is half drawn; the key list is the frame slider's tooltip.
 the photo, in the mask folder's convention, `load_picture`) decoded into a
 ring of at most 12 pictures and 64 MB (FilmReel's constants; FilmReel itself
 is not reused: it has no accessor or select, follows the newest, and draws
-its own slider). The thread count is the *session's* choice, `clamp(cores -
-1, 1, 4)`; `SlidePrefetch::start` clamps only to [1, 8] and enforces nothing
-narrower, so the four of criterion 8 is a property of the call site, not of
-the class. Starting it releases the SAM session, as plan 4's ruling 5
+its own slider). The decoder count is `slide_threads`' byte budget, read from
+the first frame's header at Play: 300 MiB over what one stb decode holds, 4.5
+bytes a pixel, never more than `cores - 1` or 4 -- so 2 at 8K and 4 at 4K and
+below. `SlidePrefetch::start` clamps only to [1, 8]; the budget is the call
+site's. The ring clears and swaps pictures while playing and never frees one;
+each decoder page-allocates stb's buffers (memory9). Starting it releases the SAM session, as plan 4's ruling 5
 requires, and Play waits while a SAM job runs, while the worker is busy, and
 while a shape or pen path is half drawn: SAM and the pool want the same
 memory and never need it at once. The decode pool uses stb alone and is not
@@ -3756,6 +3761,98 @@ The undo's erase has no path through the interface: propagate has already
 erased the targets' clicks, and opening a target drops the record, so its check
 plants the click. `workflow_bench.sh` takes `BUILD_DIR`, else `build/`, else
 the first `build_*` holding `spirula`.
+
+### memory9: criterion #9 by design, not by gate (2026-09-23)
+
+**Diagnosis, in five lines.** An 8K `load_picture` allocated 346 MB of fresh
+buffers per frame: stb's own working set (126.6 MB peak: the 4:2:0 planes and
+the RGB output) plus our three whole-frame copies. macOS's allocator keeps a
+freed large block resident for 5-20 s and recycles it into later allocations,
+so four decoders held ~600 MB of freed pages at the 10 s sample. `ps` counts
+them. One design read +388 to +1309 MB across sessions on that instrument.
+
+**Options weighed** (the dependency-free ones; the operator ruled out any new
+decoder): (a) fewer decoders on malloc, 2 threads +509 in the harness, no
+margin; (b) a preview cache in the dataset, rejected, it passes only on a
+second launch and leaves files in the operator's dataset; (c) stb's large
+buffers from `mmap`, unmapped at free, +233 to +311 in the harness; (d)
+`MallocLargeCache=0` in the environment, undocumented, not chosen. Chosen:
+(c) + (a).
+
+**Design.**
+- `src/core/PageAlloc.h` backs `STBI_MALLOC`: a block of 1 MiB or more is
+  mapped and unmapped at free, but **only on a thread inside a
+  `PageAllocScope`** (operator's ruling: every other stb caller, the training
+  loader included, keeps plain malloc). Each block's 64-byte header says how
+  it was made, so any thread frees it right. `SS_STB_PAGE_ALLOC=0` maps
+  nothing; it is the A/B knob. Only the slideshow's decoders opt in.
+- `load_picture` boxes stb's RGB straight into the caller's picture, frees
+  it, then decodes the mask and tints the boxed blocks in place: no copies,
+  and the photo and mask never coexist.
+- `slide_threads`: 300 MiB / (w x h x 4.5), clamped to [1, min(cores - 1, 4)].
+- The ring clears and swaps pictures while playing; each decoder keeps one
+  picture for its life; the panel ticks into the member `_slide_pic` and
+  re-uploads with `glTexSubImage2D`. Play also releases the window RGBA.
+
+**The readings.** `tools/mask_editor_checks/memory9.sh`, three fresh launches
+per arm, interleaved, each on a fresh copy of the 8K bench, normal priority,
+`-NSAppSleepDisabled YES`, dataset through the in-app folder dialog, binary
+`d4f6e48a` built from `f7e0a1f6`. `threads` read 2 and `sam_vram_mib` -1.0 at
+every playing sample. Raw files: `docs/notes/measurements/memory9/`.
+
+| arm | 10 s readings (MB over baseline) | median | pre-registered | vs prediction | vs bar 600 |
+|---|---|---|---|---|---|
+| C, control | +481 / +489 / +489 | **+489** | +320, window +260 to +480 | **MISS** (9 MB over the window) | **PASS** |
+| S, SAM loaded first | +227 / +1046 / +227 | **+227** | +400 to +450 | **MISS** (below) | **PASS** |
+| C0, `SS_STB_PAGE_ALLOC=0` | +243 / +563 / +243 | **+243** | +550, window +530 to +620 | **MISS** (far below) | PASS |
+| diagnostic, hook process-wide (not shipped) | +435 / +435 / +434 | +435 | none | -- | PASS |
+
+**The A/B refutes the premise the hook was chosen on.** The plan predicted the
+hook worth ~230 MB (C0 ~ +550 against C ~ +320). In the app the control reads
+~250 MB *higher* than the hook off in two of three launches. `vmmap` at 10 s
+says why: with the hook on, live `MALLOC_LARGE` is 19.8 MB and
+`MALLOC_LARGE (empty)` 410.2 MB in all three control launches -- the editor's
+freed frame, planes and window, plus the churn of opening the frame. Mapped
+decode buffers cannot reuse those pages, so they wait for the allocator's own
+schedule (the control falls to +181 to +240 by 40 s). With the hook off the
+decoders' malloc reuses them (C0-1 and C0-3: live 90.2 / 62.0 MB, empty
+119.6 / 147.7 MB). By the attribution rule every control and SAM sample is a
+residue sample (live <= 250, empty >= 350 where the reading is high), never
+the slideshow's. The process-wide diagnostic (+435) puts the operator's
+scoping at ~55 MB of the gap: under a scoped hook the editor's own open still
+decodes through malloc (editor open +410, against +311 process-wide).
+
+**S2, a residue MISS against its own window, PASS on the median.** +1046 with
+live 19.8 MB and empty 976.3 MB: SAM's host buffers released at Play in a
+lazy-reclaim session, the Task 13 regime. Reported per the rule; the next
+step the plan names (page-backing the editor's own buffers) was not started.
+
+**Criterion #8**, three runs of `mask_doc_test` with `SS_MASK_BENCH`:
+
+| row | median fps (runs) | threads | pre-registered | vs prediction | bar |
+|---|---|---|---|---|---|
+| 8K -> 1024 | 15.1 (15.1 / 15.1 / 15.1) | 2 | 15 to 17 | hit | PASS (5) |
+| 8K -> 4096 | 12.5 (12.5 / 12.4 / 12.5) | 2 | 11.5 to 13 | hit | PASS (5) |
+| 1080p -> 1024 | 350.7 (350.7 / 348.6 / 351.6) | 4 | unchanged, 379.4 within 2% | **MISS** (-7.6%) | PASS (30) |
+| 1080p -> 4096 | 398.7 (398.7 / 389.8 / 399.4) | 4 | unchanged, 405.8 within 2% | hit (-1.7%) | PASS (30) |
+
+Longest waits at 8K 134 to 171 ms (predicted <= 200). The 1080p -> 1024 cost,
+by inference and not measured apart, is the page faults on the mapped buffers
+(~0.5 ms a decode; the single-thread row read 10.0 ms off the scope against
+10.5 on it) plus the second pass the tint now makes over the mask.
+
+**Tint polarity, in the app.** On a copy of the 8K bench, editor overlay
+against playing, 40 x 40 patches: medians within 1 level both ways, and the
+tinted set identical (100% / 0%) unflipped and flipped
+(`measurements/memory9/flip_polarity.txt`).
+
+**Decisions a maintainer must not undo.**
+- stb's large buffers are page-allocated only on opted-in threads, freed by
+  the header, never by the flag; `SS_STB_PAGE_ALLOC=0` exists for the A/B.
+- `load_picture` boxes the photo before it decodes the mask and copies neither.
+- The decoder count comes from `slide_threads`' byte budget, not the core count.
+- The ring clears and swaps while playing; it never frees a picture then.
+- `_slide_pic` is a member, and the texture is re-specified only on a size change.
 
 ## Not in this phase
 
