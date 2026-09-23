@@ -291,7 +291,7 @@ void MaskSession::draw_workflow_row() {
     // Play waits for anything that would land on the document it releases.
     ImGui::BeginDisabled(frame_count() < 2 ||
                          (!_slide_playing && (!_doc || !idle() || sam_work_pending() ||
-                                              _tool.in_progress() || _path.in_progress())));
+                                              shape_open())));
     if (ui::Button(_slide_playing ? msg::slide_stop : msg::slide_play)) {
         if (_slide_playing) stop_slideshow();
         else start_slideshow();
@@ -305,7 +305,7 @@ void MaskSession::draw_workflow_row() {
     note_row_width();
 
     // Row B: propagate. Row C: its warning, drawn whether or not B is enabled.
-    ImGui::BeginDisabled(!_doc || !idle());
+    ImGui::BeginDisabled(!_doc || !idle() || _slide_playing);
     if (ui::RadioButton(msg::prop_scope_next, _prop_scope == 0)) _prop_scope = 0;
     ImGui::SameLine();
     if (ui::RadioButton(msg::prop_scope_range, _prop_scope == 1)) _prop_scope = 1;

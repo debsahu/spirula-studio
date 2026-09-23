@@ -2391,7 +2391,7 @@ unless the task says otherwise.
 | P8b | leaving a frame mid-encode | the result is dropped, not painted; history 0 | Task 8 |
 | P9 | no checkpoint; a build without SAM | nothing runs, nothing written; the button never arms | Task 5 |
 | P10 | one click removes the operator's monopod | **5 of 5** frames, min IoU 0.8159, median 0.8475; the reference is loose, so this is partly slack | Task 9 |
-| P11 | slideshow exclusivity | unwritable until plan 3 lands | absent |
+| P11 | slideshow exclusivity | pool 1895.1 -> 0.0 MiB (fresh 0.0), session -1, playing, `sam_loads` 1 -> 2, in **6 of 6** runs: PASS | plan 3 Task 13 |
 | P12 | close hands the checkpoint back | pool 1895.1 -> 0.0 MiB; **reload half re-instrumented** from job time to `sam_loads`, 1 -> 2 | Task 8 |
 | P13 | the dataset screen is untouched | fields and object list identical | Task 6 |
 | P14-P18 | modes, the shared picker, the modal, the model switch, a download from the Train screen | as recorded | Task 5 |
@@ -3295,7 +3295,10 @@ file on its own: when one layer resists removal (a macOS immutable flag, or a
 file held open on Windows) its siblings are gone, and a put-back that stopped at
 the resisting file left the frame opening without its keep. When
 only the index write fails the files are already gone and nothing goes back:
-the mask is the undone one. A target that would not go back stays in the record,
+the mask is the undone one, but the target's stale entry survives in
+`index.json`. That is cosmetic: the corrected count reads one high, and a
+reopened session that opens the frame keeps an entry with empty layers,
+counted until reverted. A retry in the same session removes it. A target that would not go back stays in the record,
 and the status line names it and says to use Undo propagate again. A
 propagate names the first frame it could not put back, with the count, ahead
 of any stray-base or rolled-back failure, and promises a retry only when the
