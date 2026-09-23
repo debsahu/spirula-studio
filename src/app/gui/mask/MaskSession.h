@@ -388,6 +388,8 @@ public:
     bool slide_pool_running() const { return _slide.running(); }
     // The depth the last window was asked for: slide_depth's, never a count.
     int slide_window() const { return _slide_window; }
+    // The decoders the last Play started: slide_threads' byte budget.
+    int slide_threads() const { return _slide_threads; }
     // How long the last stop blocked the UI thread, ms; -1 before a stop.
     double slide_stop_ms() const { return _slide_stop_ms; }
     // How long the last join of decode threads blocked the UI thread, ms: the
@@ -584,6 +586,8 @@ private:
     // The last picture's source size: the window's depth comes from the bytes
     // a picture really costs at the current target.
     int _slide_src_w = 0, _slide_src_h = 0;
+    Picture _slide_pic;              // the frame on screen; its buffer is the ring's to swap
+    int _slide_threads = 0;
     GLuint _slide_tex = 0;
     int _slide_tex_w = 0, _slide_tex_h = 0;
 

@@ -2707,6 +2707,7 @@ std::string GuiApp::state_json() {
     out += ",\"mask_slide_shown_fps\":" + std::to_string(_mask_editor.slide_shown_fps());
     out += ",\"mask_slide_gap_ms\":" + std::to_string(_mask_editor.slide_max_gap_ms());
     out += ",\"mask_slide_window\":" + std::to_string(_mask_editor.slide_window());
+    out += ",\"mask_slide_threads\":" + std::to_string(_mask_editor.slide_threads());
     out += ",\"mask_slide_decoded\":" + std::to_string(_mask_editor.slide_decoded());
     out += ",\"mask_slide_index\":" + std::to_string(_mask_editor.slide_index());
     out += ",\"mask_scanned\":" + std::to_string(_mask_editor.scanned_count());

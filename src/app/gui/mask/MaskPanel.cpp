@@ -555,19 +555,24 @@ void MaskSession::draw_slideshow(ImDrawList* dl, float ox, float oy, float w, fl
         return;
     }
     const int side = std::clamp((((int)std::max(w, h) + 255) / 256) * 256, 256, 4096);
-    Picture pic;
-    if (slideshow_tick(ImGui::GetTime(), side, pic) && !pic.empty()) {
+    if (slideshow_tick(ImGui::GetTime(), side, _slide_pic) && !_slide_pic.empty()) {
         if (!_slide_tex) glGenTextures(1, &_slide_tex);
         glBindTexture(GL_TEXTURE_2D, _slide_tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, pic.w, pic.h, 0, GL_RGB, GL_UNSIGNED_BYTE, pic.rgb.data());
-        _slide_tex_w = pic.w;
-        _slide_tex_h = pic.h;
+        // The storage is re-specified only when the picture's size changes.
+        if (_slide_pic.w == _slide_tex_w && _slide_pic.h == _slide_tex_h) {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, _slide_pic.w, _slide_pic.h, GL_RGB, GL_UNSIGNED_BYTE, _slide_pic.rgb.data());
+        } else {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, _slide_pic.w, _slide_pic.h, 0, GL_RGB, GL_UNSIGNED_BYTE,
+                         _slide_pic.rgb.data());
+            _slide_tex_w = _slide_pic.w;
+            _slide_tex_h = _slide_pic.h;
+        }
     }
     if (_slide_tex && _slide_tex_w > 0) {
         const float s = std::min(w / (float)_slide_tex_w, h / (float)_slide_tex_h);

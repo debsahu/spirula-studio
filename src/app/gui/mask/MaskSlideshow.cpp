@@ -2,7 +2,10 @@
 
 #include "app/gui/mask/MaskSlideshow.h"
 
+#include "core/PageAlloc.h"
+
 #include <algorithm>
+#include <utility>
 
 namespace gui {
 namespace mask {
@@ -18,6 +21,7 @@ void SlidePrefetch::start(std::vector<SlideFrame> frames, int threads) {
         _count = 0;
         _inflight.clear();
         _decoded = 0;
+        _picture_allocs = 0;
     }
     const int n = std::clamp(threads, 1, 8);
     for (int i = 0; i < n; i++) _threads.emplace_back([this] { worker(); });
@@ -81,7 +85,8 @@ void SlidePrefetch::want(int from, int count) {
         for (Slot& s : _slots)
             if (s.index >= 0 && !wanted_locked(s.index)) {
                 _bytes -= s.pic.bytes();
-                s = Slot{};
+                s.index = -1;
+                s.pic.rgb.clear();
             }
     }
     _cv.notify_all();
@@ -101,9 +106,10 @@ bool SlidePrefetch::take(int index, Picture& out) {
     std::lock_guard<std::mutex> lk(_mu);
     for (Slot& s : _slots)
         if (s.index == index) {
-            _bytes -= s.pic.bytes();
-            out = std::move(s.pic);
-            s = Slot{};
+            std::swap(out, s.pic);
+            s.pic.rgb.clear();
+            s.index = -1;
+            _bytes -= out.bytes();
             return true;
         }
     return false;
@@ -117,6 +123,18 @@ size_t SlidePrefetch::bytes() const {
 int SlidePrefetch::decoded() const {
     std::lock_guard<std::mutex> lk(_mu);
     return _decoded;
+}
+
+int SlidePrefetch::picture_allocs() const {
+    std::lock_guard<std::mutex> lk(_mu);
+    return _picture_allocs;
+}
+
+size_t SlidePrefetch::capacity_bytes() const {
+    std::lock_guard<std::mutex> lk(_mu);
+    size_t n = 0;
+    for (const Slot& s : _slots) n += s.pic.rgb.capacity();
+    return n;
 }
 
 // The first wanted index, from the front of the window, that is neither
@@ -134,7 +152,9 @@ int SlidePrefetch::pick_locked() const {
     return -1;
 }
 
-void SlidePrefetch::put_locked(int index, Picture&& pic) {
+// Swaps the decoder's picture into a free slot, so the decoder takes that
+// slot's cleared buffer back for its next frame.
+void SlidePrefetch::put_locked(int index, Picture& pic) {
     Slot* pick = nullptr;
     for (Slot& s : _slots)
         if (s.index < 0) { pick = &s; break; }
@@ -152,16 +172,22 @@ void SlidePrefetch::put_locked(int index, Picture&& pic) {
         }
         if (!far_slot) break;
         _bytes -= far_slot->pic.bytes();
-        *far_slot = Slot{};
+        far_slot->index = -1;
+        far_slot->pic.rgb.clear();
         if (!pick) pick = far_slot;
     }
     if (!pick) return;
     pick->index = index;
-    pick->pic = std::move(pic);
+    std::swap(pick->pic, pic);
+    pic.rgb.clear();
     _bytes += pick->pic.bytes();
 }
 
+// Each decoder page-allocates stb's buffers (core/PageAlloc.h) and keeps one
+// picture for its lifetime, swapped with the ring's on every put.
 void SlidePrefetch::worker() {
+    spirula::PageAllocScope pages;
+    Picture mine;
     for (;;) {
         int index = -1;
         SlideFrame f;
@@ -174,19 +200,20 @@ void SlidePrefetch::worker() {
             f = _frames[(size_t)index];
             target = _target;
         }
-        Picture pic;
+        const size_t before = mine.rgb.capacity();
         // A decode that throws would be std::terminate off a worker thread;
         // an empty picture is what a missing file already produces.
         try {
-            load_picture(f.image, f.mask, target, pic, f.flipped);
+            load_picture(f.image, f.mask, target, mine, f.flipped);
         } catch (...) {
-            pic = Picture();
+            mine.rgb.clear();
         }
         std::lock_guard<std::mutex> lk(_mu);
         _inflight.erase(std::find(_inflight.begin(), _inflight.end(), index));
         _decoded++;
+        _picture_allocs += mine.rgb.capacity() > before;
         if (_stop || !wanted_locked(index)) continue;
-        put_locked(index, std::move(pic));
+        put_locked(index, mine);
     }
 }
 

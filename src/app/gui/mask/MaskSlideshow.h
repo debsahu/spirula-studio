@@ -1,9 +1,10 @@
 #pragma once
 
-// The slideshow's decoder: a few threads that turn frames into pane-sized
-// Pictures (the composite tinted over the photo) a little ahead of the one
-// on screen, held in a ring under FilmReel's byte and slot budget, plus the
-// clock that paces playback. No ImGui, no GL calls. Design: docs/notes/mask-editor.md.
+// The slideshow's decoder: slide_threads' count of threads that turn frames into
+// pane-sized Pictures (the composite tinted over the photo) a little ahead of the
+// one on screen, held in a ring under FilmReel's byte and slot budget that keeps
+// its buffers while playing, plus the clock that paces playback. No ImGui, no GL
+// calls. Design: docs/notes/mask-editor.md.
 
 #include "app/gui/FilmReel.h"
 #include "app/gui/Picture.h"
@@ -45,6 +46,23 @@ inline int slide_depth(size_t picture_bytes, int frames) {
     return std::clamp(fits, 1, room);
 }
 
+inline constexpr size_t kSlideDecodeBudget = 300u << 20;
+
+// What one stb decode of a w x h JPEG holds at its peak: the 4:2:0 planes and the RGB
+// output, 4.5 bytes a pixel (126.6 MB measured on 7680x3840). 4:4:4 is 6 and over-runs by a third.
+inline size_t slide_decode_bytes(int w, int h) {
+    return w > 0 && h > 0 ? (size_t)w * (size_t)h * 9u / 2u : 0;
+}
+
+// Decoders to run at once under kSlideDecodeBudget: 2 at 8K, 4 at 4K and below, never more
+// than the machine's cores minus one, never more than 4. Unknown size decodes one at a time.
+inline int slide_threads(int w, int h, unsigned hardware_threads) {
+    const int cap = std::clamp((int)hardware_threads - 1, 1, 4);
+    const size_t one = slide_decode_bytes(w, h);
+    if (one == 0) return 1;
+    return std::clamp((int)std::min<size_t>(kSlideDecodeBudget / one, 4), 1, cap);
+}
+
 class SlidePrefetch {
 public:
     SlidePrefetch() = default;
@@ -67,11 +85,15 @@ public:
     // outside that window is dropped. Size it with slide_depth().
     void want(int from, int count);
     bool has(int index) const;
-    // Moves the picture out. Take the frame being shown and only then move
-    // the window past it: a window that steps first evicts it unshown.
+    // Swaps the picture into `out` and keeps out's old buffer, cleared, in the
+    // ring. Take the frame being shown and only then move the window past it:
+    // a window that steps first evicts it unshown.
     bool take(int index, Picture& out);
     size_t bytes() const;
     int decoded() const;
+    // Pictures the decoders had to grow a buffer for, and what the ring's slots hold.
+    int picture_allocs() const;
+    size_t capacity_bytes() const;
     // Test-only: shrinks the ring's byte budget so eviction is reachable
     // without a 64 MB fixture. Defaults to kReelBudget; call it before start().
     void set_byte_budget_for_test(size_t bytes) {
@@ -87,7 +109,7 @@ private:
     void worker();
     bool wanted_locked(int index) const;
     int pick_locked() const;
-    void put_locked(int index, Picture&& pic);
+    void put_locked(int index, Picture& pic);
 
     std::vector<std::thread> _threads;   // start() and stop() alone
     std::condition_variable _cv;
@@ -102,6 +124,7 @@ private:
     Slot _slots[kReelSlots];
     size_t _bytes = 0;
     int _decoded = 0;
+    int _picture_allocs = 0;
 };
 
 // Paces playback. The period runs from the frame actually shown, so a late

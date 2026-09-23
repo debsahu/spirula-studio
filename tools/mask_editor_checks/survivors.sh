@@ -138,6 +138,20 @@ none 'TextDisabledWrapped(msg::hint_keys)'
 if command grep -qF '    _slide_fresh = true;' src/app/gui/mask/MaskSession.cpp; then
     echo "ok   start_slideshow marks the press frame (_slide_fresh = true)"
 else echo "FAIL start_slideshow marks the press frame (_slide_fresh = true)"; FAILS=$((FAILS + 1)); fi
+# memory9: the slideshow ticks into the member picture and re-uploads into the
+# texture it has; stb's buffers are page-allocated; the decoder count is budgeted.
+has 1 'slideshow_tick(ImGui::GetTime(), side, _slide_pic)'
+has 1 'glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, _slide_pic.w, _slide_pic.h, GL_RGB, GL_UNSIGNED_BYTE, _slide_pic.rgb.data());'
+local_pic=$(awk '/^void MaskSession::draw_slideshow\(/{on=1} on&&/^}/{exit} on&&/^ *Picture pic;/{print}' "$F")
+if [ -z "$local_pic" ]; then echo "ok   draw_slideshow declares no local Picture"
+else echo "FAIL draw_slideshow declares no local Picture"; FAILS=$((FAILS + 1)); fi
+if command grep -qF 'spirula::page_alloc' src/external/stb_image_impl.cpp; then
+    echo "ok   stb_image allocates through spirula::page_alloc"
+else echo "FAIL stb_image allocates through spirula::page_alloc"; FAILS=$((FAILS + 1)); fi
+if command grep -qF '_slide_threads = mask::slide_threads(' src/app/gui/mask/MaskSession.cpp &&
+   command grep -qF 'spirula::PageAllocScope pages;' src/app/gui/mask/MaskSlideshow.cpp; then
+    echo "ok   Play budgets its decoders; each decoder opts in to page allocation"
+else echo "FAIL Play budgets its decoders; each decoder opts in to page allocation"; FAILS=$((FAILS + 1)); fi
 none '_path_mode'
 none 'paint_for('
 none '_status_h > 0.0f'

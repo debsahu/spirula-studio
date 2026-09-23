@@ -4094,8 +4094,8 @@ void bench_8k(const char* dir) {
     const bool k8_ok = gui::load_picture(img0, msk0, 4096, pic);
     check(k8_ok && gui::load_picture(img0, "", 4096, bare) && pic.w == 3840 && pic.h == 1920 &&
               pic.rgb != bare.rgb, "bench: the 8K load decoded at 3840x1920 with its mask applied");
-    // Plan 3: the pool over 100 frames, four threads, at the window depth the
-    // session would ask for at this target. Reports the sustained rate, the
+    // Plan 3: the pool over 100 frames, slide_threads' decoders, at the window
+    // depth the session would ask for at this target. Reports the sustained rate, the
     // longest wait once warm, and the cold first frame as its own number.
     auto pool_rate = [&](const fs::path& im, const fs::path& mk_, const char* fmt, int files,
                          int src_w, int src_h, int target, const char* label, double bar_fps) {
@@ -4109,7 +4109,8 @@ void bench_8k(const char* dir) {
         const int depth = mk::slide_depth(mk::slide_picture_bytes(src_w, src_h, target), 100);
         mk::SlidePrefetch p;
         p.set_target(target);
-        p.start(frames, 4);
+        const int threads = mk::slide_threads(src_w, src_h, std::thread::hardware_concurrency());
+        p.start(frames, threads);
         gui::Picture pic;
         // The first kWarm takes fill an empty ring from cold. Timing them puts
         // one cold 8K decode into a number the spec defines as a sustained rate.
@@ -4135,10 +4136,10 @@ void bench_8k(const char* dir) {
         // One decode a shown frame, plus the first tick's one re-pick and the
         // window wrapping onto frames 0..depth-1 as the last ones are shown.
         const int max_decodes = 100 + 1 + depth;
-        std::printf("bench slideshow pool %s %4d  depth %2d  %8.1f fps   longest wait %8.1f ms   "
+        std::printf("bench slideshow pool %s %4d  threads %d  depth %2d  %8.1f fps   longest wait %8.1f ms   "
                     "first frame %8.1f ms   decodes %3d   [bar: >= %.0f fps, wait <= 400 ms, "
                     "decodes <= %d] %s\n",
-                    label, target, depth, fps, max_gap, first_ms, decodes, bar_fps, max_decodes,
+                    label, target, threads, depth, fps, max_gap, first_ms, decodes, bar_fps, max_decodes,
                     (fps >= bar_fps && max_gap <= 400.0 && decodes <= max_decodes) ? "PASS" : "MISS");
     };
     pool_rate(images, masks, "f%04d", 3, 7680, 3840, 1024, "8K   ", 5.0);
@@ -6989,6 +6990,90 @@ void test_slide_prefetch() {
     check(!c30.due(300.066) && c30.due(300.068), "30 fps: due() re-arms at 33.3 ms, not only start()");
 }
 
+// memory9: how many decoders run at once is set by the bytes one decode holds.
+void test_slide_threads() {
+    check(mk::slide_threads(7680, 3840, 18) == 2, "slide threads: 8K runs two decoders");
+    check(mk::slide_threads(3840, 2160, 18) == 4, "slide threads: 4K is held at four by the cap, not the budget");
+    check(mk::slide_threads(1920, 1080, 18) == 4, "slide threads: 1080p runs four");
+    check(mk::slide_threads(15520, 7760, 18) == 1, "slide threads: a frame over the budget still decodes, alone");
+    check(mk::slide_threads(0, 0, 18) == 1, "slide threads: an unknown size decodes one at a time");
+    check(mk::slide_threads(1920, 1080, 2) == 1, "slide threads: two cores leave one for the UI");
+    check(mk::slide_threads(1920, 1080, 3) == 2, "slide threads: three cores run two");
+    check(mk::slide_threads(1920, 1080, 0) == 1, "slide threads: an unknown core count runs one");
+    check(2 * mk::slide_decode_bytes(7680, 3840) <= mk::kSlideDecodeBudget &&
+              mk::kSlideDecodeBudget < 3 * mk::slide_decode_bytes(7680, 3840),
+          "slide threads: the budget holds two 8K decodes and not three");
+}
+
+// While playing the ring clears and swaps pictures, never frees them: over 100
+// frames the buffers made are bounded by the decoders, the window and the one shown.
+void test_slide_prefetch_keeps_buffers() {
+    Fixture f = make_dataset("slide_keep", 64, 48, {"a", "b", "c"});
+    std::vector<mk::SlideFrame> frames;
+    for (int i = 0; i < 100; i++) {
+        const std::string& k = f.keys[(size_t)(i % 3)];
+        frames.push_back({(f.images / (k + ".jpg")).string(), (f.masks / (k + ".png")).string()});
+    }
+    const size_t one = mk::slide_picture_bytes(64, 48, 32);
+    const int depth = 3;
+    const int threads = mk::slide_threads(64, 48, std::thread::hardware_concurrency());
+    mk::SlidePrefetch p;
+    p.set_target(32);
+    p.set_byte_budget_for_test((size_t)depth * one);
+    p.start(frames, threads);
+    p.want(0, depth);
+    gui::Picture pic;
+    int shown = 0;
+    size_t peak_cap = 0;
+    for (int i = 0; i < 100; i++) {
+        bool got = false;
+        for (int k = 0; k < 3000 && !(got = p.take(i, pic)); k++)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        shown += got && pic.w == 32 && !pic.empty();
+        p.want((i + 1) % 100, depth);
+        peak_cap = std::max(peak_cap, p.capacity_bytes());
+    }
+    const int allocs = p.picture_allocs(), decodes = p.decoded();
+    p.stop();
+    check(shown == 100, "keeps buffers: every frame shown once: " + std::to_string(shown));
+    check(allocs >= 1 && allocs <= threads + depth + 1,
+          "keeps buffers: pictures made " + std::to_string(allocs) + " <= threads + depth + 1 = " +
+              std::to_string(threads + depth + 1));
+    check(peak_cap <= (size_t)(depth + 1) * one,
+          "keeps buffers: the ring holds " + std::to_string(peak_cap) + " bytes <= (depth + 1) pictures");
+    check(decodes <= 100 + 1 + depth, "keeps buffers: one decode a frame: " + std::to_string(decodes));
+
+    // A window that jumps drops every held frame at once; those buffers stay.
+    mk::SlidePrefetch j;
+    j.set_target(32);
+    j.set_byte_budget_for_test((size_t)depth * one);
+    j.start(frames, threads);
+    bool held = true;
+    for (int k = 0; k < 20; k++) {
+        const int from = (k % 2) * 50;
+        j.want(from, depth);
+        for (int d = 0; d < depth; d++) held = held && wait_has(j, from + d);
+    }
+    const int jump_allocs = j.picture_allocs();
+    j.stop();
+    check(held && jump_allocs <= threads + depth,
+          "keeps buffers: 20 jumps of the window make " + std::to_string(jump_allocs) +
+              " pictures <= threads + depth");
+
+    // Over budget the ring evicts; an evicted frame's buffer stays too.
+    mk::SlidePrefetch e;
+    e.set_target(32);
+    e.set_byte_budget_for_test(2 * one);
+    e.start(frames, threads);
+    e.want(0, depth);
+    const bool churned = wait_decoded(e, 60);
+    const int evict_allocs = e.picture_allocs();
+    e.stop();
+    check(churned && evict_allocs <= threads + depth,
+          "keeps buffers: 60 decodes into an over-full window make " + std::to_string(evict_allocs) +
+              " pictures <= threads + depth");
+}
+
 // Over budget the ring evicts the frame needed LAST. Room for two of three
 // wanted keeps the front one held throughout, however the other two churn;
 // an eviction of the nearest drops frame 0 on every other put.
@@ -7349,6 +7434,33 @@ void test_session_slideshow_stop_on_screen() {
     }
     s.close();
 #endif
+}
+
+// Stop opens the frame at the file's size through load_frame, never the
+// slideshow's picture: the editor paints on the whole frame.
+void test_session_slideshow_stop_reloads_full_resolution() {
+    Fixture f = make_dataset("slideshow_full_res", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "full res: open: " + err);
+    settle(s);
+    s.start_slideshow();
+    gui::Picture pic;
+    bool shown = false;
+    for (int i = 0; i < 400 && !shown; i++) {
+        shown = s.slideshow_tick(100.0, 32, pic);
+        if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(shown && pic.w == 32 && pic.h == 24, "full res: fixture: the slideshow shows a at 32x24");
+    s.stop_slideshow();
+    settle(s);
+    const auto px = s.frame_pixels();
+    check(px && px->size() == (size_t)64 * 48 * 3 && px->size() != pic.rgb.size(),
+          "full res: stop installs the whole 64x48 frame, not the 32x24 picture");
+    check(s.doc() && s.doc()->width() == 64 && s.doc()->height() == 48,
+          "full res: the document is loaded at the file's size");
+    s.close();
 }
 
 // An undecodable frame is counted as shown and skipped (Decision 14): the
@@ -8355,10 +8467,13 @@ int main() {
     test_load_picture_mask_other_size();
     test_load_picture_turned_mask();
     test_slide_prefetch();
+    test_slide_threads();
+    test_slide_prefetch_keeps_buffers();
     test_slide_prefetch_evicts_farthest();
     test_slide_prefetch_discards_stale();
     test_slide_prefetch_halt();
     test_session_slideshow();
+    test_session_slideshow_stop_reloads_full_resolution();
     test_session_slideshow_flipped();
     test_session_slideshow_window();
     test_session_slideshow_stop_does_not_join();

@@ -186,6 +186,7 @@ void MaskSession::close() {
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     }
     _slide_playing = false;
+    _slide_pic = Picture{};
     if (_doc && _doc->dirty()) save();
     close_sam();   // order vs the worker join is free: the save never touches SAM
     {
@@ -1465,9 +1466,11 @@ void MaskSession::start_slideshow() {
     std::vector<SlideFrame> frames;
     for (const FrameRef& f : _frames)
         frames.push_back({f.file, mask_file(_mask_root, f.key), _mask_flipped});
-    const int threads = std::clamp((int)std::thread::hardware_concurrency() - 1, 1, 4);
+    int w = 0, h = 0;
+    app::image_size(_frames[(size_t)_idx].file, w, h);
+    _slide_threads = mask::slide_threads(w, h, std::thread::hardware_concurrency());
     const auto t0 = std::chrono::steady_clock::now();
-    _slide.start(std::move(frames), threads);   // joins a halted playback's leftovers
+    _slide.start(std::move(frames), _slide_threads);   // joins a halted playback's leftovers
     _slide_join_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     _slide_playing = true;
@@ -1485,6 +1488,9 @@ void MaskSession::start_slideshow() {
     // One frame's buffers are not held while pictures stream.
     _doc.reset();
     _rgb.reset();
+    std::vector<uint8_t>().swap(_rgba);
+    std::vector<uint8_t>().swap(_rgba2);
+    _slide_pic = Picture{};
     _win_dirty = true;
 }
 
