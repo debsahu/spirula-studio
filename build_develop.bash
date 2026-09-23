@@ -53,10 +53,6 @@ bash tools/check_comments.sh >/dev/null || { bash tools/check_comments.sh; exit 
 # sam/ include there is invisible to mask_doc_test's link-level symbol gate.
 bash tools/check_sam_guard.sh >/dev/null || { bash tools/check_sam_guard.sh; exit 1; }
 
-# The mask editor's note cites file:line; a commit that moves a cited line
-# fails here until the note and tools/check_note_cites.sh are updated.
-bash tools/check_note_cites.sh >/dev/null || { bash tools/check_note_cites.sh; exit 1; }
-
 # The mask panel has no unit seam; this pins its gates as text, and names each
 # one that went missing.
 bash tools/mask_editor_checks/survivors.sh >/dev/null ||

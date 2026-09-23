@@ -1,5 +1,5 @@
 #!/bin/bash
-# Structural tripwire over MaskPanel.cpp: each earlier task's code is still there,
+# Structural tripwire over MaskPanel.cpp: each gate below is still there,
 # and the known wrong replacements are not. Text only, never behaviour; the exit
 # status is the number of lines that missed. Anchors are whole statements where a
 # shorter one also matches elsewhere (the pen commit vs handle_keys' Enter).
@@ -31,13 +31,13 @@ has 1 'SetItemKeyOwner(ImGuiKey_Tab)'
 has 1 'const bool typing = ImGui::GetIO().WantTextInput;'
 has 1 '} else if (path_mode()) {'
 has 1 'const int active = bind_pane(hover_pane,'
-# Task 14: EditTool's Polygon has no test seam (EditTool.cpp needs ImGui, which
+# EditTool's Polygon has no test seam (EditTool.cpp needs ImGui, which
 # mask_doc_test never links), so its input is pinned to the bound pane here.
 has 1 'const ImVec2 porg(origin.x + pane_left(active, pane_w, gap), origin.y);'
 has 1 'in.x = io.MousePos.x - porg.x;'
 has 2 'switch_view(_view_mode,'
 has 2 'in_each_pane('
-# Plan 3 Task 7: the propagate row. The 1-based UI range becomes 0-based here
+# The propagate row. The 1-based UI range becomes 0-based here
 # only, and only Propagate (never Undo propagate) waits for a SAM job.
 has 1 'propagate(scope, _prop_from - 1, _prop_to - 1);'
 has 1 'ImGui::BeginDisabled(_prop_scope != 1);'
@@ -49,9 +49,8 @@ if printf '%s' "$gate" | command grep -qF 'msg::prop_go)' &&
    ! printf '%s' "$gate" | command grep -qF 'msg::prop_undo)'; then
     echo "ok   the SAM gate holds Propagate and not Undo propagate"
 else echo "FAIL the SAM gate holds Propagate and not Undo propagate"; FAILS=$((FAILS + 1)); fi
-# Fix round 1 (task-7-review.md I1/I2/I3): the row gate, the warning's
-# placement, and the disabled-aware tooltip were each defeatable without
-# tripping any check above; anchored past the identical revert-frame gate.
+# The row gate, the warning's placement, and the disabled-aware tooltip,
+# anchored past the identical revert-frame gate.
 row_gate=$(awk '
 /\/\/ Row B: propagate\. Row C: its warning, drawn whether or not B is enabled\./ { getline; print; exit }
 ' "$F")
@@ -74,7 +73,7 @@ else
 fi
 has 1 'ui::help_on_hover_disabled(msg::prop_go_help);'
 has 1 'ui::help_on_hover_disabled(msg::prop_undo_help);'
-# Plan 3 Task 12: Play waits for SAM, the worker, a stroke and a pen path, and
+# Play waits for SAM, the worker, a stroke and a pen path, and
 # says why when greyed; playing greys Revert all (both clauses kept), the
 # navigation row and the SAM strip; the slideshow branch returns before !_doc.
 play_gate=$(awk '/Play waits for anything that would land on the document it releases/{on=1} on{print} on&&/EndDisabled\(\);/{exit}' "$F")
@@ -91,8 +90,8 @@ has 1 'ImGui::BeginDisabled(!idle() || _slide_playing ||'
 has 1 '(corrected_count() == 0 && !(_doc && _doc->dirty())));'
 nav=$(awk '/if \(ui::ButtonRaw\("<"\)\) go_to\(_idx - 1\);/{print p; exit} {p=$0}' "$F")
 if [ "$(printf '%s' "$nav" | sed 's/^ *//')" = 'ImGui::BeginDisabled(!idle() || _slide_playing || shape);' ]; then
-    echo "ok   the navigation row is greyed while playing, and while a shape is half drawn (Task 9)"
-else echo "FAIL the navigation row is greyed while playing, and while a shape is half drawn (Task 9)"; FAILS=$((FAILS + 1)); fi
+    echo "ok   the navigation row is greyed while playing, and while a shape is half drawn"
+else echo "FAIL the navigation row is greyed while playing, and while a shape is half drawn"; FAILS=$((FAILS + 1)); fi
 has 1 'const bool shape = shape_open();'
 sam=$(awk '/^ *draw_sam_status\(\);$/{print p; exit} {p=$0}' "$F")
 if [ "$(printf '%s' "$sam" | sed 's/^ *//')" = 'ImGui::BeginDisabled(_slide_playing);' ]; then
@@ -107,7 +106,7 @@ if command grep -qF '_path.in_progress())' src/app/gui/mask/MaskSession.cpp &&
    command grep -qF 'bool animating() const { return _compare.animating() || _mask_editor.animating(); }' src/app/gui/GuiApp.h; then
     echo "ok   start_slideshow refuses a pen path; GuiApp::animating() asks the editor"
 else echo "FAIL start_slideshow refuses a pen path; GuiApp::animating() asks the editor"; FAILS=$((FAILS + 1)); fi
-# Plan 3 Task 9: row D, the frame keys and the navigation row stand down for the
+# Row D, the frame keys and the navigation row stand down for the
 # worker, a half-drawn shape or pen path, and play; help shows when greyed;
 # M / Shift+M sit inside the keys' guard; the key list is the slider's tooltip.
 has 1 'bool MaskSession::shape_open() const { return _tool.in_progress() || _path.in_progress(); }'
@@ -134,11 +133,11 @@ if [ "$(printf '%s' "$tip" | sed 's/^ *//')" = 'ui::help_on_hover_disabled(shape
     echo "ok   the key list is the frame slider's tooltip, shown when greyed, read after its commit"
 else echo "FAIL the key list is the frame slider's tooltip, shown when greyed, read after its commit"; FAILS=$((FAILS + 1)); fi
 none 'TextDisabledWrapped(msg::hint_keys)'
-# Task 12 re-review B1: Play marks its press frame, or keyboard Play stops itself.
+# Play marks its press frame, or keyboard Play stops itself.
 if command grep -qF '    _slide_fresh = true;' src/app/gui/mask/MaskSession.cpp; then
     echo "ok   start_slideshow marks the press frame (_slide_fresh = true)"
 else echo "FAIL start_slideshow marks the press frame (_slide_fresh = true)"; FAILS=$((FAILS + 1)); fi
-# memory9: the slideshow ticks into the member picture and re-uploads into the
+# The slideshow ticks into the member picture and re-uploads into the
 # texture it has; the decoder count is budgeted.
 has 1 'slideshow_tick(ImGui::GetTime(), side, _slide_pic)'
 has 1 'glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, _slide_pic.w, _slide_pic.h, GL_RGB, GL_UNSIGNED_BYTE, _slide_pic.rgb.data());'

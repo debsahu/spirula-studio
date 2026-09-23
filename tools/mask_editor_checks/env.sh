@@ -5,7 +5,7 @@
 #                  be the catalog's, e.g. sam3-q4_0.ggml (optional)
 #   MEC_PORT       automation port (default 7893)
 # Screen points below are for the 1600x950 offscreen window and the 360 photo
-# fixture the note describes; override them for any other dataset.
+# fixture (15520x7760); override them for any other dataset.
 
 MEC_TOOLS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 if [ -z "$MEC_ISOLATED" ]; then

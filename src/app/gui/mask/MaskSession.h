@@ -54,7 +54,7 @@ struct SamOps {
 enum class CanvasMode { Shape, Eraser, Path, Sam };
 
 // The continuous inverse of to_stored (MaskDoc.h): a stored point to the
-// displayed frame. Plan 1 has the pixel form only.
+// displayed frame.
 void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
                   float& dx, float& dy);
 
@@ -190,7 +190,7 @@ public:
     bool sam_available() const;
     // The process-wide inference pool, MiB -- readable with the editor closed.
     static double sam_pool_mib();
-    // Checkpoint loads in this process (MaskSam::load_count), for P12.
+    // Checkpoint loads in this process (MaskSam::load_count).
     static int sam_loads();
     // GuiApp's checkpoint, every frame; "" = not cached. A NEW path drops the
     // warm session (released once any job stops) and keeps the clicks.
@@ -323,7 +323,7 @@ public:
     void revert_open_frame();
     void revert_every_frame();
 
-    // ---- propagate (plan 3) ----
+    // ---- propagate ----
     // Saves the open frame, then copies its two layers onto the targets on
     // the worker. `lo`/`hi` are 0-based inclusive and only read for Range.
     void propagate(PropagateScope scope, int lo, int hi);
@@ -332,7 +332,7 @@ public:
     void undo_propagate();
     PropagateReport last_propagate() const;
 
-    // ---- find missing (plan 3) ----
+    // ---- find missing ----
     float band_lo() const { return _band_lo; }
     float band_hi() const { return _band_hi; }
     // Ordered here, not only in the panel: lo above hi makes is_missing
@@ -362,13 +362,13 @@ public:
     void set_propagate_byte_cap_for_test(size_t bytes) { _prop_byte_cap = bytes; }
     PathTool& path_for_test() { return _path; }
     // A SAM job runs, its result waits for sam_pump(), or a margin re-apply
-    // waits to start (Decision 21): propagate and Play wait for it, since Play
+    // waits to start: propagate and Play wait for it, since Play
     // drops a waiting result. The job is asked through SamOps, as close() does.
     bool sam_work_pending() const;
 
-    // ---- slideshow (plan 3) ----
+    // ---- slideshow ----
     bool slideshow_playing() const { return _slide_playing; }
-    // The press frame is exempt from "any input stops it" (Task 12).
+    // The press frame is exempt from "any input stops it".
     bool slide_fresh() const { return _slide_fresh; }
     // For GuiApp::animating(): frames must keep coming while it plays.
     bool animating() const { return _slide_playing; }
@@ -426,8 +426,8 @@ private:
     bool sam_add_redoable() const;
     void close_sam();
     void sam_forget();
-    void forget_workflow();          // plan 3's per-dataset state (Decision 23)
-    void drop_propagate_record();    // Decision 5's drops; guarded by _mu
+    void forget_workflow();          // propagate, find and slideshow state
+    void drop_propagate_record();    // guarded by _mu
     // A revert discards the frame's (or, at -1, every frame's) clicks and last add.
     void sam_revert(int frame);
     void sam_forget_clicks(const std::vector<int>& frames);
@@ -470,7 +470,7 @@ private:
     // thereafter, cleared only after close()'s join(): safe by ordering,
     // not by exclusivity -- neither field is ever mutable mid-session.
     std::string _workspace, _image_root, _mask_root, _layer_root;
-    bool _mask_flipped = false;      // mask_root's 255 is drop (Decision 22)
+    bool _mask_flipped = false;      // mask_root's 255 is drop
     std::vector<FrameRef> _frames;
     int _idx = -1;
 

@@ -118,7 +118,7 @@ bool revert_frame(const std::string& layer_root, const std::string& mask_root,
 // load.
 int revert_all(const std::string& layer_root, std::string& error);
 
-// ---- propagate (plan 3) ----------------------------------------------------
+// ---- propagate -------------------------------------------------------------
 
 // The size a frame's correction has to be: its .base.png, else its mask,
 // else its image, which is the order MaskDoc::load resolves the base in.
@@ -146,7 +146,7 @@ bool snapshot_layers(const std::string& layer_root, const std::string& key,
 bool restore_layers(const std::string& layer_root, const std::string& mask_root,
                     const LayerSnapshot& snap, LayerIndex& idx, std::string& error);
 
-// ---- kept fractions (plan 3) ---------------------------------------------
+// ---- kept fractions -------------------------------------------------
 
 inline constexpr const char* kKeptFileName = "kept.json";
 

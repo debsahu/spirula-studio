@@ -183,7 +183,7 @@ Fixture make_dataset(const char* name, int w, int h,
 }
 
 // ---------------------------------------------------------------------------
-// Task 1: FNV-1a
+// FNV-1a
 // ---------------------------------------------------------------------------
 
 void test_fnv() {
@@ -205,7 +205,7 @@ void test_fnv() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 2: composite truth table, keys, paths
+// Composite truth table, keys, paths
 // ---------------------------------------------------------------------------
 
 void test_composite_truth_table() {
@@ -253,7 +253,7 @@ void test_keys_and_paths() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 3: PNG bytes, atomic write, index round trip
+// PNG bytes, atomic write, index round trip
 // ---------------------------------------------------------------------------
 
 void test_png_and_atomic_write() {
@@ -355,7 +355,7 @@ void test_index_roundtrip() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 4: save, fingerprint decides, revert byte-exact
+// Save, fingerprint decides, revert byte-exact
 // ---------------------------------------------------------------------------
 
 std::vector<uint8_t> box_layer(int w, int h, int x0, int y0, int x1, int y1) {
@@ -484,7 +484,7 @@ void test_fingerprint_decides() {
     check(re.frames["a"].composite_fp == fp, "index updated with the new composite fingerprint");
     check(re.frames["a"].base_fp == mk::fnv1a64(new_bytes.data(), new_bytes.size()),
           "index updated with the new base fingerprint");
-    // Criterion #3's failure signature: a base equal to a previous composite.
+    // The re-mask failure signature: a base equal to a previous composite.
     check(file_bytes(f.layer / "a.base.png") != composite_bytes, "no base equals an old composite");
 
     // Missing: a cancelled re-run. Layers stay, nothing is written.
@@ -573,8 +573,8 @@ void test_save_without_mask() {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 1: a removal failure must not report success, and one bad frame
-// must not stop the rest of a batch.
+// A removal failure must not report success, and one bad frame must not
+// stop the rest of a batch.
 // ---------------------------------------------------------------------------
 
 // fs::remove refuses a non-empty directory everywhere -- a portable stand-in
@@ -653,9 +653,8 @@ void test_recomposite_all_continues_past_failure() {
           "b's base untouched: refusing one frame must not corrupt it");
 }
 
-// Fix round 2: revert_all had the same abort-on-first-failure shape
-// recomposite_all was corrected out of last round, and round 1 made it more
-// reachable by turning a swallowed error into a first-class false.
+// revert_all, like recomposite_all, must not abort on the first failing
+// frame.
 void test_revert_all_continues_past_failure() {
     Fixture f = make_dataset("revert_continue", 64, 48, {"a", "b", "c"});
     const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
@@ -744,7 +743,7 @@ void test_revert_all_guards_empty_mask_root() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 5: the document
+// The document
 // ---------------------------------------------------------------------------
 
 gui::Stencil box_stencil(int W, int H, int x0, int y0, int x1, int y1) {
@@ -859,8 +858,8 @@ void test_doc_without_mask() {
 }
 
 // ---------------------------------------------------------------------------
-// Carried from the Task 5 review: read_rect/write_rect had no coverage, and
-// a paint that flips no bytes must not dirty the document.
+// read_rect/write_rect round trip, and a paint that flips no bytes must not
+// dirty the document.
 // ---------------------------------------------------------------------------
 
 void test_read_write_rect_roundtrip() {
@@ -905,7 +904,7 @@ void test_noop_paint_does_not_dirty() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 6: undo restores exactly; caps
+// Undo restores exactly; caps
 // ---------------------------------------------------------------------------
 
 void test_undo_redo() {
@@ -955,7 +954,7 @@ void test_undo_redo() {
 
     // The 97th op evicts the oldest: still 96, and undo bottoms out early.
     // Alternating mode keeps both strokes real changes -- a repeated identical
-    // stroke is a no-op under the Task 6 fix below and would push only one.
+    // stroke is a no-op and would push only one.
     d.redo();
     for (int k = 0; k < 2; k++)
         d.paint(k == 0 ? mk::Paint::ForceKeep : mk::Paint::ForceDrop,
@@ -967,7 +966,7 @@ void test_undo_redo() {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 1: the byte cap must evict independently of the op-count cap.
+// The byte cap must evict independently of the op-count cap.
 // ---------------------------------------------------------------------------
 
 void test_byte_cap_eviction() {
@@ -1020,7 +1019,7 @@ void test_byte_cap_eviction() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 7: orientation mapping vs orient_pixels
+// Orientation mapping vs orient_pixels
 // ---------------------------------------------------------------------------
 
 void test_orientation_mapping() {
@@ -1107,7 +1106,7 @@ void test_orientation_mapping() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 8: view math and the window's pixels
+// View math and the window's pixels
 // ---------------------------------------------------------------------------
 
 void test_view_math() {
@@ -1263,7 +1262,7 @@ void test_derive_window() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 3, Task 1: the three display styles, pixel-exact
+// The three display styles, pixel-exact
 // ---------------------------------------------------------------------------
 
 void test_window_styles() {
@@ -1372,7 +1371,7 @@ void test_view_math_non_square_pane() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 11: the session end to end, without drawing
+// The session end to end, without drawing
 // ---------------------------------------------------------------------------
 
 void settle(mk::MaskSession& s) {
@@ -1584,8 +1583,8 @@ void test_session() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 3, Task 5: propagate copies layers, not masks; refuses a size;
-// snapshot and restore put a target back
+// Propagate copies layers, not masks; refuses a size; snapshot and restore
+// put a target back
 // ---------------------------------------------------------------------------
 
 std::vector<uint8_t> stencil_pixels(const fs::path& p) {
@@ -1650,7 +1649,7 @@ void test_propagate_to() {
     check(mk::frame_size(layer_root, mask_root, "cam1/d", (f.images / "cam1" / "d.jpg").string(), w, h, from) &&
               w == 64 && h == 48 && from == (f.images / "cam1" / "d.jpg").string(),
           "frame_size falls back to the image when the mask is gone");
-    // Decision 7's order, on frames whose three candidate sizes differ: the
+    // frame_size's order, on frames whose three candidate sizes differ: the
     // mask beats the image, the base beats the mask.
     check(mk::frame_size(layer_root, mask_root, "cam0/g", (f.images / "cam0" / "g.jpg").string(), w, h, from) &&
               w == 16 && h == 12 && from == (f.masks / "cam0" / "g.png").string(),
@@ -1698,7 +1697,7 @@ void test_propagate_to() {
               file_bytes(f.layer / "cam0" / "e.base.png") == e_base,
           "a regenerated odd frame is refused without being rebased");
 
-    // A frame with no mask takes layers only (plan 1 decision 7), no composite.
+    // A frame with no mask takes layers only, no composite.
     check(mk::propagate_to(layer_root, mask_root, "cam1/d", (f.images / "cam1" / "d.jpg").string(),
                            64, 48, drop.data(), keep.data(), idx, refused, err) &&
               refused.w == 0 && refused.h == 0,
@@ -2112,7 +2111,7 @@ void test_snapshot_restore_edges() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 3, Task 6: propagate through the session, and its undo
+// Propagate through the session, and its undo
 // ---------------------------------------------------------------------------
 
 void test_session_propagate() {
@@ -2316,7 +2315,7 @@ void test_session_propagate_failures() {
 }
 
 // Undo propagate is the safety net for propagating over handheld stills, and
-// the operator's masks are 255 = DROP: it must put a flipped target back,
+// masks in the wild are often 255 = DROP: it must put a flipped target back,
 // including one that had corrections of its own before the propagate.
 void test_session_propagate_flipped() {
     Fixture f = make_dataset("session_prop_flipped", 64, 48, {"cam0/a", "cam0/b", "cam0/c"});
@@ -2449,7 +2448,7 @@ void undo_failure_arm(bool flipped) {
     check(back[5 * 64 + 5] == dropped && back[30 * 64 + 40] == synth_mask(64, 48, 1)[30 * 64 + 40],
           tag + "b's own drop reads dropped and a's keep is gone from it");
 
-    // Fail again, then open b: the record goes (Decision 5), and b shows
+    // Fail again, then open b: the record goes, and b shows
     // exactly what is on disk.
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -3306,7 +3305,7 @@ void test_session_exif_turn() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 2, Task 4: the GUI lasso and the CLI path are one fill
+// The GUI lasso and the CLI path are one fill
 // ---------------------------------------------------------------------------
 
 void test_path_fill_parity() {
@@ -3344,7 +3343,7 @@ void test_path_fill_parity() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 2, Task 6: the livewire's cost image
+// The livewire's cost image
 // ---------------------------------------------------------------------------
 
 // Grey RGB frames whose every gradient is known by hand.
@@ -3528,7 +3527,7 @@ void test_livewire_mapping() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 2, Task 7: the search
+// The livewire search
 // ---------------------------------------------------------------------------
 
 void test_livewire_edge_path() {
@@ -3543,7 +3542,7 @@ void test_livewire_edge_path() {
     check(p.size() >= 4 && p[0] == 100 && p[1] == 10, "path starts at the anchor");
     check(p.size() >= 4 && p[p.size() - 2] == 100 && p[p.size() - 1] == 110,
           "path ends at the target");
-    // Criterion #7: every point within one working pixel of the edge at
+    // Every point within one working pixel of the edge at
     // x = 99.5, and consecutive points 8-adjacent.
     float worst = 0.0f;
     bool adjacent = true;
@@ -3605,7 +3604,7 @@ void test_livewire_once() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 2, Task 8: the pen tool
+// The pen tool
 // ---------------------------------------------------------------------------
 
 gui::ViewportInput at(float x, float y) {
@@ -3863,8 +3862,8 @@ void test_path_tool_space() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 2, Task 10: stored -> displayed, continuous, is the inverse of plan
-// 1's to_stored for all eight EXIF orientations
+// stored -> displayed, continuous, is the inverse of to_stored for all
+// eight EXIF orientations
 // ---------------------------------------------------------------------------
 
 void test_to_displayed_float() {
@@ -3885,7 +3884,7 @@ void test_to_displayed_float() {
         }
     }
     // Orientation 6 by hand, the phone-portrait case: stored (10, H - 5) is
-    // displayed (5, 10) in plan 1's pixel form, so the continuous form at
+    // displayed (5, 10) in the pixel form, so the continuous form at
     // (10.5, 18.5) is (5.5, 10.5).
     float dx, dy;
     mk::to_displayed(sfm::exifTransform(6), W, H, 10.5f, 18.5f, dx, dy);
@@ -3893,8 +3892,8 @@ void test_to_displayed_float() {
 }
 
 // Anchor on the vertical arm, target on the horizontal: the straight line
-// between them is off both edges, so this is the case criterion #7 needs
-// -- the true minimum curves around the corner.
+// between them is off both edges, so the path has to follow the edge: the
+// true minimum curves around the corner.
 void test_livewire_corner_path() {
     const int W = 200, H = 120;
     mk::Livewire lw;
@@ -3948,7 +3947,7 @@ void test_livewire_sign_alignment() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 9: floors at 8K. SS_MASK_BENCH=<dir> writes the fixture there and
+// Floors at 8K. SS_MASK_BENCH=<dir> writes the fixture there and
 // prints medians of three repeats; nothing here fails on a number.
 // ---------------------------------------------------------------------------
 
@@ -4005,7 +4004,7 @@ void bench_8k(const char* dir) {
     mk::MaskDoc d;
     d.load(layer.string(), masks.string(), "f0000", W, H, idx, err, warn);
 
-    // Criterion #4, CPU half: 20 brush strokes, radius 100 px, 500 px long:
+    // Brush commit, CPU half: 20 strokes, radius 100 px, 500 px long:
     // rasterize + paint (with the op's RLE) + derive the stroke's part of a
     // 4096-square window at step 1.
     mk::Window win;
@@ -4051,7 +4050,7 @@ void bench_8k(const char* dir) {
                 median_ms([&] { d.save(layer.string(), masks.string(), idx, err); }));
     std::printf("bench undo x20                   %8.1f ms\n",
                 median_ms([&] { for (int k = 0; k < 20; k++) d.undo(); for (int k = 0; k < 20; k++) d.redo(); }, 1));
-    // Plan 3: what the slideshow decodes per frame, single-threaded.
+    // What the slideshow decodes per frame, single-threaded.
     gui::Picture pic;
     const std::string img0 = (images / "f0000.jpg").string(), msk0 = (masks / "f0000.png").string();
     const double p1024 = median_ms([&] { gui::load_picture(img0, msk0, 1024, pic); });
@@ -4060,8 +4059,8 @@ void bench_8k(const char* dir) {
     const double p2048 = median_ms([&] { gui::load_picture(img0, msk0, 2048, pic); });
     std::printf("bench load_picture 8K -> 2048    %8.1f ms   (%dx%d picture, %.1f MB)\n",
                 p2048, pic.w, pic.h, pic.bytes() / 1048576.0);
-    // The app's own target on a full-screen pane, so the row the in-app
-    // reading of criterion 8 has to be read against.
+    // The app's own target on a full-screen pane: the row an in-app
+    // slideshow rate is read against.
     const double p4096 = median_ms([&] { gui::load_picture(img0, msk0, 4096, pic); });
     std::printf("bench load_picture 8K -> 4096    %8.1f ms   (%dx%d picture, %.1f MB; 1 thread = %.1f fps)\n",
                 p4096, pic.w, pic.h, pic.bytes() / 1048576.0, 1000.0 / p4096);
@@ -4091,7 +4090,7 @@ void bench_8k(const char* dir) {
     const bool k8_ok = gui::load_picture(img0, msk0, 4096, pic);
     check(k8_ok && gui::load_picture(img0, "", 4096, bare) && pic.w == 3840 && pic.h == 1920 &&
               pic.rgb != bare.rgb, "bench: the 8K load decoded at 3840x1920 with its mask applied");
-    // Plan 3: the pool over 100 frames, slide_threads' decoders, at the window
+    // The pool over 100 frames, slide_threads' decoders, at the window
     // depth the session would ask for at this target. Reports the sustained rate, the
     // longest wait once warm, and the cold first frame as its own number.
     auto pool_rate = [&](const fs::path& im, const fs::path& mk_, const char* fmt, int files,
@@ -4151,8 +4150,8 @@ void bench_8k(const char* dir) {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 2, Task 9: livewire floors. Criterion 5: build <= 300 ms at 8K, built
-// once. Criterion 6: <= 16 ms per cursor move, p95, after the first 200 ms.
+// Livewire floors: build <= 300 ms at 8K, built once; <= 16 ms per cursor
+// move, p95, after the first 200 ms.
 // ---------------------------------------------------------------------------
 
 // p95/max of a sorted-in-place sample; (0, 0) on an empty one.
@@ -4163,7 +4162,7 @@ void p95_max(std::vector<double>& v, double& p95, double& mx) {
 }
 
 // Pearson r between move index and its time, in call order: whether cost
-// trends with index (it does -- see docs/notes/mask-editor.md).
+// trends with index (it does).
 double index_corr(const std::vector<double>& y) {
     const size_t n = y.size();
     double mi = 0.0, my = 0.0;
@@ -4189,7 +4188,7 @@ double tail_p95(const std::vector<double>& all, size_t n) {
 void bench_livewire_on(const char* label, const std::vector<uint8_t>& rgb, int fw, int fh) {
     mk::Livewire lw;
     // One direct call, not median_ms (repeats=3 would leave builds() at 3
-    // before a single cursor move, making criterion 5's builds==1 unmeasurable).
+    // before a single cursor move, making builds==1 unmeasurable).
     const auto t0 = std::chrono::steady_clock::now();
     lw.build(rgb.data(), fw, fh);
     const double build_ms = std::chrono::duration<double, std::milli>(
@@ -4383,7 +4382,7 @@ void test_add_stencil_rejects_empty() {
           "add stencil: false leaves all three outputs untouched");
 }
 
-// P4: one prompt is one undo step, for one region and a three-region union,
+// One prompt is one undo step, for one region and a three-region union,
 // each at the document's size and at half of it. The half-size cases are what
 // a std::move implementation fails: MaskDoc::paint returns silently there.
 void test_add_stencil_is_one_undo_step() {
@@ -4432,7 +4431,7 @@ struct AddCost {
 };
 
 // `prior` first paints a speckled edit into the top-left tenth -- the only
-// thing a whole-frame rect re-encodes. `whole_frame` is P5's mutant: the same
+// thing a whole-frame rect re-encodes. `whole_frame` is the mutant: the same
 // stencil handed to paint with the full-frame rect instead of the bounds.
 AddCost add_cost(const char* name, int W, int H, bool prior, bool whole_frame) {
     AddCost c;
@@ -4472,14 +4471,14 @@ AddCost add_cost(const char* name, int W, int H, bool prior, bool whole_frame) {
     return c;
 }
 
-// P5. The fresh-document pair records why the fixture carries an earlier edit:
+// The fresh-document pair records why the fixture carries an earlier edit:
 // without one, history_bytes cannot tell the whole-frame rect from the bounds.
 void test_add_history_bytes() {
     const AddCost own = add_cost("add_bytes_own", 1552, 776, true, false);
     const AddCost whole = add_cost("add_bytes_whole", 1552, 776, true, true);
     const AddCost fresh_own = add_cost("add_bytes_fresh_own", 1552, 776, false, false);
     const AddCost fresh_whole = add_cost("add_bytes_fresh_whole", 1552, 776, false, true);
-    std::printf("P5 1552x776: own %zu, whole %zu, fresh own %zu, fresh whole %zu bytes\n",
+    std::printf("add bytes 1552x776: own %zu, whole %zu, fresh own %zu, fresh whole %zu bytes\n",
                 own.bytes, whole.bytes, fresh_own.bytes, fresh_whole.bytes);
     check(own.bytes > 0 && whole.bytes > 0 && fresh_own.bytes > 0 && fresh_whole.bytes > 0,
           "add bytes: every arm painted exactly one add");
@@ -4487,19 +4486,19 @@ void test_add_history_bytes() {
           "add bytes: after an earlier edit the whole-frame rect costs 10x the bounds");
     check(fresh_whole.bytes < 2 * fresh_own.bytes,
           "add bytes: on a fresh document the whole-frame rect is invisible to history_bytes");
-    constexpr size_t kP5Bar = 2 * 1472;
-    check(own.bytes <= kP5Bar && whole.bytes > kP5Bar,
-          "add bytes: one add is within P5's bar, and the whole-frame rect is not");
+    constexpr size_t kAddBar = 2 * 1472;
+    check(own.bytes <= kAddBar && whole.bytes > kAddBar,
+          "add bytes: one add is within the bar, and the whole-frame rect is not");
 }
 
-// P5 at the size that matters, four arms, one document at a time: ~1 GB peak
+// Add history bytes at the size that matters, four arms, one document at a time: ~1 GB peak
 // (four 120 MB planes, the 120 MB disc and stencil, and the mutant's read_rect).
 void bench_add_history() {
     const int W = 15520, H = 7760;
     for (int prior = 0; prior <= 1; prior++)
         for (int whole = 0; whole <= 1; whole++) {
             const AddCost c = add_cost("bench_add_history", W, H, prior != 0, whole != 0);
-            std::printf("P5 bench %dx%d earlier_edit=%d whole_frame=%d: %zu bytes, paint %.1f ms\n",
+            std::printf("bench add history %dx%d earlier_edit=%d whole_frame=%d: %zu bytes, paint %.1f ms\n",
                         W, H, prior, whole, c.bytes, c.paint_ms);
         }
 }
@@ -4833,7 +4832,7 @@ void test_session_sam_blocker_clears_its_own_error() {
 }
 
 // ---------------------------------------------------------------------------
-// SAM assist: the canvas mode (P14)
+// SAM assist: the canvas mode
 // ---------------------------------------------------------------------------
 
 // Every ordered pair of canvas modes: picking the second must leave exactly
@@ -5320,7 +5319,7 @@ void test_prompt_point_off_frame() {
 }
 
 // ---------------------------------------------------------------------------
-// SAM assist: a re-prompt of the same object replaces its add (plan Task 6)
+// SAM assist: a re-prompt of the same object replaces its add
 // ---------------------------------------------------------------------------
 
 // One job's result for the open frame, built as the job builds it (prepare()).
@@ -5660,7 +5659,7 @@ void test_session_sam_margin_after_prompt() {
 }
 
 // ---------------------------------------------------------------------------
-// SAM assist: text prompts, the model's box, the exception chips (plan Task 7)
+// SAM assist: text prompts, the model's box, the exception chips
 // ---------------------------------------------------------------------------
 
 // A negative phrase's pixels leave the positive region they overlap, and only
@@ -5986,7 +5985,7 @@ void test_session_sam_text_gate() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 3, Task 8: the kept cache is keyed by fingerprint; the predicate
+// The kept cache is keyed by fingerprint; the predicate
 // ---------------------------------------------------------------------------
 
 // A write is measured by whether it happened, never by the bytes: a
@@ -6006,7 +6005,7 @@ std::vector<uint8_t> plant_write_probe(const fs::path& file) {
 void test_kept_cache() {
     Fixture f = make_dataset("kept", 64, 48, {"a", "b"});
     const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
-    // Decision 8 is that the kept cache never touches index.json. An index
+    // The kept cache must never touch index.json. An index
     // that EXISTS and holds one entry makes that measurable; an assertion
     // that index.json is absent is satisfied by anything at all.
     mk::LayerIndex seed_idx;
@@ -6121,7 +6120,7 @@ void test_missing_predicate() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 3, Task 9: the scan, and jumping between missing frames
+// The scan, and jumping between missing frames
 // ---------------------------------------------------------------------------
 
 void test_session_find_missing() {
@@ -6174,7 +6173,7 @@ void test_session_find_missing() {
     s.close();
     check(!s.is_open() && !s.scan_running(), "closed with the scan stopped and joined");
     // Second open: nothing changed, so the cache is read and not rewritten.
-    // Byte equality means that only because of the probe key (Task 8): the
+    // Byte equality means that only because of the probe key: the
     // writer never emits it, so a rewrite would drop it.
     const std::vector<uint8_t> probed = plant_write_probe(kept_path);
     // The band goes into the reopen at 0.0/1.0, which is NOT the member
@@ -6581,7 +6580,7 @@ void test_scan_waits_out_a_running_job() {
     s.close();
 }
 
-// Decision 10: close() stops the scan before it forgets the frames the scan
+// close() stops the scan before it forgets the frames the scan
 // reads. The hook holds the scan mid-dataset and looks at them after a wait.
 void test_close_mid_scan() {
     std::vector<std::string> keys;
@@ -6692,7 +6691,7 @@ void test_band_edit() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 3, Task 11: the slideshow's decoder ring and clock
+// The slideshow's decoder ring and clock
 // ---------------------------------------------------------------------------
 
 bool wait_has(const mk::SlidePrefetch& p, int index, int ms = 3000) {
@@ -6711,7 +6710,7 @@ bool wait_decoded(const mk::SlidePrefetch& p, int n, int ms = 3000) {
     return p.decoded() >= n;
 }
 
-// memory9: load_picture reads stb's buffers in place and boxes the photo before
+// load_picture reads stb's buffers in place and boxes the photo before
 // it decodes the mask. The oracle shares no code with Picture.cpp: the photo
 // and the 0/255 stencil come from FrameMask.cpp, the box and the tint are here.
 void oracle_picture(const std::string& img, const std::string& msk, int target, bool flipped,
@@ -6973,8 +6972,8 @@ void test_slide_prefetch() {
     check(c.due(100.10), "due at the period");
     check(!c.due(100.15), "the next period runs from the frame just shown");
     check(c.due(100.50) && !c.due(100.55), "a late frame does not queue up a burst");
-    // 5 and 30 are the ends of the UI's range and the two rates criterion 8
-    // is judged at; a hard-coded 0.1 period passes the 10 fps rows alone.
+    // 5 and 30 are the ends of the UI's range and the two rates the
+    // slideshow is benched at; a hard-coded 0.1 period passes the 10 fps rows alone.
     mk::SlideClock c5;
     c5.fps = 5.0;
     c5.start(200.0);
@@ -6987,7 +6986,7 @@ void test_slide_prefetch() {
     check(!c30.due(300.066) && c30.due(300.068), "30 fps: due() re-arms at 33.3 ms, not only start()");
 }
 
-// memory9: how many decoders run at once is set by the bytes one decode holds.
+// How many decoders run at once is set by the bytes one decode holds.
 void test_slide_threads() {
     check(mk::slide_threads(7680, 3840, 18) == 2, "slide threads: 8K runs two decoders");
     check(mk::slide_threads(3840, 2160, 18) == 4, "slide threads: 4K is held at four by the cap, not the budget");
@@ -7188,7 +7187,7 @@ void test_slide_prefetch_halt() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan 3, Task 12: the slideshow through the session, driven by a fake clock
+// The slideshow through the session, driven by a fake clock
 // ---------------------------------------------------------------------------
 
 void test_session_slideshow() {
@@ -7492,7 +7491,7 @@ void test_session_slideshow_threads_from_largest_frame() {
     s.close();
 }
 
-// An undecodable frame is counted as shown and skipped (Decision 14): the
+// An undecodable frame is counted as shown and skipped: the
 // picture on screen stays the last good one, and playback moves on.
 void test_session_slideshow_skips_undecodable() {
     Fixture f = make_dataset("slideshow_skip", 64, 48, {"a", "b", "c"});
@@ -7641,7 +7640,7 @@ void test_session_slideshow_waits_for_worker() {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// SAM assist: lifetime and teardown (plan Task 8)
+// SAM assist: lifetime and teardown
 // ---------------------------------------------------------------------------
 
 // Build, then read the flag, then publish: an Esc landing while the stencil is
@@ -7891,7 +7890,7 @@ void test_propagate_waits_for_sam() {
     s.close();
 }
 
-// P11 (plan 4's ruling 5): a slideshow and a SAM session never hold memory
+// A slideshow and a SAM session never hold memory
 // at once. A job or a waiting re-apply refuses Play; otherwise Play releases.
 void test_slideshow_releases_sam() {
     Fixture f = make_dataset("slide_sam", 64, 48, {"a", "b", "c"});
@@ -7900,21 +7899,21 @@ void test_slideshow_releases_sam() {
     s.set_sam_ops(fake.ops());
     std::string err;
     check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
-          "P11: open: " + err);
+          "slideshow vs SAM: open: " + err);
     settle(s);
     s.sam();   // a SAM half exists, as after a first prompt
     fake.busy = true;
     s.start_slideshow();
     check(!s.slideshow_playing() && fake.releases == 0 && s.doc() != nullptr,
-          "P11: a running SAM job refuses Play, and nothing is released");
+          "slideshow vs SAM: a running SAM job refuses Play, and nothing is released");
     fake.busy = false;
     s.sam_margin_changed();
     s.start_slideshow();
-    check(!s.slideshow_playing(), "P11: a re-apply waiting to start refuses Play too");
+    check(!s.slideshow_playing(), "slideshow vs SAM: a re-apply waiting to start refuses Play too");
     s.sam_pump();   // no add is held, so the waiting re-apply is dropped
     s.start_slideshow();
     check(s.slideshow_playing() && fake.releases == 1 && fake.releases_while_busy == 0,
-          "P11: starting a slideshow releases the SAM session: " + std::to_string(fake.releases));
+          "slideshow vs SAM: starting a slideshow releases the SAM session: " + std::to_string(fake.releases));
     s.stop_slideshow();
     settle(s);
     s.close();
@@ -8159,7 +8158,7 @@ void test_session_sam_redo_after_dropped_margin() {
           "dropped margin: the redone add has its detections back and can re-apply");
 }
 
-// ab4cefc4's ruling for revert, for propagate and its undo: a target's layers
+// As for revert, so for propagate and its undo: a target's layers
 // are replaced, so its clicks would re-prompt SAM with the correction just lost.
 void propagate_forgets_clicks_arm(bool flipped) {
     const std::string tag = flipped ? "propagate clicks (flipped): " : "propagate clicks: ";

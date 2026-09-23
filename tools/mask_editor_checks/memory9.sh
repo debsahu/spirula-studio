@@ -1,5 +1,5 @@
 #!/bin/bash
-# Criterion #9 in the app: resident memory 10 s into playback of an 8K dataset,
+# Slideshow memory in the app: resident memory 10 s into playback of an 8K dataset,
 # minus the Train-screen baseline, bar 600 MB. One fresh launch per call.
 # usage: memory9.sh <arm C|S> <run n> <bench dir> <out dir>
 #   C   control: one stroke, then Play      S   SAM loaded and one click first
@@ -88,7 +88,7 @@ base=$(field baseline rss_mb); play=$(field playing_10s rss_mb)
 vram=$(field playing_10s sam_vram_mib); threads=$(field playing_10s threads)
 delta=$((play - base))
 if [ "$vram" != -1.0 ]; then
-    echo "GATE #9 $ARM$N: sam_vram_mib $vram at 10 s, not -1.0: a P11 failure, not a reading" | tee -a "$RAW"
+    echo "GATE #9 $ARM$N: sam_vram_mib $vram at 10 s, not -1.0: the SAM session was not released, not a reading" | tee -a "$RAW"
 elif [ "$threads" != 2 ]; then
     echo "GATE #9 $ARM$N: threads $threads, not 2: a wrong binary or dataset, not a reading" | tee -a "$RAW"
 elif [ "$delta" -le 600 ]; then

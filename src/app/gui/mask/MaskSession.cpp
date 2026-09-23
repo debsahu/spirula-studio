@@ -537,7 +537,7 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
     }
     sam_forget_clicks(targets);
     // The job saves the source itself: a queued save() would be a separate
-    // job whose failure this one could not see (Decision 18).
+    // job whose failure this one could not see.
     struct Job {
         std::string source_key;
         int W = 0, H = 0;
@@ -1459,7 +1459,7 @@ void MaskSession::start_slideshow() {
     if (_slide_playing || frame_count() < 2 || _idx < 0 || !idle() || sam_work_pending() ||
         _path.in_progress())
         return;
-    // Both want the same memory and never need it at once (plan 4, ruling 5).
+    // Both want the same memory and never need it at once.
     sam_yield();
     if (_doc && _doc->dirty()) save();
     _slide_index = _slide_pending = _idx;

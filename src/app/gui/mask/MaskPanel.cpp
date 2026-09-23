@@ -240,7 +240,7 @@ void MaskSession::draw_toolbar() {
 
     // On this row rather than a third one: a third row comes out of what
     // draw_canvas has to share between canvas and strip, raising the window
-    // height at which the strip clips (docs/notes/mask-editor.md).
+    // height at which the strip clips.
     if (erasing() || (mode() == CanvasMode::Shape && _tool.id() == ToolId::Brush)) {
         ImGui::SameLine();
         // 340 rather than the frame slider's 260 so the corner hint below
@@ -272,8 +272,7 @@ void MaskSession::note_row_width() {
                                           ImGui::GetStyle().WindowPadding.x);
 }
 
-// Rows A to D: the view and Play, propagate, its warning, find missing
-// (Decision 24).
+// Rows A to D: the view and Play, propagate, its warning, find missing.
 void MaskSession::draw_workflow_row() {
     const bool locked = _tool.in_progress();
     const spirula::i18n::Msg* names[3] = {&msg::view_overlay, &msg::view_mask_only,

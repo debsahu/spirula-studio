@@ -1,5 +1,5 @@
 #!/bin/bash
-# Plan 3's bench dataset: the three 8K root frames mask_doc_test's bench writes
+# The workflow bench dataset: the three 8K root frames mask_doc_test's bench writes
 # (f0000..f0002), plus cam1/f0002 copied from f0002 so a second camera exists
 # for the cross-camera refusal. Idempotent. Prints the frame count per camera;
 # callers assert it rather than assume it.

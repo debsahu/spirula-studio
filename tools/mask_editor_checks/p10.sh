@@ -1,9 +1,9 @@
 #!/bin/bash
-# Task 9's P10: one SAM click on the monopod, Save, then score the saved mask.
+# P10, SAM on a monopod: one click, Save, then score the saved mask.
 # usage: p10.sh <frame key> <screen x,y> <frame x> <frame y>
 # The app must be running (launch.sh) on MEC_DATASET with the editor open on
 # that frame in SAM mode. P10_REF: see p10_roi.py. Needs uv (pillow, numpy,
-# scipy). Points used for the recorded runs: points_ext.txt and the note.
+# scipy). Points used for the recorded runs: points_ext.txt.
 
 if [ "$1" = -h ] || [ "$1" = --help ] || [ $# -ne 4 ]; then
     sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 2

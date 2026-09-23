@@ -213,7 +213,7 @@ float Livewire::link_cost(int px, int py, int qx, int qy) const {
 }
 
 // ---------------------------------------------------------------------------
-// The search (Task 7)
+// The search
 // ---------------------------------------------------------------------------
 
 void Livewire::set_anchor(int gx, int gy) {

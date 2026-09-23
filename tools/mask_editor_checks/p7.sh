@@ -1,7 +1,6 @@
 #!/bin/bash
 # First pass of P7, unasserted: Esc during a first encode on f1, from f0 with
-# the editor open in SAM mode. It printed the 3303 ms the note's first P7 row
-# was hand-read from; battery.sh is the asserted version.
+# the editor open in SAM mode. battery.sh is the asserted version.
 
 source "$(dirname "$0")/env.sh"
 gc click --at $NEXT >/dev/null; for i in $(seq 1 100); do [ "$(st mask_editor_key)" = "f1" ] && break; gc wait --frames 5 >/dev/null; done

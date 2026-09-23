@@ -1,6 +1,6 @@
 #!/bin/bash
-# Task 8's in-app battery: P12 and P6, P7, P8b, and the close freeze. Every check
-# ASSERTS against its bar; the exit status is the number that missed.
+# SAM in-app battery: unload on close (P12), device memory (P6), Esc mid-encode
+# (P7), a stale result dropped (P8b), the close freeze. Exit = misses.
 # usage: battery.sh [gui pid]     (default: the one launch.sh recorded)
 # Needs the app running on the fixture, editor closed, on the first frame, and a
 # cached checkpoint (MEC_SAM_MODEL). The weights size is q4_0's; set MEC_WEIGHTS

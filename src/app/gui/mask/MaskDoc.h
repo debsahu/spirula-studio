@@ -144,7 +144,7 @@ private:
     size_t _byte_cap = kMaxHistoryBytes;
 };
 
-// ---- propagate (plan 3) ----------------------------------------------------
+// ---- propagate -------------------------------------------------------------
 
 struct PropagateRefusal {
     int w = 0, h = 0;   // the target's size, when the sizes differed

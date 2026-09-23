@@ -57,7 +57,7 @@ void compare_fill(const std::vector<float>& poly, int W, int H, const std::strin
 }
 
 // ---------------------------------------------------------------------------
-// Task 1: the fill
+// The fill
 // ---------------------------------------------------------------------------
 
 void test_fill_matches_ray_cast() {
@@ -79,7 +79,7 @@ void test_fill_matches_ray_cast() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 2: the spelling
+// The spelling
 // ---------------------------------------------------------------------------
 
 bool close_to(float a, float b) { return std::fabs(a - b) < 1e-6f; }
@@ -143,7 +143,7 @@ void test_path_spelling() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 3: the fill inside rasterize_frame_mask
+// The fill inside rasterize_frame_mask
 // ---------------------------------------------------------------------------
 
 app::MaskShape path_shape(std::vector<float> pts, bool remove) {
@@ -284,7 +284,7 @@ void test_path_order() {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 1: format_mask_shapes must not truncate at any magnitude
+// format_mask_shapes must not truncate at any magnitude
 // ---------------------------------------------------------------------------
 
 bool close_rel(float a, float b) { return std::fabs(a - b) <= std::fabs(a) * 1e-5f + 1e-3f; }
@@ -324,7 +324,7 @@ void test_format_extreme_values_do_not_truncate() {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 2: polyfill::contains must share fill_even_odd's boundary rule
+// polyfill::contains must share fill_even_odd's boundary rule
 // ---------------------------------------------------------------------------
 
 // Unlike test_fill_matches_ray_cast's vertices (deliberately off the pixel

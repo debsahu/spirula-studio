@@ -5,7 +5,7 @@
 // over the frame decimated to at most kLivewireMaxEdge on its long side, and
 // a lazy Dijkstra from one anchor that expands only as far as the cursor
 // asks. Coordinates are grid pixels; to_grid/to_frame map them to frame
-// pixels. No ImGui, no GL. Design and floors: docs/notes/mask-editor.md.
+// pixels. No ImGui, no GL. Design: docs/notes/mask-editor.md.
 
 #include <atomic>
 #include <cstddef>
