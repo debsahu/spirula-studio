@@ -25,7 +25,7 @@ struct SlideFrame {
     bool flipped = false;   // the mask folder's 255 is drop
 };
 
-// What make_picture (Picture.cpp:73-76) produces for a w x h source at this
+// What size_picture (Picture.cpp:71-83) produces for a w x h source at this
 // target: a whole-pixel box step, never upscaling. An unknown source gets the
 // strict upper bound, since the box step leaves dw and dh each at most target.
 inline size_t slide_picture_bytes(int src_w, int src_h, int target) {

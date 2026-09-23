@@ -20,6 +20,7 @@
 #include "app/gui/mask/MaskWindow.h"
 #include "core/ImageOrient.h"
 #include "core/MaskMargin.h"
+#include "core/PageAlloc.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
 #include "i18n/catalog/Dataset.h"
@@ -4051,7 +4052,9 @@ void bench_8k(const char* dir) {
                 median_ms([&] { d.save(layer.string(), masks.string(), idx, err); }));
     std::printf("bench undo x20                   %8.1f ms\n",
                 median_ms([&] { for (int k = 0; k < 20; k++) d.undo(); for (int k = 0; k < 20; k++) d.redo(); }, 1));
-    // Plan 3: what the slideshow decodes per frame, single-threaded.
+    // Plan 3: what the slideshow decodes per frame, single-threaded, on a
+    // thread that page-allocates stb's buffers as the slideshow's decoders do.
+    spirula::PageAllocScope pages;
     gui::Picture pic;
     const std::string img0 = (images / "f0000.jpg").string(), msk0 = (masks / "f0000.png").string();
     const double p1024 = median_ms([&] { gui::load_picture(img0, msk0, 1024, pic); });
@@ -6710,6 +6713,169 @@ bool wait_decoded(const mk::SlidePrefetch& p, int n, int ms = 3000) {
     return p.decoded() >= n;
 }
 
+// memory9: load_picture reads stb's buffers in place and boxes the photo before
+// it decodes the mask. The oracle shares no code with Picture.cpp: the photo
+// and the 0/255 stencil come from FrameMask.cpp, the box and the tint are here.
+void oracle_picture(const std::string& img, const std::string& msk, int target, bool flipped,
+                    gui::Picture& out) {
+    int w = 0, h = 0, mw = 0, mh = 0;
+    std::vector<uint8_t> rgb, m;
+    app::load_rgb(img, w, h, rgb);
+    const bool got = !msk.empty() && app::load_stencil(msk, mw, mh, m);
+    const int step = std::max(1, (std::max(w, h) + target - 1) / target);
+    out = gui::Picture{};
+    out.w = std::max(1, w / step);
+    out.h = std::max(1, h / step);
+    out.src_w = w;
+    out.src_h = h;
+    out.made_for = target;
+    out.rgb.resize((size_t)out.w * out.h * 3);
+    for (int y = 0; y < out.h; y++)
+        for (int x = 0; x < out.w; x++) {
+            int acc[3] = {0, 0, 0}, n = 0, keep = 0;
+            for (int sy = y * step; sy < std::min(h, y * step + step); sy++)
+                for (int sx = x * step; sx < std::min(w, x * step + step); sx++, n++) {
+                    for (int c = 0; c < 3; c++) acc[c] += rgb[((size_t)sy * w + sx) * 3 + c];
+                    if (!got) continue;
+                    const int my = std::min(mh - 1, sy * mh / h), mx = std::min(mw - 1, sx * mw / w);
+                    keep += (m[(size_t)my * mw + mx] == 255) != flipped;
+                }
+            uint8_t* px = &out.rgb[((size_t)y * out.w + x) * 3];
+            for (int c = 0; c < 3; c++) px[c] = (uint8_t)(acc[c] / n);
+            if (got && 2 * keep < n) {
+                px[0] = (uint8_t)(px[0] / 3 + 150);
+                px[1] = (uint8_t)(px[1] / 3);
+                px[2] = (uint8_t)(px[2] / 3);
+            }
+        }
+}
+
+// Grey, not 0/255: 127 and 128 sit either side of the keep threshold. The left
+// half alternates them by column, so every block of even width is exactly half kept.
+std::vector<uint8_t> grey_mask(int w, int h) {
+    std::vector<uint8_t> px((size_t)w * h);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+            px[(size_t)y * w + x] = x < w / 2 ? (uint8_t)(x % 2 ? 128 : 127)
+                                              : (uint8_t)((x * 7 + y * 13 + (x * y) % 97) & 255);
+    return px;
+}
+
+// Blocks of `step` in which exactly half the pixels are kept (> 127).
+int half_kept_blocks(const std::vector<uint8_t>& m, int w, int h, int step) {
+    int count = 0;
+    for (int y = 0; y + step <= h; y += step)
+        for (int x = 0; x + step <= w; x += step) {
+            int keep = 0;
+            for (int sy = y; sy < y + step; sy++)
+                for (int sx = x; sx < x + step; sx++) keep += m[(size_t)sy * w + sx] > 127;
+            count += keep * 2 == step * step;
+        }
+    return count;
+}
+
+void test_load_picture_matches_make_picture() {
+    const int W = 1536, H = 768;
+    const fs::path d = scratch("picture_parity");
+    const std::string img = (d / "a.jpg").string(), msk = (d / "a.png").string();
+    write_jpg_rgb(img, W, H, synth_rgb(W, H, 3));
+    const std::vector<uint8_t> m = grey_mask(W, H);
+    write_png_gray(msk, W, H, m);
+    for (int target : {1536, 768, 512, 256, 192}) {
+        const int step = (std::max(W, H) + target - 1) / target;
+        if (step % 2 == 0)
+            check(half_kept_blocks(m, W, H, step) > 0,
+                  "picture parity: fixture holds exactly-half-kept blocks at step " + std::to_string(step));
+        for (bool flipped : {false, true}) {
+            gui::Picture got, want;
+            const bool ok = gui::load_picture(img, msk, target, got, flipped);
+            oracle_picture(img, msk, target, flipped, want);
+            const std::string tag = "picture parity: target " + std::to_string(target) +
+                                    (flipped ? " flipped" : "");
+            check(ok && got.w == want.w && got.h == want.h && got.src_w == W && got.made_for == target,
+                  tag + ": the oracle's size " + std::to_string(want.w) + "x" + std::to_string(want.h));
+            check(ok && got.rgb == want.rgb, tag + ": byte for byte the oracle's");
+        }
+    }
+    int w = 0, h = 0, mw = 0, mh = 0;
+    std::vector<uint8_t> rgb, st;
+    app::load_rgb(img, w, h, rgb);
+    app::load_stencil(msk, mw, mh, st);
+    for (int target : {768, 256}) {
+        gui::Picture made, want;
+        gui::make_picture(rgb.data(), w, h, st.data(), target, made);
+        oracle_picture(img, msk, target, false, want);
+        check(made.rgb == want.rgb && made.w == want.w,
+              "picture parity: make_picture keeps its bytes, target " + std::to_string(target));
+    }
+    gui::Picture bare, masked;
+    gui::load_picture(img, "", 256, bare);
+    gui::load_picture(img, msk, 256, masked);
+    check(!bare.empty() && bare.rgb != masked.rgb, "picture parity: fixture check: the mask tints something");
+}
+
+void test_load_picture_reuses_its_buffer() {
+    const fs::path d = scratch("picture_reuse");
+    const std::string img = (d / "a.jpg").string(), msk = (d / "a.png").string();
+    write_jpg_rgb(img, 640, 480, synth_rgb(640, 480, 1));
+    write_png_gray(msk, 640, 480, synth_mask(640, 480, 1));
+    gui::Picture out;
+    // Room for twice the picture: a fresh vector would come back exactly sized.
+    out.rgb.reserve((size_t)320 * 240 * 3 * 2);
+    const uint8_t* data = out.rgb.data();
+    const size_t cap = out.rgb.capacity();
+    bool same = true, ok = true;
+    for (int i = 0; i < 20; i++) {
+        ok = ok && gui::load_picture(img, msk, 320, out) && out.w == 320;
+        same = same && out.rgb.data() == data && out.rgb.capacity() == cap;
+    }
+    check(ok && same, "picture reuse: 20 loads at one target keep the buffer they were given");
+    const bool failed = !gui::load_picture((d / "missing.jpg").string(), msk, 320, out);
+    check(failed && out.empty() && out.w == 0 && out.rgb.capacity() == cap,
+          "picture reuse: a file that does not decode empties the picture and keeps its buffer");
+}
+
+void test_load_picture_mask_other_size() {
+    const fs::path d = scratch("picture_other_size");
+    const std::string img = (d / "a.jpg").string(), msk = (d / "a.png").string();
+    // Odd sizes, so nearest sampling of a half-size mask lands on row and
+    // column boundaries a rounded or shifted map would cross.
+    write_jpg_rgb(img, 203, 151, synth_rgb(203, 151, 5));
+    write_png_gray(msk, 101, 75, synth_mask(101, 75, 5));
+    for (int target : {203, 101, 40})
+        for (bool flipped : {false, true}) {
+            gui::Picture got, want;
+            gui::load_picture(img, msk, target, got, flipped);
+            oracle_picture(img, msk, target, flipped, want);
+            check(!got.empty() && got.rgb == want.rgb,
+                  "picture other size: a half-size mask samples like the oracle, target " +
+                      std::to_string(target) + (flipped ? " flipped" : ""));
+        }
+}
+
+// A JPEG mask stored sideways with Orientation 6 is turned upright before it is
+// laid on the photo, as load_stencil does; stb's buffer alone would not be.
+void test_load_picture_turned_mask() {
+    const fs::path d = scratch("picture_turned");
+    const std::string img = (d / "a.jpg").string(), msk = (d / "a_mask.jpg").string();
+    write_jpg_rgb(img, 64, 48, synth_rgb(64, 48, 2));
+    std::vector<uint8_t> side((size_t)48 * 64 * 3);
+    for (int y = 0; y < 64; y++)
+        for (int x = 0; x < 48; x++) {
+            const uint8_t v = (x < 12 || y < 20) ? 0 : 255;
+            for (int c = 0; c < 3; c++) side[((size_t)y * 48 + x) * 3 + c] = v;
+        }
+    check(write_jpg_rgb_oriented(msk, 48, 64, side, 6) && !app::photo_turn(msk).identity(),
+          "picture turned: fixture: a 48x64 JPEG mask carrying Orientation 6");
+    for (bool flipped : {false, true}) {
+        gui::Picture got, want;
+        gui::load_picture(img, msk, 32, got, flipped);
+        oracle_picture(img, msk, 32, flipped, want);
+        check(!got.empty() && got.rgb == want.rgb,
+              std::string("picture turned: the mask is turned before it is laid on") + (flipped ? ", flipped" : ""));
+    }
+}
+
 void test_slide_prefetch() {
     Fixture f = make_dataset("slide", 64, 48, {"a", "b", "c", "d", "e", "g"});
     std::vector<mk::SlideFrame> frames;
@@ -8184,6 +8350,10 @@ int main() {
     test_session_sam_release_pending_refuses();
     test_session_sam_margin_keeps_pause();
     test_session_sam_redo_after_dropped_margin();
+    test_load_picture_matches_make_picture();
+    test_load_picture_reuses_its_buffer();
+    test_load_picture_mask_other_size();
+    test_load_picture_turned_mask();
     test_slide_prefetch();
     test_slide_prefetch_evicts_farthest();
     test_slide_prefetch_discards_stale();
