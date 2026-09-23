@@ -218,6 +218,14 @@ three repeats each, median.
 | derive whole mask, step 2 | 8.3 ms | |
 | MaskDoc::save 8K | 702.5 ms | |
 | undo x20 + redo x20 | 9.3 ms | |
+| load_picture 8K -> 1024 | 124.2 ms | decode + box filter + mask tint, 1 thread; 960x480 picture (1.3 MB) = 8.1 fps |
+| load_picture 8K -> 2048 | 131.6 ms | 1920x960 picture (5.3 MB) |
+| load_picture 8K -> 4096 | 142.2 ms | the app's full-screen target; 3840x1920 picture (21.1 MB) = 7.0 fps |
+| load_picture 1080p -> 1024 | 10.0 ms | 960x540 picture = 100.0 fps; 16-frame fixture under `<bench>/hd` |
+| slideshow pool 8K -> 1024, 4 threads | 30.7 fps | depth 11; longest warm wait 121 ms; cold first frame 142 ms; decodes <= 100+1+depth. PASS (>= 5) |
+| slideshow pool 8K -> 4096, 4 threads | 19.7 fps | 3840x1920 picture; depth 3 (kReelBudget / 21.1 MB), so at most 3 decodes in flight; longest wait 163 ms. PASS (>= 5) |
+| slideshow pool 1080p -> 1024, 4 threads | 379.6 fps | depth 11; longest wait 10.6 ms. PASS (>= 30) |
+| slideshow pool 1080p -> 4096, 4 threads | 406.9 fps | 1920x1080 at step 1; depth 10; longest wait 10.5 ms. PASS (>= 30) |
 | resident memory, one 8K frame open | 387.3 MB above baseline | out-of-band `/usr/bin/time -l` peak RSS, not part of the committed bench; see note below; bar 600 MB |
 
 M5 Pro, 18 cores, macOS 26.6.2, load average ~2.96/18 during measurement (quiet,
@@ -242,6 +250,20 @@ in its status strip ("Last stroke"); see the in-app measurement below.
 Criterion 9 of the plan (resident memory <= 600 MB above baseline with one 8K
 frame open): measured at 387.3 MB above baseline. PASS, by the out-of-band
 `/usr/bin/time -l` method described above, not by anything in `bench_8k`.
+
+Criterion 8 of the plan (>= 5 fps at 8K on four threads, >= 30 fps at
+1080p): the single-thread decode floors are 124.2 ms through load_picture
+at a 1024 px target and 142.2 ms at the 4096 px target the app asks for on
+a full-screen pane, giving 8.1 and 7.0 fps on one thread; 1080p gives
+100.0 fps on one thread (Task 10). Criterion 8 is met on the pool rows
+(Task 11): four threads sustain 30.7 fps at 8K into a 1024 px pane and
+19.7 fps at the 4096 target, where the ring's 64 MB holds three
+3840x1920 pictures and so admits three decodes at once (3 x 7.0 fps is
+the ceiling); 1080p runs at 380-407 fps. PASS. Each row takes 100 frames
+in the session's order (take, then move the window past the frame), and
+decodes stay within 100 + 1 + depth, so the order is paid for once. The
+lever at 4096 is kReelBudget, not the thread count. Task 13's in-app
+reading is an observation of a different quantity (see Task 13).
 
 **Why the margin is ~90x and not ~2x** (carried from the Task 9 review). Plan
 line 43 predicted a naive `gui::Selection` approach would pay "two 29.5 MB
@@ -1589,7 +1611,7 @@ shape of the evidence behind every number in this note.
 **Nothing automated ever drives the GUI.** `mask_doc_test` links `MaskLayer`,
 `MaskDoc`, `MaskSession`, `MaskWindow`, `EditDoc`, `SelectShape`, `Selection`,
 `FrameMask`, `FrameLook`, `Livewire` and `PathTool`
-(`cmake/SsApps.cmake:414-429`) -- **`MaskPanel.cpp` and `PathOverlay.cpp` are
+(`cmake/SsApps.cmake:414-431`) -- **`MaskPanel.cpp` and `PathOverlay.cpp` are
 in no test target at all**, which is the deliberate ImGui carve-out and is
 also the reason nothing in CI can catch a panel regression. Every in-app
 result in this note came from a hand-run `guictl.py` battery. It is

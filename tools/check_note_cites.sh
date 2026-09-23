@@ -95,8 +95,8 @@ row src/app/gui/Layout.cpp 34 "ItemSpacing = ImVec2(8, 6)"
 row src/app/gui/Layout.h 26 "unscaled * ui_scale()"
 row src/app/gui/Layout.cpp 49-50 "ScaleAllSizes(scale)"
 row src/app/gui/Layout.cpp 49-50 "FontScaleMain = scale"
-row cmake/SsApps.cmake 414-429 "add_executable(mask_doc_test" 414
-row cmake/SsApps.cmake 414-429 "ss_configure_app(mask_doc_test)" 429
+row cmake/SsApps.cmake 414-431 "add_executable(mask_doc_test" 414
+row cmake/SsApps.cmake 414-431 "ss_configure_app(mask_doc_test)" 431
 # The slider and the eraser.
 row src/app/gui/mask/MaskPanel.cpp 237-251 "ImGuiSliderFlags_Logarithmic"
 row src/app/gui/mask/MaskPanel.cpp 237-251 "erasing() || (mode() == CanvasMode::Shape && _tool.id() == ToolId::Brush)" 237
