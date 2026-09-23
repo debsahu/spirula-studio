@@ -2560,6 +2560,106 @@ void test_undo_propagate_failure_no_entry() {
     undo_failure_no_entry_arm(true);
 }
 
+// macOS's user immutable flag: the file can be neither removed nor replaced,
+// while its siblings can. Cleared when this goes out of scope.
+struct Immutable {
+    fs::path p;
+    bool on = false;
+    explicit Immutable(const fs::path& path) : p(path) {
+#if defined(__APPLE__)
+        on = geteuid() != 0 && ::chflags(p.c_str(), UF_IMMUTABLE) == 0;
+#endif
+    }
+    ~Immutable() { clear(); }
+    void clear() {
+#if defined(__APPLE__)
+        if (on) ::chflags(p.c_str(), 0);
+#endif
+        on = false;
+    }
+};
+
+bool immutable_injects() {
+#if defined(__APPLE__)
+    if (geteuid() != 0) return true;
+#endif
+    static bool said = false;
+    if (!said) std::printf("skip immutable-file arms: skipped (not macOS, or root)\n");
+    said = true;
+    return false;
+}
+
+// One layer that will not go: revert_frame removes the base and the keep, then
+// fails. Every file goes back on its own, the resisting one included.
+void undo_one_layer_resists_arm(bool flipped) {
+    if (!immutable_injects()) return;
+    const std::string tag = flipped ? "one layer resists (flipped): " : "one layer resists (unflipped): ";
+    Fixture f = make_dataset(flipped ? "undo_uchg_f" : "undo_uchg_u", 64, 48, {"cam0/a", "cam0/b"});
+    const fs::path b_png = f.masks / "cam0" / "b.png", dir = f.layer / "cam0";
+    const fs::path b_base = dir / "b.base.png", b_drop = dir / "b.drop.png", b_keep = dir / "b.keep.png";
+    mk::MaskSession s;
+    open_and_drop(s, f, flipped, tag);
+    keep_box(s);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const std::vector<uint8_t> mask_p = file_bytes(b_png), base_p = file_bytes(b_base),
+                               drop_p = file_bytes(b_drop), keep_p = file_bytes(b_keep);
+    check(!base_p.empty() && !drop_p.empty() && !keep_p.empty() && s.can_undo_propagate(),
+          tag + "fixture: b was propagated with a drop and a keep, no entry before");
+    {
+        Immutable lock(b_drop);
+        check(lock.on, tag + "fixture: b's drop layer is immutable");
+        s.undo_propagate();
+        settle(s);
+    }
+    check(s.error().find("cam0/b") != std::string::npos && s.can_undo_propagate(),
+          tag + "the failure is named and the undo offered again: " + s.error());
+    check(file_bytes(b_png) == mask_p && file_bytes(b_base) == base_p && file_bytes(b_drop) == drop_p &&
+              file_bytes(b_keep) == keep_p,
+          tag + "the base, both layers and the mask are the propagate's, byte for byte");
+    s.go_to(1);
+    settle(s);
+    std::vector<uint8_t> shown = s.doc() ? s.doc()->composite() : std::vector<uint8_t>();
+    if (flipped) mk::flip_polarity(shown.data(), shown.size());
+    check(s.doc() && !s.doc()->dirty() && shown == stencil_pixels(b_png),
+          tag + "b opens showing the mask training reads");
+    s.close();
+}
+
+void test_undo_propagate_one_layer_resists() {
+    undo_one_layer_resists_arm(false);
+    undo_one_layer_resists_arm(true);
+}
+
+// Revert all queued right behind a propagate: the record the propagate's job
+// sets is dropped by the revert's job. Whether the propagate's job has run by
+// the time of the UI-thread drop varies, so the pair is repeated kQueued times.
+void test_revert_all_drops_queued_record() {
+    constexpr int kQueued = 10;
+    Fixture f = make_dataset("prop_revall_queued", 64, 48, {"cam0/a", "cam0/b"});
+    mk::MaskSession s;
+    open_and_drop(s, f, false, "queued revert all: ");
+    int survived = 0;
+    for (int i = 0; i < kQueued; i++) {
+        if (i) {
+            mk::Mapping m;
+            gui::ShapeStroke box;
+            box.kind = gui::ShapeKind::Box;
+            box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+            s.commit_stroke(box, mk::Paint::ForceDrop, m);
+        }
+        s.propagate(mk::PropagateScope::Next, 0, 0);
+        s.revert_every_frame();
+        settle(s);
+        if (!s.doc() || s.doc()->key() != "cam0/a") break;
+        survived += s.can_undo_propagate() ? 1 : 0;
+    }
+    check(s.doc() && s.doc()->key() == "cam0/a" && survived == 0,
+          "queued revert all: no record outlives a Revert all queued behind its propagate (" +
+              std::to_string(survived) + " of " + std::to_string(kQueued) + ")");
+    s.close();
+}
+
 // The same undo failing only at its index write: the files are already gone,
 // so nothing is put back and masks/ already holds the undone mask.
 void test_undo_propagate_index_save_fails() {
@@ -2659,32 +2759,36 @@ void test_propagate_names_unrestored() {
     s.close();
 }
 
-// A rollback that fails after the propagate really wrote: c's drop went in,
-// its keep did not, and the rollback cannot read the keep back either.
+// A rollback that fails after the propagate really wrote: the source is saved
+// first, so only c's mask write meets the read-only folder, after c's layers
+// went in; the rollback puts the drop back and then fails on the same write.
 void test_propagate_unrestored_after_a_write() {
+    if (!chmod_injects()) return;
     Fixture f = make_dataset("prop_wrote", 64, 48, {"cam0/a", "cam0/c"});
-    const fs::path c_drop = f.layer / "cam0" / "c.drop.png", c_keep = f.layer / "cam0" / "c.keep.png";
+    const fs::path c_drop = f.layer / "cam0" / "c.drop.png", ro = f.masks / "cam0";
     mk::MaskSession s;
     open_and_drop(s, f, false, "wrote: ");
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
-    const std::vector<uint8_t> drop_before = file_bytes(c_drop);
-    std::error_code ec;
-    fs::remove(c_keep, ec);
-    fs::create_directories(c_keep / "blocker", ec);
+    const std::vector<uint8_t> drop_before = file_bytes(c_drop), c_before = file_bytes(ro / "c.png");
     gui::ShapeStroke big;
     big.kind = gui::ShapeKind::Box;
     big.pts = {20.0f, 20.0f, 40.0f, 40.0f};
     mk::Mapping m;
     s.commit_stroke(big, mk::Paint::ForceDrop, m);
+    s.save();
+    settle(s);
+    check(!s.doc()->dirty(), "wrote: fixture: the source is saved, so the job writes nothing of its own");
+    const auto was = fs::status(ro).permissions();
+    fs::permissions(ro, fs::perms::owner_read | fs::perms::owner_exec);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
+    fs::permissions(ro, was);
     const mk::PropagateReport r = s.last_propagate();
-    check(r.failed == 1 && r.unrestored == 1 && r.unrestored_path.find("c.keep.png") != std::string::npos,
-          "wrote: the keep write failed, so the drop had been written, and the rollback failed: " +
-              r.unrestored_path);
-    check(file_bytes(c_drop) == drop_before, "wrote: the rollback still put c's drop back");
-    fs::remove_all(c_keep, ec);
+    check(r.failed == 1 && r.unrestored == 1 && r.unrestored_path.find("c.png") != std::string::npos,
+          "wrote: c failed at its mask, after its layers, and the rollback failed too: " + r.unrestored_path);
+    check(file_bytes(c_drop) == drop_before && file_bytes(ro / "c.png") == c_before,
+          "wrote: the rollback still put c's drop back, and the mask was never touched");
     s.close();
 }
 
@@ -6594,6 +6698,8 @@ int main() {
     test_undo_propagate_failure();
     test_revert_all_drops_propagate_record();
     test_undo_propagate_failure_no_entry();
+    test_undo_propagate_one_layer_resists();
+    test_revert_all_drops_queued_record();
     test_undo_propagate_index_save_fails();
     test_propagate_camera_many();
     test_propagate_names_unrestored();

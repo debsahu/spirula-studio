@@ -517,10 +517,11 @@ bool restore_layers(const std::string& layer_root, const std::string& mask_root,
         const bool readable = can_put_back && (!has_mask || read_file(mask_path, found_mask)) &&
                               (!has_base || read_file(base_path, found_base));
         if (!revert_frame(layer_root, mask_root, snap.key, idx, error)) {
+            // Each file on its own: the one that would not go is still there.
             if (readable && idx.frames.count(snap.key)) {
-                std::string bad;
                 if (has_base) write_file_atomic(base_path, found_base.data(), found_base.size());
-                put(now, bad);
+                put_one(d, now.had_drop, now.drop_png);
+                put_one(k, now.had_keep, now.keep_png);
                 if (has_mask) write_file_atomic(mask_path, found_mask.data(), found_mask.size());
             }
             return false;

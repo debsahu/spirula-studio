@@ -3177,7 +3177,10 @@ now puts back the layers it found whenever the mask on disk is still the
 found entry's composite and not the snapshot's, so the frame stays wholly as
 the propagate left it. A never-edited target is undone by `revert_frame`, which
 writes the mask before it removes the files; when a removal fails the entry
-stays, so the base, the layers and the mask read beforehand go back too. When
+stays, so the base, the layers and the mask read beforehand go back too, each
+file on its own: when one layer resists removal (a macOS immutable flag, or a
+file held open on Windows) its siblings are gone, and a put-back that stopped at
+the resisting file left the frame opening without its keep. When
 only the index write fails the files are already gone and nothing goes back:
 the mask is the undone one. A target that would not go back stays in the record,
 and the status line names it and says to use Undo propagate again. A
@@ -3205,6 +3208,14 @@ The propagate's load rebases it, so the undo gives the regenerated base under
 the target's own layers, which is what opening it would have shown, not the
 raw file that was on disk. `test_undo_propagate_regenerated_target` pins that
 and nothing asserts byte identity there.
+
+**Reported, and healed by a retry.** When a never-edited target's rollback
+fails inside the propagate because `masks/` will not take its write, the target
+keeps its `.base.png` and layers with no index entry: the status line names it
+and Undo propagate removes them. Opened first instead, it shows the propagated
+look over an untouched mask, the record is gone, and a later propagate onto it
+is refused as a stray base. A put-back write that fails for a second reason is
+reported and not repaired.
 
 **Known and left, as in plan 1's `revert_all`.** A mask regenerated after the
 propagate (a CLI `spirula sam` run; the app's DatasetPrep rebases first) is
