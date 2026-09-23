@@ -3469,6 +3469,109 @@ void test_click_maps_by_shown_layout() {
           "shown layout: a reloaded document forgets the old layout");
 }
 
+// Side by side draws one view twice: the same picture point in either pane
+// must reach the same frame pixel, and a click in the gap reaches none.
+void test_click_maps_by_clicked_pane() {
+    Fixture f = make_dataset("shown_panes", 64, 32, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "shown panes: open: " + err);
+    settle(s);
+    mk::View v;
+    const float pane_w = 300.0f, gap = 6.0f;
+    const mk::Mapping m = mk::mapping(v, 64, 32, pane_w, 150.0f);
+    float wx = 0.0f, wy = 0.0f, gx = 0.0f, gy = 0.0f;
+    s.path_space(m).to_frame(40.0f, 30.0f, wx, wy);
+    // Where a right-pane click goes through the LEFT pane's origin: the defect.
+    s.path_space(m).to_frame(40.0f + pane_w + gap, 30.0f, gx, gy);
+    check(std::fabs(gx - wx) > 1.0f,
+          "shown panes: fixture: the left origin sends a right-pane click elsewhere");
+    s.note_shown(m, 100.0f, 50.0f, 2, pane_w, gap);
+    float lx = -1.0f, ly = -1.0f, rx = -1.0f, ry = -1.0f;
+    check(s.shown_to_frame(140.0f, 80.0f, lx, ly) && lx == wx && ly == wy,
+          "shown panes: a left-pane click lands where the left pane had it");
+    check(s.shown_to_frame(140.0f + pane_w + gap, 80.0f, rx, ry) && rx == wx && ry == wy,
+          "shown panes: a right-pane click lands on the same frame pixel");
+    check(!s.shown_to_frame(100.0f + pane_w + 0.5f * gap, 80.0f, rx, ry),
+          "shown panes: a click in the gap is no click");
+    s.note_shown(m, 100.0f, 50.0f);
+    check(s.shown_to_frame(140.0f, 80.0f, lx, ly) && lx == wx && ly == wy,
+          "shown panes: one pane maps as it always did");
+    s.close();
+}
+
+// Every peek in every view: side by side shows photo and mask bare, and a peek
+// turns exactly one pane into the overlay. One pane ignores the pane index.
+void test_pane_style_for() {
+    using S = mk::Style;
+    using P = mk::Peek;
+    using V = mk::ViewMode;
+    struct Row { V v; P p; S left, right; const char* what; };
+    const Row rows[] = {
+        {V::Overlay, P::None, S::Overlay, S::Overlay, "overlay, no peek"},
+        {V::Overlay, P::Photo, S::Photo, S::Photo, "overlay, Tab"},
+        {V::Overlay, P::Mask, S::MaskOnly, S::MaskOnly, "overlay, Shift+Tab"},
+        {V::MaskOnly, P::None, S::MaskOnly, S::MaskOnly, "mask only, no peek"},
+        {V::MaskOnly, P::Photo, S::Photo, S::Photo, "mask only, Tab"},
+        {V::MaskOnly, P::Mask, S::MaskOnly, S::MaskOnly, "mask only, Shift+Tab"},
+        {V::SideBySide, P::None, S::Photo, S::MaskOnly, "side by side, no peek"},
+        {V::SideBySide, P::Photo, S::Photo, S::Overlay, "side by side, Tab"},
+        {V::SideBySide, P::Mask, S::Overlay, S::MaskOnly, "side by side, Shift+Tab"},
+    };
+    for (const Row& r : rows) {
+        check(mk::pane_style_for(r.p, r.v, 0) == r.left,
+              std::string("pane style: ") + r.what + ", left pane");
+        check(mk::pane_style_for(r.p, r.v, 1) == r.right,
+              std::string("pane style: ") + r.what + ", right pane");
+    }
+}
+
+// A cached pane window is reused only while it is the same window in the same
+// style. The right pane is forgotten off screen: upload_rect keeps only panes
+// on screen current, so a stroke painted meanwhile would never reach it.
+void test_plan_derive() {
+    using S = mk::Style;
+    using P = mk::Peek;
+    using V = mk::ViewMode;
+    mk::Window a, b;
+    a.r = mk::Rect{0, 0, 32, 32};
+    b.r = mk::Rect{16, 0, 48, 32};
+    a.tw = a.th = b.tw = b.th = 32;
+    check(!mk::same_window(a, b), "plan derive: fixture: the two windows differ");
+    mk::Window w0, w1;
+    S s0 = S::Overlay, s1 = S::MaskOnly;
+    auto run = [&](bool dirty, const mk::Window& want, V v, P p) {
+        return mk::plan_derive(dirty, want, v, p, w0, s0, w1, s1);
+    };
+    mk::PaneDerive d = run(true, a, V::Overlay, P::None);
+    check(d.left && !d.right && mk::same_window(w0, a),
+          "plan derive: dirty derives the one pane shown");
+    d = run(false, a, V::Overlay, P::None);
+    check(!d.left && !d.right, "plan derive: nothing changed, nothing derived");
+    d = run(false, a, V::Overlay, P::Photo);
+    check(d.left && s0 == S::Photo, "plan derive: a peek re-derives in the new style");
+    d = run(false, a, V::Overlay, P::None);
+    check(d.left && s0 == S::Overlay, "plan derive: releasing the peek re-derives");
+    d = run(false, b, V::Overlay, P::None);
+    check(d.left && mk::same_window(w0, b), "plan derive: a moved window re-derives");
+    d = run(false, b, V::SideBySide, P::None);
+    check(d.left && d.right && s0 == S::Photo && s1 == S::MaskOnly && mk::same_window(w1, b),
+          "plan derive: side by side derives both panes, photo and mask");
+    d = run(false, b, V::SideBySide, P::None);
+    check(!d.left && !d.right, "plan derive: side by side, nothing changed, nothing derived");
+    d = run(false, b, V::SideBySide, P::Photo);
+    check(!d.left && d.right && s1 == S::Overlay,
+          "plan derive: side by side, Tab re-derives only the mask pane");
+    run(false, b, V::SideBySide, P::None);
+    d = run(false, b, V::Overlay, P::None);
+    check(d.left && !d.right, "plan derive: back to one pane, the right pane is not derived");
+    d = run(false, b, V::SideBySide, P::None);
+    check(d.right, "plan derive: the right pane comes back derived afresh, not stale");
+    d = run(true, b, V::SideBySide, P::None);
+    check(d.left && d.right, "plan derive: dirty derives both panes");
+}
+
 // A result paints in the mode its click asked for: plain drops, Ctrl keeps,
 // Shift+Ctrl clears back to the base -- the paint grammar, on SAM's region.
 void test_session_sam_paint_modes() {
@@ -4711,6 +4814,9 @@ int main() {
     test_mask_picker_row();
     test_strip_reserve();
     test_click_maps_by_shown_layout();
+    test_click_maps_by_clicked_pane();
+    test_pane_style_for();
+    test_plan_derive();
     test_session_sam_paint_modes();
     test_session_sam_clear_is_local();
     test_margin_radius();

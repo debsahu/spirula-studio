@@ -48,52 +48,58 @@ std::string one_decimal(double v) {
 
 void MaskSession::destroy_gl() {
     if (_tex) glDeleteTextures(1, &_tex);
-    _tex = 0;
+    if (_tex2) glDeleteTextures(1, &_tex2);
+    _tex = _tex2 = 0;
     _win = Window{};
+    _win2 = Window{};
     _win_dirty = true;
 }
 
-void MaskSession::ensure_window(const Mapping& m, float pane_w, float pane_h) {
-    const Window want = window_for(m, _dw, _dh, pane_w, pane_h);
-    const Style style = pane_style(0);
-    if (!_win_dirty && same_window(want, _win) && style == _win_style) return;
-    _win = want;
-    _win_style = style;
-    _win_dirty = false;
-    if (_win.r.empty()) return;
+void MaskSession::upload_window(GLuint& tex, const Window& win, Style style,
+                                std::vector<uint8_t>& rgba) {
+    if (win.r.empty()) return;
     WindowSource src = window_source();
-    src.style = _win_style;
-    derive_window(_win, _win.r, src, _rgba);
-    if (!_tex) glGenTextures(1, &_tex);
-    glBindTexture(GL_TEXTURE_2D, _tex);
+    src.style = style;
+    derive_window(win, win.r, src, rgba);
+    if (!tex) glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, _win.tw, _win.th, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                 _rgba.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, win.tw, win.th, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 rgba.data());
 }
 
-void MaskSession::upload_rect(const Rect& shown) {
-    if (!_tex || _win.r.empty() || shown.empty()) return;
+void MaskSession::ensure_window(const Mapping& m, float pane_w, float pane_h) {
+    const Window want = window_for(m, _dw, _dh, pane_w, pane_h);
+    const PaneDerive d =
+        plan_derive(_win_dirty, want, _view_mode, _peek, _win, _win_style, _win2, _win2_style);
+    _win_dirty = false;
+    if (d.left) upload_window(_tex, _win, _win_style, _rgba);
+    if (d.right) upload_window(_tex2, _win2, _win2_style, _rgba2);
+}
+
+void MaskSession::upload_rect_to(GLuint tex, const Window& win, Style style,
+                                 std::vector<uint8_t>& rgba, const Rect& shown) {
+    if (!tex || win.r.empty() || shown.empty()) return;
     WindowSource src = window_source();
-    src.style = _win_style;
-    const Rect t = derive_window(_win, shown, src, _rgba);
+    src.style = style;
+    const Rect t = derive_window(win, shown, src, rgba);
     if (t.empty()) return;
-    glBindTexture(GL_TEXTURE_2D, _tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, _win.tw);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, win.tw);
     glTexSubImage2D(GL_TEXTURE_2D, 0, t.x0, t.y0, t.w(), t.h(), GL_RGBA, GL_UNSIGNED_BYTE,
-                    _rgba.data() + ((size_t)t.y0 * _win.tw + (size_t)t.x0) * 4);
+                    rgba.data() + ((size_t)t.y0 * win.tw + (size_t)t.x0) * 4);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
-Style MaskSession::pane_style(int) const {
-    if (_peek == Peek::Photo) return Style::Photo;
-    if (_peek == Peek::Mask) return Style::MaskOnly;
-    return Style::Overlay;
+void MaskSession::upload_rect(const Rect& shown) {
+    upload_rect_to(_tex, _win, _win_style, _rgba, shown);
+    if (_view_mode == ViewMode::SideBySide) upload_rect_to(_tex2, _win2, _win2_style, _rgba2, shown);
 }
 
 void MaskSession::draw() {
@@ -123,7 +129,7 @@ void MaskSession::draw() {
         const float status_y = ImGui::GetCursorPosY();
         draw_status();
         _status_h = ImGui::GetCursorPosY() - status_y;
-        _strip.update(_status_h, (int)_mode, ImGui::GetWindowWidth());
+        _strip.update(_status_h, (int)_mode * 3 + (int)_view_mode, ImGui::GetWindowWidth());
     }
     ImGui::End();
     if (!open) _close_requested = true;
@@ -247,6 +253,28 @@ void MaskSession::draw_toolbar() {
         ui::corner_key(msg::radius_keys.get());
         ui::help_on_hover(msg::radius_help);
     }
+    draw_workflow_row();
+}
+
+// The window may not be narrower than any toolbar row, or that row's right
+// end clips unseen; _toolbar_w starts each frame at the tool row's width.
+void MaskSession::note_row_width() {
+    _toolbar_w = std::max(_toolbar_w, ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
+                                          ImGui::GetStyle().WindowPadding.x);
+}
+
+// Row A: the view. Tasks 7, 9 and 12 add rows B to D and Play (Decision 24).
+void MaskSession::draw_workflow_row() {
+    if (ui::RadioButton(msg::view_overlay, _view_mode == ViewMode::Overlay))
+        _view_mode = ViewMode::Overlay;
+    ImGui::SameLine();
+    if (ui::RadioButton(msg::view_mask_only, _view_mode == ViewMode::MaskOnly))
+        _view_mode = ViewMode::MaskOnly;
+    ImGui::SameLine();
+    if (ui::RadioButton(msg::view_side_by_side, _view_mode == ViewMode::SideBySide))
+        _view_mode = ViewMode::SideBySide;
+    ui::help_on_hover(msg::view_help);
+    note_row_width();
 }
 
 void MaskSession::draw_canvas() {
@@ -288,21 +316,40 @@ void MaskSession::draw_canvas() {
     }
     const ImGuiIO& io = ImGui::GetIO();
     const bool space = ImGui::IsKeyDown(ImGuiKey_Space);
+    // One pane, or two over one view with a gap. A stroke or a path is fed
+    // one pane's pixels, so it belongs to the pane it started in.
+    const int npanes = _view_mode == ViewMode::SideBySide ? 2 : 1;
+    const float gap = npanes == 2 ? px(6.0f) : 0.0f;
+    const float pane_w = (size.x - gap * (float)(npanes - 1)) / (float)npanes;
+    int hover_pane = -1;
+    for (int p = 0; hovered && p < npanes; p++) {
+        const float x0 = origin.x + (float)p * (pane_w + gap);
+        if (io.MousePos.x >= x0 && io.MousePos.x < x0 + pane_w) hover_pane = p;
+    }
+    const bool over = hover_pane >= 0;
+    if ((_tool.in_progress() || _path.in_progress()) && _stroke_pane >= npanes) {
+        _tool.cancel();
+        _path.cancel();
+    }
+    const int active = _tool.in_progress() || _path.in_progress() ? _stroke_pane
+                                                                  : std::max(0, hover_pane);
+    const ImVec2 porg(origin.x + (float)active * (pane_w + gap), origin.y);
+    const ImVec2 pfar(porg.x + pane_w, far_corner.y);
     // The view. Never while a stroke is in progress: its points are pane pixels.
     if (!_tool.in_progress()) {
-        const Mapping m0 = mapping(_view, _dw, _dh, size.x, size.y);
+        const Mapping m0 = mapping(_view, _dw, _dh, pane_w, size.y);
         // Alt, because the bare wheel is the zoom and Shift/Ctrl are the
         // paint modes. Guarded by in_progress() with the view: a stroke
         // carries one radius, so changing it mid-stroke would resize all of it.
-        if (hovered && io.MouseWheel != 0.0f) {
+        if (over && io.MouseWheel != 0.0f) {
             if (io.KeyAlt) set_radius(wheel_brush(radius(), io.MouseWheel));
             else
-                zoom_about(_view, std::pow(1.2f, io.MouseWheel), io.MousePos.x - origin.x,
-                           io.MousePos.y - origin.y, _dw, _dh, size.x, size.y);
+                zoom_about(_view, std::pow(1.2f, io.MouseWheel), io.MousePos.x - porg.x,
+                           io.MousePos.y - porg.y, _dw, _dh, pane_w, size.y);
         }
         const bool pan_down = ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
                               (space && ImGui::IsMouseDown(ImGuiMouseButton_Left));
-        if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
+        if (over && (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
                         (space && ImGui::IsMouseClicked(ImGuiMouseButton_Left))))
             _panning = true;
         if (_panning) {
@@ -310,27 +357,37 @@ void MaskSession::draw_canvas() {
             else pan(_view, io.MouseDelta.x, io.MouseDelta.y, m0, _dw, _dh);
         }
     }
-    const Mapping m = mapping(_view, _dw, _dh, size.x, size.y);
-    ensure_window(m, size.x, size.y);
+    const Mapping m = mapping(_view, _dw, _dh, pane_w, size.y);
+    ensure_window(m, pane_w, size.y);
 
-    dl->PushClipRect(origin, far_corner, true);
-    if (_tex && !_win.r.empty()) {
-        const ImVec2 a(origin.x + m.to_screen_x((float)_win.r.x0),
-                       origin.y + m.to_screen_y((float)_win.r.y0));
-        const ImVec2 b(origin.x + m.to_screen_x((float)(_win.r.x0 + _win.tw * _win.step)),
-                       origin.y + m.to_screen_y((float)(_win.r.y0 + _win.th * _win.step)));
-        dl->AddImage((ImTextureID)(intptr_t)_tex, a, b);
+    for (int p = 0; p < npanes; p++) {
+        const ImVec2 o(origin.x + (float)p * (pane_w + gap), origin.y);
+        const GLuint tex = p == 0 ? _tex : _tex2;
+        const Window& win = p == 0 ? _win : _win2;
+        dl->PushClipRect(o, ImVec2(o.x + pane_w, far_corner.y), true);
+        if (tex && !win.r.empty()) {
+            const ImVec2 a(o.x + m.to_screen_x((float)win.r.x0),
+                           o.y + m.to_screen_y((float)win.r.y0));
+            const ImVec2 b(o.x + m.to_screen_x((float)(win.r.x0 + win.tw * win.step)),
+                           o.y + m.to_screen_y((float)(win.r.y0 + win.th * win.step)));
+            dl->AddImage((ImTextureID)(intptr_t)tex, a, b);
+        }
+        dl->PopClipRect();
     }
+    dl->PushClipRect(porg, pfar, true);
 
     // The tool, fed pane pixels, the left button only. The modifiers are
     // read from the frame the stroke completes, as EditSession does.
-    const bool can_stroke = hovered && !space && !_panning;
+    const bool can_stroke = over && !space && !_panning;
+    if (!_tool.in_progress() && !_path.in_progress() && can_stroke &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        _stroke_pane = hover_pane;
     _tool.set_brush_radius(radius() * m.scale);
     ViewportInput in;
     in.hovered = can_stroke;
-    in.x = io.MousePos.x - origin.x;
-    in.y = io.MousePos.y - origin.y;
-    in.W = (int)size.x;
+    in.x = io.MousePos.x - porg.x;
+    in.y = io.MousePos.y - porg.y;
+    in.W = (int)pane_w;
     in.H = (int)size.y;
     in.down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
     in.clicked = can_stroke && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
@@ -347,7 +404,12 @@ void MaskSession::draw_canvas() {
             shown_to_frame(io.MousePos.x, io.MousePos.y, fx, fy)) {
             sam_prompt_point(fx, fy, sam_click_mode(io.KeyShift, io.KeyCtrl), in.clicked);
         }
-        draw_sam_clicks(dl, m, origin.x, origin.y);
+        for (int p = 0; p < npanes; p++) {
+            const float ox = origin.x + (float)p * (pane_w + gap);
+            dl->PushClipRect(ImVec2(ox, origin.y), ImVec2(ox + pane_w, far_corner.y), false);
+            draw_sam_clicks(dl, m, ox, origin.y);
+            dl->PopClipRect();
+        }
     } else if (path_mode()) {
         ensure_livewire();
         _path.set_space(path_space(m));
@@ -362,7 +424,7 @@ void MaskSession::draw_canvas() {
             upload_rect(commit_stroke(stroke, paint_now(_path.mode_shift(), _path.mode_ctrl()), m));
             _last_commit_ms = now_ms() - t0;
         }
-        draw_path_overlay(dl, origin, _path);
+        draw_path_overlay(dl, porg, _path);
     } else {
         ShapeStroke stroke;
         bool consumed = false;
@@ -371,10 +433,10 @@ void MaskSession::draw_canvas() {
             upload_rect(commit_stroke(stroke, paint_now(in.shift, in.ctrl), m));
             _last_commit_ms = now_ms() - t0;
         }
-        _tool.draw_overlay(dl, origin);
+        _tool.draw_overlay(dl, porg);
     }
     dl->PopClipRect();
-    note_shown(m, origin.x, origin.y);
+    note_shown(m, origin.x, origin.y, npanes, pane_w, gap);
     handle_keys(m);
 }
 
@@ -429,6 +491,10 @@ void MaskSession::handle_keys(const Mapping& m) {
         upload_rect(io.KeyShift ? redo() : undo());
     }
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) save();
+    const ImGuiInputFlags route = ImGuiInputFlags_RouteFocused |
+                                  ImGuiInputFlags_RouteFromRootWindow;
+    if (!io.KeyCtrl && ImGui::Shortcut(ImGuiKey_V, route))
+        _view_mode = (ViewMode)(((int)_view_mode + 1) % 3);
 }
 
 // Names what goes -- the corrected-frame count, and the open frame's unsaved
@@ -498,7 +564,8 @@ void MaskSession::draw_status() {
         if (!_path.snapping()) ui::TextDisabledWrapped(msg::path_straight);
     }
     ui::TextDisabledWrapped(msg::hint_view);
-    ui::TextDisabledWrapped(msg::peek_hint, {"Tab"});
+    ui::TextDisabledWrapped(_view_mode == ViewMode::SideBySide ? msg::peek_hint_side
+                                                               : msg::peek_hint, {"Tab"});
 }
 
 // The editor's clicks on this frame, as SegmentPanel draws them: the object's

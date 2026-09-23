@@ -499,18 +499,62 @@ void MaskSession::ensure_livewire() {
                 false);
 }
 
+Style pane_style_for(Peek peek, ViewMode view, int pane) {
+    if (view == ViewMode::SideBySide) {
+        // Both bare views are on screen already, so the peek turns ONE pane
+        // into the overlay and leaves the other as the reference.
+        if (peek == Peek::Photo) return pane == 1 ? Style::Overlay : Style::Photo;
+        if (peek == Peek::Mask) return pane == 0 ? Style::Overlay : Style::MaskOnly;
+        return pane == 0 ? Style::Photo : Style::MaskOnly;
+    }
+    if (peek == Peek::Photo) return Style::Photo;
+    if (peek == Peek::Mask) return Style::MaskOnly;
+    if (view == ViewMode::MaskOnly) return Style::MaskOnly;
+    return Style::Overlay;
+}
+
+PaneDerive plan_derive(bool dirty, const Window& want, ViewMode view, Peek peek, Window& win0,
+                       Style& style0, Window& win1, Style& style1) {
+    const bool two = view == ViewMode::SideBySide;
+    const Style s0 = pane_style_for(peek, view, 0), s1 = pane_style_for(peek, view, 1);
+    if (!two) win1 = Window{};
+    PaneDerive d;
+    d.left = dirty || !same_window(want, win0) || s0 != style0;
+    d.right = two && (dirty || !same_window(want, win1) || s1 != style1);
+    if (d.left) {
+        win0 = want;
+        style0 = s0;
+    }
+    if (d.right) {
+        win1 = want;
+        style1 = s1;
+    }
+    return d;
+}
+
 // Pane px -> displayed mask px (the mapping) -> stored mask px (the EXIF
 // turn) -> stored frame px (the mask-to-frame scale), and back.
-void MaskSession::note_shown(const Mapping& m, float origin_x, float origin_y) {
+void MaskSession::note_shown(const Mapping& m, float origin_x, float origin_y, int panes,
+                             float pane_w, float gap) {
     _shown = m;
     _shown_x = origin_x;
     _shown_y = origin_y;
+    _shown_panes = std::max(1, panes);
+    _shown_pane_w = pane_w;
+    _shown_gap = gap;
     _shown_valid = true;
 }
 
 bool MaskSession::shown_to_frame(float screen_x, float screen_y, float& fx, float& fy) const {
     if (!_shown_valid || !_doc) return false;
-    path_space(_shown).to_frame(screen_x - _shown_x, screen_y - _shown_y, fx, fy);
+    float x = screen_x - _shown_x;
+    if (_shown_panes > 1) {
+        const float stride = _shown_pane_w + _shown_gap;
+        const int p = (int)std::floor(x / stride);
+        if (p < 0 || p >= _shown_panes || x - (float)p * stride >= _shown_pane_w) return false;
+        x -= (float)p * stride;
+    }
+    path_space(_shown).to_frame(x, screen_y - _shown_y, fx, fy);
     return true;
 }
 

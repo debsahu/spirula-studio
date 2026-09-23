@@ -397,7 +397,7 @@ at call time (`logical_ctrl_key()`, `Automation.cpp`) instead of hard-coding
 (or Escape, mid-gesture) can be held for the duration of a drag, which the
 existing endpoints had no way to express. Verified fixed: `Ctrl+Z` now
 reaches `MaskSession::undo()` through the keyboard exactly as the Undo button
-does (both call the identical function, `MaskPanel.cpp:189` and `:429`), and
+does (both call the identical function, `MaskPanel.cpp:195` and `:491`), and
 `Ctrl+drag` now force-keeps instead of doing nothing. This is a real,
 committed change to test infrastructure outside this task's stated file list;
 flagged for review rather than folded silently into the docs commit.
@@ -414,13 +414,13 @@ screen px at this zoom), all plain drags (ForceDrop).
 **Why a second quantity is necessary, not just nice to have.**
 `MaskSession::commit_stroke` short-circuits on an empty rect
 (`MaskSession.cpp:397-408`, `if (r.empty()) return {};`) and `upload_rect`
-does the same (`MaskPanel.cpp:80`), so a coordinate-mapping bug that made
-every automated drag much shorter than the claimed 500 px at radius 106
+does the same (in `upload_rect_to`, `MaskPanel.cpp:87`), so a
+coordinate-mapping bug that made every automated drag much shorter than the claimed 500 px at radius 106
 would make the "Last stroke" readings *faster*, not slower or absent --
 indistinguishable from genuine success by timing alone. Task 9 corroborated
 its CPU-side number with a deterministic `history_bytes()` of exactly 60039
 across all three runs; this in-app run corroborates with the "Kept %"
-readout (`MaskPanel.cpp:476`), read before the series and after every one of
+readout (`MaskPanel.cpp:542`), read before the series and after every one of
 the 20 strokes, the same readout Step 6 already uses to confirm the Ctrl and
 Shift+Ctrl gestures actually change the mask.
 
@@ -524,7 +524,7 @@ frame `f0000`:
    the base again). Performed with the Undo *button*, not the `Ctrl+Z` key
    chord -- at this point in the task the automation-harness defect above was
    not yet found, and the button was the way to isolate whether undo itself
-   worked. `MaskPanel.cpp:189` (`ui::Button(msg::undo)`) and `:429`
+   worked. `MaskPanel.cpp:195` (`ui::Button(msg::undo)`) and `:491`
    (`handle_keys`'s Ctrl+Z path) call the identical `MaskSession::undo()`, and
    the keyboard path was independently exercised later in Step 6 once the fix
    landed, so this substitution does not weaken the result. **PASS.**
@@ -568,9 +568,9 @@ what was inferred rather than run flagged as such.
   "Kept %" and painted a lighter/keep-tinted stroke inside a drop region;
   Shift+Ctrl+drag over that same stroke returned "Kept %" exactly to its
   pre-stroke value and removed the tint. "The modifier read is the one held
-  at release" is read from source (`MaskPanel.cpp:340-341` samples
+  at release" is read from source (`MaskPanel.cpp:397-398` samples
   `io.KeyShift` / `io.KeyCtrl` into `ViewportInput` on the frame being drawn,
-  and `:371` hands those to `paint_now` on the frame the stroke commits)
+  and `:433` hands those to `paint_now` on the frame the stroke commits)
   rather than reproduced with the modifier changed mid-drag.
 - [x] **Right drag paints nothing and moves nothing.** No stroke, no pan.
 - [x] **Box, ellipse, lasso, polygon, brush all commit on release.** Box,
@@ -604,7 +604,7 @@ what was inferred rather than run flagged as such.
   switching from a dirty `f0000` to `f0001` autosaved `f0000`'s layers to
   disk and the new frame's status read "Saved". `<` and the slider were
   **not** independently exercised; `go_to()` is the single function behind
-  all three (`MaskPanel.cpp:219`, `:223`, `:225`), so this is inferred from
+  all three (`MaskPanel.cpp:225`, `:229`, `:231`), so this is inferred from
   the one call tested.
 - [x] **Closing the window with Done or its close box while dirty writes the
   files.** Both exercised independently: Done and the title-bar close box
@@ -1398,11 +1398,11 @@ height -- which is the same reason the reserve is measured rather than
 computed.
 
 **That 192 px is the worst case the battery reached, not the worst case
-`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:462-502`), the eight
+`draw_status` can emit.** Enumerating it (`MaskPanel.cpp:528-569`), the eight
 items behind the 192 are frame/camera, kept/saved/corrected, brush/commit,
 `hint_buttons`, `hint_path` (the wrapped one), `path_anchors`, `hint_view`,
 and the status-or-error line. Two more items exist: `status_base_regenerated`
-and `status_base_missing` (`MaskPanel.cpp:482-485`), one `TextDisabledWrapped`
+and `status_base_missing` (`MaskPanel.cpp:548-551`), one `TextDisabledWrapped`
 each and mutually exclusive, since `base_state()` returns one value. Neither
 was on screen for any row of the table above, and the exact arithmetic is how
 that is known rather than assumed -- 110, 132 and 176 are 5, 6 and 8 lines to
@@ -1462,7 +1462,7 @@ than wrong.
 
 **The fix above removes the defect at every window size a person would work
 at, and does not remove it at every window size.** `draw_canvas` floors the
-canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:462-502`) draws its
+canvas at `px(64.0f)`, and `draw_status` (`MaskPanel.cpp:528-569`) draws its
 full content unconditionally with no cap and no truncation. Once the window is
 short enough that the canvas has pinned at its floor, every further pixel of
 shrink becomes a pixel of strip pushed past the window bottom. It is the same
@@ -1714,7 +1714,7 @@ keeps them apart. **The operator used it on a real 120 MP correction and asked
 for the opposite**: *"carry over eraser and brush size from each other, rather
 than keeping it independent."* Their experience of the task beats the
 generalisation, so `_eraser` is gone and `radius()` / `set_radius()`
-(`MaskSession.h:110-111`) address the one float. The slider, `[`/`]` and
+(`MaskSession.h:119-120`) address the one float. The slider, `[`/`]` and
 Alt+wheel all move it whichever tool is up.
 
 **The test was inverted, not deleted.** It guarded independence, which is now
@@ -1741,7 +1741,7 @@ self-evident the moment you switch and the number does not change.
 
 ### The slider
 
-`MaskPanel.cpp:231-245`, on the **frame-navigation row**, shown only under the
+`MaskPanel.cpp:237-251`, on the **frame-navigation row**, shown only under the
 brush or the eraser, `ImGuiSliderFlags_Logarithmic | AlwaysClamp` over
 `[kMinBrush, kMaxBrush]` = [1, 4096]. The range is twelve octaves and `[`/`]`
 are multiplicative, so a linear slider would put every usable size in the
@@ -1785,7 +1785,7 @@ changed.
 takes `ImGui::GetItemRectMin()` / `GetItemRectMax()`, so it draws over the **last
 item**, not specifically over a button. The slider therefore carries
 `[ ] Alt+wheel` in the same corner `Q B E L P C F T K`, `I` and `X` sit in
-(`MaskPanel.cpp:246-252`), plus a `help_on_hover` sentence of the kind `save` /
+(`MaskPanel.cpp:252-255`), plus a `help_on_hover` sentence of the kind `save` /
 `revert_frame` / `revert_all` already have.
 
 **The hint is a `Msg`, not a raw key string.** The brackets are identifiers and
@@ -1834,7 +1834,7 @@ eraser ever does move into `ToolId`, the key comes with it.
 
 ### Alt+wheel over the canvas
 
-`MaskPanel.cpp:294-302`. The bare wheel is already the zoom, and Shift/Ctrl
+`MaskPanel.cpp:341-349`. The bare wheel is already the zoom, and Shift/Ctrl
 are the paint modes, so Alt is what was left; it is read by no mask tool and
 by no view gesture. The factor is `1.18^wheel` -- the **reciprocal** of the
 grow step, not the bracket's 0.85 -- so a notch back exactly undoes a notch,
@@ -2006,7 +2006,7 @@ stand in for the job.
   `encode_image` at 2.56 s on a byte-identical binary, on mains power with no
   thermal warning; the cause was not found. This is why P7's bar moved.
 - **The open frame's pixels are co-owned.** `_rgb` is a
-  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:316`) and a job holds
+  `shared_ptr<const vector<uint8_t>>` (`MaskSession.h:333`) and a job holds
   its own reference, so moving to another frame, which replaces `_rgb` in
   `pump()`, never frees what a job reads. The `const` element type makes a
   refill in place a compile error. **Host memory is a known, unmeasured
@@ -2951,11 +2951,11 @@ a file the plan added.
 
 Hold **Tab** over the canvas to see the bare photo, **Shift+Tab** the bare
 mask; release and the overlay returns. The canvas owns Tab while hovered or
-active (`SetItemKeyOwner`, `MaskPanel.cpp:269-274`), which is what stops
+active (`SetItemKeyOwner`, `MaskPanel.cpp:297-302`), which is what stops
 imgui's nav from tabbing: the tabbing request polls Tab with
 `ImGuiKeyOwner_NoOwner` (`_deps/imgui-src/imgui.cpp:14152`) and stands down
 when the key has an owner. The hint is one strip line after `hint_view` in
-every mode (`MaskPanel.cpp:501`). `state_json` reports `mask_peek`,
+every mode (`MaskPanel.cpp:567-568`). `state_json` reports `mask_peek`,
 `mask_peek_total` (frames peeked since launch, monotonic) and `nav_visible`
 (`io.NavVisible`, the observable for "nav took the Tab"), at
 `GuiApp.cpp:2645-2650`.
@@ -3022,9 +3022,49 @@ strip was briefly taller (canvas 392): it read as a peek with no field focused,
 which is correct. Locate the field with `tree -q sam_text_label`, never a
 fixed point.
 
+### Task 4: view modes and side by side (2026-09-22)
+
+A third toolbar row: **Overlay**, **Mask only**, **Side by side**; `V` cycles
+them. Side by side is the bare photo left and the mask right over one `View`,
+6 px apart, each pane with its own window and texture. A stroke, a pen path or
+a SAM click maps through the pane it landed in, and a click in the gap is
+none. The pure decisions live in `MaskSession.cpp`, where `mask_doc_test`
+reaches them: `pane_style_for` (every peek in every view, 18 checks) and
+`plan_derive` (which pane re-derives, 12 checks); `MaskPanel.cpp` only calls
+them. `shown_to_frame` gained the pane split (6 checks).
+
+**The stale right pane.** `upload_rect` keeps only the panes on screen
+current, so `plan_derive` forgets the right pane's window outside side by
+side. Without that, a stroke painted in Overlay is missing from the mask pane
+on return: 0 stroke pixels against 611 in the app, and in the unit test only
+"the right pane comes back derived afresh, not stale" fails.
+
+Measured in the app, same setup as Task 3 (1600x950 offscreen, the two-frame
+bench):
+
+- **One frame pixel from either pane.** SAM clicks at (400,340) left and
+  (1195,340) right, pane width 789, gap 6: both `sam_click` = (3815.51,
+  2135.51), and the stroke mapping agreed. With `shown_to_frame` subtracting
+  the left origin for both panes, the right click mapped to x = 11603.27, a
+  pane width away, off the frame: no click, no prompt.
+- **Canvas height per view mode.** Shape and eraser 666, SAM 392, path 622
+  (600 on the session's first path entry, while the edge map builds, as
+  before this task), identical in all three views and through SAM's loading,
+  busy and result lines. The row costs 30 px against Task 3's 696 and 422.
+- **Grammar on the right pane.** Plain and Shift drop, Ctrl keeps,
+  Shift+Ctrl returned `kept` exactly to its prior value, a right drag left
+  the history count unchanged, and the eraser kept on a plain drag and
+  dropped on Ctrl.
+- **The wheel** over either pane zooms both; **Alt**+wheel changed
+  `Brush: 24 px` to 39, then 28, with no zoom.
+
+The left pane is the bare photo, so a stroke shows only in the mask pane.
+Seeing it over the photo is the peek: Tab turns the mask pane into the
+overlay, Shift+Tab the photo pane.
+
 ## Not in this phase
 
 SAM assist's own deliberate absences, and why, are listed under "SAM assist:
 how it is built, and what not to undo". For the hand editor:
-propagate, find-missing, slideshow, view modes, session persistence; vertex
-handles on a path; a Bezier path.
+propagate, find-missing, slideshow, session persistence; vertex handles on
+a path; a Bezier path.

@@ -58,6 +58,15 @@ void to_displayed(const sfm::ExifTransform& t, int W, int H, float sx, float sy,
 
 // What Tab is showing: nothing, the bare photo (Tab), the bare mask (Shift+Tab).
 enum class Peek { None, Photo, Mask };
+enum class ViewMode { Overlay, MaskOnly, SideBySide };
+
+// What pane 0 (left) or 1 (right, side by side only) shows under a peek.
+Style pane_style_for(Peek peek, ViewMode view, int pane);
+struct PaneDerive { bool left = false, right = false; };
+// Which pane windows to derive for `want`, bringing the caches up to date.
+// The right pane is forgotten off screen: upload_rect keeps it current only there.
+PaneDerive plan_derive(bool dirty, const Window& want, ViewMode view, Peek peek, Window& win0,
+                       Style& style0, Window& win1, Style& style1);
 
 class MaskSession {
 public:
@@ -113,11 +122,15 @@ public:
     WindowSource window_source() const;
     Peek peek() const { return _peek; }
     int peek_total() const { return _peek_total; }
+    ViewMode view_mode() const { return _view_mode; }
+    void set_view_mode(ViewMode v) { _view_mode = v; }
     // Pane px <-> frame px: the view, the EXIF turn, the mask-to-frame scale.
     PathSpace path_space(const Mapping& m) const;
-    // The layout the last drawn frame used, pane origin in screen px. A click
-    // maps through it: that is the picture aimed at. False until one is drawn.
-    void note_shown(const Mapping& m, float origin_x, float origin_y);
+    // The layout the last drawn frame used: pane origin in screen px and, side
+    // by side, the pane count, width and gap. A click maps through the pane it
+    // lands in, and nowhere from a gap. False until one is drawn.
+    void note_shown(const Mapping& m, float origin_x, float origin_y, int panes = 1,
+                    float pane_w = 0.0f, float gap = 0.0f);
     bool shown_to_frame(float screen_x, float screen_y, float& fx, float& fy) const;
     // The open frame's pixels, co-owned: a holder keeps them past a frame change.
     std::shared_ptr<const std::vector<uint8_t>> frame_pixels() const { return _rgb; }
@@ -297,7 +310,11 @@ private:
     void handle_keys(const Mapping& m);
     void ensure_window(const Mapping& m, float pane_w, float pane_h);
     void upload_rect(const Rect& shown);
-    Style pane_style(int pane) const;                             // MaskPanel.cpp
+    void draw_workflow_row();                                     // MaskPanel.cpp
+    void note_row_width();                                        // MaskPanel.cpp
+    void upload_window(GLuint& tex, const Window& win, Style style, std::vector<uint8_t>& rgba);
+    void upload_rect_to(GLuint tex, const Window& win, Style style, std::vector<uint8_t>& rgba,
+                        const Rect& shown);
     // The pen tool (MaskPanel.cpp drives it; this and path_space have no ImGui).
     void ensure_livewire();
 
@@ -366,6 +383,8 @@ private:
     int _sam_scroll_frames = 0;      // frames left to hold that list at its end
     Mapping _shown;
     float _shown_x = 0.0f, _shown_y = 0.0f;
+    int _shown_panes = 1;
+    float _shown_pane_w = 0.0f, _shown_gap = 0.0f;
     bool _shown_valid = false;       // cleared wherever a new document arrives
     StripReserve _strip;
     std::string _sam_blocker;
@@ -387,6 +406,14 @@ private:
     Style _win_style = Style::Overlay;   // what _rgba / _tex were derived with
     Peek _peek = Peek::None;
     int _peek_total = 0;
+    ViewMode _view_mode = ViewMode::Overlay;
+    // The right pane of side by side: its own window and texture over the
+    // same view. Same size as the left one, so one Mapping serves both.
+    GLuint _tex2 = 0;
+    Window _win2;
+    Style _win2_style = Style::MaskOnly;
+    std::vector<uint8_t> _rgba2;
+    int _stroke_pane = 0;
     int _slider_idx = 0;
     bool _close_requested = false;
     bool _revert_all_ask = false;    // Revert all was clicked; open its confirmation
