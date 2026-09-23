@@ -1,0 +1,104 @@
+C3 pid 43031 pri 46 screen train binary_md5 3395ac1af0bb975070c957342ba9702f
+STEP baseline | rss_mb 105 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow False | window 0 | threads 0 | pri 46 | t 12:12:10
+  vmmap baseline: Physical footprint:         185.6M
+  vmmap baseline: IOAccelerator (graphics)          11.4M    11.3M    11.3M       0K       0K    11.3M       0K       50 
+  vmmap baseline: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap baseline: MALLOC_LARGE                      3008K    3008K    3008K       0K       0K       0K       0K        1         see MALLOC ZONE table below
+  vmmap baseline: MALLOC_LARGE (empty)              2352K    2352K    2352K       0K       0K       0K       0K        1         see MALLOC ZONE table below
+  vmmap baseline: MALLOC_SMALL                      31.9M    13.7M    13.7M       0K       0K       0K       0K       49         see MALLOC ZONE table below
+  vmmap baseline: MALLOC_SMALL (empty)              8256K    1008K    1008K       0K       0K       0K       0K        5         see MALLOC ZONE table below
+  vmmap baseline: TOTAL                              3.0G   702.1M   185.6M       0K       0K    43.4M       0K     6135 
+  vmmap baseline: TOTAL                                      48.8M      18.4M      18.4M         0K      35181      12.8M      5758K     31%      59
+STEP editor_open | rss_mb 515 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow False | window 0 | threads 0 | pri 46 | t 12:12:13
+  vmmap editor_open: Physical footprint:         627.0M
+  vmmap editor_open: IOAccelerator (graphics)          71.9M    71.5M    71.5M       0K       0K    71.5M       0K       68 
+  vmmap editor_open: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap editor_open: MALLOC_LARGE                     228.0M   228.0M   228.0M       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap editor_open: MALLOC_LARGE (empty)             157.0M   157.0M   157.0M       0K       0K       0K       0K        6         see MALLOC ZONE table below
+  vmmap editor_open: MALLOC_SMALL                      31.9M    13.9M    13.9M       0K       0K       0K       0K       49         see MALLOC ZONE table below
+  vmmap editor_open: MALLOC_SMALL (empty)              8256K    1728K    1728K       0K       0K       0K       0K        5         see MALLOC ZONE table below
+  vmmap editor_open: TOTAL                              3.5G     1.2G   627.0M       0K       0K   103.8M       0K     6182 
+  vmmap editor_open: TOTAL                                     273.8M     244.5M     244.5M         0K      35377     238.1M      6617K      3%      65
+C3 stroke: history 0 -> 1
+STEP stroke_done | rss_mb 516 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow False | window 0 | threads 0 | pri 46 | t 12:12:15
+  vmmap stroke_done: Physical footprint:         627.5M
+  vmmap stroke_done: IOAccelerator (graphics)          71.9M    71.5M    71.5M       0K       0K    71.5M       0K       68 
+  vmmap stroke_done: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap stroke_done: MALLOC_LARGE                     228.0M   228.0M   228.0M       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap stroke_done: MALLOC_LARGE (empty)             157.0M   157.0M   157.0M       0K       0K       0K       0K        6         see MALLOC ZONE table below
+  vmmap stroke_done: MALLOC_SMALL                      31.9M    14.0M    14.0M       0K       0K       0K       0K       49         see MALLOC ZONE table below
+  vmmap stroke_done: MALLOC_SMALL (empty)              16.1M    2064K    2064K       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap stroke_done: TOTAL                              3.5G     1.1G   627.5M       0K       0K   103.8M       0K     6178 
+  vmmap stroke_done: TOTAL                                     281.8M     245.0M     245.0M         0K      35385     238.1M      7025K      3%      67
+STEP playing_5s | rss_mb 320 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow True | window 3 | threads 2 | pri 46 | t 12:12:22
+  vmmap playing_5s: Physical footprint:         455.6M
+  vmmap playing_5s: IOAccelerator (graphics)          76.4M    76.0M    76.0M       0K       0K    76.0M       0K       69 
+  vmmap playing_5s: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap playing_5s: MALLOC_LARGE                      49.1M    49.1M    49.1M       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap playing_5s: MALLOC_LARGE (empty)             161.8M   161.8M   161.8M       0K       0K       0K       0K        6         see MALLOC ZONE table below
+  vmmap playing_5s: MALLOC_SMALL                      35.9M    17.6M    13.8M       0K       0K       0K       0K       50         see MALLOC ZONE table below
+  vmmap playing_5s: MALLOC_SMALL (empty)              12.1M     400K      64K       0K       0K       0K       0K        6         see MALLOC ZONE table below
+  vmmap playing_5s: TOTAL                              3.3G   977.3M   455.7M       0K       0K   108.3M       0K     6178 
+  vmmap playing_5s: TOTAL                                     103.4M      68.3M      63.9M         0K      35542      60.8M      3107K      5%      68
+STEP playing_10s | rss_mb 349 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow True | window 3 | threads 2 | pri 46 | t 12:12:28
+  vmmap playing_10s: Physical footprint:         455.7M
+  vmmap playing_10s: IOAccelerator (graphics)          76.4M    76.0M    76.0M       0K       0K    76.0M       0K       69 
+  vmmap playing_10s: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap playing_10s: MALLOC_LARGE                      63.2M    63.1M    63.1M       0K       0K       0K       0K        9         see MALLOC ZONE table below
+  vmmap playing_10s: MALLOC_LARGE (empty)             147.7M   147.7M   147.7M       0K       0K       0K       0K        4         see MALLOC ZONE table below
+  vmmap playing_10s: MALLOC_SMALL                      31.9M    14.3M    13.8M       0K       0K       0K       0K       49         see MALLOC ZONE table below
+  vmmap playing_10s: MALLOC_SMALL (empty)              16.1M    3776K      64K       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap playing_10s: TOTAL                              3.3G   977.3M   455.7M       0K       0K   108.3M       0K     6178 
+  vmmap playing_10s: TOTAL                                     117.5M      82.3M      77.9M         0K      35431      73.4M      4618K      6%      70
+STEP playing_15s | rss_mb 349 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow True | window 3 | threads 2 | pri 46 | t 12:12:34
+  vmmap playing_15s: Physical footprint:         455.7M
+  vmmap playing_15s: IOAccelerator (graphics)          76.4M    76.0M    76.0M       0K       0K    76.0M       0K       69 
+  vmmap playing_15s: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap playing_15s: MALLOC_LARGE                      63.2M    63.1M    63.1M       0K       0K       0K       0K        9         see MALLOC ZONE table below
+  vmmap playing_15s: MALLOC_LARGE (empty)             147.7M   147.7M   147.7M       0K       0K       0K       0K        4         see MALLOC ZONE table below
+  vmmap playing_15s: MALLOC_SMALL                      31.9M    14.3M    13.8M       0K       0K       0K       0K       49         see MALLOC ZONE table below
+  vmmap playing_15s: MALLOC_SMALL (empty)              16.1M    3776K      64K       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap playing_15s: TOTAL                              3.3G   977.3M   455.7M       0K       0K   108.3M       0K     6178 
+  vmmap playing_15s: TOTAL                                     117.5M      82.3M      77.9M         0K      35425      73.4M      4618K      6%      70
+STEP playing_20s | rss_mb 349 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow True | window 3 | threads 2 | pri 46 | t 12:12:40
+  vmmap playing_20s: Physical footprint:         455.7M
+  vmmap playing_20s: IOAccelerator (graphics)          76.4M    76.0M    76.0M       0K       0K    76.0M       0K       69 
+  vmmap playing_20s: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap playing_20s: MALLOC_LARGE                     119.4M   119.4M   119.4M       0K       0K       0K       0K       11         see MALLOC ZONE table below
+  vmmap playing_20s: MALLOC_LARGE (empty)              91.4M    91.4M    91.4M       0K       0K       0K       0K        2         see MALLOC ZONE table below
+  vmmap playing_20s: MALLOC_SMALL                      31.9M    14.3M    13.8M       0K       0K       0K       0K       49         see MALLOC ZONE table below
+  vmmap playing_20s: MALLOC_SMALL (empty)              16.1M    3776K      64K       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap playing_20s: TOTAL                              3.3G   977.3M   455.7M       0K       0K   108.3M       0K     6178 
+  vmmap playing_20s: TOTAL                                     173.8M     138.6M     134.2M         0K      35532     129.7M      4593K      4%      72
+STEP playing_30s | rss_mb 349 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow True | window 3 | threads 2 | pri 46 | t 12:12:51
+  vmmap playing_30s: Physical footprint:         455.7M
+  vmmap playing_30s: IOAccelerator (graphics)          76.4M    76.0M    76.0M       0K       0K    76.0M       0K       69 
+  vmmap playing_30s: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap playing_30s: MALLOC_LARGE                      49.1M    49.1M    49.1M       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap playing_30s: MALLOC_LARGE (empty)             161.8M   161.8M   161.8M       0K       0K       0K       0K        6         see MALLOC ZONE table below
+  vmmap playing_30s: MALLOC_SMALL                      35.9M    17.6M    13.8M       0K       0K       0K       0K       50         see MALLOC ZONE table below
+  vmmap playing_30s: MALLOC_SMALL (empty)              12.1M     400K      64K       0K       0K       0K       0K        6         see MALLOC ZONE table below
+  vmmap playing_30s: TOTAL                              3.3G   977.3M   455.7M       0K       0K   108.3M       0K     6180 
+  vmmap playing_30s: TOTAL                                     103.4M      68.3M      63.9M         0K      35422      60.8M      3118K      5%      68
+STEP playing_40s | rss_mb 349 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow True | window 3 | threads 2 | pri 46 | t 12:13:02
+  vmmap playing_40s: Physical footprint:         456.2M
+  vmmap playing_40s: IOAccelerator (graphics)          76.4M    76.0M    76.0M       0K       0K    76.0M       0K       69 
+  vmmap playing_40s: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap playing_40s: MALLOC_LARGE                      49.1M    49.1M    49.1M       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap playing_40s: MALLOC_LARGE (empty)             161.8M   161.8M   161.8M       0K       0K       0K       0K        6         see MALLOC ZONE table below
+  vmmap playing_40s: MALLOC_SMALL                      35.9M    17.6M    13.8M       0K       0K       0K       0K       50         see MALLOC ZONE table below
+  vmmap playing_40s: MALLOC_SMALL (empty)              12.1M     400K      64K       0K       0K       0K       0K        6         see MALLOC ZONE table below
+  vmmap playing_40s: TOTAL                              3.3G   977.8M   456.2M       0K       0K   108.3M       0K     6181 
+  vmmap playing_40s: TOTAL                                     103.4M      68.3M      63.9M         0K      35423      60.8M      3134K      5%      68
+C3 stop_ms 0.011125 join_ms 0.027167 key f0002
+STEP stopped_frame_open | rss_mb 501 | sam_vram_mib -1.0 | sam_pool_mib 0.0 | slideshow False | window 3 | threads 2 | pri 46 | t 12:13:04
+  vmmap stopped_frame_open: Physical footprint:         603.9M
+  vmmap stopped_frame_open: IOAccelerator (graphics)          76.4M    76.0M    76.0M       0K       0K    76.0M       0K       69 
+  vmmap stopped_frame_open: IOSurface                         29.2M    29.2M    29.2M       0K       0K    29.2M       0K        6 
+  vmmap stopped_frame_open: MALLOC_LARGE                     231.3M   231.3M   231.3M       0K       0K       0K       0K        8         see MALLOC ZONE table below
+  vmmap stopped_frame_open: MALLOC_LARGE (empty)             127.2M   127.1M   127.1M       0K       0K       0K       0K        9         see MALLOC ZONE table below
+  vmmap stopped_frame_open: MALLOC_SMALL                      31.9M    14.3M    13.8M       0K       0K       0K       0K       49         see MALLOC ZONE table below
+  vmmap stopped_frame_open: MALLOC_SMALL (empty)              16.1M    3776K      64K       0K       0K       0K       0K        7         see MALLOC ZONE table below
+  vmmap stopped_frame_open: TOTAL                              3.5G     1.1G   603.9M       0K       0K   108.3M       0K     6196 
+  vmmap stopped_frame_open: TOTAL                                     285.7M     250.5M     246.1M         0K      35413     241.6M      4663K      2%      69
+GATE #9 C3: playing_10s - baseline = 244 MB (bar <= 600) -> PASS

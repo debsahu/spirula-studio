@@ -1,0 +1,9 @@
+bench load_picture 8K -> 1024       116.8 ms   (960x480 picture, 1.3 MB; 1 thread = 8.6 fps)
+bench load_picture 8K -> 2048       126.2 ms   (1920x960 picture, 5.3 MB)
+bench load_picture 8K -> 4096       146.2 ms   (3840x1920 picture, 21.1 MB; 1 thread = 6.8 fps)
+bench load_picture 1080p -> 1024     10.5 ms   (1 thread = 95.5 fps)
+bench slideshow pool 8K    1024  threads 2  depth 11      16.6 fps   longest wait    120.5 ms   first frame    122.0 ms   decodes 100   [bar: >= 5 fps, wait <= 400 ms, decodes <= 112] PASS
+bench slideshow pool 8K    4096  threads 2  depth  3      13.4 fps   longest wait    147.7 ms   first frame    152.3 ms   decodes 100   [bar: >= 5 fps, wait <= 400 ms, decodes <= 104] PASS
+bench slideshow pool 1080p 1024  threads 4  depth 11     369.8 fps   longest wait      7.5 ms   first frame     12.1 ms   decodes 100   [bar: >= 30 fps, wait <= 400 ms, decodes <= 112] PASS
+bench slideshow pool 1080p 4096  threads 4  depth 10     426.6 fps   longest wait      9.1 ms   first frame     10.6 ms   decodes 100   [bar: >= 30 fps, wait <= 400 ms, decodes <= 111] PASS
+0 failure(s)
