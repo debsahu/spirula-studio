@@ -2708,6 +2708,10 @@ std::string GuiApp::state_json() {
     out += ",\"mask_slide_window\":" + std::to_string(_mask_editor.slide_window());
     out += ",\"mask_slide_decoded\":" + std::to_string(_mask_editor.slide_decoded());
     out += ",\"mask_slide_index\":" + std::to_string(_mask_editor.slide_index());
+    out += ",\"mask_scanned\":" + std::to_string(_mask_editor.scanned_count());
+    out += ",\"mask_missing\":" + std::to_string(_mask_editor.missing_count());
+    out += ",\"mask_scan_ms\":" + std::to_string(_mask_editor.scan_ms());
+    out += ",\"mask_editor_error\":" + quoted(_mask_editor.error());
     return out;
 }
 

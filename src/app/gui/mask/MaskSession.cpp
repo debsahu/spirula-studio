@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <map>
 
 namespace fs = std::filesystem;
 namespace msg = spirula::i18n::msg::maskedit;
@@ -86,8 +87,11 @@ int next_missing(const std::vector<FrameHealth>& v, int from, int dir, float lo,
 MaskSession::MaskSession()
     : _sam_ops{[](MaskSam& s) { return s.busy(); }, [](MaskSam& s) { return s.release(); }} {}
 
+// stop_scan() again: a close() that skipped it would otherwise end the process
+// here on a joinable thread, hiding which check saw that.
 MaskSession::~MaskSession() {
     close();
+    stop_scan();
     sam_drain_retiring();
 }
 
@@ -153,15 +157,22 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
         _corrected = (int)_index.frames.size();
     }
     forget_workflow();
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        _health.assign(_frames.size(), FrameHealth{});
+        _scanned = 0;
+    }
     _quit = false;
     _worker = std::thread([this] { worker_main(); });
     _open = true;
     load_frame(0);
+    start_scan();
     return true;
 }
 
 void MaskSession::close() {
     if (!_open && !_worker.joinable()) return;
+    stop_scan();
     _slide.stop();   // also joins the threads a halted slideshow left finishing
     _slide_playing = false;
     if (_doc && _doc->dirty()) save();
@@ -225,7 +236,9 @@ void MaskSession::worker_main() {
             job = std::move(_queue.front());
             _queue.pop_front();
         }
+        _job_seq++;
         job();
+        _job_seq++;
         _pending--;
     }
 }
@@ -265,6 +278,7 @@ std::string MaskSession::error() const {
 void MaskSession::load_frame(int i) {
     if (i < 0 || i >= frame_count()) return;
     const FrameRef f = _frames[(size_t)i];
+    _nav = i;
     post_status(msg::working.get(), false);
     enqueue([this, f, i] {
         Loaded l;
@@ -276,6 +290,8 @@ void MaskSession::load_frame(int i) {
         l.turn = app::photo_turn(f.file);
         l.doc = std::make_unique<MaskDoc>();
         std::string err, warning;
+        const auto was = _index.frames.find(f.key);
+        const uint64_t composite_was = was == _index.frames.end() ? 0 : was->second.composite_fp;
         if (!l.doc->load(_layer_root, _mask_root, f.key, l.fw, l.fh, _index, err, warning)) {
             post_error(warning.empty() ? spirula::i18n::format(msg::err_read, {err})
                                        : size_mismatch_text(warning, *l.doc),
@@ -283,6 +299,10 @@ void MaskSession::load_frame(int i) {
             return;
         }
         set_corrected((int)_index.frames.size());
+        // A rebase wrote a new composite into masks/, which the scan never read.
+        const auto now = _index.frames.find(f.key);
+        if (now != _index.frames.end() && now->second.composite_fp != composite_was)
+            refresh_health({f.key});
         std::lock_guard<std::mutex> lk(_mu);
         _loaded = std::move(l);
         _loaded_ready = true;
@@ -313,6 +333,14 @@ void MaskSession::pump() {
         }
     }
     if (have_saved && _doc && _doc->key() == saved_key) _doc->mark_saved(saved_rev, saved_comp);
+    if (have_saved && _doc && _doc->key() == saved_key && _idx >= 0) {
+        std::lock_guard<std::mutex> lk(_mu);
+        if ((size_t)_idx < _health.size()) {
+            _health[(size_t)_idx].scanned = true;
+            _health[(size_t)_idx].missing_mask = !saved_comp;
+            _health[(size_t)_idx].kept = saved_comp ? _doc->kept_fraction() : -1.0f;
+        }
+    }
     if (!have_loaded) return;
     _doc = std::move(l.doc);
     _doc_gen++;   // by construction: every _doc arrives here
@@ -407,6 +435,7 @@ void MaskSession::revert_open_frame() {
         if (!mask::revert_frame(_layer_root, _mask_root, key, _index, err))
             post_error(spirula::i18n::format(msg::err_write, {err}), true);
         set_corrected((int)_index.frames.size());
+        refresh_health({key});
     });
     _idx = -1;
     sam_revert(i);
@@ -422,12 +451,15 @@ void MaskSession::revert_every_frame() {
         std::string err;
         drop_propagate_record();   // one a propagate queued ahead of this may have set
         const bool flipped = _index.mask_flipped;
+        std::vector<std::string> reverted;
+        for (const auto& [key, e] : _index.frames) reverted.push_back(key);
         if (mask::revert_all(_layer_root, err) < 0)
             post_error(spirula::i18n::format(msg::err_write, {err}), true);
         if (!_index.load(_layer_root, err)) _index = LayerIndex{};
         _index.mask_root = _mask_root;
         _index.mask_flipped = flipped;
         set_corrected((int)_index.frames.size());
+        refresh_health(reverted);
     });
     _idx = -1;
     sam_revert(-1);
@@ -461,6 +493,9 @@ void MaskSession::forget_workflow() {
         _prop = PropagateRecord{};
         _prop_undoable = false;
         _prop_report = PropagateReport{};
+        _health.clear();
+        _scanned = 0;
+        _scan_ms = -1.0;
     }
     _slide_index = -1;
     _slide_shown = 0;
@@ -587,6 +622,9 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
         rep.bytes = rec.bytes;
         rep.undoable = !rec.targets.empty() && rec.bytes <= j->byte_cap;
         set_corrected((int)_index.frames.size());
+        std::vector<std::string> touched;
+        for (const FrameRef& t : j->targets) touched.push_back(t.key);
+        refresh_health(touched);
         std::lock_guard<std::mutex> lk(_mu);
         _prop_report = rep;
         _prop_undoable = rep.undoable;
@@ -624,6 +662,8 @@ void MaskSession::undo_propagate() {
         _prop_undoable = false;
     }
     enqueue([this, rec] {
+        std::vector<std::string> touched;   // before the loop moves the failures out
+        for (const LayerSnapshot& t : rec->targets) touched.push_back(t.key);
         PropagateRecord left;
         left.source_key = rec->source_key;
         std::string failed_key, failed_path;
@@ -640,6 +680,7 @@ void MaskSession::undo_propagate() {
         std::reverse(left.targets.begin(), left.targets.end());   // record order
         const int restored = (int)(rec->targets.size() - left.targets.size());
         set_corrected((int)_index.frames.size());
+        refresh_health(touched);
         std::lock_guard<std::mutex> lk(_mu);
         _prop_report = PropagateReport{};
         _status = spirula::i18n::format(msg::prop_undone, {restored});
@@ -651,6 +692,137 @@ void MaskSession::undo_propagate() {
         _prop = std::move(left);
         _prop_undoable = true;
     });
+}
+
+// ---------------------------------------------------------------------------
+// Find missing
+// ---------------------------------------------------------------------------
+
+FrameHealth MaskSession::health(int i) const {
+    std::lock_guard<std::mutex> lk(_mu);
+    return i >= 0 && (size_t)i < _health.size() ? _health[(size_t)i] : FrameHealth{};
+}
+
+int MaskSession::scanned_count() const {
+    std::lock_guard<std::mutex> lk(_mu);
+    return _scanned;
+}
+
+bool MaskSession::scan_running() const {
+    std::lock_guard<std::mutex> lk(_mu);
+    return _scan_running;
+}
+
+double MaskSession::scan_ms() const {
+    std::lock_guard<std::mutex> lk(_mu);
+    return _scan_ms;
+}
+
+int MaskSession::missing_count() const {
+    std::lock_guard<std::mutex> lk(_mu);
+    int n = 0;
+    for (const FrameHealth& h : _health) n += is_missing(h, _band_lo, _band_hi) ? 1 : 0;
+    return n;
+}
+
+// From the frame last asked for, not _idx: a load that failed leaves _idx on
+// the frame before it, and searching from there would land on it again.
+bool MaskSession::go_to_missing(int dir) {
+    std::vector<FrameHealth> v;
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        v = _health;
+    }
+    const int j = next_missing(v, _nav >= 0 ? _nav : _idx, dir, _band_lo, _band_hi);
+    if (j < 0) {
+        post_status(msg::find_none.get(), true);
+        return false;
+    }
+    if (j == _idx && !_doc) load_frame(j);   // go_to() skips its own index
+    else go_to(j);
+    return true;
+}
+
+void MaskSession::start_scan() {
+    stop_scan();
+    _scan_stop = false;
+    _scan = std::thread([this] { scan_main(); });
+    std::lock_guard<std::mutex> lk(_mu);
+    _scan_running = true;
+}
+
+void MaskSession::stop_scan() {
+    _scan_stop = true;
+    if (_scan.joinable()) _scan.join();
+    std::lock_guard<std::mutex> lk(_mu);
+    _scan_running = false;
+}
+
+// One decode per mask the cache does not know by fingerprint, off the worker
+// so navigation stays live. A read a worker job overlapped is thrown away,
+// cache entry and all, and redone: that job may have rewritten the mask.
+void MaskSession::scan_main() {
+    const auto t0 = std::chrono::steady_clock::now();
+    KeptCache cache;
+    std::string err;
+    cache.load(_layer_root, err);
+    const int n = (int)_frames.size();
+    int since_save = 0;
+    bool save_failed = false;
+    for (int i = 0; i < n && !_scan_stop.load();) {
+        const uint64_t seq = _job_seq.load();
+        if (seq & 1) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            continue;
+        }
+        const std::string& key = _frames[(size_t)i].key;
+        FrameHealth h;
+        h.scanned = true;
+        h.missing_mask = !kept_fraction_of(_mask_root, key, _mask_flipped, cache, h.kept);
+        if (_scan_hook) _scan_hook(i);
+        {
+            std::lock_guard<std::mutex> lk(_mu);
+            if (_job_seq.load() != seq) {
+                cache.dirty = cache.frames.erase(key) > 0 || cache.dirty;
+                continue;
+            }
+            if ((size_t)i < _health.size()) _health[(size_t)i] = h;
+            _scanned = ++i;
+        }
+        // One failure ends the periodic writes, so a failing write is never
+        // retried on every remaining frame of a thousand-frame scan.
+        if (++since_save >= 64 && !save_failed) {
+            since_save = 0;
+            if (cache.save(_layer_root, err)) cache.dirty = false;
+            else save_failed = true;
+        }
+    }
+    if (!save_failed && !cache.save(_layer_root, err)) save_failed = true;
+    if (save_failed) post_status(spirula::i18n::format(msg::err_write, {err}), true);
+    else cache.dirty = false;
+    if (_scan_stop.load()) return;
+    std::lock_guard<std::mutex> lk(_mu);
+    _scan_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+}
+
+// After a job rewrote masks. Worker thread, so no mask changes under the
+// read. The cache is read and never written back: kept.json has one writer.
+void MaskSession::refresh_health(const std::vector<std::string>& keys) {
+    if (keys.empty()) return;
+    std::map<std::string, int> at;
+    for (size_t i = 0; i < _frames.size(); i++) at[_frames[i].key] = (int)i;
+    KeptCache cache;
+    std::string err;
+    cache.load(_layer_root, err);
+    for (const std::string& key : keys) {
+        const auto it = at.find(key);
+        if (it == at.end()) continue;
+        FrameHealth h;
+        h.scanned = true;
+        h.missing_mask = !kept_fraction_of(_mask_root, key, _mask_flipped, cache, h.kept);
+        std::lock_guard<std::mutex> lk(_mu);
+        if ((size_t)it->second < _health.size()) _health[(size_t)it->second] = h;
+    }
 }
 
 Rect MaskSession::shown_rect(const Rect& stored) const {

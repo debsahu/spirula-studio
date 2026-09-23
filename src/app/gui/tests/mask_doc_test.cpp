@@ -54,9 +54,14 @@ namespace {
 
 int g_failures = 0;
 
+// A FAIL is flushed at once: a later abort would lose a piped buffer, and with
+// it the name of the check that saw the defect.
 void check(bool ok, const std::string& what) {
     std::printf("%s %s\n", ok ? "ok  " : "FAIL", what.c_str());
-    if (!ok) g_failures++;
+    if (!ok) {
+        g_failures++;
+        std::fflush(stdout);
+    }
 }
 
 // A chmod can inject a read or write failure only for a non-root POSIX user.
@@ -1374,6 +1379,11 @@ void settle(mk::MaskSession& s) {
     for (int i = 0; i < 2000 && !s.idle(); i++)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     s.pump();
+}
+
+void wait_scanned(mk::MaskSession& s) {
+    for (int i = 0; i < 2000 && s.scanned_count() < s.frame_count(); i++)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
 void test_session() {
@@ -3207,7 +3217,12 @@ void test_session_close_reports_a_failed_save() {
     check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
     settle(s);
     // A regular file where the layer folder goes: every layer write fails.
+    // The scan's kept.json made the folder, so it goes first.
+    wait_scanned(s);
+    for (int i = 0; i < 2000 && !fs::exists(f.layer / mk::kKeptFileName); i++)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     std::error_code ec;
+    fs::remove_all(f.layer, ec);
     fs::create_directories(f.layer.parent_path(), ec);
     const std::vector<uint8_t> one = {'x'};
     check(mk::write_file_atomic(f.layer.string(), one.data(), one.size()) &&
@@ -6105,6 +6120,336 @@ void test_missing_predicate() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan 3, Task 9: the scan, and jumping between missing frames
+// ---------------------------------------------------------------------------
+
+void test_session_find_missing() {
+    Fixture f = make_dataset("find", 64, 48, {"a", "b", "c", "d", "e"});
+    // b nearly empty (kept 0.01), c absent, e all kept (1.0).
+    std::vector<uint8_t> nearly(64 * 48, 0);
+    for (int i = 0; i < 31; i++) nearly[(size_t)i] = 255;
+    write_png_gray(f.masks / "b.png", 64, 48, nearly);
+    fs::remove(f.masks / "c.png");
+    write_png_gray(f.masks / "e.png", 64, 48, std::vector<uint8_t>(64 * 48, 255));
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
+    settle(s);
+    wait_scanned(s);
+    check(s.scanned_count() == 5, "all five scanned");
+    check(s.health(1).scanned && !s.health(1).missing_mask && s.health(1).kept < 0.02f, "b's kept is tiny");
+    check(s.health(2).scanned && s.health(2).missing_mask, "c has no mask");
+    check(s.health(4).kept == 1.0f, "e is all kept");
+    check(s.missing_count() == 3, "b, c, e are missing at the default band");
+    check(s.band_lo() == 0.05f && s.band_hi() == 0.98f, "default band");
+    check(s.frame_index() == 0 && s.go_to_missing(+1), "jump forward");
+    settle(s);
+    check(s.frame_index() == 1, "landed on b");
+    check(s.go_to_missing(+1), "jump again");
+    settle(s);
+    check(s.frame_index() == 2 && s.doc() && s.doc()->base_state() == mk::BaseState::Missing, "landed on c, Missing");
+    check(s.go_to_missing(+1), "and again");
+    settle(s);
+    check(s.frame_index() == 4, "landed on e");
+    check(!s.go_to_missing(+1) && s.frame_index() == 4 &&
+              s.error() == spirula::i18n::msg::maskedit::find_none.get(),
+          "none further, and says which: " + s.error());
+    check(s.go_to_missing(-1), "back");
+    settle(s);
+    check(s.frame_index() == 2, "back on c");
+    s.set_band(0.0f, 1.0f);
+    check(s.missing_count() == 1, "with a full band only the absent mask is missing");
+    // set_band orders its arguments. The panel clamps; the API must too,
+    // because lo above hi makes is_missing true for every scanned frame.
+    s.set_band(0.90f, 0.10f);
+    check(s.band_lo() == 0.10f && s.band_hi() == 0.90f, "set_band orders its arguments");
+    s.set_band(0.0f, 1.0f);
+    // The cache on disk: a, b, d, e; never c.
+    mk::KeptCache cache;
+    check(cache.load(s.layer_root(), err) && cache.frames.size() == 4 && cache.frames.count("c") == 0,
+          "kept.json holds the four decodable masks");
+    const fs::path kept_path = fs::path(s.layer_root()) / mk::kKeptFileName;
+    check(s.scan_running(), "a scan thread is outstanding while the session is open");
+    s.close();
+    check(!s.is_open() && !s.scan_running(), "closed with the scan stopped and joined");
+    // Second open: nothing changed, so the cache is read and not rewritten.
+    // Byte equality means that only because of the probe key (Task 8): the
+    // writer never emits it, so a rewrite would drop it.
+    const std::vector<uint8_t> probed = plant_write_probe(kept_path);
+    // The band goes into the reopen at 0.0/1.0, which is NOT the member
+    // default: "open() keeps it" and "open() resets it" are otherwise the
+    // same observation, since 0.05/0.98 is what a reset would produce.
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "reopen");
+    settle(s);
+    wait_scanned(s);
+    check(s.band_lo() == 0.0f && s.band_hi() == 1.0f, "open() leaves the band alone");
+    check(s.missing_count() == 1, "and that band is the one the count uses");
+    check(file_bytes(kept_path) == probed, "cache read, not rewritten");
+    s.set_band(0.05f, 0.98f);
+    check(s.missing_count() == 3, "same answer from the cache at the default band");
+    // A save on the open frame refreshes its health without a rescan.
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {0.0f, 0.0f, 64.0f, 48.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.save();
+    settle(s);
+    check(s.health(0).scanned && s.health(0).kept == 0.0f, "a's health follows the save");
+    check(s.missing_count() == 4, "a is now missing too");
+
+    // A propagate rewrites OTHER frames' masks. Only d is healthy at this
+    // point, so d alone changes state and the count is a sharp instrument:
+    // without the refresh it stays at 4 through both of these.
+    check(s.health(3).scanned && !mk::is_missing(s.health(3), s.band_lo(), s.band_hi()),
+          "fixture: d is the one healthy frame");
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    check(s.last_propagate().done == 4, "propagated onto b, c, d, e");
+    check(mk::is_missing(s.health(3), s.band_lo(), s.band_hi()) && s.missing_count() == 5,
+          "d's health followed the propagate");
+    check(s.can_undo_propagate(), "still on the source");
+    s.undo_propagate();
+    settle(s);
+    check(!mk::is_missing(s.health(3), s.band_lo(), s.band_hi()) && s.missing_count() == 4,
+          "and followed the undo back");
+
+    // Revert frame rewrites the open frame's mask on the worker, not through
+    // the save path, so only its own refresh can tell the count.
+    check(mk::is_missing(s.health(0), s.band_lo(), s.band_hi()), "fixture: a is missing before the revert");
+    s.revert_open_frame();
+    settle(s);
+    check(!mk::is_missing(s.health(0), s.band_lo(), s.band_hi()) && s.missing_count() == 3,
+          "a's health followed Revert frame");
+
+    // Revert all rewrites every corrected mask, the open frame's included, and
+    // the reload after it rebases nothing: only its own refresh can tell.
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    check(mk::is_missing(s.health(0), s.band_lo(), s.band_hi()) &&
+              mk::is_missing(s.health(3), s.band_lo(), s.band_hi()) && s.missing_count() == 5,
+          "fixture: a and d are missing before Revert all");
+    s.revert_every_frame();
+    settle(s);
+    check(!mk::is_missing(s.health(0), s.band_lo(), s.band_hi()) &&
+              !mk::is_missing(s.health(3), s.band_lo(), s.band_hi()) && s.missing_count() == 3,
+          "a's and d's health followed Revert all");
+
+    check(s.scan_running(), "the reopened session's scan thread is outstanding too");
+    s.close();
+    check(!s.is_open() && !s.scan_running(), "the second close stopped and joined it as well");
+}
+
+// A directory where kept.json must land makes write_file_atomic's rename
+// fail. close() joins the scan first, so the final save has happened by the
+// time error() is read and there is no race with the scan thread.
+void test_scan_save_failure() {
+    Fixture f = make_dataset("scanfail", 64, 48, {"a", "b"});
+    fs::create_directories(f.layer / mk::kKeptFileName);
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
+    settle(s);
+    wait_scanned(s);
+    check(s.scanned_count() == 2, "the scan finished although its cache write could not");
+    check(!s.health(0).missing_mask && !s.health(1).missing_mask, "and _health is still the product");
+    s.close();
+    check(s.error().find(mk::kKeptFileName) != std::string::npos,
+          "the failed cache write named itself on the status line: " + s.error());
+}
+
+// The operator's masks are 255 = DROP: the scan counts the zeros there, so the
+// band describes what the trainer keeps, as the open document's Kept does.
+void test_session_find_missing_flipped() {
+    Fixture f = make_dataset("find_flipped", 64, 48, {"a", "b"});
+    write_png_gray(f.masks / "a.png", 64, 48, box_layer(64, 48, 0, 0, 32, 24));    // a quarter white
+    write_png_gray(f.masks / "b.png", 64, 48, std::vector<uint8_t>(64 * 48, 0));   // all black
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), true, err),
+          "find flipped: open: " + err);
+    settle(s);
+    wait_scanned(s);
+    check(std::abs(s.health(0).kept - 0.75f) < 1e-6f,
+          "find flipped: a keeps three quarters when the folder's 255 is drop");
+    check(s.doc() && std::abs(s.doc()->kept_fraction() - s.health(0).kept) < 1e-6f,
+          "find flipped: the scan agrees with the open document's Kept");
+    check(s.health(1).kept == 1.0f && s.missing_count() == 1,
+          "find flipped: an all-black flipped mask keeps everything, and is the one missing");
+    s.close();
+}
+
+// The scan reads masks while the worker writes them. A job that ran during a
+// frame's read makes that read stale: it is dropped and the frame read again,
+// or the job's own refresh would be overwritten with the mask it replaced.
+void test_scan_yields_to_a_write() {
+    Fixture f = make_dataset("scanrace", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::atomic<int> phase{0};
+    s.set_scan_hook_for_test([&phase](int i) {
+        if (i != 1 || phase.load() != 0) return;
+        phase = 1;
+        for (int k = 0; k < 4000 && phase.load() != 2; k++)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "scan race: open: " + err);
+    settle(s);
+    for (int k = 0; k < 4000 && phase.load() != 1; k++)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    check(phase.load() == 1, "scan race: the scan holds b's read, not yet published");
+    const float before = s.health(1).kept;
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {0.0f, 0.0f, 64.0f, 48.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    check(s.last_propagate().done == 1 && s.health(1).kept == 0.0f,
+          "scan race: the propagate's refresh published b's new mask");
+    phase = 2;
+    wait_scanned(s);
+    check(before == -1.0f, "scan race: fixture: b was unpublished when the job ran");
+    check(s.scanned_count() == 2 && s.health(1).kept == 0.0f,
+          "scan race: the scan's stale read of b did not overwrite the refresh");
+    s.close();
+    mk::KeptCache cache;
+    uint64_t fp = 0;
+    check(cache.load(f.layer.string(), err) && cache.frames.count("b") &&
+              mk::fingerprint_file((f.masks / "b.png").string(), fp) &&
+              cache.frames["b"].fp == fp && cache.frames["b"].kept == 0.0f,
+          "scan race: kept.json holds b as it is on disk now");
+}
+
+// A FIFO at a mask path blocks an open until a writer comes; the scan must not
+// wait on one, or close() waits on the scan.
+void test_scan_skips_a_fifo() {
+#ifndef _WIN32
+    Fixture f = make_dataset("scanfifo", 64, 48, {"a", "b", "c"});
+    const fs::path fifo = f.masks / "b.png";
+    fs::remove(fifo);
+    check(mkfifo(fifo.c_str(), 0600) == 0, "scan fifo: fixture: b's mask is a FIFO");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "scan fifo: open: " + err);
+    settle(s);
+    wait_scanned(s);
+    check(s.scanned_count() == 3 && s.health(1).missing_mask && !s.health(2).missing_mask,
+          "scan fifo: the scan passes b as missing and reaches c");
+    for (int i = 0; i < 2000 && s.scanned_count() < 3; i++) {   // frees a mutant's blocked open
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    s.close();
+#endif
+}
+
+// A re-run between sessions rewrites a corrected frame's mask. The scan sees
+// the new file (its old fingerprint misses); the load rebases the frame and
+// writes a new composite, which the scan never read.
+void test_scan_follows_rebase() {
+    Fixture f = make_dataset("scanrebase", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "rebase: open: " + err);
+    settle(s);
+    wait_scanned(s);
+    s.go_to(1);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {0.0f, 0.0f, 32.0f, 48.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.save();
+    settle(s);
+    s.close();
+    write_png_gray(f.masks / "b.png", 64, 48, std::vector<uint8_t>(64 * 48, 255));
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "rebase: reopen: " + err);
+    settle(s);
+    wait_scanned(s);
+    check(s.health(1).kept == 1.0f && s.missing_count() == 1,
+          "rebase: the scan reads the re-run's mask, not its cached predecessor");
+    check(s.go_to_missing(+1), "rebase: M");
+    settle(s);
+    const float composite = s.doc() ? s.doc()->kept_fraction() : -1.0f;
+    check(s.frame_index() == 1 && composite > 0.4f && composite < 0.6f,
+          "rebase: fixture: the load rebased b under its left-half drop");
+    check(s.health(1).kept == composite && s.missing_count() == 0,
+          "rebase: b's health followed the composite its load wrote");
+    s.close();
+}
+
+// A mask that exists and will not decode is missing to the scan; the load
+// that M starts fails and names the file. The next M must move past it, and
+// the way back must load the frame the failed load left in place.
+void test_find_missing_unreadable() {
+    Fixture f = make_dataset("find_corrupt", 64, 48, {"a", "b", "c", "d"});
+    write_png_gray(f.masks / "a.png", 64, 48, std::vector<uint8_t>(64 * 48, 0));
+    const char junk[] = "not a png";
+    check(mk::write_file_atomic((f.masks / "b.png").string(), (const uint8_t*)junk, sizeof junk - 1),
+          "unreadable: fixture written");
+    fs::remove(f.masks / "c.png");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "unreadable: open: " + err);
+    settle(s);
+    wait_scanned(s);
+    check(s.health(1).scanned && s.health(1).missing_mask && s.missing_count() == 3,
+          "unreadable: the scan counts b missing");
+    check(s.go_to_missing(+1), "unreadable: M");
+    settle(s);
+    const std::string named = spirula::i18n::format(spirula::i18n::msg::maskedit::err_read,
+                                                    {mk::mask_file(s.mask_root(), "b")});
+    check(!s.doc() && s.error() == named, "unreadable: the status line names b's mask: " + s.error());
+    check(s.go_to_missing(-1), "unreadable: Shift+M");
+    settle(s);
+    check(s.frame_index() == 0 && s.doc(), "unreadable: back onto a, which the failed load left open");
+    check(s.go_to_missing(+1), "unreadable: M again");
+    settle(s);
+    check(s.go_to_missing(+1), "unreadable: and M once more");
+    settle(s);
+    check(s.frame_index() == 2 && s.doc() && s.doc()->base_state() == mk::BaseState::Missing,
+          "unreadable: the next M moves past the frame that would not load");
+    s.close();
+}
+
+// Spec 9.2's second arm, "a layer but no base (5.4)": 5.4's base is
+// masks/<key>.png, and with it absent the first arm already holds.
+void test_find_missing_layer_without_mask() {
+    Fixture f = make_dataset("find_layer", 64, 48, {"a", "c"});
+    fs::remove(f.masks / "c.png");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "layer: open: " + err);
+    settle(s);
+    s.go_to(1);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {0.0f, 0.0f, 16.0f, 16.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.save();
+    settle(s);
+    s.close();
+    check(fs::exists(mk::layer_file(f.layer.string(), "c", mk::Layer::Drop)) &&
+              !fs::exists(mk::layer_file(f.layer.string(), "c", mk::Layer::Base)) &&
+              !fs::exists(f.masks / "c.png"),
+          "layer: fixture: c has a drop layer, no base and no mask");
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "layer: reopen: " + err);
+    settle(s);
+    wait_scanned(s);
+    s.set_band(0.0f, 1.0f);
+    check(s.health(1).missing_mask && s.missing_count() == 1,
+          "layer: a frame with a correction layer and no mask is missing at any band");
+    s.close();
+}
+
+// ---------------------------------------------------------------------------
 // Plan 3, Task 11: the slideshow's decoder ring and clock
 // ---------------------------------------------------------------------------
 
@@ -7256,6 +7601,14 @@ int main() {
     test_slideshow_releases_sam();
     test_kept_cache();
     test_missing_predicate();
+    test_session_find_missing();
+    test_scan_save_failure();
+    test_session_find_missing_flipped();
+    test_scan_yields_to_a_write();
+    test_scan_skips_a_fifo();
+    test_scan_follows_rebase();
+    test_find_missing_unreadable();
+    test_find_missing_layer_without_mask();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();

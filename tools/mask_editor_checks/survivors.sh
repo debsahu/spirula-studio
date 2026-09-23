@@ -98,6 +98,29 @@ if command grep -qF '_path.in_progress())' src/app/gui/mask/MaskSession.cpp &&
    command grep -qF 'bool animating() const { return _compare.animating() || _mask_editor.animating(); }' src/app/gui/GuiApp.h; then
     echo "ok   start_slideshow refuses a pen path; GuiApp::animating() asks the editor"
 else echo "FAIL start_slideshow refuses a pen path; GuiApp::animating() asks the editor"; FAILS=$((FAILS + 1)); fi
+# Plan 3 Task 9: row D's find buttons wait for the worker and stand down while
+# playing, their help shows when greyed; the frame keys stand down for a stroke,
+# a pen path, the worker and Ctrl; the key list is the frame slider's tooltip.
+find=$(awk '/if \(ui::Button\(msg::find_first\)\) go_to\(0\);/{print p; exit} {p=$0}' "$F")
+if [ "$(printf '%s' "$find" | sed 's/^ *//')" = 'ImGui::BeginDisabled(!idle() || _slide_playing);' ]; then
+    echo "ok   row D's find buttons wait for the worker and are greyed while playing"
+else echo "FAIL row D's find buttons wait for the worker and are greyed while playing"; FAILS=$((FAILS + 1)); fi
+has 1 'ui::help_on_hover_disabled(msg::find_help);'
+none 'ui::help_on_hover(msg::find_help);'
+has 1 'if (ui::Button(msg::find_prev)) go_to_missing(-1);'
+has 1 'if (ui::Button(msg::find_next)) go_to_missing(+1);'
+has 1 'hi_pct = std::clamp(hi_pct, lo_pct, 100);'
+keys=$(awk '/ImGui::Shortcut\(ImGuiKey_V, route\)/{v=1} v&&/if \(ImGui::Shortcut\(ImGuiKey_LeftArrow, rep\)\)/{print p; exit} {p=$0}' "$F")
+if [ "$(printf '%s' "$keys" | sed 's/^ *//')" = 'if (!_tool.in_progress() && !_path.in_progress() && idle() && !io.KeyCtrl) {' ]; then
+    echo "ok   the frame keys follow V and stand down for a stroke, a pen path, the worker and Ctrl"
+else echo "FAIL the frame keys follow V and stand down for a stroke, a pen path, the worker and Ctrl"; FAILS=$((FAILS + 1)); fi
+has 1 'if (ImGui::Shortcut(ImGuiKey_M, route)) go_to_missing(+1);'
+has 1 'if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_M, route)) go_to_missing(-1);'
+tip=$(awk 'p~/IsItemDeactivatedAfterEdit\(\) && _slider_idx != _idx\) go_to\(_slider_idx\);/{print; exit} {p=$0}' "$F")
+if [ "$(printf '%s' "$tip" | sed 's/^ *//')" = 'ui::help_on_hover(msg::hint_keys);' ]; then
+    echo "ok   the key list is the frame slider's tooltip, read after its commit"
+else echo "FAIL the key list is the frame slider's tooltip, read after its commit"; FAILS=$((FAILS + 1)); fi
+none 'TextDisabledWrapped(msg::hint_keys)'
 none '_path_mode'
 none 'paint_for('
 none '_status_h > 0.0f'

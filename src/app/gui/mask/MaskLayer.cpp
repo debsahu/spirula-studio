@@ -629,6 +629,9 @@ bool kept_fraction_of(const std::string& mask_root, const std::string& key, bool
                       KeptCache& cache, float& kept) {
     kept = -1.0f;
     const std::string path = mask_file(mask_root, key);
+    // A FIFO or a device there would block the open until a writer came.
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) return false;
     uint64_t fp = 0;
     if (!fingerprint_file(path, fp)) return false;
     const auto it = cache.frames.find(key);

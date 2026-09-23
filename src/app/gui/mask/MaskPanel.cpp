@@ -230,6 +230,7 @@ void MaskSession::draw_toolbar() {
     ImGui::SetNextItemWidth(px(260.0f));
     ui::SliderIntRaw("##maskframe", &_slider_idx, 0, std::max(0, frame_count() - 1), "%d");
     if (ImGui::IsItemDeactivatedAfterEdit() && _slider_idx != _idx) go_to(_slider_idx);
+    ui::help_on_hover(msg::hint_keys);
     ImGui::SameLine();
     if (ui::ButtonRaw(">")) go_to(_idx + 1);
     ImGui::EndDisabled();
@@ -266,7 +267,7 @@ void MaskSession::note_row_width() {
                                           ImGui::GetStyle().WindowPadding.x);
 }
 
-// Rows A to C: the view and Play, propagate, its warning. Task 9 adds row D
+// Rows A to D: the view and Play, propagate, its warning, find missing
 // (Decision 24).
 void MaskSession::draw_workflow_row() {
     const bool locked = _tool.in_progress();
@@ -334,6 +335,35 @@ void MaskSession::draw_workflow_row() {
     ImGui::EndDisabled();
     note_row_width();
     ui::TextDisabled(msg::prop_warn_moves);
+    note_row_width();
+
+    // Row D: find missing. The count's width changes as the scan runs, which
+    // moves the minimum width, never the height.
+    ImGui::BeginDisabled(!idle() || _slide_playing);
+    if (ui::Button(msg::find_first)) go_to(0);
+    ImGui::SameLine();
+    if (ui::Button(msg::find_prev)) go_to_missing(-1);
+    ImGui::SameLine();
+    if (ui::Button(msg::find_next)) go_to_missing(+1);
+    ImGui::SameLine();
+    if (ui::Button(msg::find_last)) go_to(frame_count() - 1);
+    ImGui::EndDisabled();
+    ui::help_on_hover_disabled(msg::find_help);
+    ImGui::SameLine();
+    int lo_pct = (int)std::lround(100.0f * _band_lo), hi_pct = (int)std::lround(100.0f * _band_hi);
+    ImGui::SetNextItemWidth(px(110.0f));
+    const bool lo_changed = ui::InputInt(msg::find_band_lo, &lo_pct);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(px(110.0f));
+    const bool hi_changed = ui::InputInt(msg::find_band_hi, &hi_pct);
+    if (lo_changed || hi_changed) {
+        lo_pct = std::clamp(lo_pct, 0, 100);
+        hi_pct = std::clamp(hi_pct, lo_pct, 100);
+        set_band(0.01f * (float)lo_pct, 0.01f * (float)hi_pct);
+    }
+    ImGui::SameLine();
+    if (scanned_count() < frame_count()) ui::Text(msg::find_scanning, {scanned_count(), frame_count()});
+    else ui::Text(msg::find_count, {missing_count()});
     note_row_width();
 }
 
@@ -596,6 +626,18 @@ void MaskSession::handle_keys(const Mapping& m) {
     if (!io.KeyCtrl && ImGui::Shortcut(ImGuiKey_V, route))
         _view_mode = switch_view(_view_mode, (ViewMode)(((int)_view_mode + 1) % 3),
                                  _tool.in_progress());
+    // Not while a pen path is open: pump() cancels it on the new frame, silently.
+    const ImGuiInputFlags rep = route | ImGuiInputFlags_Repeat;
+    if (!_tool.in_progress() && !_path.in_progress() && idle() && !io.KeyCtrl) {
+        if (ImGui::Shortcut(ImGuiKey_LeftArrow, rep)) go_to(_idx - 1);
+        if (ImGui::Shortcut(ImGuiKey_RightArrow, rep)) go_to(_idx + 1);
+        if (ImGui::Shortcut(ImGuiKey_PageUp, rep)) go_to(std::max(0, _idx - 10));
+        if (ImGui::Shortcut(ImGuiKey_PageDown, rep)) go_to(std::min(frame_count() - 1, _idx + 10));
+        if (ImGui::Shortcut(ImGuiKey_Home, route)) go_to(0);
+        if (ImGui::Shortcut(ImGuiKey_End, route)) go_to(frame_count() - 1);
+        if (ImGui::Shortcut(ImGuiKey_M, route)) go_to_missing(+1);
+        if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_M, route)) go_to_missing(-1);
+    }
 }
 
 // Names what goes -- the corrected-frame count, and the open frame's unsaved

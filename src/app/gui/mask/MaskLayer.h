@@ -167,7 +167,7 @@ struct KeptCache {
 };
 // From the cache when the fingerprint and `flipped` (the folder's 255 is
 // drop) match, else decoded and cached. False with kept = -1 when the mask is
-// absent or unreadable.
+// absent, unreadable or not a regular file.
 bool kept_fraction_of(const std::string& mask_root, const std::string& key, bool flipped,
                       KeptCache& cache, float& kept);
 

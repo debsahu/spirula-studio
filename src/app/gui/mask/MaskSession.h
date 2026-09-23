@@ -328,6 +328,30 @@ public:
     bool can_undo_propagate() const;
     void undo_propagate();
     PropagateReport last_propagate() const;
+
+    // ---- find missing (plan 3) ----
+    float band_lo() const { return _band_lo; }
+    float band_hi() const { return _band_hi; }
+    // Ordered here, not only in the panel: lo above hi makes is_missing
+    // true for every scanned frame, and the API has other callers.
+    void set_band(float lo, float hi) {
+        _band_lo = lo < hi ? lo : hi;
+        _band_hi = lo < hi ? hi : lo;
+    }
+    FrameHealth health(int i) const;
+    int scanned_count() const;
+    int missing_count() const;
+    // A scan thread was started and has not been joined. is_open() cannot
+    // answer this: close() clears _open whether or not it stopped the scan.
+    bool scan_running() const;
+    // Wall time of the last completed scan, ms; -1 before one completes.
+    double scan_ms() const;
+    // Loads the next (+1) or previous (-1) missing frame; false, with a
+    // status line, when there is none that way.
+    bool go_to_missing(int dir);
+    // Test-only: runs on the scan thread between a frame's read and its
+    // publication. Set before open(); the scan reads it without a lock.
+    void set_scan_hook_for_test(std::function<void(int)> hook) { _scan_hook = std::move(hook); }
     // Test-only, as MaskDoc::set_history_byte_cap_for_test is:
     // a record of never-edited targets is 0 bytes, so 256 MB is unreachable.
     void set_propagate_byte_cap_for_test(size_t bytes) { _prop_byte_cap = bytes; }
@@ -375,6 +399,10 @@ private:
     // clear: the work it lost is still lost.
     void post_error(const std::string& s, bool sticky);
     void set_corrected(int n);
+    void start_scan();
+    void stop_scan();
+    void scan_main();
+    void refresh_health(const std::vector<std::string>& keys);
     Rect shown_rect(const Rect& stored) const;
     bool sam_add_on_top(int object) const;
     bool sam_add_redoable() const;
@@ -560,6 +588,20 @@ private:
     PropagateRecord _prop;             // guarded by _mu
     bool _prop_undoable = false;       // guarded by _mu
     PropagateReport _prop_report;      // guarded by _mu
+    std::thread _scan;
+    std::atomic<bool> _scan_stop{false};
+    bool _scan_running = false;         // guarded by _mu
+    std::vector<FrameHealth> _health;   // guarded by _mu
+    int _scanned = 0;                   // guarded by _mu
+    double _scan_ms = -1.0;             // guarded by _mu
+    // UI thread only. The scan never reads the band; missing_count() holds
+    // _mu for _health and reads these two outside anything that guards them.
+    float _band_lo = 0.05f, _band_hi = 0.98f;
+    // Odd while a worker job runs. The worker is the only writer of masks, so a
+    // scan read that saw this unchanged and even saw no mask change under it.
+    std::atomic<uint64_t> _job_seq{0};
+    int _nav = -1;                      // UI thread: the frame last asked for
+    std::function<void(int)> _scan_hook;
     size_t _prop_byte_cap = kMaxHistoryBytes;   // UI thread; copied into the job
     std::string _status, _error;     // guarded by _mu
     bool _error_sticky = false;      // guarded by _mu
