@@ -39,6 +39,19 @@ void SlidePrefetch::stop() {
     _count = 0;
 }
 
+// _inflight is left alone: each worker erases its own index when its decode ends.
+void SlidePrefetch::halt() {
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        _stop = true;
+        _running = false;
+        for (Slot& s : _slots) s = Slot{};
+        _bytes = 0;
+        _count = 0;
+    }
+    _cv.notify_all();
+}
+
 // A flag, not the thread vector: start() and stop() push and clear _threads
 // outside the lock, so reading it under the lock advertises a safety it does
 // not have.

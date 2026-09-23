@@ -57,6 +57,9 @@ public:
     void start(std::vector<SlideFrame> frames, int threads);
     // Joins the threads and drops the ring.
     void stop();
+    // stop() without the join: a decode in flight ends on its own, unput, and
+    // stop(), start() or the destructor joins it. For the UI thread.
+    void halt();
     bool running() const;
     // The pane's long edge, as FilmReel sizes its pictures.
     void set_target(int side);

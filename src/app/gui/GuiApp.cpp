@@ -2697,6 +2697,17 @@ std::string GuiApp::state_json() {
     out += "\",\"mask_peek_total\":" + std::to_string(_mask_editor.peek_total());
     out += ",\"nav_visible\":";
     out += ImGui::GetIO().NavVisible ? "true" : "false";
+    static const char* kView[] = {"overlay", "mask", "side"};
+    out += ",\"mask_view\":\"";
+    out += kView[(int)_mask_editor.view_mode()];
+    out += "\",\"mask_slideshow\":";
+    out += _mask_editor.slideshow_playing() ? "true" : "false";
+    out += ",\"mask_slide_stop_ms\":" + std::to_string(_mask_editor.slide_stop_ms());
+    out += ",\"mask_slide_shown_fps\":" + std::to_string(_mask_editor.slide_shown_fps());
+    out += ",\"mask_slide_gap_ms\":" + std::to_string(_mask_editor.slide_max_gap_ms());
+    out += ",\"mask_slide_window\":" + std::to_string(_mask_editor.slide_window());
+    out += ",\"mask_slide_decoded\":" + std::to_string(_mask_editor.slide_decoded());
+    out += ",\"mask_slide_index\":" + std::to_string(_mask_editor.slide_index());
     return out;
 }
 

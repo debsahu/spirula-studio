@@ -134,6 +134,7 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
     }
     idx.mask_root = _mask_root;
     idx.mask_flipped = mask_flipped;
+    _mask_flipped = mask_flipped;
     _index = std::move(idx);
     _idx = -1;
     _doc.reset();
@@ -161,6 +162,8 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
 
 void MaskSession::close() {
     if (!_open && !_worker.joinable()) return;
+    _slide.stop();   // also joins the threads a halted slideshow left finishing
+    _slide_playing = false;
     if (_doc && _doc->dirty()) save();
     close_sam();   // order vs the worker join is free: the save never touches SAM
     {
@@ -191,6 +194,7 @@ void MaskSession::close() {
     _image_root.clear();
     _mask_root.clear();
     _layer_root.clear();
+    _mask_flipped = false;
     std::lock_guard<std::mutex> lk(_mu);
     _loaded = Loaded{};
     _loaded_ready = false;
@@ -452,10 +456,17 @@ bool MaskSession::sam_work_pending() const {
 // Frame keys repeat across datasets, so nothing keyed by one may outlive it:
 // a record that did would undo this dataset's layers into the next one's.
 void MaskSession::forget_workflow() {
-    std::lock_guard<std::mutex> lk(_mu);
-    _prop = PropagateRecord{};
-    _prop_undoable = false;
-    _prop_report = PropagateReport{};
+    {
+        std::lock_guard<std::mutex> lk(_mu);
+        _prop = PropagateRecord{};
+        _prop_undoable = false;
+        _prop_report = PropagateReport{};
+    }
+    _slide_index = -1;
+    _slide_shown = 0;
+    _slide_max_gap = 0.0;
+    _slide_stop_ms = -1.0;
+    _slide_started = _slide_last_shown = _slide_now = 0.0;
 }
 
 void MaskSession::drop_propagate_record() {
@@ -1234,6 +1245,95 @@ size_t MaskSession::sam_held_bytes() const {
     size_t n = 0;
     for (const HeldRegion& h : _sam_held) n += h.mask.size();
     return n;
+}
+
+// ---------------------------------------------------------------------------
+// Slideshow
+// ---------------------------------------------------------------------------
+
+void MaskSession::start_slideshow() {
+    if (_slide_playing || frame_count() < 2 || _idx < 0 || !idle() || sam_work_pending() ||
+        _path.in_progress())
+        return;
+    // Both want the same memory and never need it at once (plan 4, ruling 5).
+    sam_yield();
+    if (_doc && _doc->dirty()) save();
+    _slide_index = _idx;
+    std::vector<SlideFrame> frames;
+    for (const FrameRef& f : _frames)
+        frames.push_back({f.file, mask_file(_mask_root, f.key), _mask_flipped});
+    const int threads = std::clamp((int)std::thread::hardware_concurrency() - 1, 1, 4);
+    _slide.start(std::move(frames), threads);
+    _slide_playing = true;
+    _slide_need = false;
+    _slide_started = _slide_last_shown = _slide_now = 0.0;
+    _slide_first = true;
+    _slide_max_gap = 0.0;
+    _slide_stop_ms = -1.0;
+    _slide_shown = 0;
+    _slide_window = 0;
+    _slide_src_w = 0;
+    _slide_src_h = 0;
+    _slide_tex_w = 0;   // the last playback's picture is not this one's first
+    // One frame's buffers are not held while pictures stream.
+    _doc.reset();
+    _rgb.reset();
+    _win_dirty = true;
+}
+
+// halt(), not stop(): this runs inside an ImGui frame, and joining waited out
+// an 8K decode in flight, 321 to 536 ms in the app.
+void MaskSession::stop_slideshow() {
+    if (!_slide_playing) return;
+    const auto t0 = std::chrono::steady_clock::now();
+    _slide.halt();
+    _slide_stop_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    _slide_playing = false;
+    const int i = _slide_index;
+    _idx = -1;
+    load_frame(i);
+}
+
+double MaskSession::slide_shown_fps() const {
+    const double s = _slide_now - _slide_started;
+    return _slide_shown > 1 && s > 0.0 ? (double)(_slide_shown - 1) / s : 0.0;
+}
+
+bool MaskSession::slideshow_tick(double now, int target_side, Picture& pic) {
+    if (!_slide_playing) return false;
+    const int n = frame_count();
+    // Bounded by the ring's BYTES, not its slots: at a 4096 target an 8K
+    // picture is 22 MB, so 64 MB holds three and a window of eleven thrashes.
+    const int depth = slide_depth(slide_picture_bytes(_slide_src_w, _slide_src_h, target_side), n);
+    _slide_now = now;
+    _slide_window = depth;
+    _slide.set_target(target_side);
+    _slide_clock.fps = _slide_fps;
+    if (_slide_first) {
+        _slide_first = false;
+        _slide_started = now;
+        // The one window that includes the frame shown: nothing is decoded yet.
+        _slide.want(_slide_index, depth);
+        _slide_need = true;
+    } else if (!_slide_need && _slide_clock.due(now)) {
+        _slide_index = (_slide_index + 1) % n;
+        _slide_need = true;
+    }
+    if (!_slide_need || !_slide.take(_slide_index, pic)) return false;
+    _slide_need = false;
+    // Only after the take: a window moved first would drop this picture unshown.
+    _slide.want((_slide_index + 1) % n, depth);
+    if (!pic.empty()) {
+        _slide_src_w = pic.src_w;
+        _slide_src_h = pic.src_h;
+    }
+    if (_slide_shown > 0) _slide_max_gap = std::max(_slide_max_gap, 1000.0 * (now - _slide_last_shown));
+    _slide_last_shown = now;
+    _slide_shown++;
+    _slide_clock.start(now);
+    _slider_idx = _slide_index;
+    return true;
 }
 
 }  // namespace mask

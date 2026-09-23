@@ -70,6 +70,34 @@ else
 fi
 has 1 'ui::help_on_hover_disabled(msg::prop_go_help);'
 has 1 'ui::help_on_hover_disabled(msg::prop_undo_help);'
+# Plan 3 Task 12: Play waits for SAM, the worker, a stroke and a pen path, and
+# says why when greyed; playing greys Revert all (both clauses kept), the
+# navigation row and the SAM strip; the slideshow branch returns before !_doc.
+play_gate=$(awk '/Play waits for anything that would land on the document it releases/{on=1} on{print} on&&/EndDisabled\(\);/{exit}' "$F")
+for clause in 'frame_count() < 2 ||' '(!_slide_playing && (!_doc || !idle() || sam_work_pending() ||' \
+              '_tool.in_progress() || _path.in_progress())));' 'else start_slideshow();'; do
+    if printf '%s' "$play_gate" | command grep -qF -- "$clause"; then echo "ok   Play's gate holds: $clause"
+    else echo "FAIL Play's gate holds: $clause"; FAILS=$((FAILS + 1)); fi
+done
+has 1 'ui::help_on_hover_disabled(msg::slide_help);'
+has 1 'ImGui::BeginDisabled(!idle() || _slide_playing ||'
+has 1 '(corrected_count() == 0 && !(_doc && _doc->dirty())));'
+nav=$(awk '/if \(ui::ButtonRaw\("<"\)\) go_to\(_idx - 1\);/{print p; exit} {p=$0}' "$F")
+if [ "$(printf '%s' "$nav" | sed 's/^ *//')" = 'ImGui::BeginDisabled(!idle() || _slide_playing);' ]; then
+    echo "ok   the navigation row is greyed while playing"
+else echo "FAIL the navigation row is greyed while playing"; FAILS=$((FAILS + 1)); fi
+sam=$(awk '/^ *draw_sam_status\(\);$/{print p; exit} {p=$0}' "$F")
+if [ "$(printf '%s' "$sam" | sed 's/^ *//')" = 'ImGui::BeginDisabled(_slide_playing);' ]; then
+    echo "ok   the SAM strip is drawn greyed while playing"
+else echo "FAIL the SAM strip is drawn greyed while playing"; FAILS=$((FAILS + 1)); fi
+order=$(awk '/dl->AddRectFilled\(origin, far_corner,/{a=NR} /draw_slideshow\(dl, origin.x, origin.y, size.x, size.y\);/{b=NR} /^    if \(!_doc\) \{$/{c=NR} END{print (a && b && c && a < b && b < c) ? "yes" : "no"}' "$F")
+if [ "$order" = yes ]; then echo "ok   the slideshow branch sits between the canvas fill and !_doc"
+else echo "FAIL the slideshow branch sits between the canvas fill and !_doc"; FAILS=$((FAILS + 1)); fi
+has 1 'if (!_slide_first && input) {'
+if command grep -qF '_path.in_progress())' src/app/gui/mask/MaskSession.cpp &&
+   command grep -qF 'bool animating() const { return _compare.animating() || _mask_editor.animating(); }' src/app/gui/GuiApp.h; then
+    echo "ok   start_slideshow refuses a pen path; GuiApp::animating() asks the editor"
+else echo "FAIL start_slideshow refuses a pen path; GuiApp::animating() asks the editor"; FAILS=$((FAILS + 1)); fi
 none '_path_mode'
 none 'paint_for('
 none '_status_h > 0.0f'

@@ -26,6 +26,7 @@
 #include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -6298,6 +6299,281 @@ void test_slide_prefetch_discards_stale() {
 #endif
 }
 
+// halt() is stop() without the join: a decode in flight finishes on its own
+// and is never put, and a later stop() joins it.
+void test_slide_prefetch_halt() {
+#ifndef _WIN32
+    Fixture f = make_dataset("slide_halt", 64, 48, {"a", "b"});
+    const fs::path fifo = f.masks / "a.png";
+    fs::remove(fifo);
+    check(mkfifo(fifo.c_str(), 0600) == 0, "halt: the fixture's mask is a FIFO");
+    std::vector<mk::SlideFrame> frames;
+    for (const std::string& k : f.keys)
+        frames.push_back({(f.images / (k + ".jpg")).string(), (f.masks / (k + ".png")).string()});
+    mk::SlidePrefetch p;
+    p.set_target(32);
+    p.start(frames, 2);
+    p.want(0, 2);
+    check(wait_has(p, 1), "halt: fixture: b is held");
+    bool in_flight = false;
+    for (int i = 0; i < 3000 && !in_flight; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) { in_flight = true; close(fd); }
+        else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check(in_flight && p.decoded() == 1, "halt: fixture: a's decode is in flight");
+    std::atomic<bool> done{false};
+    std::thread halter([&] { p.halt(); done = true; });
+    for (int i = 0; i < 500 && !done; i++) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const bool returned = done;
+    for (int i = 0; i < 3000 && !done; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    halter.join();
+    check(returned, "halt: returns while a decode is in flight");
+    check(!p.running() && !p.has(1) && p.bytes() == 0, "halt: stopped, and the ring is dropped");
+    for (int i = 0; i < 3000 && p.decoded() < 2; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check(p.decoded() == 2 && !p.has(0) && p.bytes() == 0, "halt: the decode in flight is not put");
+    p.want(1, 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    check(p.decoded() == 2 && !p.has(1), "halt: a halted pool decodes nothing more");
+    p.stop();
+    p.start(frames, 1);
+    p.want(1, 1);
+    check(wait_has(p, 1), "halt: start after a halt decodes again");
+    p.stop();
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Plan 3, Task 12: the slideshow through the session, driven by a fake clock
+// ---------------------------------------------------------------------------
+
+void test_session_slideshow() {
+    Fixture f = make_dataset("slideshow", 64, 48, {"a", "b", "c", "d"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "open: " + err);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    check(s.doc()->dirty(), "fixture: dirty before play");
+    s.set_slide_fps(10.0f);
+    check(!s.animating() && !s.slideshow_playing(), "not animating before play");
+    s.start_slideshow();
+    check(s.animating() && s.slideshow_playing() && s.doc() == nullptr, "playing, document released");
+    settle(s);
+    check(fs::exists(f.layer / "a.drop.png"), "the dirty frame was saved on play");
+    gui::Picture pic;
+    // `at` is held fixed while a picture is awaited, so the shown times, and
+    // with them the reported rate and gap, are the ones driven here.
+    int shown_i = -1;
+    auto show_at = [&](double at, const std::string& what) {
+        const int wanted = (shown_i + 1) % 4;
+        bool shown = false;
+        for (int i = 0; i < 400 && !shown; i++) {
+            shown = s.slideshow_tick(at, 32, pic);
+            if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        check(shown && s.slide_index() == wanted, what);
+        shown_i = s.slide_index();
+    };
+    show_at(100.0, "frame 0 shown first");
+    check(pic.w == 32 && pic.h == 24, "pane-sized picture");
+    // Unflipped, synth_mask drops the corner and keeps the ellipse centre.
+    const size_t mid = ((size_t)12 * 32 + 16) * 3;
+    check(pic.rgb.size() > mid && pic.rgb[0] >= 150 && pic.rgb[mid] < 150,
+          "slideshow: the dropped corner is tinted and the kept centre is not");
+    check(!s.slideshow_tick(100.05, 32, pic), "not due yet at 10 fps");
+    check(s.slide_index() == 0, "a tick that is not due does not advance the frame");
+    // Driven at 0.2 s against a 10 fps clock: the rate reported must be the
+    // achieved 5 fps, not the set one.
+    for (int k = 1; k < 6; k++)
+        show_at(100.0 + 0.2 * k, "frame " + std::to_string(k % 4) + " at the driven cadence");
+    const double fps = s.slide_shown_fps();
+    check(fps > 4.95 && fps < 5.05, "shown fps is the driven cadence: " + std::to_string(fps));
+    const double gap = s.slide_max_gap_ms();
+    check(gap > 195.0 && gap < 205.0, "the longest gap is one period: " + std::to_string(gap));
+    // 300 ms, not the 1.3 s since play began nor the 1.1 s sum of the gaps.
+    show_at(101.3, "frame after a 300 ms stall");
+    const double stall = s.slide_max_gap_ms();
+    check(stall > 295.0 && stall < 305.0, "the 300 ms stall is the max, not a sum: " + std::to_string(stall));
+
+    // A real 10 ms per frame gives the pool time to re-decode the frame just
+    // taken if the window's front is the frame shown: 40 decodes, not 20.
+    // Four frames against a depth of 3; re-derive the band if either changes.
+    const int d0 = s.slide_decoded();
+    for (int k = 0; k < 20; k++) {
+        show_at(101.5 + 0.2 * k, "steady frame " + std::to_string(k));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const int cost = s.slide_decoded() - d0;
+    check(cost >= 20 && cost <= 30, "20 frames cost about 20 decodes, not 40: " + std::to_string(cost));
+
+    s.stop_slideshow();
+    check(!s.animating() && !s.slideshow_playing(), "stopped");
+    // -1 until a stop is timed, so a dropped measurement fails here.
+    check(s.slide_stop_ms() >= 0.0, "the join was timed: " + std::to_string(s.slide_stop_ms()));
+    settle(s);
+    const int last = shown_i;
+    check(s.doc() && s.frame_index() == last && s.doc()->key() == f.keys[(size_t)last],
+          "stop lands on the frame shown");
+    s.close();
+    check(s.slide_stop_ms() < 0.0 && s.slide_max_gap_ms() == 0.0 && s.slide_shown_fps() == 0.0,
+          "close forgets the last playback's numbers");
+    s.set_slide_fps(1.0f);
+    const float lo = s.slide_fps();
+    s.set_slide_fps(100.0f);
+    check(lo == 5.0f && s.slide_fps() == 30.0f, "the rate is clamped to 5..30 fps");
+}
+
+// The operator's masks are 255 = DROP: the slideshow tints what the trainer
+// drops, so synth_mask's dropped corner, read flipped, plays untinted.
+void test_session_slideshow_flipped() {
+    Fixture f = make_dataset("slideshow_flipped", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), true, err),
+          "slideshow flipped: open: " + err);
+    settle(s);
+    s.start_slideshow();
+    gui::Picture pic;
+    bool shown = false;
+    for (int i = 0; i < 400 && !shown; i++) {
+        shown = s.slideshow_tick(100.0, 32, pic);
+        if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(shown && !pic.empty() && pic.rgb[0] < 150,
+          "slideshow flipped: the file's dropped corner plays as kept, untinted");
+    // A flag that threw the mask away would leave the centre untinted too.
+    const size_t mid = ((size_t)12 * 32 + 16) * 3;
+    check(shown && pic.rgb.size() > mid && pic.rgb[mid] >= 150,
+          "slideshow flipped: the file's kept centre plays as dropped, tinted");
+    s.stop_slideshow();
+    settle(s);
+    s.close();
+}
+
+// The window is what the ring's bytes hold ahead of the frame shown: before a
+// picture reports its source a 4096 target is costed at 4096^2 x 3 (one fits),
+// then 64 x 48 frames fit all three others; a slot count would give 4 both times.
+void test_session_slideshow_window() {
+    Fixture f = make_dataset("slideshow_window", 64, 48, {"a", "b", "c", "d"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "slideshow window: open: " + err);
+    settle(s);
+    s.start_slideshow();
+    gui::Picture pic;
+    bool shown = false;
+    for (int i = 0; i < 400 && !shown; i++) {
+        shown = s.slideshow_tick(100.0, 4096, pic);
+        if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(shown && pic.w == 64 && s.slide_window() == 1,
+          "slideshow window: unknown source at 4096 holds one: " + std::to_string(s.slide_window()));
+    s.slideshow_tick(100.01, 4096, pic);
+    check(s.slide_window() == 3,
+          "slideshow window: a known 64x48 source holds the other three: " + std::to_string(s.slide_window()));
+    s.stop_slideshow();
+    settle(s);
+    s.close();
+}
+
+// Stop runs inside an ImGui frame, so it must not wait out an 8K decode (321
+// to 536 ms in the app when it joined). A FIFO mask holds b's decode in flight.
+void test_session_slideshow_stop_does_not_join() {
+#ifndef _WIN32
+    Fixture f = make_dataset("slideshow_stop", 64, 48, {"a", "b"});
+    const fs::path fifo = f.masks / "b.png";
+    fs::remove(fifo);
+    check(mkfifo(fifo.c_str(), 0600) == 0, "slideshow stop: fixture: b's mask is a FIFO");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "slideshow stop: open: " + err);
+    settle(s);
+    s.start_slideshow();
+    gui::Picture pic;
+    bool shown = false;
+    for (int i = 0; i < 400 && !shown; i++) {
+        shown = s.slideshow_tick(100.0, 32, pic);
+        if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    bool in_flight = false;
+    for (int i = 0; i < 3000 && !in_flight; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) { in_flight = true; close(fd); }
+        else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check(shown && in_flight, "slideshow stop: fixture: a shown, b's decode in flight");
+    std::atomic<bool> done{false};
+    std::thread stopper([&] { s.stop_slideshow(); done = true; });
+    for (int i = 0; i < 500 && !done; i++) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const bool returned = done;
+    for (int i = 0; i < 3000 && !done; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    stopper.join();
+    check(returned && s.slide_stop_ms() >= 0.0 && s.slide_stop_ms() < 100.0,
+          "slideshow stop: returns while a decode is in flight: " + std::to_string(s.slide_stop_ms()));
+    check(!s.slideshow_playing(), "slideshow stop: stopped");
+    for (int i = 0; i < 300; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    settle(s);
+    check(s.doc() && s.doc()->key() == "a", "slideshow stop: lands on a, the frame shown");
+    s.close();
+#endif
+}
+
+// A load still on the worker would install a document mid-playback.
+void test_session_slideshow_waits_for_worker() {
+#ifndef _WIN32
+    Fixture f = make_dataset("slideshow_busy", 64, 48, {"a", "b"});
+    const fs::path fifo = f.masks / "b.png";
+    fs::remove(fifo);
+    check(mkfifo(fifo.c_str(), 0600) == 0, "slideshow busy: fixture: b's mask is a FIFO");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "slideshow busy: open: " + err);
+    settle(s);
+    s.go_to(1);
+    bool blocked = false;
+    for (int i = 0; i < 3000 && !blocked; i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) { blocked = true; close(fd); }
+        else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check(blocked && !s.idle(), "slideshow busy: fixture: b's load is on the worker");
+    s.start_slideshow();
+    check(!s.slideshow_playing(), "slideshow busy: Play waits for the worker");
+    for (int i = 0; i < 3000 && !s.idle(); i++) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    settle(s);
+    s.stop_slideshow();
+    s.close();
+#endif
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -6548,6 +6824,35 @@ void test_propagate_waits_for_sam() {
     settle(s);
     check(file_bytes(b_png) == original_b, "prop sam: a SAM job does not hold Undo propagate back");
     fake.busy = false;
+    s.close();
+}
+
+// P11 (plan 4's ruling 5): a slideshow and a SAM session never hold memory
+// at once. A job or a waiting re-apply refuses Play; otherwise Play releases.
+void test_slideshow_releases_sam() {
+    Fixture f = make_dataset("slide_sam", 64, 48, {"a", "b", "c"});
+    FakeSamOps fake;
+    mk::MaskSession s;
+    s.set_sam_ops(fake.ops());
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "P11: open: " + err);
+    settle(s);
+    s.sam();   // a SAM half exists, as after a first prompt
+    fake.busy = true;
+    s.start_slideshow();
+    check(!s.slideshow_playing() && fake.releases == 0 && s.doc() != nullptr,
+          "P11: a running SAM job refuses Play, and nothing is released");
+    fake.busy = false;
+    s.sam_margin_changed();
+    s.start_slideshow();
+    check(!s.slideshow_playing(), "P11: a re-apply waiting to start refuses Play too");
+    s.sam_pump();   // no add is held, so the waiting re-apply is dropped
+    s.start_slideshow();
+    check(s.slideshow_playing() && fake.releases == 1 && fake.releases_while_busy == 0,
+          "P11: starting a slideshow releases the SAM session: " + std::to_string(fake.releases));
+    s.stop_slideshow();
+    settle(s);
     s.close();
 }
 
@@ -6942,6 +7247,13 @@ int main() {
     test_slide_prefetch();
     test_slide_prefetch_evicts_farthest();
     test_slide_prefetch_discards_stale();
+    test_slide_prefetch_halt();
+    test_session_slideshow();
+    test_session_slideshow_flipped();
+    test_session_slideshow_window();
+    test_session_slideshow_stop_does_not_join();
+    test_session_slideshow_waits_for_worker();
+    test_slideshow_releases_sam();
     test_kept_cache();
     test_missing_predicate();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);

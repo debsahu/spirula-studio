@@ -10,10 +10,12 @@
 #include "app/gui/edit/EditTool.h"
 #include "app/gui/mask/MaskAdd.h"
 #include "app/gui/mask/MaskDoc.h"
+#include "app/gui/mask/MaskSlideshow.h"
 #include "app/gui/mask/MaskWindow.h"
 #include "app/gui/mask/Livewire.h"
 #include "app/gui/mask/PathTool.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -333,6 +335,30 @@ public:
     // propagate and Play wait for it. Asked through SamOps, as close() does.
     bool sam_work_pending() const;
 
+    // ---- slideshow (plan 3) ----
+    bool slideshow_playing() const { return _slide_playing; }
+    // For GuiApp::animating(): frames must keep coming while it plays.
+    bool animating() const { return _slide_playing; }
+    float slide_fps() const { return _slide_fps; }
+    void set_slide_fps(float f) { _slide_fps = std::clamp(f, 5.0f, 30.0f); }
+    // Refused while SAM work, the worker or a pen path is pending; otherwise
+    // releases the SAM session and the document (saving a dirty frame).
+    void start_slideshow();
+    // Stops the pool and loads the frame shown.
+    void stop_slideshow();
+    int slide_index() const { return _slide_index; }
+    double slide_shown_fps() const;
+    double slide_max_gap_ms() const { return _slide_max_gap; }
+    // Decodes since play began: one a shown frame is the window's whole point.
+    int slide_decoded() const { return _slide.decoded(); }
+    // The depth the last window was asked for: slide_depth's, never a count.
+    int slide_window() const { return _slide_window; }
+    // How long the last stop blocked the UI thread, ms; -1 before a stop.
+    double slide_stop_ms() const { return _slide_stop_ms; }
+    // True when the picture of the frame now shown is in `pic`. `now` is
+    // seconds; `target_side` the pane's long edge.
+    bool slideshow_tick(double now, int target_side, Picture& pic);
+
 private:
     struct Loaded {
         std::unique_ptr<MaskDoc> doc;
@@ -387,12 +413,15 @@ private:
                         const Rect& shown);
     // The pen tool (MaskPanel.cpp drives it; this and path_space have no ImGui).
     void ensure_livewire();
+    // MaskPanel.cpp: the picture on screen while playing; stops on any input.
+    void draw_slideshow(ImDrawList* dl, float ox, float oy, float w, float h);
 
     bool _open = false;
     // Set once in open() before the worker starts, read by both threads
     // thereafter, cleared only after close()'s join(): safe by ordering,
     // not by exclusivity -- neither field is ever mutable mid-session.
     std::string _workspace, _image_root, _mask_root, _layer_root;
+    bool _mask_flipped = false;      // mask_root's 255 is drop (Decision 22)
     std::vector<FrameRef> _frames;
     int _idx = -1;
 
@@ -489,6 +518,24 @@ private:
     int _slider_idx = 0;
     bool _close_requested = false;
     bool _revert_all_ask = false;    // Revert all was clicked; open its confirmation
+
+    SlidePrefetch _slide;
+    SlideClock _slide_clock;
+    bool _slide_playing = false;
+    bool _slide_need = false;        // waiting for the picture of _slide_index
+    int _slide_index = -1;
+    float _slide_fps = 10.0f;
+    double _slide_started = 0.0, _slide_last_shown = 0.0, _slide_now = 0.0;
+    bool _slide_first = true;        // no tick has run since start_slideshow
+    double _slide_max_gap = 0.0;
+    double _slide_stop_ms = -1.0;    // -1 = no stop measured yet
+    int _slide_shown = 0;
+    int _slide_window = 0;
+    // The last picture's source size: the window's depth comes from the bytes
+    // a picture really costs at the current target.
+    int _slide_src_w = 0, _slide_src_h = 0;
+    GLuint _slide_tex = 0;
+    int _slide_tex_w = 0, _slide_tex_h = 0;
 
     // The worker and what it hands back.
     std::thread _worker;

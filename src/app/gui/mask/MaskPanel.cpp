@@ -49,7 +49,9 @@ std::string one_decimal(double v) {
 void MaskSession::destroy_gl() {
     if (_tex) glDeleteTextures(1, &_tex);
     if (_tex2) glDeleteTextures(1, &_tex2);
-    _tex = _tex2 = 0;
+    if (_slide_tex) glDeleteTextures(1, &_slide_tex);
+    _tex = _tex2 = _slide_tex = 0;
+    _slide_tex_w = _slide_tex_h = 0;
     _win = Window{};
     _win2 = Window{};
     _win_dirty = true;
@@ -211,7 +213,8 @@ void MaskSession::draw_toolbar() {
     ImGui::SameLine();
     // Only when there is something to lose, and never in one click: it
     // deletes every hand correction in the dataset.
-    ImGui::BeginDisabled(!idle() || (corrected_count() == 0 && !(_doc && _doc->dirty())));
+    ImGui::BeginDisabled(!idle() || _slide_playing ||
+                         (corrected_count() == 0 && !(_doc && _doc->dirty())));
     if (ui::Button(msg::revert_all)) _revert_all_ask = true;
     ImGui::EndDisabled();
     ui::help_on_hover(msg::revert_all_help);
@@ -221,7 +224,7 @@ void MaskSession::draw_toolbar() {
     _toolbar_w = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
                  ImGui::GetStyle().WindowPadding.x;
 
-    ImGui::BeginDisabled(!idle());
+    ImGui::BeginDisabled(!idle() || _slide_playing);
     if (ui::ButtonRaw("<")) go_to(_idx - 1);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(px(260.0f));
@@ -263,8 +266,8 @@ void MaskSession::note_row_width() {
                                           ImGui::GetStyle().WindowPadding.x);
 }
 
-// Rows A to C: the view, propagate, its warning. Tasks 9 and 12 add row D and
-// Play (Decision 24).
+// Rows A to C: the view and Play, propagate, its warning. Task 9 adds row D
+// (Decision 24).
 void MaskSession::draw_workflow_row() {
     const bool locked = _tool.in_progress();
     const spirula::i18n::Msg* names[3] = {&msg::view_overlay, &msg::view_mask_only,
@@ -278,6 +281,21 @@ void MaskSession::draw_workflow_row() {
         else ui::help_on_hover(msg::view_help);
     }
     ImGui::EndDisabled();
+    ImGui::SameLine();
+    // Play waits for anything that would land on the document it releases.
+    ImGui::BeginDisabled(frame_count() < 2 ||
+                         (!_slide_playing && (!_doc || !idle() || sam_work_pending() ||
+                                              _tool.in_progress() || _path.in_progress())));
+    if (ui::Button(_slide_playing ? msg::slide_stop : msg::slide_play)) {
+        if (_slide_playing) stop_slideshow();
+        else start_slideshow();
+    }
+    ImGui::EndDisabled();
+    ui::help_on_hover_disabled(msg::slide_help);
+    ImGui::SameLine();
+    int fps = (int)std::lround(_slide_fps);
+    ImGui::SetNextItemWidth(px(160.0f));
+    if (ui::SliderInt(msg::slide_fps, &fps, 5, 30)) set_slide_fps((float)fps);
     note_row_width();
 
     // Row B: propagate. Row C: its warning, drawn whether or not B is enabled.
@@ -344,6 +362,11 @@ void MaskSession::draw_canvas() {
     if (_peek != Peek::None) _peek_total++;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(origin, far_corner, IM_COL32(24, 24, 24, 255));
+    if (_slide_playing) {
+        _shown_valid = false;   // what is drawn is no document's picture
+        draw_slideshow(dl, origin.x, origin.y, size.x, size.y);
+        return;
+    }
     if (!_doc) {
         _shown_valid = false;
         _held_pane = -1;
@@ -478,6 +501,45 @@ void MaskSession::draw_canvas() {
     handle_keys(m);
 }
 
+// Any input stops it on the frame shown. The first frame is exempt for a
+// KEYBOARD Play: ImGui::Button fires on mouse release, so the starting click is
+// never seen here, but the Space or Enter that pressed it is.
+void MaskSession::draw_slideshow(ImDrawList* dl, float ox, float oy, float w, float h) {
+    const ImGuiIO& io = ImGui::GetIO();
+    bool input = io.MouseWheel != 0.0f;
+    for (int b = 0; b < ImGuiMouseButton_COUNT; b++) input = input || ImGui::IsMouseClicked((ImGuiMouseButton)b);
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; k++)
+        input = input || ImGui::IsKeyPressed((ImGuiKey)k, false);
+    if (!_slide_first && input) {
+        stop_slideshow();
+        return;
+    }
+    const int side = std::clamp((((int)std::max(w, h) + 255) / 256) * 256, 256, 4096);
+    Picture pic;
+    if (slideshow_tick(ImGui::GetTime(), side, pic) && !pic.empty()) {
+        if (!_slide_tex) glGenTextures(1, &_slide_tex);
+        glBindTexture(GL_TEXTURE_2D, _slide_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, pic.w, pic.h, 0, GL_RGB, GL_UNSIGNED_BYTE, pic.rgb.data());
+        _slide_tex_w = pic.w;
+        _slide_tex_h = pic.h;
+    }
+    if (_slide_tex && _slide_tex_w > 0) {
+        const float s = std::min(w / (float)_slide_tex_w, h / (float)_slide_tex_h);
+        const float pw = (float)_slide_tex_w * s, ph = (float)_slide_tex_h * s;
+        const ImVec2 a(ox + 0.5f * (w - pw), oy + 0.5f * (h - ph));
+        dl->AddImage((ImTextureID)(intptr_t)_slide_tex, a, ImVec2(a.x + pw, a.y + ph));
+    } else {
+        dl->AddText(ImVec2(ox + px(8.0f), oy + px(8.0f)), IM_COL32(200, 200, 200, 255),
+                    msg::slide_waiting.get());
+    }
+}
+
 void MaskSession::handle_keys(const Mapping& m) {
     const ImGuiIO& io = ImGui::GetIO();
     // RootAndChildWindows counts a popup opened from this window as focused, so
@@ -571,11 +633,16 @@ void MaskSession::draw_status() {
     if (!err.empty()) ui::TextColoredRaw(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), err);
     else if (!st.empty()) ui::TextDisabledRaw(st);
     else ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
-    if (_idx >= 0 && _idx < frame_count()) {
-        const FrameRef& f = _frames[(size_t)_idx];
-        ui::Text(msg::status_frame, {_idx + 1, frame_count(), f.key});
+    const int at = _slide_playing ? _slide_index : _idx;
+    if (at >= 0 && at < frame_count()) {
+        const FrameRef& f = _frames[(size_t)at];
+        ui::Text(msg::status_frame, {at + 1, frame_count(), f.key});
         ImGui::SameLine();
         ui::Text(msg::status_camera, {f.camera.empty() ? std::string("/") : f.camera});
+        if (_slide_shown > 0) {
+            ImGui::SameLine();
+            ui::Text(msg::slide_stats, {one_decimal(slide_shown_fps()), one_decimal(_slide_max_gap)});
+        }
     }
     if (_doc) {
         ui::Text(msg::status_kept, {one_decimal(100.0 * _doc->kept_fraction())});
@@ -589,7 +656,10 @@ void MaskSession::draw_status() {
             ui::TextDisabledWrapped(msg::status_base_missing);
     }
     if (sam_mode()) {
+        // Playing, the list would describe the frame play started on.
+        ImGui::BeginDisabled(_slide_playing);
         draw_sam_status();
+        ImGui::EndDisabled();
     } else {
         ui::Text(erasing() ? msg::eraser_radius : msg::brush_radius,
                  {(int)std::lround(radius())});
