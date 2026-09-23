@@ -78,6 +78,22 @@ struct PropagateReport {
     size_t bytes = 0;                   // of the undo record
 };
 
+// What the scan knows about a frame. `kept` is -1 until scanned or when
+// the mask is absent.
+struct FrameHealth {
+    bool scanned = false;
+    bool missing_mask = false;
+    float kept = -1.0f;
+};
+// Missing: no mask file, or a kept fraction outside [lo, hi]. Unscanned is
+// not missing.
+inline bool is_missing(const FrameHealth& h, float lo, float hi) {
+    return h.scanned && (h.missing_mask || h.kept < lo || h.kept > hi);
+}
+// The first missing index strictly after `from` in direction `dir` (+1 or
+// -1), or -1.
+int next_missing(const std::vector<FrameHealth>& v, int from, int dir, float lo, float hi);
+
 // What pane 0 (left) or 1 (right, side by side only) shows under a peek.
 Style pane_style_for(Peek peek, ViewMode view, int pane);
 struct PaneDerive { bool left = false, right = false; };

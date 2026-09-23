@@ -146,5 +146,30 @@ bool snapshot_layers(const std::string& layer_root, const std::string& key,
 bool restore_layers(const std::string& layer_root, const std::string& mask_root,
                     const LayerSnapshot& snap, LayerIndex& idx, std::string& error);
 
+// ---- kept fractions (plan 3) ---------------------------------------------
+
+inline constexpr const char* kKeptFileName = "kept.json";
+
+// The kept fraction of every mask seen, keyed by the mask file's fingerprint
+// so a second open decodes nothing. Kept apart from index.json: an entry
+// there means "corrected", and these frames are not.
+struct KeptEntry {
+    uint64_t fp = 0;
+    bool flipped = false;   // the convention `kept` was counted under
+    float kept = 0.0f;      // in the app's convention, 255 = keep
+};
+struct KeptCache {
+    std::map<std::string, KeptEntry> frames;
+    bool dirty = false;
+    bool load(const std::string& layer_root, std::string& error);
+    // Writes only when dirty, so an unchanged dataset is not rewritten.
+    bool save(const std::string& layer_root, std::string& error) const;
+};
+// From the cache when the fingerprint and `flipped` (the folder's 255 is
+// drop) match, else decoded and cached. False with kept = -1 when the mask is
+// absent or unreadable.
+bool kept_fraction_of(const std::string& mask_root, const std::string& key, bool flipped,
+                      KeptCache& cache, float& kept);
+
 }  // namespace mask
 }  // namespace gui

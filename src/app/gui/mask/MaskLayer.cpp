@@ -576,5 +576,76 @@ bool restore_layers(const std::string& layer_root, const std::string& mask_root,
     return true;
 }
 
+bool KeptCache::load(const std::string& layer_root, std::string& error) {
+    frames.clear();
+    dirty = false;
+    const std::string path = (fs::path(layer_root) / kKeptFileName).string();
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return true;
+    JsonValue doc;
+    try {
+        doc = json_parse_file(path);
+    } catch (const std::exception& e) {
+        error = path + ": " + e.what();
+        return false;
+    }
+    const JsonValue* fr = doc.find("frames");
+    if (!fr || !fr->is_object()) return true;
+    for (const auto& [key, v] : fr->obj) {
+        KeptEntry e;
+        if (const JsonValue* p = v.find("fp")) fnv_parse(p->as_string(), e.fp);
+        if (const JsonValue* q = v.find("flipped")) e.flipped = q->as_bool(false);
+        e.kept = (float)v.get_double("kept", 0.0);
+        frames[key] = e;
+    }
+    return true;
+}
+
+bool KeptCache::save(const std::string& layer_root, std::string& error) const {
+    if (!dirty) return true;
+    JsonWriter w;
+    w.object();
+    w.field("spirula_mask_kept", 1);
+    w.key("frames").object();
+    for (const auto& [key, e] : frames) {
+        w.key(key.c_str()).object();
+        w.field("fp", fnv_hex(e.fp));
+        w.field("flipped", e.flipped);
+        w.field("kept", e.kept);
+        w.end();
+    }
+    w.end();
+    w.end();
+    const std::string text = w.str();
+    const std::string path = (fs::path(layer_root) / kKeptFileName).string();
+    if (!write_file_atomic(path, (const uint8_t*)text.data(), text.size())) {
+        error = path;
+        return false;
+    }
+    return true;
+}
+
+bool kept_fraction_of(const std::string& mask_root, const std::string& key, bool flipped,
+                      KeptCache& cache, float& kept) {
+    kept = -1.0f;
+    const std::string path = mask_file(mask_root, key);
+    uint64_t fp = 0;
+    if (!fingerprint_file(path, fp)) return false;
+    const auto it = cache.frames.find(key);
+    if (it != cache.frames.end() && it->second.fp == fp && it->second.flipped == flipped) {
+        kept = it->second.kept;
+        return true;
+    }
+    int w = 0, h = 0;
+    std::vector<uint8_t> px;
+    if (!app::load_stencil(path, w, h, px)) return false;
+    size_t n = 0;
+    for (uint8_t v : px) n += (v != 0) != flipped ? 1 : 0;
+    kept = px.empty() ? 0.0f : (float)n / (float)px.size();
+    cache.frames[key] = KeptEntry{fp, flipped, kept};
+    cache.dirty = true;
+    return true;
+}
+
 }  // namespace mask
 }  // namespace gui

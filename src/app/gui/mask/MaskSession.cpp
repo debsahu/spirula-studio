@@ -76,6 +76,13 @@ std::vector<int> propagate_targets(const std::vector<FrameRef>& frames, int src,
     return out;
 }
 
+int next_missing(const std::vector<FrameHealth>& v, int from, int dir, float lo, float hi) {
+    const int n = (int)v.size();
+    for (int i = from + dir; i >= 0 && i < n; i += dir)
+        if (is_missing(v[(size_t)i], lo, hi)) return i;
+    return -1;
+}
+
 MaskSession::MaskSession()
     : _sam_ops{[](MaskSam& s) { return s.busy(); }, [](MaskSam& s) { return s.release(); }} {}
 

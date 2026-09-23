@@ -5969,6 +5969,141 @@ void test_session_sam_text_gate() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan 3, Task 8: the kept cache is keyed by fingerprint; the predicate
+// ---------------------------------------------------------------------------
+
+// A write is measured by whether it happened, never by the bytes: a
+// byte-identical unconditional rewrite satisfies byte equality exactly.
+// A key the writer never emits survives a read and dies in a rewrite.
+std::vector<uint8_t> plant_write_probe(const fs::path& file) {
+    std::vector<uint8_t> v = file_bytes(file);
+    const std::string probe = "\"ss_probe\":1,";
+    const bool object = !v.empty() && v[0] == '{';
+    check(object, "probe: the file is a JSON object");
+    if (!object) return v;   // an insert at begin() + 1 of nothing would crash, not fail
+    v.insert(v.begin() + 1, probe.begin(), probe.end());
+    check(mk::write_file_atomic(file.string(), v.data(), v.size()), "probe: planted");
+    return v;
+}
+
+void test_kept_cache() {
+    Fixture f = make_dataset("kept", 64, 48, {"a", "b"});
+    const std::string mask_root = f.masks.string(), layer_root = f.layer.string();
+    // Decision 8 is that the kept cache never touches index.json. An index
+    // that EXISTS and holds one entry makes that measurable; an assertion
+    // that index.json is absent is satisfied by anything at all.
+    mk::LayerIndex seed_idx;
+    seed_idx.mask_root = mask_root;
+    seed_idx.frames["b"] = mk::IndexEntry{};
+    std::string ierr;
+    check(seed_idx.save(layer_root, ierr), "fixture: an index.json to leave alone: " + ierr);
+    const fs::path index_file = f.layer / mk::kIndexFileName;
+    const std::vector<uint8_t> index_before = file_bytes(index_file);
+    check(!index_before.empty(), "fixture: index.json has bytes to compare");
+    std::vector<uint8_t> px = stencil_pixels(f.masks / "a.png");
+    size_t n = 0;
+    for (uint8_t v : px) n += v ? 1 : 0;
+    const float truth = (float)n / (float)px.size();
+    mk::KeptCache cache;
+    std::string err;
+    check(cache.load(layer_root, err) && cache.frames.empty() && !cache.dirty, "absent cache loads empty");
+    float kept = 0.0f;
+    check(mk::kept_fraction_of(mask_root, "a", false, cache, kept) && std::abs(kept - truth) < 1e-6f,
+          "decoded kept fraction");
+    check(cache.frames.count("a") == 1 && cache.dirty, "cached and dirty");
+    uint64_t fp = 0;
+    mk::fingerprint_file((f.masks / "a.png").string(), fp);
+    check(cache.frames["a"].fp == fp, "cached under the file's fingerprint");
+    // A hit is read from the cache and not decoded: plant a wrong value under
+    // the right fingerprint and expect it back.
+    cache.frames["a"].kept = 0.123f;
+    check(mk::kept_fraction_of(mask_root, "a", false, cache, kept) && std::abs(kept - 0.123f) < 1e-6f,
+          "a fingerprint hit is not decoded");
+    // A stale fingerprint is decoded and replaced.
+    cache.frames["a"].fp = fp ^ 1u;
+    check(mk::kept_fraction_of(mask_root, "a", false, cache, kept) && std::abs(kept - truth) < 1e-6f &&
+              cache.frames["a"].fp == fp, "a stale fingerprint is re-decoded and re-keyed");
+    // A missing mask: false, -1, and no entry.
+    check(!mk::kept_fraction_of(mask_root, "zzz", false, cache, kept) && kept == -1.0f &&
+              cache.frames.count("zzz") == 0, "missing mask is false and uncached");
+    // A mask that exists but is not an image: false, -1, and no entry.
+    const std::vector<uint8_t> junk(64, 0x7f);
+    check(mk::write_file_atomic((f.masks / "junk.png").string(), junk.data(), junk.size()),
+          "fixture: a mask that is not a PNG");
+    check(!mk::kept_fraction_of(mask_root, "junk", false, cache, kept) && kept == -1.0f &&
+              cache.frames.count("junk") == 0, "an undecodable mask is false and uncached");
+    // The operator's masks are 255 = DROP. q is a quarter white, so the two
+    // conventions disagree by half, and a fraction cached under one is not
+    // a hit under the other.
+    write_png_gray(f.masks / "q.png", 64, 48, box_layer(64, 48, 0, 0, 32, 24));
+    check(mk::kept_fraction_of(mask_root, "q", false, cache, kept) && std::abs(kept - 0.25f) < 1e-6f,
+          "flipped: fixture: q keeps a quarter in the app's convention");
+    check(mk::kept_fraction_of(mask_root, "q", true, cache, kept) && std::abs(kept - 0.75f) < 1e-6f,
+          "flipped: a cached fraction does not outlive a change of convention");
+    mk::KeptCache fresh;
+    check(mk::kept_fraction_of(mask_root, "q", true, fresh, kept) && std::abs(kept - 0.75f) < 1e-6f,
+          "flipped: kept counts the zeros when the folder's 255 is drop");
+    check(cache.frames["q"].flipped, "flipped: the entry records its convention");
+    // Round trip, and an unchanged cache is not rewritten.
+    check(cache.save(layer_root, err), "save: " + err);
+    const fs::path file = f.layer / mk::kKeptFileName;
+    check(fs::exists(file), "kept.json written");
+    mk::KeptCache back;
+    check(back.load(layer_root, err) && back.frames.count("a") == 1 && back.frames["a"].fp == fp &&
+              std::abs(back.frames["a"].kept - truth) < 1e-6f && !back.dirty, "round trip");
+    check(back.frames.count("q") == 1 && back.frames["q"].flipped && !back.frames["a"].flipped,
+          "flipped: the convention survives the round trip");
+    const std::vector<uint8_t> probed = plant_write_probe(file);
+    check(back.load(layer_root, err) && back.frames.count("a") == 1 && !back.dirty,
+          "the probe key does not disturb the load");
+    check(back.save(layer_root, err) && file_bytes(file) == probed, "a clean cache does not rewrite");
+    check(mk::kept_fraction_of(mask_root, "a", false, back, kept) && !back.dirty, "a hit leaves it clean");
+    check(mk::kept_fraction_of(mask_root, "b", false, back, kept) && back.dirty, "a decode marks it dirty");
+    // A corrupt cache fails rather than reading as empty: a kept fraction
+    // silently taken as zero would call every frame missing.
+    check(mk::write_file_atomic(file.string(), junk.data(), junk.size()),
+          "fixture: kept.json is not JSON");
+    mk::KeptCache bad;
+    std::string berr;
+    check(!bad.load(layer_root, berr) && berr.find(mk::kKeptFileName) != std::string::npos,
+          "a corrupt kept.json fails and names itself: " + berr);
+    // index.json is not touched by any of this, and an index entry still
+    // means "corrected": a scanned frame must not acquire one.
+    check(file_bytes(index_file) == index_before, "index.json is byte-unchanged");
+    mk::LayerIndex after_idx;
+    check(after_idx.load(layer_root, ierr) && after_idx.frames.size() == 1 &&
+              after_idx.frames.count("b") == 1,
+          "still exactly the one entry the fixture put there");
+}
+
+void test_missing_predicate() {
+    std::vector<mk::FrameHealth> v(7);
+    v[0] = {true, false, 0.50f};
+    v[1] = {true, true, -1.0f};
+    v[2] = {true, false, 0.99f};
+    v[3] = {false, false, -1.0f};
+    v[4] = {true, false, 0.04f};
+    v[5] = {true, false, 0.05f};
+    v[6] = {true, false, 0.98f};
+    const float lo = 0.05f, hi = 0.98f;
+    check(!mk::is_missing(v[0], lo, hi), "inside the band");
+    check(mk::is_missing(v[1], lo, hi), "no mask file");
+    check(mk::is_missing(v[2], lo, hi), "above the band");
+    check(!mk::is_missing(v[3], lo, hi), "unscanned is not missing");
+    check(mk::is_missing(v[4], lo, hi), "below the band");
+    check(!mk::is_missing(v[5], lo, hi), "the lower edge is inclusive");
+    check(!mk::is_missing(v[6], lo, hi), "the upper edge is inclusive");
+    check(mk::is_missing({true, true, 0.50f}, lo, hi), "no mask file, whatever kept says");
+    check(mk::next_missing(v, 0, +1, lo, hi) == 1, "next from 0");
+    check(mk::next_missing(v, 1, +1, lo, hi) == 2, "next from 1");
+    check(mk::next_missing(v, 2, +1, lo, hi) == 4, "next from 2 skips the unscanned");
+    check(mk::next_missing(v, 4, +1, lo, hi) == -1, "none after 4");
+    check(mk::next_missing(v, 5, -1, lo, hi) == 4, "previous from 5");
+    check(mk::next_missing(v, 1, -1, lo, hi) == -1, "none before 1");
+    check(mk::next_missing(v, -1, +1, lo, hi) == 1, "from before the start");
+}
+
+// ---------------------------------------------------------------------------
 // Plan 3, Task 11: the slideshow's decoder ring and clock
 // ---------------------------------------------------------------------------
 
@@ -6807,6 +6942,8 @@ int main() {
     test_slide_prefetch();
     test_slide_prefetch_evicts_farthest();
     test_slide_prefetch_discards_stale();
+    test_kept_cache();
+    test_missing_predicate();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();
