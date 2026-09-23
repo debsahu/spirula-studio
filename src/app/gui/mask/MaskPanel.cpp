@@ -224,15 +224,18 @@ void MaskSession::draw_toolbar() {
     _toolbar_w = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
                  ImGui::GetStyle().WindowPadding.x;
 
-    ImGui::BeginDisabled(!idle() || _slide_playing);
+    const bool shape = shape_open();
+    ImGui::BeginDisabled(!idle() || _slide_playing || shape);
     if (ui::ButtonRaw("<")) go_to(_idx - 1);
+    if (shape) ui::help_on_hover_disabled(msg::nav_locked);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(px(260.0f));
     ui::SliderIntRaw("##maskframe", &_slider_idx, 0, std::max(0, frame_count() - 1), "%d");
     if (ImGui::IsItemDeactivatedAfterEdit() && _slider_idx != _idx) go_to(_slider_idx);
-    ui::help_on_hover(msg::hint_keys);
+    ui::help_on_hover_disabled(shape ? msg::nav_locked : msg::hint_keys);
     ImGui::SameLine();
     if (ui::ButtonRaw(">")) go_to(_idx + 1);
+    if (shape) ui::help_on_hover_disabled(msg::nav_locked);
     ImGui::EndDisabled();
 
     // On this row rather than a third one: a third row comes out of what
@@ -262,6 +265,8 @@ void MaskSession::draw_toolbar() {
 
 // The window may not be narrower than any toolbar row, or that row's right
 // end clips unseen; _toolbar_w starts each frame at the tool row's width.
+bool MaskSession::shape_open() const { return _tool.in_progress() || _path.in_progress(); }
+
 void MaskSession::note_row_width() {
     _toolbar_w = std::max(_toolbar_w, ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
                                           ImGui::GetStyle().WindowPadding.x);
@@ -339,16 +344,20 @@ void MaskSession::draw_workflow_row() {
 
     // Row D: find missing. The count's width changes as the scan runs, which
     // moves the minimum width, never the height.
-    ImGui::BeginDisabled(!idle() || _slide_playing);
+    const spirula::i18n::Msg& find_tip = shape_open() ? msg::nav_locked : msg::find_help;
+    ImGui::BeginDisabled(!idle() || _slide_playing || shape_open());
     if (ui::Button(msg::find_first)) go_to(0);
+    ui::help_on_hover_disabled(find_tip);
     ImGui::SameLine();
     if (ui::Button(msg::find_prev)) go_to_missing(-1);
+    ui::help_on_hover_disabled(find_tip);
     ImGui::SameLine();
     if (ui::Button(msg::find_next)) go_to_missing(+1);
+    ui::help_on_hover_disabled(find_tip);
     ImGui::SameLine();
     if (ui::Button(msg::find_last)) go_to(frame_count() - 1);
+    ui::help_on_hover_disabled(find_tip);
     ImGui::EndDisabled();
-    ui::help_on_hover_disabled(msg::find_help);
     ImGui::SameLine();
     int lo_pct = (int)std::lround(100.0f * _band_lo), hi_pct = (int)std::lround(100.0f * _band_hi);
     ImGui::SetNextItemWidth(px(110.0f));
@@ -357,8 +366,7 @@ void MaskSession::draw_workflow_row() {
     ImGui::SetNextItemWidth(px(110.0f));
     const bool hi_changed = ui::InputInt(msg::find_band_hi, &hi_pct);
     if (lo_changed || hi_changed) {
-        lo_pct = std::clamp(lo_pct, 0, 100);
-        hi_pct = std::clamp(hi_pct, lo_pct, 100);
+        band_edit(lo_pct, hi_pct, lo_changed);
         set_band(0.01f * (float)lo_pct, 0.01f * (float)hi_pct);
     }
     ImGui::SameLine();
@@ -630,7 +638,7 @@ void MaskSession::handle_keys(const Mapping& m) {
                                  _tool.in_progress());
     // Not while a pen path is open: pump() cancels it on the new frame, silently.
     const ImGuiInputFlags rep = route | ImGuiInputFlags_Repeat;
-    if (!_tool.in_progress() && !_path.in_progress() && idle() && !io.KeyCtrl) {
+    if (!shape_open() && idle() && !io.KeyCtrl) {
         if (ImGui::Shortcut(ImGuiKey_LeftArrow, rep)) go_to(_idx - 1);
         if (ImGui::Shortcut(ImGuiKey_RightArrow, rep)) go_to(_idx + 1);
         if (ImGui::Shortcut(ImGuiKey_PageUp, rep)) go_to(std::max(0, _idx - 10));

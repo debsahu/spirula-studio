@@ -576,9 +576,17 @@ bool restore_layers(const std::string& layer_root, const std::string& mask_root,
     return true;
 }
 
+// A relative root resolves against the working directory, which is no dataset.
+static bool kept_root_ok(const std::string& layer_root, std::string& error) {
+    if (fs::path(layer_root).is_absolute()) return true;
+    error = std::string(kKeptFileName) + ": not an absolute folder: \"" + layer_root + "\"";
+    return false;
+}
+
 bool KeptCache::load(const std::string& layer_root, std::string& error) {
     frames.clear();
     dirty = false;
+    if (!kept_root_ok(layer_root, error)) return false;
     const std::string path = (fs::path(layer_root) / kKeptFileName).string();
     std::error_code ec;
     if (!fs::exists(path, ec)) return true;
@@ -603,6 +611,7 @@ bool KeptCache::load(const std::string& layer_root, std::string& error) {
 
 bool KeptCache::save(const std::string& layer_root, std::string& error) const {
     if (!dirty) return true;
+    if (!kept_root_ok(layer_root, error)) return false;
     JsonWriter w;
     w.object();
     w.field("spirula_mask_kept", 1);

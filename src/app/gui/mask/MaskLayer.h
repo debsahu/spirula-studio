@@ -161,6 +161,7 @@ struct KeptEntry {
 struct KeptCache {
     std::map<std::string, KeptEntry> frames;
     bool dirty = false;
+    // Both refuse a relative or empty root rather than use the working folder.
     bool load(const std::string& layer_root, std::string& error);
     // Writes only when dirty, so an unchanged dataset is not rewritten.
     bool save(const std::string& layer_root, std::string& error) const;

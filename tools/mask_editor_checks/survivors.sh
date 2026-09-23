@@ -83,9 +83,10 @@ has 1 'ui::help_on_hover_disabled(msg::slide_help);'
 has 1 'ImGui::BeginDisabled(!idle() || _slide_playing ||'
 has 1 '(corrected_count() == 0 && !(_doc && _doc->dirty())));'
 nav=$(awk '/if \(ui::ButtonRaw\("<"\)\) go_to\(_idx - 1\);/{print p; exit} {p=$0}' "$F")
-if [ "$(printf '%s' "$nav" | sed 's/^ *//')" = 'ImGui::BeginDisabled(!idle() || _slide_playing);' ]; then
-    echo "ok   the navigation row is greyed while playing"
-else echo "FAIL the navigation row is greyed while playing"; FAILS=$((FAILS + 1)); fi
+if [ "$(printf '%s' "$nav" | sed 's/^ *//')" = 'ImGui::BeginDisabled(!idle() || _slide_playing || shape);' ]; then
+    echo "ok   the navigation row is greyed while playing, and while a shape is half drawn (Task 9)"
+else echo "FAIL the navigation row is greyed while playing, and while a shape is half drawn (Task 9)"; FAILS=$((FAILS + 1)); fi
+has 1 'const bool shape = shape_open();'
 sam=$(awk '/^ *draw_sam_status\(\);$/{print p; exit} {p=$0}' "$F")
 if [ "$(printf '%s' "$sam" | sed 's/^ *//')" = 'ImGui::BeginDisabled(_slide_playing);' ]; then
     echo "ok   the SAM strip is drawn greyed while playing"
@@ -99,29 +100,37 @@ if command grep -qF '_path.in_progress())' src/app/gui/mask/MaskSession.cpp &&
    command grep -qF 'bool animating() const { return _compare.animating() || _mask_editor.animating(); }' src/app/gui/GuiApp.h; then
     echo "ok   start_slideshow refuses a pen path; GuiApp::animating() asks the editor"
 else echo "FAIL start_slideshow refuses a pen path; GuiApp::animating() asks the editor"; FAILS=$((FAILS + 1)); fi
-# Plan 3 Task 9: row D's find buttons wait for the worker and stand down while
-# playing, their help shows when greyed; the frame keys stand down for a stroke,
-# a pen path, the worker and Ctrl; the key list is the frame slider's tooltip.
+# Plan 3 Task 9: row D, the frame keys and the navigation row stand down for the
+# worker, a half-drawn shape or pen path, and play; help shows when greyed;
+# M / Shift+M sit inside the keys' guard; the key list is the slider's tooltip.
+has 1 'bool MaskSession::shape_open() const { return _tool.in_progress() || _path.in_progress(); }'
 find=$(awk '/if \(ui::Button\(msg::find_first\)\) go_to\(0\);/{print p; exit} {p=$0}' "$F")
-if [ "$(printf '%s' "$find" | sed 's/^ *//')" = 'ImGui::BeginDisabled(!idle() || _slide_playing);' ]; then
-    echo "ok   row D's find buttons wait for the worker and are greyed while playing"
-else echo "FAIL row D's find buttons wait for the worker and are greyed while playing"; FAILS=$((FAILS + 1)); fi
-has 1 'ui::help_on_hover_disabled(msg::find_help);'
+if [ "$(printf '%s' "$find" | sed 's/^ *//')" = 'ImGui::BeginDisabled(!idle() || _slide_playing || shape_open());' ]; then
+    echo "ok   row D's find buttons wait for the worker, a half-drawn shape and play"
+else echo "FAIL row D's find buttons wait for the worker, a half-drawn shape and play"; FAILS=$((FAILS + 1)); fi
+has 1 'const spirula::i18n::Msg& find_tip = shape_open() ? msg::nav_locked : msg::find_help;'
+has 4 'ui::help_on_hover_disabled(find_tip);'
 none 'ui::help_on_hover(msg::find_help);'
 has 1 'if (ui::Button(msg::find_prev)) go_to_missing(-1);'
 has 1 'if (ui::Button(msg::find_next)) go_to_missing(+1);'
-has 1 'hi_pct = std::clamp(hi_pct, lo_pct, 100);'
-keys=$(awk '/ImGui::Shortcut\(ImGuiKey_V, route\)/{v=1} v&&/if \(ImGui::Shortcut\(ImGuiKey_LeftArrow, rep\)\)/{print p; exit} {p=$0}' "$F")
-if [ "$(printf '%s' "$keys" | sed 's/^ *//')" = 'if (!_tool.in_progress() && !_path.in_progress() && idle() && !io.KeyCtrl) {' ]; then
-    echo "ok   the frame keys follow V and stand down for a stroke, a pen path, the worker and Ctrl"
-else echo "FAIL the frame keys follow V and stand down for a stroke, a pen path, the worker and Ctrl"; FAILS=$((FAILS + 1)); fi
-has 1 'if (ImGui::Shortcut(ImGuiKey_M, route)) go_to_missing(+1);'
-has 1 'if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_M, route)) go_to_missing(-1);'
+has 1 'band_edit(lo_pct, hi_pct, lo_changed);'
+keys=$(awk '/ImGui::Shortcut\(ImGuiKey_V, route\)/{v=1} v&&/if \(!shape_open\(\) && idle\(\) && !io.KeyCtrl\) \{/{g=1; next} g&&/^    \}$/{exit} g{print}' "$F")
+for line in 'if (ImGui::Shortcut(ImGuiKey_LeftArrow, rep)) go_to(_idx - 1);' \
+            'if (ImGui::Shortcut(ImGuiKey_M, route)) go_to_missing(+1);' \
+            'if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_M, route)) go_to_missing(-1);'; do
+    if printf '%s\n' "$keys" | sed 's/^ *//' | command grep -qxF -- "$line"; then
+        echo "ok   inside the keys' guard (after V; no shape, idle, no Ctrl): $line"
+    else echo "FAIL inside the keys' guard (after V; no shape, idle, no Ctrl): $line"; FAILS=$((FAILS + 1)); fi
+done
 tip=$(awk 'p~/IsItemDeactivatedAfterEdit\(\) && _slider_idx != _idx\) go_to\(_slider_idx\);/{print; exit} {p=$0}' "$F")
-if [ "$(printf '%s' "$tip" | sed 's/^ *//')" = 'ui::help_on_hover(msg::hint_keys);' ]; then
-    echo "ok   the key list is the frame slider's tooltip, read after its commit"
-else echo "FAIL the key list is the frame slider's tooltip, read after its commit"; FAILS=$((FAILS + 1)); fi
+if [ "$(printf '%s' "$tip" | sed 's/^ *//')" = 'ui::help_on_hover_disabled(shape ? msg::nav_locked : msg::hint_keys);' ]; then
+    echo "ok   the key list is the frame slider's tooltip, shown when greyed, read after its commit"
+else echo "FAIL the key list is the frame slider's tooltip, shown when greyed, read after its commit"; FAILS=$((FAILS + 1)); fi
 none 'TextDisabledWrapped(msg::hint_keys)'
+# Task 12 re-review B1: Play marks its press frame, or keyboard Play stops itself.
+if command grep -qF '    _slide_fresh = true;' src/app/gui/mask/MaskSession.cpp; then
+    echo "ok   start_slideshow marks the press frame (_slide_fresh = true)"
+else echo "FAIL start_slideshow marks the press frame (_slide_fresh = true)"; FAILS=$((FAILS + 1)); fi
 none '_path_mode'
 none 'paint_for('
 none '_status_h > 0.0f'

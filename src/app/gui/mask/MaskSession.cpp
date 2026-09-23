@@ -84,6 +84,11 @@ int next_missing(const std::vector<FrameHealth>& v, int from, int dir, float lo,
     return -1;
 }
 
+void band_edit(int& lo_pct, int& hi_pct, bool lo_edited) {
+    if (lo_edited) lo_pct = std::clamp(lo_pct, 0, std::clamp(hi_pct, 0, 100));
+    else hi_pct = std::clamp(hi_pct, std::clamp(lo_pct, 0, 100), 100);
+}
+
 MaskSession::MaskSession()
     : _sam_ops{[](MaskSam& s) { return s.busy(); }, [](MaskSam& s) { return s.release(); }} {}
 
@@ -243,7 +248,9 @@ void MaskSession::worker_main() {
             _queue.pop_front();
         }
         _job_seq++;
+        if (_worker_hook) _worker_hook(false);
         job();
+        if (_worker_hook) _worker_hook(true);
         _job_seq++;
         _pending--;
     }
@@ -339,14 +346,6 @@ void MaskSession::pump() {
         }
     }
     if (have_saved && _doc && _doc->key() == saved_key) _doc->mark_saved(saved_rev, saved_comp);
-    if (have_saved && _doc && _doc->key() == saved_key && _idx >= 0) {
-        std::lock_guard<std::mutex> lk(_mu);
-        if ((size_t)_idx < _health.size()) {
-            _health[(size_t)_idx].scanned = true;
-            _health[(size_t)_idx].missing_mask = !saved_comp;
-            _health[(size_t)_idx].kept = saved_comp ? _doc->kept_fraction() : -1.0f;
-        }
-    }
     if (!have_loaded) return;
     _doc = std::move(l.doc);
     _doc_gen++;   // by construction: every _doc arrives here
@@ -419,6 +418,9 @@ void MaskSession::save() {
             return;
         }
         set_corrected((int)_index.frames.size());
+        // Here, not in pump(): a save that go_to() or Play made lands after
+        // the document is gone.
+        refresh_health({s->key});
         std::lock_guard<std::mutex> lk(_mu);
         _saved_key = s->key;
         _saved_rev = s->rev;
@@ -630,6 +632,7 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
         set_corrected((int)_index.frames.size());
         std::vector<std::string> touched;
         for (const FrameRef& t : j->targets) touched.push_back(t.key);
+        if (j->dirty) touched.push_back(j->source_key);   // saved above
         refresh_health(touched);
         std::lock_guard<std::mutex> lk(_mu);
         _prop_report = rep;
@@ -776,6 +779,7 @@ void MaskSession::scan_main() {
     int since_save = 0;
     bool save_failed = false;
     for (int i = 0; i < n && !_scan_stop.load();) {
+        if (_scan_hook) _scan_hook(i, false);
         const uint64_t seq = _job_seq.load();
         if (seq & 1) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -785,7 +789,7 @@ void MaskSession::scan_main() {
         FrameHealth h;
         h.scanned = true;
         h.missing_mask = !kept_fraction_of(_mask_root, key, _mask_flipped, cache, h.kept);
-        if (_scan_hook) _scan_hook(i);
+        if (_scan_hook) _scan_hook(i, true);
         {
             std::lock_guard<std::mutex> lk(_mu);
             if (_job_seq.load() != seq) {

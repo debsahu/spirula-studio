@@ -95,6 +95,9 @@ inline bool is_missing(const FrameHealth& h, float lo, float hi) {
 // The first missing index strictly after `from` in direction `dir` (+1 or
 // -1), or -1.
 int next_missing(const std::vector<FrameHealth>& v, int from, int dir, float lo, float hi);
+// A band field's edit in whole percent: the edited end is held inside [0, 100]
+// and on its own side of the other end, which never moves with it.
+void band_edit(int& lo_pct, int& hi_pct, bool lo_edited);
 
 // What pane 0 (left) or 1 (right, side by side only) shows under a peek.
 Style pane_style_for(Peek peek, ViewMode view, int pane);
@@ -349,9 +352,11 @@ public:
     // Loads the next (+1) or previous (-1) missing frame; false, with a
     // status line, when there is none that way.
     bool go_to_missing(int dir);
-    // Test-only: runs on the scan thread between a frame's read and its
-    // publication. Set before open(); the scan reads it without a lock.
-    void set_scan_hook_for_test(std::function<void(int)> hook) { _scan_hook = std::move(hook); }
+    // Test-only, set before open() and read without a lock. The scan's runs
+    // before a frame's read (false) and between read and publication (true);
+    // the worker's inside a job, before (false) and after (true) it runs.
+    void set_scan_hook_for_test(std::function<void(int, bool)> hook) { _scan_hook = std::move(hook); }
+    void set_worker_hook_for_test(std::function<void(bool)> hook) { _worker_hook = std::move(hook); }
     // Test-only, as MaskDoc::set_history_byte_cap_for_test is:
     // a record of never-edited targets is 0 bytes, so 256 MB is unreachable.
     void set_propagate_byte_cap_for_test(size_t bytes) { _prop_byte_cap = bytes; }
@@ -361,6 +366,8 @@ public:
 
     // ---- slideshow (plan 3) ----
     bool slideshow_playing() const { return _slide_playing; }
+    // The press frame is exempt from "any input stops it" (Task 12).
+    bool slide_fresh() const { return _slide_fresh; }
     // For GuiApp::animating(): frames must keep coming while it plays.
     bool animating() const { return _slide_playing; }
     float slide_fps() const { return _slide_fps; }
@@ -441,6 +448,8 @@ private:
     void ensure_window(const Mapping& m, float pane_w, float pane_h);
     void upload_rect(const Rect& shown);
     void draw_workflow_row();                                     // MaskPanel.cpp
+    // A shape or pen path is half drawn; changing frames would drop it.
+    bool shape_open() const;                                      // MaskPanel.cpp
     void note_row_width();                                        // MaskPanel.cpp
     void upload_window(GLuint& tex, const Window& win, Style style, std::vector<uint8_t>& rgba);
     void upload_rect_to(GLuint tex, const Window& win, Style style, std::vector<uint8_t>& rgba,
@@ -610,7 +619,8 @@ private:
     // scan read that saw this unchanged and even saw no mask change under it.
     std::atomic<uint64_t> _job_seq{0};
     int _nav = -1;                      // UI thread: the frame last asked for
-    std::function<void(int)> _scan_hook;
+    std::function<void(int, bool)> _scan_hook;
+    std::function<void(bool)> _worker_hook;
     size_t _prop_byte_cap = kMaxHistoryBytes;   // UI thread; copied into the job
     std::string _status, _error;     // guarded by _mu
     bool _error_sticky = false;      // guarded by _mu

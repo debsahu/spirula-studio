@@ -6277,6 +6277,21 @@ void test_session_find_missing_flipped() {
           "find flipped: the scan agrees with the open document's Kept");
     check(s.health(1).kept == 1.0f && s.missing_count() == 1,
           "find flipped: an all-black flipped mask keeps everything, and is the one missing");
+    // refresh_health reads under the same convention: a propagated corner drop.
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {32.0f, 24.0f, 64.0f, 48.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    mk::KeptCache fresh;
+    float disk = -2.0f;
+    mk::kept_fraction_of(s.mask_root(), "b", true, fresh, disk);
+    check(s.last_propagate().done == 1 && disk > 0.6f && disk < 0.8f,
+          "find flipped: fixture: b keeps all but a propagated corner: " + std::to_string(disk));
+    check(std::abs(s.health(1).kept - disk) < 1e-6f,
+          "find flipped: the propagate's refresh counts b in the folder's convention");
     s.close();
 }
 
@@ -6287,8 +6302,8 @@ void test_scan_yields_to_a_write() {
     Fixture f = make_dataset("scanrace", 64, 48, {"a", "b"});
     mk::MaskSession s;
     std::atomic<int> phase{0};
-    s.set_scan_hook_for_test([&phase](int i) {
-        if (i != 1 || phase.load() != 0) return;
+    s.set_scan_hook_for_test([&phase](int i, bool read) {
+        if (!read || i != 1 || phase.load() != 0) return;
         phase = 1;
         for (int k = 0; k < 4000 && phase.load() != 2; k++)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -6435,6 +6450,8 @@ void test_find_missing_layer_without_mask() {
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.save();
     settle(s);
+    check(s.health(1).scanned && s.health(1).missing_mask,
+          "layer: the save leaves c missing, before any reopen");
     s.close();
     check(fs::exists(mk::layer_file(f.layer.string(), "c", mk::Layer::Drop)) &&
               !fs::exists(mk::layer_file(f.layer.string(), "c", mk::Layer::Base)) &&
@@ -6447,6 +6464,230 @@ void test_find_missing_layer_without_mask() {
     check(s.health(1).missing_mask && s.missing_count() == 1,
           "layer: a frame with a correction layer and no mask is missing at any band");
     s.close();
+}
+
+float disk_kept(const std::string& mask_root, const std::string& key, bool flipped) {
+    mk::KeptCache fresh;
+    float k = -2.0f;
+    mk::kept_fraction_of(mask_root, key, flipped, fresh, k);
+    return k;
+}
+
+// Fix a missing frame, then leave it every way the editor offers. The save
+// those make lands after the document is gone, so only a refresh in the
+// save's own job can move b out of the count.
+void fix_then_leave_arm(bool flipped, int route) {
+    const char* names[5] = {"M", "Right", "First", "Last", "Play"};
+    const std::string tag = std::string(flipped ? "fix flipped, " : "fix, ") + names[route] + ": ";
+    Fixture f = make_dataset(flipped ? "fix_leave_f" : "fix_leave_u", 64, 48, {"a", "b", "c", "d"});
+    std::vector<uint8_t> nearly(64 * 48, 0), all(64 * 48, 255);
+    for (int i = 0; i < 31; i++) nearly[(size_t)i] = 255;
+    if (flipped) {
+        for (uint8_t& v : nearly) v = (uint8_t)(255 - v);
+        std::fill(all.begin(), all.end(), 0);
+    }
+    write_png_gray(f.masks / "b.png", 64, 48, nearly);   // kept 0.01
+    write_png_gray(f.masks / "d.png", 64, 48, all);      // kept 1.0
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), flipped, err), tag + "open: " + err);
+    settle(s);
+    wait_scanned(s);
+    check(s.missing_count() == 2 && s.go_to_missing(+1), tag + "fixture: b and d missing, M");
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {0.0f, 0.0f, 32.0f, 48.0f};
+    s.commit_stroke(box, mk::Paint::ForceKeep, m);
+    check(s.frame_index() == 1 && s.doc() && s.doc()->dirty(), tag + "fixture: b fixed, unsaved");
+    if (route == 0) s.go_to_missing(+1);
+    if (route == 1) s.go_to(s.frame_index() + 1);
+    if (route == 2) s.go_to(0);
+    if (route == 3) s.go_to(s.frame_count() - 1);
+    if (route == 4) {
+        s.start_slideshow();
+        check(s.slideshow_playing(), tag + "fixture: playing");
+        settle(s);
+        s.stop_slideshow();
+    }
+    settle(s);
+    settle(s);
+    const float disk = disk_kept(s.mask_root(), "b", flipped);
+    check(disk > 0.4f && disk < 0.6f, tag + "fixture: b's fix is on disk: " + std::to_string(disk));
+    check(std::abs(s.health(1).kept - disk) < 1e-6f && s.missing_count() == 1,
+          tag + "b's health follows the save leaving it made");
+    bool back = false;
+    for (int k = 0; k < 4 && s.go_to_missing(-1); k++) {
+        settle(s);
+        back = back || s.frame_index() == 1;
+    }
+    check(!back, tag + "Shift+M never returns to the fixed b");
+    s.close();
+}
+
+void test_fix_then_leave() {
+    for (int route = 0; route < 5; route++) {
+        fix_then_leave_arm(false, route);
+        fix_then_leave_arm(true, route);
+    }
+}
+
+// A read the scan begins while a job runs must wait the job out: the job may
+// write the mask after the read and refresh it before it finishes, and the
+// read's value would then be published over the refresh.
+void test_scan_waits_out_a_running_job() {
+    Fixture f = make_dataset("scanwait", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::atomic<bool> armed{false}, at_b{false}, read_b{false}, started{false}, refreshed{false};
+    const auto until = [](const std::atomic<bool>& flag, int ms) {
+        for (int k = 0; k < ms && !flag.load(); k++) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    };
+    s.set_scan_hook_for_test([&](int i, bool read) {
+        if (i != 1) return;
+        if (!read && !at_b.exchange(true)) until(started, 3000);
+        if (read && started.load() && !read_b.exchange(true)) until(refreshed, 1000);
+    });
+    s.set_worker_hook_for_test([&](bool end) {
+        if (!armed.load()) return;
+        if (!end) {
+            started = true;
+            until(read_b, 300);
+            return;
+        }
+        refreshed = true;
+        for (int k = 0; k < 300 && s.scanned_count() < 2; k++)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "scan wait: open: " + err);
+    settle(s);
+    until(at_b, 3000);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {0.0f, 0.0f, 64.0f, 48.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    armed = true;
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    armed = false;
+    wait_scanned(s);
+    check(at_b.load() && started.load() && s.last_propagate().done == 1,
+          "scan wait: fixture: the scan stood at b when the propagate began");
+    check(s.scanned_count() == 2 && s.health(1).kept == 0.0f,
+          "scan wait: a read begun during a job does not overwrite that job's refresh");
+    s.close();
+}
+
+// Decision 10: close() stops the scan before it forgets the frames the scan
+// reads. The hook holds the scan mid-dataset and looks at them after a wait.
+void test_close_mid_scan() {
+    std::vector<std::string> keys;
+    for (int i = 0; i < 40; i++) {
+        char b[16];
+        std::snprintf(b, sizeof b, "f%04d", i);
+        keys.push_back(b);
+    }
+    Fixture f = make_dataset("close_mid", 64, 48, keys);
+    {
+        mk::MaskSession s;
+        std::atomic<bool> held{false};
+        std::atomic<int> seen{-1};
+        s.set_scan_hook_for_test([&](int i, bool read) {
+            if (read || i != 5 || held.exchange(true)) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            seen = (int)s.frames().size();
+        });
+        std::string err;
+        check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "close mid: open: " + err);
+        for (int k = 0; k < 3000 && !held.load(); k++) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        s.close();
+        check(held.load() && seen.load() == 40, "close mid: close() stops the scan before it forgets the frames");
+    }
+    // Closed at any point, kept.json is whole and every entry is its file's.
+    for (int rep = 0; rep < 4; rep++) {
+        mk::MaskSession s;
+        std::string err;
+        s.open(f.root.string(), f.images.string(), f.masks.string(), false, err);
+        std::this_thread::sleep_for(std::chrono::milliseconds(rep * 3));
+        s.close();
+        mk::KeptCache c;
+        const bool loaded = c.load(f.layer.string(), err);
+        int bad = 0;
+        for (const auto& [k, e] : c.frames) {
+            uint64_t fp = 0;
+            if (!mk::fingerprint_file(mk::mask_file(f.masks.string(), k), fp) || fp != e.fp) bad++;
+        }
+        check(loaded && bad == 0, "close mid: kept.json is whole and true after close " + std::to_string(rep));
+    }
+}
+
+// An undo whose target's mask went back but whose index write failed: the
+// target stays in the record, and its key must still reach the refresh.
+void test_undo_refresh_after_index_failure() {
+    Fixture f = make_dataset("undo_index_fail", 64, 48, {"a", "b"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "undo index: open: " + err);
+    settle(s);
+    wait_scanned(s);
+    const float before = s.health(1).kept;
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = {0.0f, 0.0f, 64.0f, 48.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.propagate(mk::PropagateScope::Next, 0, 0);
+    settle(s);
+    const fs::path index = f.layer / mk::kIndexFileName;
+    fs::remove(index);
+    fs::create_directories(index);
+    s.undo_propagate();
+    settle(s);
+    const float disk = disk_kept(s.mask_root(), "b", false);
+    check(!s.error().empty() && s.can_undo_propagate() && std::abs(disk - before) < 1e-6f,
+          "undo index: fixture: b's mask went back, its index write failed: " + s.error());
+    check(std::abs(s.health(1).kept - disk) < 1e-6f,
+          "undo index: the failed target's health follows its mask anyway");
+    std::error_code ec;
+    fs::remove_all(index, ec);
+    s.close();
+}
+
+// A close() that cleared the roots under a running scan once made its final
+// save write kept.json into the working folder. The cache refuses such a root.
+void test_kept_cache_refuses_a_relative_root() {
+    const fs::path d = scratch("kept_relative"), was = fs::current_path();
+    fs::current_path(d);
+    mk::KeptCache c;
+    c.frames["a"] = mk::KeptEntry{1, false, 0.5f};
+    c.dirty = true;
+    std::string e1, e2, e3;
+    const bool empty_saved = c.save("", e1), rel_saved = c.save("rel", e2);
+    const bool loaded = mk::KeptCache().load("", e3);
+    const bool wrote = fs::exists(d / mk::kKeptFileName) || fs::exists(d / "rel");
+    fs::current_path(was);
+    check(!empty_saved && !rel_saved && !wrote, "kept root: an empty or relative root writes nothing");
+    check(e1.find(mk::kKeptFileName) != std::string::npos && e2.find("rel") != std::string::npos,
+          "kept root: and says why: " + e1);
+    check(!loaded && !e3.empty(), "kept root: nor reads from the working folder");
+}
+
+void test_band_edit() {
+    int lo = 99, hi = 98;
+    mk::band_edit(lo, hi, true);
+    check(lo == 98 && hi == 98, "band: typing Min above Max stops at Max, and Max stays");
+    lo = 50;
+    hi = 7;
+    mk::band_edit(lo, hi, false);
+    check(lo == 50 && hi == 50, "band: typing Max below Min stops at Min, and Min stays");
+    lo = -4;
+    hi = 150;
+    mk::band_edit(lo, hi, true);
+    check(lo == 0 && hi == 150, "band: Min held at 0");
+    mk::band_edit(lo, hi, false);
+    check(hi == 100, "band: Max held at 100");
 }
 
 // ---------------------------------------------------------------------------
@@ -6715,6 +6956,7 @@ void test_session_slideshow() {
     s.set_slide_fps(10.0f);
     check(!s.animating() && !s.slideshow_playing(), "not animating before play");
     s.start_slideshow();
+    check(s.slide_fresh(), "play marks its press frame, so the key that pressed Play does not stop it");
     check(s.animating() && s.slideshow_playing() && s.doc() == nullptr, "playing, document released");
     check(s.frame_pixels() == nullptr, "playing, the frame's pixels are released");
     settle(s);
@@ -7765,6 +8007,12 @@ int main() {
     test_scan_follows_rebase();
     test_find_missing_unreadable();
     test_find_missing_layer_without_mask();
+    test_fix_then_leave();
+    test_scan_waits_out_a_running_job();
+    test_close_mid_scan();
+    test_undo_refresh_after_index_failure();
+    test_band_edit();
+    test_kept_cache_refuses_a_relative_root();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();
