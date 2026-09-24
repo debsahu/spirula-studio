@@ -8,6 +8,7 @@
 #include "core/SourcePath.h"
 #include "data/DatasetColor.h"
 #include "external/stb_image_write.h"
+#include "i18n/catalog/Log.h"
 #include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
@@ -225,6 +226,127 @@ void test_removed_input_frames_go() {
     check(fs::exists(ws / "images" / "a0.jpg"), "removed input: the remaining input's frames are there");
 }
 
+// An interrupted prep leaves frames but no .spirula-frames; the next run must
+// still prune them.
+void test_interrupted_prep_prunes() {
+    const fs::path root = scratch("interrupted");
+    const fs::path ws = root / "dataset";
+    gui::PrepJob job;
+    job.workspace = ws.string();
+    job.photo_import = gui::PhotoImport::Copy;
+    for (const char* name : {"a", "b"}) {
+        for (int i = 0; i < 3; i++)
+            write_jpg(root / name / (std::string(name) + std::to_string(i) + ".jpg"), 32, 24, i);
+        gui::PrepInput in;
+        in.path = (root / name).string();
+        in.subdir = name;
+        job.inputs.push_back(in);
+    }
+    gui::RunProgress prog;
+    std::string err;
+    check(run_prep(job, prog, err), "interrupted: first run: " + err);
+    fs::remove(ws / gui::kFramesStampFile);   // killed before the stamp was written
+    check(fs::is_directory(ws / "images" / "b") && !fs::exists(ws / gui::kFramesStampFile),
+          "fixture: frames of a and b, no frames stamp");
+
+    job.inputs.pop_back();   // as the GUI hands it over: a lone input gets images/ itself
+    job.inputs[0].subdir.clear();
+    prog.drain();
+    check(run_prep(job, prog, err), "interrupted: re-prep of a alone: " + err);
+    check(!fs::exists(ws / "images" / "b"),
+          "interrupted prep: the re-prep prunes the removed input's frames");
+    check(fs::exists(ws / "images" / "a0.jpg"),
+          "interrupted prep: the remaining input's frames are there");
+}
+
+// A lone input's own camera folders survive an unstamped prune, others go: the
+// frames are not called stale, so a resume can still keep finished inputs.
+void test_interrupted_lone_input_keeps_cameras() {
+    const fs::path root = scratch("lone");
+    const fs::path photos = root / "photos", ws = root / "dataset";
+    for (const char* cam : {"cam0", "cam1"})
+        for (int i = 0; i < 3; i++)
+            write_jpg(photos / cam / ("p" + std::to_string(i) + ".jpg"), 32, 24, i);
+    gui::PrepJob job;
+    job.workspace = ws.string();
+    job.photo_import = gui::PhotoImport::Copy;
+    gui::PrepInput in;
+    in.path = photos.string();
+    job.inputs = {in};
+    gui::RunProgress prog;
+    std::string err;
+    check(run_prep(job, prog, err), "lone: first run: " + err);
+    const fs::path sentinel = ws / "images" / "cam0" / "kept.txt";
+    std::ofstream(sentinel) << "x";
+    write_jpg(ws / "images" / "old" / "o0.jpg", 32, 24, 9);
+    fs::remove(ws / gui::kFramesStampFile);
+    check(fs::is_directory(ws / "images" / "cam1"), "fixture: the input's cameras are cam0/ and cam1/");
+    check(run_prep(job, prog, err), "lone: re-prep: " + err);
+    check(!fs::exists(ws / "images" / "old") && fs::exists(sentinel),
+          "interrupted lone input: its camera folders stay, a leftover folder goes");
+}
+
+// The same for a lone video, whose cameras are cam<k>/. Pruning runs before
+// extraction, so the run failing here for want of a decoder does not matter.
+void test_interrupted_lone_video_keeps_cameras() {
+    const fs::path root = scratch("lonevideo");
+    const fs::path ws = root / "dataset", images = ws / "images";
+    write_jpg(images / "cam0" / "f0.jpg", 32, 24, 1);
+    write_jpg(images / "cam1" / "f0.jpg", 32, 24, 2);
+    write_jpg(images / "old" / "o0.jpg", 32, 24, 3);
+    write_jpg(images / "r0.jpg", 32, 24, 5);   // a single-track frame, also its own
+    write_jpg(root / "clip.OSV", 32, 24, 4);   // never decoded
+    gui::PrepJob job;
+    job.workspace = ws.string();
+    gui::PrepInput in;
+    in.path = (root / "clip.OSV").string();
+    in.is_video = true;
+    job.inputs = {in};
+    gui::RunProgress prog;
+    std::string err;
+    run_prep(job, prog, err);
+    check(!fs::exists(images / "old") && fs::exists(images / "cam0" / "f0.jpg") &&
+              fs::exists(images / "cam1" / "f0.jpg") && fs::exists(images / "r0.jpg"),
+          "interrupted lone video: its cam<k>/ folders stay, a leftover folder goes");
+}
+
+// A removed input's folder can be a link into a raw capture: the link goes,
+// what it points at is never touched.
+void test_stale_dir_symlink_unlinked() {
+    const fs::path root = scratch("symlink");
+    const fs::path ws = root / "dataset", raw = root / "raw";
+    for (int i = 0; i < 3; i++) write_jpg(raw / ("r" + std::to_string(i) + ".jpg"), 32, 24, i);
+    gui::PrepJob job;
+    job.workspace = ws.string();
+    job.photo_import = gui::PhotoImport::Copy;
+    for (const char* name : {"a", "b"}) {
+        for (int i = 0; i < 3; i++)
+            write_jpg(root / name / (std::string(name) + std::to_string(i) + ".jpg"), 32, 24, i);
+        gui::PrepInput in;
+        in.path = (root / name).string();
+        in.subdir = name;
+        job.inputs.push_back(in);
+    }
+    gui::RunProgress prog;
+    std::string err;
+    check(run_prep(job, prog, err), "symlink: first run: " + err);
+    std::error_code ec;
+    fs::remove_all(ws / "images" / "b", ec);
+    fs::create_directory_symlink(raw, ws / "images" / "b", ec);
+    check(!ec && fs::is_symlink(ws / "images" / "b"), "fixture: images/b is a link to the raw folder");
+
+    job.inputs.pop_back();
+    prog.drain();
+    check(run_prep(job, prog, err), "symlink: re-prep of a alone: " + err);
+    check(!fs::exists(fs::symlink_status(ws / "images" / "b")),
+          "stale dir symlink: the link itself is removed");
+    check(fs::exists(raw / "r0.jpg") && fs::exists(raw / "r2.jpg"),
+          "stale dir symlink: its target is untouched");
+    const std::string line = spirula::i18n::format(spirula::i18n::msg::log::frames_link_removed,
+                                                   {std::string("b"), raw.string()});
+    check(logged(prog, line), "stale dir symlink: the removal is logged with its target");
+}
+
 // I1: a record that cannot be replaced or removed would be read as current.
 void test_stale_record_fails_prep() {
     const fs::path root = scratch("stale");
@@ -323,6 +445,10 @@ int main() {
     test_run_rewrites_color_record();
     test_removed_input_frames_go();
     test_stale_record_fails_prep();
+    test_interrupted_prep_prunes();
+    test_interrupted_lone_input_keeps_cameras();
+    test_interrupted_lone_video_keeps_cameras();
+    test_stale_dir_symlink_unlinked();
     test_prune_spares_input_folder();
     test_clip_colors_mapping();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);

@@ -146,9 +146,16 @@ non-DJI video). Each unknown input is logged with its layout as it is read.
 - When the inputs change, the frames of inputs no longer in the job are removed
   from the dataset's `images/`, so nothing is trained that the record does not
   describe. A folder an input is read from is never removed.
+- The same prune runs when `images/` holds frames but `.spirula-frames` is
+  missing, as after an interrupted prep. Those frames are not called stale, so a
+  resume still keeps what the interrupted run finished; a lone input keeps its
+  root frames and its camera folders (`cam<k>/`, or its own photo subfolders).
+- A stale entry that is a directory symlink is unlinked and logged with its
+  target. The link is never followed, so what it points at is never touched.
+  Anything that cannot be removed is logged.
 - Clear project removes the record.
-- `spirula sam extract` writes no record, and warns when the video carries a
-  colour profile.
+- `spirula sam extract` writes no record, and warns when the video is D-Log M,
+  in an unsupported log profile, or unreadable. A Normal clip stays silent.
 
 ### What training does with it
 

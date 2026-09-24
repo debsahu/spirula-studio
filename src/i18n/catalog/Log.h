@@ -2483,6 +2483,48 @@ SS_MSG(frames_removed_inputs,
        "images/: {0}"),
     TR("Artık bu veri kümesinde olmayan girdilerin kareleri images/ klasöründen "
        "kaldırıldı: {0}"));
+SS_MSG(frames_link_removed,
+    EN("Removed the link {0} from images/; it pointed to {1}, which is left as "
+       "it is"),
+    JA("images/ からリンク {0} を削除しました。リンク先の {1} "
+       "はそのまま残しています"),
+    ZH_HANS("已从 images/ 中删除链接 {0}；它指向的 {1} 保持不变"),
+    ZH_HANT("已從 images/ 中刪除連結 {0}；它指向的 {1} 保持不變"),
+    KO("images/에서 링크 {0}을(를) 삭제했습니다. 링크가 가리키던 {1}은(는) 그대로 둡니다"),
+    DE("Der Link {0} wurde aus images/ entfernt; sein Ziel {1} bleibt "
+       "unverändert"),
+    FR("Le lien {0} a été retiré de images/ ; sa cible {1} est laissée telle "
+       "quelle"),
+    ES("Se quitó el enlace {0} de images/; su destino {1} se deja como está"),
+    PT("O link {0} foi removido de images/; o destino {1} fica como está"),
+    IT("Il collegamento {0} è stato rimosso da images/; la sua destinazione {1} "
+       "resta com'è"),
+    NL("De koppeling {0} is uit images/ verwijderd; het doel {1} blijft zoals "
+       "het is"),
+    RU("Ссылка {0} удалена из images/; то, на что она указывала ({1}), не "
+       "тронуто"),
+    TR("{0} bağlantısı images/ klasöründen kaldırıldı; gösterdiği {1} olduğu "
+       "gibi bırakıldı"));
+SS_MSG(frames_not_removed,
+    EN("Could not remove {0} from images/; its frames are still in the dataset"),
+    JA("images/ から {0} を削除できませんでした。そのフレームはデー"
+       "タセットに残っています"),
+    ZH_HANS("无法从 images/ 中删除 {0}；其帧仍在数据集中"),
+    ZH_HANT("無法從 images/ 中刪除 {0}；其影格仍在資料集中"),
+    KO("images/에서 {0}을(를) 삭제할 수 없습니다. 그 프레임은 아직 데이터셋에 있습니다"),
+    DE("{0} konnte nicht aus images/ entfernt werden; seine Frames sind noch im "
+       "Datensatz"),
+    FR("Impossible de retirer {0} de images/ ; ses images sont toujours dans le "
+       "jeu de données"),
+    ES("No se pudo quitar {0} de images/; sus fotogramas siguen en el conjunto "
+       "de datos"),
+    PT("Não foi possível remover {0} de images/; os quadros continuam no "
+       "conjunto de dados"),
+    IT("Impossibile rimuovere {0} da images/; i suoi fotogrammi sono ancora nel "
+       "dataset"),
+    NL("Kon {0} niet uit images/ verwijderen; de beelden staan nog in de dataset"),
+    RU("Не удалось удалить {0} из images/; его кадры по-прежнему в наборе данных"),
+    TR("{0} images/ klasöründen kaldırılamadı; kareleri hâlâ veri kümesinde"));
 SS_MSG(dataset_color_as_set,
     EN("Colour profile from the clips' metadata: {0}; --image-color-log {1} as set"),
     JA("クリップのメタデータによる色プロファイル: {0}。--image-color-log は指定"

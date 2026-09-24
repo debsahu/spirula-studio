@@ -297,12 +297,12 @@ int sam_cli_extract(int argc, char** argv) {
 #ifdef SS_TOOL_SFM
     // The trainer reads a clip's profile from the dataset's colour record,
     // which only dataset preparation writes (data/DatasetColor.h).
+    // A Normal clip needs no decode, so it has nothing to warn about.
     if (const sfm::VideoColor vc = sfm::video_color(o.input);
-        vc.mode != sfm::VideoColorMode::NotRecorded) {
+        vc.mode != sfm::VideoColorMode::NotRecorded && vc.mode != sfm::VideoColorMode::Normal) {
         namespace lm = spirula::i18n::msg::log;
         const spirula::i18n::Msg& label =
-            vc.mode == sfm::VideoColorMode::DlogM    ? lm::color_profile_dlogm
-            : vc.mode == sfm::VideoColorMode::Normal ? lm::color_profile_not_log
+            vc.mode == sfm::VideoColorMode::DlogM      ? lm::color_profile_dlogm
             : vc.mode == sfm::VideoColorMode::OtherLog ? lm::color_profile_unsupported_log
                                                        : lm::color_profile_unknown;
         std::fprintf(stderr, "%s %s\n", spirula::i18n::msg::data::word_warning.get(),

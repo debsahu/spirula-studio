@@ -172,27 +172,61 @@ bool inside(const fs::path& p, const fs::path& root) {
 
 // Frames an input the job no longer names left in the dataset's images/: they
 // would be trained on beside the new ones, and the colour record says nothing
-// of them. Never a folder an input is read from. Returns what was removed.
-std::vector<std::string> prune_removed_inputs(const fs::path& images, const fs::path& ws,
-                                              const std::vector<PrepInput>& inputs) {
-    std::vector<std::string> removed;
+// of them. Never a folder an input is read from.
+struct Pruned {
+    std::vector<std::string> removed, stuck;
+    std::vector<std::pair<std::string, std::string>> links;   // name, target
+};
+
+// `own_frames_kept`: the frames are not being re-extracted, so a lone input's
+// own root frames and camera folders stay; only other folders go.
+Pruned prune_removed_inputs(const fs::path& images, const fs::path& ws,
+                            const std::vector<PrepInput>& inputs, bool own_frames_kept) {
+    Pruned out;
     std::set<std::string> kept;
+    const PrepInput* lone = nullptr;
     std::error_code ec;
     for (const PrepInput& in : inputs) {
         const fs::path src = fs::absolute(in.path, ec).lexically_normal();
-        if (inside(src, images) || inside(images, src)) return removed;
-        // A lone input owns images/ itself, so nothing else in it is kept.
-        if (!in.subdir.empty()) kept.insert(fs::path(in.subdir).begin()->string());
+        if (inside(src, images) || inside(images, src)) return out;
+        // A lone input owns images/ itself.
+        if (in.subdir.empty()) lone = &in;
+        else kept.insert(fs::path(in.subdir).begin()->string());
     }
+    if (lone && own_frames_kept && !lone->is_video)
+        for (const std::string& cam : camera_subfolders(lone->path))
+            kept.insert(fs::path(cam).begin()->string());
+    auto camera_dir = [](const std::string& n) {
+        return n.size() > 3 && n.compare(0, 3, "cam") == 0 &&
+               n.find_first_not_of("0123456789", 3) == std::string::npos;
+    };
     std::vector<fs::path> gone;
-    for (fs::directory_iterator it(images, ec), end; !ec && it != end; it.increment(ec))
-        if (!kept.count(it->path().filename().string())) gone.push_back(it->path());
+    for (fs::directory_iterator it(images, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        if (kept.count(name)) continue;
+        if (lone && own_frames_kept) {
+            const fs::file_status st = it->symlink_status(ec);
+            if (!fs::is_directory(st) && !fs::is_symlink(st)) continue;
+            if (lone->is_video && camera_dir(name)) continue;
+        }
+        gone.push_back(it->path());
+    }
     for (const fs::path& p : gone) {
+        const std::string name = p.filename().string();
+        if (fs::is_symlink(fs::symlink_status(p, ec))) {
+            // The link, never what it points at.
+            const std::string target = fs::read_symlink(p, ec).string();
+            fs::remove(p, ec);
+            if (!fs::exists(fs::symlink_status(p, ec))) out.links.push_back({name, target});
+            else out.stuck.push_back(name);
+            continue;
+        }
         if (fs::is_directory(p, ec)) clear_generated(p, ws);
         else fs::remove(p, ec);
-        if (!fs::exists(p, ec)) removed.push_back(p.filename().string());
+        if (!fs::exists(fs::symlink_status(p, ec))) out.removed.push_back(name);
+        else out.stuck.push_back(name);
     }
-    return removed;
+    return out;
 }
 
 // The frame number the masker should be given for each file, taken from the
@@ -1259,10 +1293,15 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     // Frames already there were extracted with settings the workspace records;
     // a run asking for others has to go back to the video (ReconStamp.h).
     const ReconStamp frames_now = frames_stamp(job);
+    // No stamp over frames that are there: an earlier run stopped before
+    // writing it, so what the frames came from is unknown (see the prune below).
+    bool frames_unstamped = false;
     {
-        const std::string moved =
-            recon_stamp_change(read_recon_stamp(ws.string(), kFramesStampFile),
-                               frames_now);
+        const ReconStamp prior = read_recon_stamp(ws.string(), kFramesStampFile);
+        std::error_code ec;
+        frames_unstamped = !prior.present && fs::is_directory(ws / "images", ec) &&
+                           !fs::is_empty(ws / "images", ec);
+        const std::string moved = recon_stamp_change(prior, frames_now);
         if (!moved.empty()) {
             _frames_stale = true;
             out.frames_rebuilt = true;
@@ -1340,12 +1379,22 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     } else {
         out.image_dir = (ws / "images").string();
         out.image_dir_cfg = "images";
-        if (frames_stale(job)) {
-            const std::vector<std::string> gone =
-                prune_removed_inputs(fs::path(out.image_dir), ws, job.inputs);
-            std::string names;
-            for (const std::string& g : gone) names += (names.empty() ? "" : ", ") + g;
-            if (!names.empty()) log(fmt(lmsg::frames_removed_inputs, {names}), /*detail=*/false);
+        // Unstamped frames are pruned without being called stale, so a resume
+        // still keeps the inputs an interrupted run finished.
+        if (frames_stale(job) || frames_unstamped) {
+            const Pruned pr = prune_removed_inputs(fs::path(out.image_dir), ws, job.inputs,
+                                                   /*own_frames_kept=*/!frames_stale(job));
+            auto join = [](const std::vector<std::string>& v) {
+                std::string j;
+                for (const std::string& x : v) j += (j.empty() ? "" : ", ") + x;
+                return j;
+            };
+            if (!pr.removed.empty())
+                log(fmt(lmsg::frames_removed_inputs, {join(pr.removed)}), /*detail=*/false);
+            for (const auto& [name, target] : pr.links)
+                log(fmt(lmsg::frames_link_removed, {name, target}), /*detail=*/false);
+            if (!pr.stuck.empty())
+                log(fmt(lmsg::frames_not_removed, {join(pr.stuck)}), /*detail=*/false);
         }
         // Every input is measured before any of them is extracted, so the bar
         // covers the whole step from the first frame rather than restarting on
