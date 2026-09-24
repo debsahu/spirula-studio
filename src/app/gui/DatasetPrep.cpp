@@ -2166,7 +2166,8 @@ bool DatasetPrep::extract_video_ffmpeg16(const PrepJob& job, const PrepInput& in
         if (keep.empty()) return failed(lmsg::err_no_frames_extracted.get());
     }
 
-    const double gb = 33.0e-3 * (double)std::max<size_t>(keep.size(), 1) * (double)streams *
+    // 40 MB per 3840² PNG16: the mean over 374 frames of a 187 s D-Log M clip.
+    const double gb = 40.0e-3 * (double)std::max<size_t>(keep.size(), 1) * (double)streams *
                       ((double)width * height / (3840.0 * 3840.0));
     char gbs[32];
     std::snprintf(gbs, sizeof gbs, "%.1f", gb);

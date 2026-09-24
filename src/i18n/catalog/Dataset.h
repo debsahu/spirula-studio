@@ -9849,55 +9849,55 @@ SS_MSG(frame_bits_help,
     EN("How many bits per channel the frames taken from a video keep. Auto writes "
        "16-bit PNG for a clip shot in D-Log M, whose 10 bits the log curve needs, "
        "and 8-bit JPEG for everything else. 16-bit frames always go through ffmpeg "
-       "and take about 50 times the disk of JPEG: some 32 MB per 3840 x 3840 frame."),
+       "and take about 60 times the disk of JPEG: some 40 MB per 3840 x 3840 frame."),
     JA("動画から取り出すフレームに残すチャンネルあたりのビット数です。自動では、ログカーブに "
        "10 ビットが必要な D-Log M で撮影したクリップを 16 ビット PNG で、それ以外を 8 ビット "
-       "JPEG で書き出します。16 ビットのフレームは常に ffmpeg を通り、JPEG の約 50 倍のディスクを "
-       "使います（3840 x 3840 の 1 フレームで約 32 MB）。"),
+       "JPEG で書き出します。16 ビットのフレームは常に ffmpeg を通り、JPEG の約 60 倍のディスクを "
+       "使います（3840 x 3840 の 1 フレームで約 40 MB）。"),
     ZH_HANS("从视频取出的帧每个通道保留多少位。自动模式下，以 D-Log M 拍摄的片段（其对数曲线需要 "
             "10 位）写为 16 位 PNG，其余写为 8 位 JPEG。16 位帧始终经由 ffmpeg，占用的磁盘约为 "
-            "JPEG 的 50 倍：每帧 3840 x 3840 约 32 MB。"),
+            "JPEG 的 60 倍：每帧 3840 x 3840 约 40 MB。"),
     ZH_HANT("從影片取出的影格每個通道保留多少位元。自動模式下，以 D-Log M 拍攝的片段（其對數曲線需要 "
             "10 位元）寫為 16 位元 PNG，其餘寫為 8 位元 JPEG。16 位元影格一律經由 ffmpeg，佔用的磁碟約為 "
-            "JPEG 的 50 倍：每個 3840 x 3840 影格約 32 MB。"),
+            "JPEG 的 60 倍：每個 3840 x 3840 影格約 40 MB。"),
     KO("동영상에서 꺼낸 프레임이 채널당 몇 비트를 유지할지 정합니다. 자동은 로그 커브에 10비트가 "
        "필요한 D-Log M 클립을 16비트 PNG 로, 나머지는 8비트 JPEG 로 씁니다. 16비트 프레임은 항상 "
-       "ffmpeg 를 거치며 JPEG 의 약 50배 디스크를 씁니다 (3840 x 3840 프레임당 약 32 MB)."),
+       "ffmpeg 를 거치며 JPEG 의 약 60배 디스크를 씁니다 (3840 x 3840 프레임당 약 40 MB)."),
     DE("Wie viele Bit pro Kanal die aus einem Video entnommenen Bilder behalten. Automatisch "
        "schreibt 16-Bit-PNG für einen in D-Log M gedrehten Clip, dessen Log-Kurve die 10 Bit "
        "braucht, und 8-Bit-JPEG für alles andere. 16-Bit-Bilder laufen immer über ffmpeg und "
-       "belegen etwa 50-mal so viel Speicher wie JPEG: rund 32 MB je Bild mit 3840 x 3840."),
+       "belegen etwa 60-mal so viel Speicher wie JPEG: rund 40 MB je Bild mit 3840 x 3840."),
     FR("Le nombre de bits par canal que gardent les images tirées d'une vidéo. Automatique "
        "écrit du PNG 16 bits pour un clip filmé en D-Log M, dont la courbe log a besoin des "
        "10 bits, et du JPEG 8 bits pour tout le reste. Les images 16 bits passent toujours par "
-       "ffmpeg et occupent environ 50 fois le disque du JPEG : quelque 32 Mo par image de "
+       "ffmpeg et occupent environ 60 fois le disque du JPEG : quelque 40 Mo par image de "
        "3840 x 3840."),
     ES("Cuántos bits por canal conservan los fotogramas sacados de un vídeo. Automático "
        "escribe PNG de 16 bits para un clip grabado en D-Log M, cuya curva logarítmica necesita "
        "los 10 bits, y JPEG de 8 bits para todo lo demás. Los fotogramas de 16 bits pasan "
-       "siempre por ffmpeg y ocupan unas 50 veces el disco del JPEG: unos 32 MB por fotograma "
+       "siempre por ffmpeg y ocupan unas 60 veces el disco del JPEG: unos 40 MB por fotograma "
        "de 3840 x 3840."),
     PT("Quantos bits por canal os quadros tirados de um vídeo mantêm. O automático grava PNG "
        "de 16 bits para um clipe gravado em D-Log M, cuja curva logarítmica precisa dos 10 "
        "bits, e JPEG de 8 bits para todo o resto. Quadros de 16 bits sempre passam pelo ffmpeg "
-       "e ocupam cerca de 50 vezes o disco do JPEG: uns 32 MB por quadro de 3840 x 3840."),
+       "e ocupam cerca de 60 vezes o disco do JPEG: uns 40 MB por quadro de 3840 x 3840."),
     IT("Quanti bit per canale conservano i fotogrammi presi da un video. Automatico scrive "
        "PNG a 16 bit per una clip girata in D-Log M, la cui curva logaritmica ha bisogno dei "
        "10 bit, e JPEG a 8 bit per tutto il resto. I fotogrammi a 16 bit passano sempre da "
-       "ffmpeg e occupano circa 50 volte il disco del JPEG: circa 32 MB per fotogramma "
+       "ffmpeg e occupano circa 60 volte il disco del JPEG: circa 40 MB per fotogramma "
        "3840 x 3840."),
     NL("Hoeveel bits per kanaal de beelden uit een video houden. Automatisch schrijft 16-bit "
        "PNG voor een clip in D-Log M, waarvan de logcurve de 10 bits nodig heeft, en 8-bit JPEG "
-       "voor al het andere. 16-bit beelden gaan altijd via ffmpeg en nemen ongeveer 50 keer "
-       "zoveel schijfruimte in als JPEG: zo'n 32 MB per beeld van 3840 x 3840."),
+       "voor al het andere. 16-bit beelden gaan altijd via ffmpeg en nemen ongeveer 60 keer "
+       "zoveel schijfruimte in als JPEG: zo'n 40 MB per beeld van 3840 x 3840."),
     RU("Сколько бит на канал сохраняют кадры, взятые из видео. Авто пишет 16-битные PNG для "
        "клипа, снятого в D-Log M, логарифмической кривой которого нужны 10 бит, и 8-битные JPEG "
        "для всего остального. 16-битные кадры всегда идут через ffmpeg и занимают примерно в "
-       "50 раз больше места, чем JPEG: около 32 МБ на кадр 3840 x 3840."),
+       "60 раз больше места, чем JPEG: около 40 МБ на кадр 3840 x 3840."),
     TR("Bir videodan alınan karelerin kanal başına kaç bit tuttuğu. Otomatik, log eğrisi 10 "
        "bite ihtiyaç duyan D-Log M ile çekilmiş bir klip için 16 bit PNG, geri kalan her şey "
        "için 8 bit JPEG yazar. 16 bit kareler her zaman ffmpeg üzerinden geçer ve JPEG'in "
-       "yaklaşık 50 katı disk kaplar: 3840 x 3840 kare başına yaklaşık 32 MB."));
+       "yaklaşık 60 katı disk kaplar: 3840 x 3840 kare başına yaklaşık 40 MB."));
 
 SS_MSG(frame_bits_auto,
     EN("Auto (16-bit for D-Log M)"),

@@ -119,10 +119,11 @@ used: on grey it is a 0.9962 gain (Y=940 lands on 65283, not 65535), and on
 saturated chroma it misses BT.709 by up to 8.2% of full scale. With the filter
 Y=64/502/940 land on 0/32768/65520 and colour stays within 0.22%.
 
-Cost, measured on the Osmo 360's 3840² fisheye frames: about 32-37 MB per
-frame against 0.6 MB for JPEG, and a second decode of every track. A 9 s clip
-at 2 fps (36 frames) wrote 1.3 GB in 78 s. The prep log states the estimate
-before the second pass. Keep `cache_images = disk` for such a dataset: `cpu`
+Cost, measured on the Osmo 360's 3840² fisheye frames: 38-40 MB per D-Log M
+frame (33 MB for a Normal clip) against 0.6 MB for JPEG, and a second decode
+of every track. The 187 s D-Log M clip at 1 fps (374 frames) wrote 15.0 GB in
+18 min on an M4 Max, with the two 1.95 GB track copies on top while it ran.
+The prep log states the estimate, at 40 MB a frame, before the second pass. Keep `cache_images = disk` for such a dataset: `cpu`
 holds every frame decoded, 88.5 MB each.
 
 ## Telling a D-Log M clip from a normal one

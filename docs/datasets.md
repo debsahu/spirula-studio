@@ -717,7 +717,7 @@ measured by different models are NOT one budget -- see below.
 A D-Log M clip's frames are 16-bit PNG, not JPEG, unless the job says 8
 (`frame_bits`; see [notes/dlog-m.md](notes/dlog-m.md#16-bit-frames)). They go
 through ffmpeg, keep the same instants on both lenses of a 360 file, and take
-about 50 times the disk.
+about 60 times the disk.
 
 A workspace records what its frames were extracted with (`.spirula-frames`,
 `gui/ReconStamp.h`). A re-run whose answer differs -- a different rate, a
