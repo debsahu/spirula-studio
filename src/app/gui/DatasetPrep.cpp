@@ -15,6 +15,7 @@
 #include "app_generated/mask_py.h"   // kMaskPy[], from reference/scripts/mask.py
 
 #include "core/ExrImage.h"
+#include "data/DatasetColor.h"
 #include "core/ImageOrient.h"
 #include "sfm/core/Exif.h"
 #ifdef SS_TOOL_SFM
@@ -795,6 +796,31 @@ std::string leaf_name(const fs::path& p) {
                                 : p.filename().string();
 }
 
+// Extracted frames carry no trace of the clip's picture profile, so it is read
+// off each input now and kept beside them for the trainer (data/DatasetColor.h).
+spirula::DatasetColor clip_colors(const std::vector<PrepInput>& inputs) {
+    spirula::DatasetColor d;
+    for (const PrepInput& in : inputs) {
+        spirula::ClipColorEntry e;
+        e.source = leaf_name(fs::path(in.path));
+#ifdef SS_TOOL_SFM
+        if (in.is_video) {
+            const sfm::VideoColor c = sfm::video_color(in.path);
+            e.code = c.code;
+            switch (c.mode) {
+                case sfm::VideoColorMode::Normal:  e.mode = spirula::ClipColor::Normal; break;
+                case sfm::VideoColorMode::DlogM:   e.mode = spirula::ClipColor::DlogM; break;
+                case sfm::VideoColorMode::Other:   e.mode = spirula::ClipColor::Other; break;
+                case sfm::VideoColorMode::Unknown: e.mode = spirula::ClipColor::Unknown; break;
+                default: break;
+            }
+        }
+#endif
+        d.clips.push_back(e);
+    }
+    return d;
+}
+
 bool named(const fs::path& p, const char* what) {
     std::string n = leaf_name(p);
     for (auto& c : n) c = (char)std::tolower((unsigned char)c);
@@ -981,7 +1007,8 @@ std::vector<std::string> workspace_artifacts(const std::string& workspace,
     if (!is_input_folder(ws / "masks", inputs, true)) add("masks");
     for (const char* name : {"features", "sparse", "colmap", "normals", "depths",
                              ".progress", sfm::resume::kDir, "matches.bin",
-                             "database.db", kReconStampFile})
+                             "database.db", kReconStampFile,
+                             spirula::kDatasetColorFile})
         add(name);
     return out;
 }
@@ -1358,6 +1385,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     // Written once the images are there, so an interrupted extraction is not
     // recorded as having produced what it was asked for.
     write_recon_stamp(ws.string(), frames_now, kFramesStampFile);
+    spirula::write_dataset_color(ws.string(), clip_colors(job.inputs));
 
     out.n_images = count_images(out.image_dir, skip_dir);
     log(fmt(lmsg::found_images, {(long long)out.n_images, out.image_dir}),

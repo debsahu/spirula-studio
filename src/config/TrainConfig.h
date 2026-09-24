@@ -298,7 +298,7 @@ inline int train_tier_rank(const char* tier) {
     X(std::optional<bool>, image_color_is_linear, std::nullopt, "colorspace", "basic", "") \
     X(std::string, image_color_transfer, "", "colorspace", "advanced", "srgb|srgb-clamped|aces|filmic|uncharted2|none") \
     X(std::string, image_color_gamut, "", "colorspace", "basic", "Rec.709|ACES2065-1|ACEScg|Rec.2020|AdobeRGB|DCI-P3|none") \
-    X(std::string, image_color_log, "", "colorspace", "basic", "dlogm-osmo360|none") \
+    X(std::string, image_color_log, "auto", "colorspace", "basic", "auto|dlogm-osmo360|none") \
     X(std::optional<bool>, splat_color_is_linear, std::nullopt, "colorspace", "basic", "") \
     X(std::string, splat_color_transfer, "", "colorspace", "advanced", "srgb|srgb-clamped|aces|filmic|uncharted2|none") \
     X(std::string, splat_color_gamut, "", "colorspace", "basic", "Rec.709|ACES2065-1|ACEScg|Rec.2020|AdobeRGB|DCI-P3|none") \

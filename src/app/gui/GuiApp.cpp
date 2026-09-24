@@ -6531,6 +6531,13 @@ void GuiApp::draw_train() {
             _train_masks_key = key;
             _train_masks_at = now;
             _train_has_masks = !_cfg.data.empty() && fs::is_directory(md, ec) && !fs::is_empty(md, ec);
+            _train_color = spirula::dataset_color_label(
+                spirula::summarize_dataset_color(spirula::read_dataset_color(_cfg.data)));
+        }
+        if (!_train_color.empty()) {
+            ImGui::SameLine();
+            ui::TextDisabledRaw(i18n::format(msg::dataset_color_profile, {_train_color}));
+            ui::help_on_hover(msg::dataset_color_profile_help);
         }
         if (_train_has_masks) {
             ImGui::SameLine();

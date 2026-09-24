@@ -20,6 +20,7 @@
 
 #include "engine/Engine.h"
 #include "core/ColorSpace.h"
+#include "data/DatasetColor.h"
 #include "data/DatasetParser.h"
 #include "app/webviewer/RenderWorker.h"
 #include "config/TrainConfig.h"
@@ -84,6 +85,14 @@ struct ColorResolution {
 };
 
 ColorResolution resolve_color(const TrainConfig& c);
+
+// `--image-color-log auto` settled from what the dataset recorded of its clips
+// (data/DatasetColor.h); any other value is the user's and is kept. Returns the
+// line to log, "" for none; throws on a dataset mixing D-Log M with anything else.
+std::string adopt_dataset_color(TrainConfig& c, const DatasetColor& d);
+
+// The profile a dataset's record adds up to, as the GUI and the log name it.
+std::string dataset_color_label(const DatasetColorSummary& s);
 
 // One pixel of an image file, taken into the space the image-compare panel's
 // render pane shows: the splat working space when `raw`, display values

@@ -105,13 +105,34 @@ reads) is the refinement, at about 44x the disk per frame (48 MB against
 
 ## Telling a D-Log M clip from a normal one
 
-Nothing detects it; set the flag. The Osmo 360 records the mode in the `.OSV`
-file's `djmd` metadata track: in sample 0, top-level field 2 (stream meta),
-then field 4, then field 1 is the colour mode -- **19 is D-Log M**, 0 is Normal
-(an empty field 4 decodes to 0). `src/sfm/core/Telemetry.cpp` already parses
-this track for the IMU, and is the natural place to read it. The video stream's own tags say `bt709` either
-way. Extracted frames carry no mode, so detection belongs at extraction time
-and has to be recorded beside the dataset.
+From the clip's metadata, never from its pixels. The Osmo 360 records the mode
+in the `.OSV` file's `djmd` metadata track: in sample 0, top-level field 2
+(stream meta), then field 4, then field 1 is the colour mode -- **19 is D-Log
+M**, 0 is Normal (an empty field 4 decodes to 0). The video stream's own tags
+say `bt709` either way. `sfm::video_color` (`src/sfm/core/Telemetry.cpp`) reads
+it; five real clips read as recorded (three D-Log M, two Normal).
+
+Extracted frames carry no mode, so the GUI's dataset preparation writes each
+input's mode to `.spirula-color` in the dataset root (`src/data/DatasetColor.h`),
+one line per input: `dlogm`, `normal`, `other` (another DJI profile),
+`unknown` or `unrecorded` (no profile metadata: photos, a non-DJI video).
+
+`--image-color-log` defaults to `auto`, which `TrainerSession::load_dataset`
+settles from that record and logs:
+
+| record | `auto` becomes |
+|---|---|
+| every input D-Log M | `dlogm-osmo360` |
+| none D-Log M, none unknown | no curve |
+| an `unknown` input, no D-Log M | no curve, and a line asking for the flag |
+| D-Log M beside anything else | refused: set the flag |
+| no record | no curve, nothing logged |
+
+Any explicit value, `none` included, is kept. The seed points follow the
+images as before. **Only the Osmo 360's layout (`dvtm_oq101.proto`) is read.**
+Every other DJI product is `unknown`, never Normal: the Avata 360
+(`dvtm_AVATA360.proto`) has `fov_type` at StreamMeta field 4, where the Osmo
+has the colour mode, so the Osmo path reads a 0 there that means nothing.
 
 ## Where the numbers come from
 

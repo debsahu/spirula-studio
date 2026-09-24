@@ -134,4 +134,6 @@ shared with the viewer. The seed cloud has `--point-color-log`. See
 Both front ends spell an unset string field `none`, and the GUI writes it
 literally when a preset gave the field a value. `resolve_color` treats `""`
 and `"none"` alike for every colour field; `colorspace::transfer_or` takes
-the fallback the caller wants for that case.
+the fallback the caller wants for that case. The one exception is
+`--image-color-log`, whose unset value is `auto` (follow the dataset's record,
+`docs/notes/dlog-m.md`), so that `none` can be an explicit "not log".

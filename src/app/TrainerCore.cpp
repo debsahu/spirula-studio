@@ -147,6 +147,40 @@ ColorResolution resolve_color(const TrainConfig& c) {
     return r;
 }
 
+std::string dataset_color_label(const DatasetColorSummary& s) {
+    switch (s.verdict) {
+        case DatasetColorVerdict::DlogM:   return lmsg::color_profile_dlogm.get();
+        case DatasetColorVerdict::NotLog:  return lmsg::color_profile_not_log.get();
+        case DatasetColorVerdict::Unknown: return lmsg::color_profile_unknown.get();
+        case DatasetColorVerdict::Mixed:   return lmsg::color_profile_mixed.get();
+        default:                           return {};
+    }
+}
+
+std::string adopt_dataset_color(TrainConfig& c, const DatasetColor& d) {
+    const DatasetColorSummary s = summarize_dataset_color(d);
+    const bool from_dataset = c.image_color_log == "auto";
+    // Settled either way, so config.json records what the run decoded with.
+    if (from_dataset) c.image_color_log.clear();
+    if (s.verdict == DatasetColorVerdict::None) return {};
+    if (!from_dataset)
+        return lfmt(lmsg::dataset_color_as_set,
+                    {dataset_color_label(s), unset(c.image_color_log) ? std::string("none")
+                                                                      : c.image_color_log});
+    switch (s.verdict) {
+        case DatasetColorVerdict::DlogM:
+            c.image_color_log = "dlogm-osmo360";
+            return lfmt(lmsg::dataset_color_dlogm, {(long long)s.dlogm});
+        case DatasetColorVerdict::NotLog:
+            return lfmt(lmsg::dataset_color_not_log, {(long long)s.not_log});
+        case DatasetColorVerdict::Unknown:
+            return lfmt(lmsg::dataset_color_unknown, {s.first_unknown});
+        default:
+            throw std::runtime_error(lfmt(lmsg::dataset_color_mixed,
+                {(long long)s.dlogm, (long long)(s.not_log + s.unknown + s.unrecorded)}));
+    }
+}
+
 void source_pixel_for_compare(const ColorResolution& c, bool raw, float v[3]) {
     if (c.image_curve != colorspace::InputCurve::DlogMOsmo360) return;
     colorspace::dlogm_osmo360_to_rec2020(v);
@@ -826,6 +860,9 @@ void TrainerSession::load_dataset() {
     pcfg.metashape_ply           = cfg.metashape_ply;
     pcfg.metashape_psx           = cfg.metashape_psx;
     ds = parse_dataset(cfg.data, pcfg, cfg.data_format);
+    if (std::string line = adopt_dataset_color(cfg, read_dataset_color(cfg.data));
+        !line.empty())
+        log(line);
     if (ds.center_mode != "none") {
         char xyz[96];
         std::snprintf(xyz, sizeof xyz, "%.12g, %.12g, %.12g",

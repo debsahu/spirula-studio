@@ -9616,73 +9616,86 @@ SS_MSG(image_color_log_help,
        "`dlogm-osmo360` is DJI D-Log M from an Osmo 360; it decodes to linear "
        "Rec.2020, so the input is then linear and Rec.2020, and setting either "
        "to anything else is an error. Only the training images are decoded: "
-       "masking, SfM and depth still see the flat log frames."),
+       "masking, SfM and depth still see the flat log frames."
+       " `auto`, the default, takes it from the dataset: `dlogm-osmo360` when every clip's metadata says D-Log M, no curve when none does; a dataset mixing the two is refused. `none` says the input is not log."),
     JA("入力を撮影したログカーブで、ほかの何よりも先にデコードされます。"
        "dlogm-osmo360 は Osmo 360 の DJI D-Log M で、リニアな Rec.2020 に"
        "デコードされます。そのため入力はリニアかつ Rec.2020 となり、どちらかを"
        "別の値にするとエラーになります。デコードされるのは学習画像だけで、"
-       "マスク・SfM・深度は平坦なログのフレームのまま見ます。"),
+       "マスク・SfM・深度は平坦なログのフレームのまま見ます。"
+       "既定の auto はデータセットから決めます。すべてのクリップのメタデータが D-Log M なら dlogm-osmo360、どれもそうでなければカーブなしです。両方が混在するデータセットは拒否されます。none は入力がログではないことを示します。"),
     ZH_HANS("拍摄输入时所用的对数曲线，在其他一切之前解码。dlogm-osmo360 是 "
             "Osmo 360 的 DJI D-Log M，解码为线性 Rec.2020，因此输入随之成为线性"
             "且为 Rec.2020，把其中任一项设为别的值都会报错。只有训练图像会被"
-            "解码：蒙版、SfM 和深度看到的仍是平淡的对数帧。"),
+            "解码：蒙版、SfM 和深度看到的仍是平淡的对数帧。"
+       "默认的 auto 由数据集决定：所有片段的元数据都是 D-Log M 时为 dlogm-osmo360，都不是时不用曲线；两者混合的数据集会被拒绝。none 表示输入不是对数。"),
     ZH_HANT("拍攝輸入時所用的對數曲線，在其他一切之前解碼。dlogm-osmo360 是 "
             "Osmo 360 的 DJI D-Log M，解碼為線性 Rec.2020，因此輸入隨之成為線性"
             "且為 Rec.2020，把其中任一項設為別的值都會報錯。只有訓練影像會被"
-            "解碼：遮罩、SfM 和深度看到的仍是平淡的對數影格。"),
+            "解碼：遮罩、SfM 和深度看到的仍是平淡的對數影格。"
+       "預設的 auto 由資料集決定：所有片段的中繼資料都是 D-Log M 時為 dlogm-osmo360，都不是時不用曲線；兩者混合的資料集會被拒絕。none 表示輸入不是對數。"),
     KO("입력을 촬영한 로그 커브로, 다른 무엇보다 먼저 디코딩됩니다. "
        "dlogm-osmo360은 Osmo 360의 DJI D-Log M이며 선형 Rec.2020으로 "
        "디코딩되므로, 입력은 선형이자 Rec.2020이 되고 둘 중 하나를 다른 값으로 "
        "설정하면 오류입니다. 디코딩되는 것은 학습 이미지뿐이며 마스크, SfM, "
-       "깊이는 여전히 밋밋한 로그 프레임을 봅니다."),
+       "깊이는 여전히 밋밋한 로그 프레임을 봅니다."
+       " 기본값 auto는 데이터셋에서 정합니다. 모든 클립의 메타데이터가 D-Log M이면 dlogm-osmo360, 하나도 아니면 커브 없음이며, 둘이 섞인 데이터셋은 거부됩니다. none은 입력이 로그가 아니라는 뜻입니다."),
     DE("Die Log-Kurve, mit der die Eingabe aufgenommen wurde; sie wird vor "
        "allem anderen decodiert. `dlogm-osmo360` ist DJI D-Log M einer Osmo 360 "
        "und decodiert nach linearem Rec.2020, daher ist die Eingabe danach linear "
        "und Rec.2020, und beides anders zu setzen ist ein Fehler. Decodiert "
        "werden nur die Trainingsbilder: Maskierung, SfM und Tiefe sehen weiter "
-       "die flachen Log-Bilder."),
+       "die flachen Log-Bilder."
+       " Der Standard `auto` entnimmt es dem Datensatz: `dlogm-osmo360`, wenn die Metadaten jedes Clips D-Log M sagen, keine Kurve, wenn keiner es tut; ein Datensatz, der beides mischt, wird abgelehnt. `none` sagt, dass die Eingabe kein Log ist."),
     FR("La courbe log dans laquelle l'entrée a été filmée, décodée avant tout le "
        "reste. « dlogm-osmo360 » est le D-Log M de DJI d'une Osmo 360 ; il se "
        "décode en Rec.2020 linéaire, l'entrée est donc ensuite linéaire et en "
        "Rec.2020, et régler l'un ou l'autre autrement est une erreur. Seules les "
        "images d'entraînement sont décodées : le masquage, la SfM et la "
-       "profondeur voient toujours les images log plates."),
+       "profondeur voient toujours les images log plates."
+       " « auto », la valeur par défaut, la prend du jeu de données : « dlogm-osmo360 » quand les métadonnées de chaque clip indiquent D-Log M, aucune courbe quand aucune ne l'indique ; un jeu de données qui mélange les deux est refusé. « none » indique que l'entrée n'est pas en log."),
     ES("La curva logarítmica con la que se grabó la entrada, decodificada antes "
        "que nada. «dlogm-osmo360» es el D-Log M de DJI de una Osmo 360; se "
        "decodifica a Rec.2020 lineal, así que la entrada pasa a ser lineal y "
        "Rec.2020, y fijar cualquiera de las dos en otro valor es un error. Solo "
        "se decodifican las imágenes de entrenamiento: el enmascarado, la SfM y "
-       "la profundidad siguen viendo los fotogramas log planos."),
+       "la profundidad siguen viendo los fotogramas log planos."
+       " «auto», el valor por defecto, la toma del conjunto de datos: «dlogm-osmo360» cuando los metadatos de cada clip dicen D-Log M, ninguna curva cuando ninguno lo dice; un conjunto que mezcla ambos se rechaza. «none» indica que la entrada no es log."),
     PT("A curva log em que a entrada foi gravada, decodificada antes de tudo. "
        "«dlogm-osmo360» é o D-Log M da DJI de uma Osmo 360; ele é decodificado "
        "para Rec.2020 linear, então a entrada passa a ser linear e Rec.2020, e "
        "definir qualquer um dos dois com outro valor é um erro. Só as imagens "
        "de treinamento são decodificadas: o mascaramento, o SfM e a "
-       "profundidade continuam vendo os quadros log lavados."),
+       "profundidade continuam vendo os quadros log lavados."
+       " «auto», o padrão, a obtém do conjunto de dados: «dlogm-osmo360» quando os metadados de todos os clipes indicam D-Log M, nenhuma curva quando nenhum indica; um conjunto que mistura os dois é recusado. «none» diz que a entrada não é log."),
     IT("La curva log con cui è stato girato l'ingresso, decodificata prima di "
        "ogni altra cosa. «dlogm-osmo360» è il D-Log M di DJI di una Osmo 360; "
        "si decodifica in Rec.2020 lineare, quindi l'ingresso diventa lineare e "
        "Rec.2020, e impostare uno dei due diversamente è un errore. Vengono "
        "decodificate solo le immagini di addestramento: mascheratura, SfM e "
-       "profondità vedono ancora i fotogrammi log piatti."),
+       "profondità vedono ancora i fotogrammi log piatti."
+       " «auto», il valore predefinito, la ricava dal dataset: «dlogm-osmo360» quando i metadati di ogni clip indicano D-Log M, nessuna curva quando nessuno lo fa; un dataset che mescola i due viene rifiutato. «none» indica che l'ingresso non è log."),
     NL("De log-kromme waarmee de invoer is opgenomen, gedecodeerd vóór al het "
        "andere. `dlogm-osmo360` is DJI D-Log M van een Osmo 360; die decodeert "
        "naar lineair Rec.2020, dus de invoer is daarna lineair en Rec.2020, en "
        "een van beide anders instellen is een fout. Alleen de trainingsbeelden "
        "worden gedecodeerd: maskeren, SfM en diepte zien nog de vlakke "
-       "log-beelden."),
+       "log-beelden."
+       " `auto`, de standaard, haalt hem uit de dataset: `dlogm-osmo360` als de metadata van elke clip D-Log M zegt, geen kromme als geen enkele dat doet; een dataset die beide mengt wordt geweigerd. `none` zegt dat de invoer geen log is."),
     RU("Логарифмическая кривая, в которой снят вход; она декодируется раньше "
        "всего остального. «dlogm-osmo360» -- DJI D-Log M с Osmo 360; он "
        "декодируется в линейный Rec.2020, поэтому вход становится линейным и "
        "в Rec.2020, и задать одно из них иначе -- ошибка. Декодируются только "
        "обучающие изображения: маскирование, SfM и глубина по-прежнему видят "
-       "плоские логарифмические кадры."),
+       "плоские логарифмические кадры."
+       " «auto», значение по умолчанию, берёт её из набора данных: «dlogm-osmo360», если метаданные каждого клипа указывают D-Log M, и без кривой, если ни один не указывает; набор, где смешано то и другое, отклоняется. «none» означает, что вход не логарифмический."),
     TR("Girdinin çekildiği log eğrisi; her şeyden önce çözülür. "
        "`dlogm-osmo360`, bir Osmo 360'ın DJI D-Log M'sidir ve doğrusal "
        "Rec.2020'ye çözülür; bu yüzden girdi bundan sonra doğrusal ve Rec.2020 "
        "olur, ikisinden birini başka bir değere ayarlamak hatadır. Yalnızca "
        "eğitim görüntüleri çözülür: maskeleme, SfM ve derinlik hâlâ düz log "
-       "karelerini görür."));
+       "karelerini görür."
+       " Varsayılan `auto` bunu veri kümesinden alır: her klibin meta verisi D-Log M diyorsa `dlogm-osmo360`, hiçbiri demiyorsa eğri yok; ikisini karıştıran bir veri kümesi reddedilir. `none`, girdinin log olmadığını söyler."));
 
 SS_MSG(splat_color_is_linear,
     EN("Train splats in linear light"), JA("スプラットをリニアで学習"),
@@ -11460,6 +11473,13 @@ SS_MSG(choice_not_log,
     PT("sem log"), IT("non log"), NL("geen log"), RU("не логарифм"),
     TR("log değil"));
 
+SS_MSG(choice_from_the_dataset,
+    EN("from the dataset"), JA("データセットから"), ZH_HANS("取自数据集"),
+    ZH_HANT("取自資料集"), KO("데이터셋에서"), DE("aus dem Datensatz"),
+    FR("d'après le jeu de données"), ES("según el conjunto de datos"),
+    PT("conforme o conjunto de dados"), IT("dal dataset"), NL("uit de dataset"),
+    RU("из набора данных"), TR("veri kümesinden"));
+
 SS_MSG(choice_never,
     EN("never"),
     JA("しない"),
@@ -11645,6 +11665,7 @@ inline constexpr ChoiceText kChoiceText[] = {
     {"splat_color_transfer", "none", &choice_same_as_input},
     {"point_color_gamut", "none", &choice_same_as_input},
     {"point_color_transfer", "none", &choice_same_as_input},
+    {"image_color_log", "auto", &choice_from_the_dataset},
     {"image_color_log", "none", &choice_not_log},
     {"point_color_log", "none", &choice_same_as_input},
     {"point_color_log", "off", &choice_not_log},

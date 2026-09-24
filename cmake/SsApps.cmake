@@ -369,6 +369,11 @@ add_executable(dlogm_session_test
     ${SS_SRC}/app/tests/dlogm_session_test.cpp)
 ss_configure_app(dlogm_session_test)
 
+# `--image-color-log auto` against a dataset's record of its clips.
+add_executable(dataset_color_test
+    ${SS_SRC}/app/tests/dataset_color_test.cpp)
+ss_configure_app(dataset_color_test)
+
 # The stencil shapes, spelling and fill, with no GUI: FrameMask.cpp is compiled
 # into the CLI too, so this must link without imgui.
 add_executable(frame_mask_test

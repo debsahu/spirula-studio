@@ -102,8 +102,9 @@ inline const char* transfer_name(Transfer t) { return kTransfers[(int)t]; }
 enum class InputCurve : int { None = 0, DlogMOsmo360 = 1 };
 
 // "" and "none" are unset, as for transfer_or; "off" is an explicit no-curve.
+// "auto" left over after adopt_dataset_color found no record reads as unset.
 inline InputCurve input_curve_or(const std::string& name, InputCurve fallback) {
-    if (name.empty() || name == "none") return fallback;
+    if (name.empty() || name == "none" || name == "auto") return fallback;
     if (name == "off") return InputCurve::None;
     if (name == "dlogm-osmo360") return InputCurve::DlogMOsmo360;
     throw std::runtime_error("unsupported input curve: " + name);

@@ -2067,6 +2067,186 @@ SS_MSG(log_curve_needs_linear,
     NL("{0} decodeert naar lineair licht, dus {1} kan niet uit staan"),
     RU("{0} декодирует в линейный свет, поэтому {1} нельзя выключать"),
     TR("{0} doğrusal ışığa çözer, bu yüzden {1} kapalı olamaz"));
+// What a dataset's record of its clips' picture profiles adds up to
+// (data/DatasetColor.h). D-Log M is DJI's name for it in every language.
+SS_MSG(color_profile_dlogm,
+    EN("D-Log M"), JA("D-Log M"), ZH_HANS("D-Log M"), ZH_HANT("D-Log M"),
+    KO("D-Log M"), DE("D-Log M"), FR("D-Log M"), ES("D-Log M"), PT("D-Log M"),
+    IT("D-Log M"), NL("D-Log M"), RU("D-Log M"), TR("D-Log M"));
+SS_MSG(color_profile_not_log,
+    EN("not log"), JA("ログではない"), ZH_HANS("非对数"), ZH_HANT("非對數"),
+    KO("로그 아님"), DE("kein Log"), FR("pas en log"), ES("sin log"),
+    PT("sem log"), IT("non log"), NL("geen log"), RU("не логарифмический"),
+    TR("log değil"));
+SS_MSG(color_profile_unknown,
+    EN("unknown"), JA("不明"), ZH_HANS("未知"), ZH_HANT("未知"),
+    KO("알 수 없음"), DE("unbekannt"), FR("inconnu"), ES("desconocido"),
+    PT("desconhecido"), IT("sconosciuto"), NL("onbekend"), RU("неизвестен"),
+    TR("bilinmiyor"));
+SS_MSG(color_profile_mixed,
+    EN("mixed"), JA("混在"), ZH_HANS("混合"), ZH_HANT("混合"),
+    KO("혼합"), DE("gemischt"), FR("mélangé"), ES("mixto"), PT("misto"),
+    IT("misto"), NL("gemengd"), RU("смешанный"), TR("karışık"));
+SS_MSG(dataset_color_dlogm,
+    EN("Colour profile from the clips' metadata: D-Log M (clips: {0}); reading "
+       "the input with --image-color-log dlogm-osmo360"),
+    JA("クリップのメタデータによる色プロファイル: D-Log M（クリップ数: {0}）。"
+       "入力を --image-color-log dlogm-osmo360 で読み込みます"),
+    ZH_HANS("片段元数据中的色彩配置：D-Log M（片段数：{0}）；按 --image-color-log "
+            "dlogm-osmo360 读取输入"),
+    ZH_HANT("片段中繼資料中的色彩設定：D-Log M（片段數：{0}）；依 --image-color-log "
+            "dlogm-osmo360 讀取輸入"),
+    KO("클립 메타데이터의 색 프로필: D-Log M(클립 수: {0}). 입력을 "
+       "--image-color-log dlogm-osmo360으로 읽습니다"),
+    DE("Farbprofil laut Metadaten der Clips: D-Log M (Clips: {0}); die Eingabe "
+       "wird mit --image-color-log dlogm-osmo360 gelesen"),
+    FR("Profil colorimétrique d'après les métadonnées des clips : D-Log M "
+       "(clips : {0}) ; l'entrée est lue avec --image-color-log dlogm-osmo360"),
+    ES("Perfil de color según los metadatos de los clips: D-Log M (clips: {0}); "
+       "la entrada se lee con --image-color-log dlogm-osmo360"),
+    PT("Perfil de cor segundo os metadados dos clipes: D-Log M (clipes: {0}); a "
+       "entrada é lida com --image-color-log dlogm-osmo360"),
+    IT("Profilo colore dai metadati delle clip: D-Log M (clip: {0}); l'ingresso "
+       "viene letto con --image-color-log dlogm-osmo360"),
+    NL("Kleurprofiel volgens de metadata van de clips: D-Log M (clips: {0}); de "
+       "invoer wordt gelezen met --image-color-log dlogm-osmo360"),
+    RU("Цветовой профиль по метаданным клипов: D-Log M (клипов: {0}); вход "
+       "читается с --image-color-log dlogm-osmo360"),
+    TR("Kliplerin meta verisine göre renk profili: D-Log M (klip sayısı: {0}); "
+       "girdi --image-color-log dlogm-osmo360 ile okunuyor"));
+SS_MSG(dataset_color_not_log,
+    EN("Colour profile from the clips' metadata: not log (clips: {0}); the input "
+       "is not decoded (--image-color-log)"),
+    JA("クリップのメタデータによる色プロファイル: ログではない（クリップ数: {0}）。"
+       "入力はデコードしません（--image-color-log）"),
+    ZH_HANS("片段元数据中的色彩配置：非对数（片段数：{0}）；不解码输入"
+            "（--image-color-log）"),
+    ZH_HANT("片段中繼資料中的色彩設定：非對數（片段數：{0}）；不解碼輸入"
+            "（--image-color-log）"),
+    KO("클립 메타데이터의 색 프로필: 로그 아님(클립 수: {0}). 입력을 디코딩하지 "
+       "않습니다(--image-color-log)"),
+    DE("Farbprofil laut Metadaten der Clips: kein Log (Clips: {0}); die Eingabe "
+       "wird nicht decodiert (--image-color-log)"),
+    FR("Profil colorimétrique d'après les métadonnées des clips : pas en log "
+       "(clips : {0}) ; l'entrée n'est pas décodée (--image-color-log)"),
+    ES("Perfil de color según los metadatos de los clips: sin log (clips: {0}); "
+       "la entrada no se decodifica (--image-color-log)"),
+    PT("Perfil de cor segundo os metadados dos clipes: sem log (clipes: {0}); a "
+       "entrada não é decodificada (--image-color-log)"),
+    IT("Profilo colore dai metadati delle clip: non log (clip: {0}); l'ingresso "
+       "non viene decodificato (--image-color-log)"),
+    NL("Kleurprofiel volgens de metadata van de clips: geen log (clips: {0}); de "
+       "invoer wordt niet gedecodeerd (--image-color-log)"),
+    RU("Цветовой профиль по метаданным клипов: не логарифмический (клипов: {0}); "
+       "вход не декодируется (--image-color-log)"),
+    TR("Kliplerin meta verisine göre renk profili: log değil (klip sayısı: {0}); "
+       "girdi çözülmüyor (--image-color-log)"));
+SS_MSG(dataset_color_unknown,
+    EN("Colour profile unknown: {0} carries DJI metadata this build cannot read "
+       "the profile from. If it was shot in D-Log M, set --image-color-log"),
+    JA("色プロファイルは不明です: {0} の DJI メタデータからは、このビルドでは"
+       "プロファイルを読み取れません。D-Log M で撮影した場合は --image-color-log "
+       "を設定してください"),
+    ZH_HANS("色彩配置未知：{0} 带有此版本无法从中读取配置的 DJI 元数据。如果是用 "
+            "D-Log M 拍摄的，请设置 --image-color-log"),
+    ZH_HANT("色彩設定未知：{0} 帶有此版本無法從中讀取設定的 DJI 中繼資料。如果是用 "
+            "D-Log M 拍攝的，請設定 --image-color-log"),
+    KO("색 프로필을 알 수 없습니다: {0}의 DJI 메타데이터에서 이 빌드는 프로필을 "
+       "읽을 수 없습니다. D-Log M으로 촬영했다면 --image-color-log를 설정하세요"),
+    DE("Farbprofil unbekannt: {0} trägt DJI-Metadaten, aus denen dieser Build das "
+       "Profil nicht lesen kann. Wurde in D-Log M gefilmt, --image-color-log setzen"),
+    FR("Profil colorimétrique inconnu : {0} porte des métadonnées DJI dont cette "
+       "version ne sait pas lire le profil. S'il a été filmé en D-Log M, "
+       "définissez --image-color-log"),
+    ES("Perfil de color desconocido: {0} lleva metadatos DJI de los que esta "
+       "versión no sabe leer el perfil. Si se grabó en D-Log M, defina "
+       "--image-color-log"),
+    PT("Perfil de cor desconhecido: {0} traz metadados DJI dos quais esta versão "
+       "não consegue ler o perfil. Se foi gravado em D-Log M, defina "
+       "--image-color-log"),
+    IT("Profilo colore sconosciuto: {0} contiene metadati DJI da cui questa "
+       "versione non sa leggere il profilo. Se è stato girato in D-Log M, "
+       "impostare --image-color-log"),
+    NL("Kleurprofiel onbekend: {0} bevat DJI-metadata waaruit deze versie het "
+       "profiel niet kan lezen. Is er in D-Log M gefilmd, stel dan "
+       "--image-color-log in"),
+    RU("Цветовой профиль неизвестен: в {0} есть метаданные DJI, из которых эта "
+       "сборка не умеет читать профиль. Если снято в D-Log M, задайте "
+       "--image-color-log"),
+    TR("Renk profili bilinmiyor: {0}, bu sürümün profili okuyamadığı DJI meta "
+       "verisi taşıyor. D-Log M ile çekildiyse --image-color-log ayarlayın"));
+SS_MSG(dataset_color_mixed,
+    EN("The dataset mixes clips shot in D-Log M (clips: {0}) with clips that are "
+       "not, or whose profile is unknown (clips: {1}). Set --image-color-log to "
+       "say how to read all of them, or prepare a dataset from one kind"),
+    JA("このデータセットには D-Log M で撮影したクリップ（{0} 本）と、そうでないか"
+       "プロファイルが不明なクリップ（{1} 本）が混在しています。すべての読み方を "
+       "--image-color-log で指定するか、どちらか一方だけでデータセットを作成して"
+       "ください"),
+    ZH_HANS("数据集混合了用 D-Log M 拍摄的片段（片段数：{0}）和不是或配置未知的片段"
+            "（片段数：{1}）。请用 --image-color-log 指定全部片段的读取方式，或只用"
+            "一种片段准备数据集"),
+    ZH_HANT("資料集混合了用 D-Log M 拍攝的片段（片段數：{0}）和不是或設定未知的片段"
+            "（片段數：{1}）。請用 --image-color-log 指定全部片段的讀取方式，或只用"
+            "一種片段準備資料集"),
+    KO("데이터셋에 D-Log M으로 촬영한 클립(클립 수: {0})과 그렇지 않거나 프로필을 "
+       "알 수 없는 클립(클립 수: {1})이 섞여 있습니다. --image-color-log로 전체를 "
+       "읽는 방법을 지정하거나 한 종류로만 데이터셋을 준비하세요"),
+    DE("Der Datensatz mischt Clips in D-Log M (Clips: {0}) mit Clips, die es nicht "
+       "sind oder deren Profil unbekannt ist (Clips: {1}). Mit --image-color-log "
+       "angeben, wie alle zu lesen sind, oder einen Datensatz aus nur einer Sorte "
+       "vorbereiten"),
+    FR("Le jeu de données mélange des clips filmés en D-Log M (clips : {0}) et des "
+       "clips qui ne le sont pas ou dont le profil est inconnu (clips : {1}). "
+       "Indiquez avec --image-color-log comment tous les lire, ou préparez un jeu "
+       "de données d'une seule sorte"),
+    ES("El conjunto de datos mezcla clips grabados en D-Log M (clips: {0}) con "
+       "clips que no lo están o cuyo perfil se desconoce (clips: {1}). Indique con "
+       "--image-color-log cómo leerlos todos, o prepare un conjunto de datos de un "
+       "solo tipo"),
+    PT("O conjunto de dados mistura clipes gravados em D-Log M (clipes: {0}) com "
+       "clipes que não estão ou cujo perfil é desconhecido (clipes: {1}). Indique "
+       "com --image-color-log como ler todos, ou prepare um conjunto de dados de um "
+       "só tipo"),
+    IT("Il dataset mescola clip girate in D-Log M (clip: {0}) con clip che non lo "
+       "sono o il cui profilo è sconosciuto (clip: {1}). Indicare con "
+       "--image-color-log come leggerle tutte, o preparare un dataset di un solo "
+       "tipo"),
+    NL("De dataset mengt clips in D-Log M (clips: {0}) met clips die dat niet zijn "
+       "of waarvan het profiel onbekend is (clips: {1}). Geef met "
+       "--image-color-log aan hoe ze allemaal gelezen worden, of bereid een "
+       "dataset van één soort voor"),
+    RU("В наборе данных смешаны клипы, снятые в D-Log M (клипов: {0}), и клипы, "
+       "снятые иначе или с неизвестным профилем (клипов: {1}). Укажите через "
+       "--image-color-log, как читать их все, или подготовьте набор из клипов "
+       "одного вида"),
+    TR("Veri kümesi D-Log M ile çekilmiş klipleri (klip sayısı: {0}) öyle olmayan "
+       "ya da profili bilinmeyen kliplerle (klip sayısı: {1}) karıştırıyor. "
+       "Hepsinin nasıl okunacağını --image-color-log ile belirtin ya da tek türden "
+       "bir veri kümesi hazırlayın"));
+SS_MSG(dataset_color_as_set,
+    EN("Colour profile from the clips' metadata: {0}; --image-color-log {1} as set"),
+    JA("クリップのメタデータによる色プロファイル: {0}。--image-color-log は指定"
+       "どおり {1} です"),
+    ZH_HANS("片段元数据中的色彩配置：{0}；--image-color-log 按设置为 {1}"),
+    ZH_HANT("片段中繼資料中的色彩設定：{0}；--image-color-log 依設定為 {1}"),
+    KO("클립 메타데이터의 색 프로필: {0}. --image-color-log는 설정대로 {1}입니다"),
+    DE("Farbprofil laut Metadaten der Clips: {0}; --image-color-log {1} wie "
+       "gesetzt"),
+    FR("Profil colorimétrique d'après les métadonnées des clips : {0} ; "
+       "--image-color-log {1} tel que défini"),
+    ES("Perfil de color según los metadatos de los clips: {0}; --image-color-log "
+       "{1} según lo definido"),
+    PT("Perfil de cor segundo os metadados dos clipes: {0}; --image-color-log {1} "
+       "conforme definido"),
+    IT("Profilo colore dai metadati delle clip: {0}; --image-color-log {1} come "
+       "impostato"),
+    NL("Kleurprofiel volgens de metadata van de clips: {0}; --image-color-log {1} "
+       "zoals ingesteld"),
+    RU("Цветовой профиль по метаданным клипов: {0}; --image-color-log {1}, как "
+       "задано"),
+    TR("Kliplerin meta verisine göre renk profili: {0}; --image-color-log {1}, "
+       "ayarlandığı gibi"));
 SS_MSG(log_curve_needs_rec2020,
     EN("{0} decodes to Rec.2020, so {1} must be Rec.2020 or unset, not {2}"),
     JA("{0} は Rec.2020 にデコードするため、{1} は Rec.2020 か未設定にして"
