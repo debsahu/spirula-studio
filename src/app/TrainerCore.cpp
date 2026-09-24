@@ -146,6 +146,9 @@ ColorResolution resolve_color(const TrainConfig& c) {
     r.point_curve = colorspace::input_curve_or(c.point_color_log, r.image_curve);
     apply_log_curve(r.point_curve, "point", c.point_color_is_linear,
                     c.point_color_gamut, r.point_linear, r.point_gamut);
+    const float gain = std::exp2(c.image_color_log_exposure);
+    if (r.image_curve != colorspace::InputCurve::None) r.image_gain = gain;
+    if (r.point_curve != colorspace::InputCurve::None) r.point_gain = gain;
     return r;
 }
 
@@ -199,6 +202,7 @@ std::string adopt_dataset_color(TrainConfig& c, const DatasetColor& d) {
 void source_pixel_for_compare(const ColorResolution& c, bool raw, float v[3]) {
     if (c.image_curve != colorspace::InputCurve::DlogMOsmo360) return;
     colorspace::dlogm_osmo360_to_rec2020(v);
+    for (int d = 0; d < 3; d++) v[d] *= c.image_gain;
     colorspace::apply3x3(gamut_to_rec709("Rec.2020"), v);
     if (!raw) {
         for (int d = 0; d < 3; d++) v[d] = colorspace::tone_encode(v[d], c.image_transfer);
@@ -274,8 +278,10 @@ public:
     void operator()(float col[3]) const {
         if (identity_) return;
         // A log seed is linear once decoded (resolve_color forces point_linear).
-        if (c_.point_curve == colorspace::InputCurve::DlogMOsmo360)
+        if (c_.point_curve == colorspace::InputCurve::DlogMOsmo360) {
             colorspace::dlogm_osmo360_to_rec2020(col);
+            for (int d = 0; d < 3; d++) col[d] *= c_.point_gain;
+        }
         for (int d = 0; d < 3; d++)
             if (!c_.point_linear) col[d] = colorspace::srgb_to_linear(col[d]);
         colorspace::apply3x3(to_709_, col);
@@ -1125,12 +1131,19 @@ void TrainerSession::setup_engine() {
                                       {"--apply-ppisp-before-color-space",
                                        "--apply-ppisp-before-bilagrid"}));
     {
-        auto vec = [](const Mat3f& m) { return std::vector<float>(m.begin(), m.end()); };
+        auto vec = [](const Mat3f& m, float gain) {
+            std::vector<float> v(m.begin(), m.end());
+            for (float& x : v) x *= gain;
+            return v;
+        };
+        // The GT matrix is the first linear step after the decode, so the
+        // exposure gain rides on it; both backends and the host mirror read it.
         engine_init_color_space(
             splat_cs_on, (int)color.splat_transfer, color.splat_linear,
-            splat_cs_on ? vec(gamut_to_rec709(color.splat_gamut)) : std::vector<float>{},
+            splat_cs_on ? vec(gamut_to_rec709(color.splat_gamut), 1.0f) : std::vector<float>{},
             image_cs_on, (int)color.image_transfer, color.image_linear,
-            image_cs_on ? vec(gamut_to_rec709(color.image_gamut)) : std::vector<float>{});
+            image_cs_on ? vec(gamut_to_rec709(color.image_gamut), color.image_gain)
+                        : std::vector<float>{});
         engine_init_image_decode((int)color.image_curve);
     }
 

@@ -55,9 +55,9 @@ fs::path write_dataset(const fs::path& root) {
     return root;
 }
 
-}  // namespace
-
-int main() {
+// One step at `exposure` stops; the GT and the brightness match should both
+// read `display`.
+void run(float exposure, float display, const char* gt_what, const char* luma_what) {
     const fs::path tmp = fs::temp_directory_path() /
                          ("dlogm_session_test_" + std::to_string(::getpid()));
     const fs::path data = write_dataset(tmp / "data");
@@ -66,6 +66,7 @@ int main() {
     s.cfg.data = data.string();
     s.cfg.output_dir_prefix = (tmp / "out").string();
     s.cfg.image_color_log = "dlogm-osmo360";
+    s.cfg.image_color_log_exposure = exposure;
     s.cfg.num_iterations = 1;
     s.cfg.steps_per_save = 0;
     s.cfg.eval_mode = "all";
@@ -91,23 +92,33 @@ int main() {
         backend::memcpy_sync(gt.data(), rgb.data_ptr(), gt.size() * sizeof(float),
                              backend::MemcpyKind::DeviceToHost);
     double worst = n > 0 ? 0.0 : 1.0;
-    for (float v : gt) worst = std::max(worst, (double)std::fabs(v - kDisplay));
-    std::printf("GT values: %lld, max |GT - 0.4614| = %.3g\n", (long long)n, worst);
-    check(n > 0 && worst < 1e-4, "step: the uploaded GT is decoded (code 0.4 -> 0.4614)");
+    for (float v : gt) worst = std::max(worst, (double)std::fabs(v - display));
+    std::printf("GT values: %lld, max |GT - %.4f| = %.3g\n", (long long)n, display, worst);
+    check(n > 0 && worst < 1e-4, gt_what);
 
     const auto& luma = engine().background.luma_by_cam_host;
     int seen = 0;
     double luma_err = 0.0;
     for (float l : luma)
-        if (!std::isnan(l)) { seen++; luma_err = std::max(luma_err, (double)std::fabs(l - kDisplay)); }
-    std::printf("brightness match: %d view(s) measured, max |luma - 0.4614| = %.3g\n",
-                seen, luma_err);
-    check(seen > 0 && luma_err < 1e-4,
-          "step: the brightness match measures decoded light, not codes");
+        if (!std::isnan(l)) { seen++; luma_err = std::max(luma_err, (double)std::fabs(l - display)); }
+    std::printf("brightness match: %d view(s) measured, max |luma - %.4f| = %.3g\n",
+                seen, display, luma_err);
+    check(seen > 0 && luma_err < 1e-4, luma_what);
 
     engine_reset();
     std::error_code ec;
     fs::remove_all(tmp, ec);
+}
+
+}  // namespace
+
+int main() {
+    run(0.0f, kDisplay, "step: the uploaded GT is decoded (code 0.4 -> 0.4614)",
+        "step: the brightness match measures decoded light, not codes");
+    // +1 stop doubles the decoded 0.18 before the display encode.
+    run(1.0f, colorspace::linear_to_srgb(0.36f),
+        "exposure +1: the uploaded GT is 0.36 linear, displayed",
+        "exposure +1: the brightness match reads the brightened GT");
     std::printf("%s\n", g_failures ? "FAILED" : "all ok");
     return g_failures ? 1 : 0;
 }

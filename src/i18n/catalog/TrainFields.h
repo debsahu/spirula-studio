@@ -9779,6 +9779,100 @@ SS_MSG(image_color_log_help,
        "reddeder. Profili okunamayan bir girdi eğrisiz kalır ve bu bayrağı "
        "isteyen bir satır yazılır. `none`, girdinin log olmadığını söyler."));
 
+SS_MSG(image_color_log_exposure,
+    EN("Exposure after the log decode (stops)"), JA("ログデコード後の露出（段）"),
+    ZH_HANS("对数解码后的曝光（档）"), ZH_HANT("對數解碼後的曝光（檔）"),
+    KO("로그 디코딩 후 노출(스톱)"), DE("Belichtung nach der Log-Dekodierung (Blenden)"),
+    FR("Exposition après le décodage log (IL)"),
+    ES("Exposición tras la decodificación log (pasos)"),
+    PT("Exposição após a decodificação log (stops)"),
+    IT("Esposizione dopo la decodifica log (stop)"),
+    NL("Belichting na het log-decoderen (stops)"),
+    RU("Экспозиция после лог-декодирования (ступени)"),
+    TR("Log çözme sonrası pozlama (stop)"));
+SS_MSG(image_color_log_exposure_help,
+    EN("An exposure offset in stops, applied to linear light right after the "
+       "D-Log M decode, to the training images and the seed points alike: +1 "
+       "doubles them. 0, the default, keeps the decode scene-linear. DJI "
+       "Studio's D-Log M to Rec.709 LUT is brighter because it bakes in a "
+       "display exposure; +0.45 approximately matches its brightness, as "
+       "measured on clip 0129. Without a log curve it does nothing."),
+    JA("D-Log M のデコード直後にリニアな光へ掛ける露出オフセット（段）で、"
+       "学習画像にもシード点にも同じように掛かります。+1 で 2 倍になります。"
+       "既定の 0 ではデコードはシーンリニアのままです。DJI Studio の D-Log M "
+       "から Rec.709 への LUT は表示用の露出を含むため明るくなります。+0.45 "
+       "でその明るさにほぼ合います（クリップ 0129 で測定）。ログカーブが"
+       "ないときは何もしません。"),
+    ZH_HANS("以档为单位的曝光偏移，在 D-Log M 解码之后立即作用于线性光，"
+            "训练图像和种子点都一样：+1 使其加倍。默认的 0 让解码保持场景线性。"
+            "DJI Studio 的 D-Log M 到 Rec.709 LUT 包含了显示用的曝光，所以更亮；"
+            "+0.45 大致与其亮度一致（在片段 0129 上测得）。没有对数曲线时不起作用。"),
+    ZH_HANT("以檔為單位的曝光偏移，在 D-Log M 解碼之後立即作用於線性光，"
+            "訓練影像和種子點都一樣：+1 使其加倍。預設的 0 讓解碼保持場景線性。"
+            "DJI Studio 的 D-Log M 到 Rec.709 LUT 包含了顯示用的曝光，所以更亮；"
+            "+0.45 大致與其亮度一致（在片段 0129 上測得）。沒有對數曲線時不起作用。"),
+    KO("D-Log M 디코딩 직후 선형 광에 적용하는 노출 오프셋(스톱)이며, 학습 "
+       "이미지와 시드 점에 똑같이 적용됩니다. +1은 두 배로 만듭니다. 기본값 0은 "
+       "디코딩 결과를 장면 선형으로 둡니다. DJI Studio의 D-Log M→Rec.709 LUT는 "
+       "표시용 노출을 포함해 더 밝습니다. +0.45가 그 밝기에 거의 맞습니다(클립 "
+       "0129에서 측정). 로그 커브가 없으면 아무 일도 하지 않습니다."),
+    DE("Ein Belichtungsversatz in Blendenstufen, direkt nach der D-Log-M-"
+       "Dekodierung auf lineares Licht angewendet, auf die Trainingsbilder und "
+       "die Startpunkte gleichermaßen: +1 verdoppelt sie. 0, der Standard, "
+       "lässt die Dekodierung szenenlinear. DJI Studios LUT von D-Log M nach "
+       "Rec.709 ist heller, weil sie eine Anzeigebelichtung enthält; +0.45 "
+       "trifft ihre Helligkeit ungefähr, gemessen an Clip 0129. Ohne Log-Kurve "
+       "bewirkt es nichts."),
+    FR("Un décalage d'exposition en IL, appliqué à la lumière linéaire juste "
+       "après le décodage D-Log M, aux images d'entraînement comme aux points "
+       "de départ : +1 les double. 0, la valeur par défaut, laisse le décodage "
+       "linéaire en scène. La LUT D-Log M vers Rec.709 de DJI Studio est plus "
+       "claire parce qu'elle intègre une exposition d'affichage ; +0.45 "
+       "correspond à peu près à sa luminosité, mesurée sur le clip 0129. Sans "
+       "courbe log, il n'a aucun effet."),
+    ES("Un desplazamiento de exposición en pasos, aplicado a la luz lineal "
+       "justo después de la decodificación D-Log M, igual a las imágenes de "
+       "entrenamiento que a los puntos semilla: +1 los duplica. 0, el valor "
+       "por defecto, deja la decodificación lineal de escena. La LUT de D-Log M"
+       " a Rec.709 de DJI Studio es más clara porque incluye una exposición de "
+       "visualización; +0.45 se ajusta aproximadamente a su brillo, medido en "
+       "el clip 0129. Sin curva log no hace nada."),
+    PT("Um ajuste de exposição em stops, aplicado à luz linear logo após a "
+       "decodificação D-Log M, tanto nas imagens de treinamento quanto nos "
+       "pontos iniciais: +1 os dobra. 0, o padrão, mantém a decodificação "
+       "linear de cena. A LUT de D-Log M para Rec.709 do DJI Studio é mais "
+       "clara porque embute uma exposição de exibição; +0.45 corresponde "
+       "aproximadamente ao brilho dela, medido no clipe 0129. Sem curva log, "
+       "não faz nada."),
+    IT("Uno scostamento di esposizione in stop, applicato alla luce lineare "
+       "subito dopo la decodifica D-Log M, alle immagini di addestramento come "
+       "ai punti iniziali: +1 li raddoppia. 0, il predefinito, lascia la "
+       "decodifica lineare di scena. La LUT da D-Log M a Rec.709 di DJI Studio "
+       "è più chiara perché incorpora un'esposizione di visualizzazione; +0.45 "
+       "ne eguaglia all'incirca la luminosità, misurata sulla clip 0129. Senza "
+       "curva log non fa nulla."),
+    NL("Een belichtingsverschuiving in stops, direct na het D-Log M-decoderen "
+       "op lineair licht toegepast, op de trainingsbeelden en de startpunten "
+       "gelijk: +1 verdubbelt ze. 0, de standaard, laat het decoderen "
+       "scène-lineair. De LUT van D-Log M naar Rec.709 van DJI Studio is "
+       "lichter omdat die een weergavebelichting bevat; +0.45 komt ongeveer "
+       "overeen met de helderheid ervan, gemeten op clip 0129. Zonder "
+       "log-kromme doet het niets."),
+    RU("Сдвиг экспозиции в ступенях, применяемый к линейному свету сразу "
+       "после декодирования D-Log M, одинаково к обучающим изображениям и к "
+       "начальным точкам: +1 удваивает их. 0, значение по умолчанию, оставляет "
+       "декодирование линейным по сцене. LUT DJI Studio из D-Log M в Rec.709 "
+       "светлее, потому что включает экспозицию для отображения; +0.45 "
+       "примерно совпадает с его яркостью, по измерению на клипе 0129. Без "
+       "логарифмической кривой ничего не делает."),
+    TR("Stop cinsinden bir pozlama kaydırması; D-Log M çözmesinin hemen "
+       "ardından doğrusal ışığa, eğitim görüntülerine ve başlangıç noktalarına "
+       "aynı şekilde uygulanır: +1 onları iki katına çıkarır. Varsayılan 0, "
+       "çözmeyi sahne-doğrusal bırakır. DJI Studio'nun D-Log M'den Rec.709'a "
+       "LUT'u bir görüntüleme pozlaması içerdiği için daha parlaktır; +0.45 "
+       "onun parlaklığına yaklaşık olarak uyar, 0129 klibinde ölçüldüğü gibi. "
+       "Log eğrisi yoksa hiçbir şey yapmaz."));
+
 SS_MSG(splat_color_is_linear,
     EN("Train splats in linear light"), JA("スプラットをリニアで学習"),
     ZH_HANS("在线性光下训练泼溅"), ZH_HANT("在線性光下訓練潑濺"),

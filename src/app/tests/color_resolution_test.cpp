@@ -181,9 +181,50 @@ void test_seeds() {
     check(same, "seed: `off` shows an sRGB cloud as a run without the flag does");
 }
 
+// --image-color-log-exposure: a gain in linear after the decode, on the
+// images and the seeds alike.
+void test_exposure() {
+    TrainConfig zero = dlogm();
+    zero.image_color_log_exposure = 0.0f;
+    const auto g0 = seed_color(zero, 102, 102, 102);
+    check(resolve_color(zero).image_gain == 1.0f && std::fabs(g0[1] - 0.18f) < 1e-4f,
+          "exposure: 0 leaves the decode unchanged");
+
+    TrainConfig one = dlogm();
+    one.image_color_log_exposure = 1.0f;
+    const ColorResolution r1 = resolve_color(one);
+    check(r1.image_gain == 2.0f, "exposure: +1 doubles the image side");
+    const auto g1 = seed_color(one, 102, 102, 102);
+    check(std::fabs(g1[0] - 2.0f * g0[0]) < 1e-5f && std::fabs(g1[2] - 2.0f * g0[2]) < 1e-5f,
+          "exposure: +1 doubles the seeds' linear colour");
+
+    TrainConfig part = dlogm();
+    part.image_color_log_exposure = 0.45f;
+    check(std::fabs(resolve_color(part).image_gain - std::exp2(0.45f)) < 1e-6f &&
+              std::fabs(resolve_color(part).point_gain - std::exp2(0.45f)) < 1e-6f,
+          "exposure: +0.45 is 2^0.45 on both sides, not 1 + 0.45");
+
+    float raw[3] = {0.4f, 0.4f, 0.4f};
+    source_pixel_for_compare(r1, true, raw);
+    check(std::fabs(raw[1] - 0.36f) < 1e-5f, "exposure: the compare source gets the gain");
+
+    TrainConfig plain;
+    plain.image_color_log = "none";
+    plain.image_color_log_exposure = 1.0f;
+    const ColorResolution rp = resolve_color(plain);
+    check(rp.image_gain == 1.0f && rp.point_gain == 1.0f,
+          "exposure: no log curve, no gain");
+
+    TrainConfig off = one;
+    off.point_color_log = "off";
+    check(resolve_color(off).point_gain == 1.0f && resolve_color(off).image_gain == 2.0f,
+          "exposure: an sRGB seed cloud is not brightened");
+}
+
 }  // namespace
 
 int main() {
+    test_exposure();
     test_image_side();
     test_point_side();
     test_seeds();

@@ -66,6 +66,9 @@ struct ColorResolution {
     // the side it is on to linear Rec.2020 (core/DlogM.h).
     colorspace::InputCurve image_curve = colorspace::InputCurve::None;
     colorspace::InputCurve point_curve = colorspace::InputCurve::None;
+    // Linear gain right after that decode, 2^--image-color-log-exposure; 1 without one.
+    float image_gain = 1.0f;
+    float point_gain = 1.0f;
 
     // Whether the render needs the conversion pass at all.
     bool splat_on() const {

@@ -41,6 +41,28 @@ this way stores **linear Rec.2020** splats, which the GUI viewport and
 `--splat-color-gamut Rec.709 --splat-color-is-linear 0`. The images are
 still decoded; only the splats' storage changes.
 
+### Exposure: `--image-color-log-exposure`
+
+```
+--image-color-log-exposure <stops>   # default 0
+```
+
+A gain of 2^stops on linear light, right after the decode, on the training
+images and on the seed points alike, so the two stay in agreement (+1
+doubles both). 0 keeps the decode scene-linear. Without a log curve it does
+nothing, and a seed side set to `off` is not brightened.
+
+DJI Studio's D-Log M -> Rec.709 LUT is brighter than the decode because it
+bakes in a display exposure. **+0.45 approximately matches its brightness**,
+as measured on clip 0129: after a global gain of about +0.45 stops the decode
+matched the LUT's output to within about 3 display levels. That is one clip,
+not a calibration.
+
+On the images the gain rides on the GT's Rec.2020 -> Rec.709 matrix, the
+first linear step after the decode, so both backends and the host mean-luma
+mirror get it without a kernel change. The compare panel's source pane
+applies it too.
+
 `--point-color-log` is the seed cloud's curve. Unset (`none`) follows the
 images, which is right for a cloud the SfM sampled from the same log frames:
 without the decode those seeds start about 1.15 stops too bright (code 0.4 is
@@ -250,9 +272,9 @@ That also covers the Apache-2.0 code the tree already had (`shaders/ppisp.slang`
 | test | holds |
 |---|---|
 | `dlogm_osmo360` | the curve's anchors on both branches, continuity at the cut, the round trip (2e-5), the matrix's row sums, determinant and layout, and code -> Rec.709 through spirula's own Rec.2020 matrix |
-| `color_resolution_test` | what `resolve_color` makes of the two flags, the refusals, the `hdr` preset, the transfer left alone, the seed colours (including `off` against a run with no flag), and the compare panel's source decode |
+| `color_resolution_test` | what `resolve_color` makes of the two flags, the refusals, the `hdr` preset, the transfer left alone, the seed colours (including `off` against a run with no flag), the compare panel's source decode, and the exposure gain on the seeds and the compare source |
 | `gt_decode_dlogm` | the device decode against the host curve and the mean-luma mirror, the misuse guard, and that `engine_reset` clears it |
-| `dlogm_session_test` | the flag through `TrainerSession::setup_engine` and one real step: the decode is armed, the uploaded GT is decoded, and the brightness match measures decoded light |
+| `dlogm_session_test` | the flag through `TrainerSession::setup_engine` and one real step: the decode is armed, the uploaded GT is decoded, and the brightness match measures decoded light; again at +1 stop, where both read the doubled light |
 
 None of them uses D-Log M footage: none was available. What was checked
 instead is ordinary footage encoded to D-Log M codes with the inverse curve.
