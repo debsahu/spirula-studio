@@ -32,17 +32,25 @@ void chunk(std::vector<uint8_t>& out, const char tag[4], const uint8_t* data,
 
 bool save_depth_png16(const std::string& path, const uint16_t* data, int width,
                       int height) {
-    if (!data || width <= 0 || height <= 0) return false;
+    return save_png16(path, data, width, height, 1);
+}
+
+bool save_png16(const std::string& path, const uint16_t* data, int width, int height,
+                int channels) {
+    if (!data || width <= 0 || height <= 0 ||
+        (channels != 1 && channels != 3 && channels != 4))
+        return false;
+    const size_t row_samples = (size_t)width * channels;
 
     // One filter byte per row, then the row big-endian. Filter 0 (None) all
     // through: a depth map is smooth, so Paeth would compress better, but the
     // whole file is one of these per frame against seconds of network.
-    std::vector<uint8_t> raw((size_t)height * (1 + (size_t)width * 2));
+    std::vector<uint8_t> raw((size_t)height * (1 + row_samples * 2));
     for (int y = 0; y < height; ++y) {
-        uint8_t* row = raw.data() + (size_t)y * (1 + (size_t)width * 2);
+        uint8_t* row = raw.data() + (size_t)y * (1 + row_samples * 2);
         *row++ = 0;
-        const uint16_t* src = data + (size_t)y * width;
-        for (int x = 0; x < width; ++x) {
+        const uint16_t* src = data + (size_t)y * row_samples;
+        for (size_t x = 0; x < row_samples; ++x) {
             row[x * 2 + 0] = (uint8_t)(src[x] >> 8);
             row[x * 2 + 1] = (uint8_t)(src[x] & 0xFF);
         }
@@ -66,7 +74,7 @@ bool save_depth_png16(const std::string& path, const uint16_t* data, int width,
     ihdr[6] = (uint8_t)((uint32_t)height >> 8);
     ihdr[7] = (uint8_t)height;
     ihdr[8] = 16;   // bit depth
-    ihdr[9] = 0;    // grayscale
+    ihdr[9] = channels == 1 ? 0 : channels == 3 ? 2 : 6;  // grey, RGB, RGBA
     ihdr[10] = 0;   // deflate
     ihdr[11] = 0;   // adaptive filtering
     ihdr[12] = 0;   // no interlace

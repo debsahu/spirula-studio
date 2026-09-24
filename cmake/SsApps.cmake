@@ -68,6 +68,8 @@ list(APPEND SS_TOOL_SOURCES
      ${SS_SRC}/app/FrameLook.cpp
      ${SS_SRC}/app/FrameMotion.cpp
      ${SS_SRC}/app/Pano360.cpp
+     ${SS_SRC}/app/FlareRemoval.cpp
+     ${SS_SRC}/app/DepthPng.cpp
      ${SS_SRC}/app/AppPaths.cpp
      ${SS_SRC}/app/CrashLog.cpp)
 if(WIN32)
@@ -125,8 +127,7 @@ if(SS_BUILD_SAM)
     list(APPEND SS_TOOL_SOURCES
          ${SS_SRC}/app/cli/geometry_main.cpp
          ${SS_SRC}/app/GeometryModel.cpp
-         ${SS_SRC}/app/GeometryWarp.cpp
-         ${SS_SRC}/app/DepthPng.cpp)
+         ${SS_SRC}/app/GeometryWarp.cpp)
     list(APPEND SS_TOOL_DEFS SS_TOOL_GEOMETRY=1)
     list(APPEND SS_TOOL_LIBS ss_metric3d ss_moge)
 endif()
@@ -322,7 +323,8 @@ if(SS_SEPARATE_TOOLS)
         set(_sam_src ${SS_SRC}/app/cli/sam_main.cpp ${SS_SRC}/app/FrameMask.cpp
                      ${SS_SRC}/app/FrameMaskSvg.cpp
                      ${SS_SRC}/app/FrameLook.cpp ${SS_SRC}/app/FrameMotion.cpp
-                     ${SS_SRC}/app/Pano360.cpp)
+                     ${SS_SRC}/app/Pano360.cpp ${SS_SRC}/app/FlareRemoval.cpp
+                     ${SS_SRC}/app/DepthPng.cpp)
         set(_sam_lib ss_sam)
         if(SS_ENABLE_PATENTED)
             list(APPEND _sam_src ${SS_SRC}/app/cli/sam_extract.cpp
@@ -353,6 +355,13 @@ add_executable(frame_motion_test
     ${SS_SRC}/app/FrameMotion.cpp
     ${SS_SRC}/app/Pano360.cpp)
 ss_configure_app(frame_motion_test)
+
+# The sun ghost removal on synthetic lenses, frames and files.
+add_executable(flare_removal_test
+    ${SS_SRC}/app/tests/flare_removal_test.cpp
+    ${SS_SRC}/app/FlareRemoval.cpp
+    ${SS_SRC}/app/DepthPng.cpp)
+ss_configure_app(flare_removal_test)
 
 add_executable(packed_lens_test
     ${SS_SRC}/app/tests/packed_lens_test.cpp
@@ -482,6 +491,8 @@ if(SS_BUILD_GUI)
     add_executable(dataset_prep_test
         ${SS_SRC}/app/gui/tests/dataset_prep_test.cpp
         ${SS_SRC}/app/gui/DatasetPrep.cpp
+        ${SS_SRC}/app/FlareRemoval.cpp
+        ${SS_SRC}/app/DepthPng.cpp
         ${SS_SRC}/app/gui/FrameSelect.cpp
         ${SS_SRC}/app/gui/PrepProgress.cpp
         ${SS_SRC}/app/gui/ReconStamp.cpp
@@ -498,6 +509,8 @@ if(SS_BUILD_GUI)
     add_executable(frame_bits_test
         ${SS_SRC}/app/gui/tests/frame_bits_test.cpp
         ${SS_SRC}/app/gui/DatasetPrep.cpp
+        ${SS_SRC}/app/FlareRemoval.cpp
+        ${SS_SRC}/app/DepthPng.cpp
         ${SS_SRC}/app/gui/FrameSelect.cpp
         ${SS_SRC}/app/gui/PrepProgress.cpp
         ${SS_SRC}/app/gui/ReconStamp.cpp
