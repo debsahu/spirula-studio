@@ -44,6 +44,9 @@
 
 namespace gui {
 
+// Reads the picture profile a clip was shot in; null means sfm::video_color.
+using VideoColorRead = sfm::VideoColor (*)(const std::string& path);
+
 // A click made in the mask preview, kept because it is a prompt for the whole
 // run and not just for the frame it was drawn on.
 //
@@ -276,6 +279,10 @@ struct PrepJob {
     bool  auto_rotate = true;
     bool  force_external_decode = false;
     std::string ffmpeg_exe = "ffmpeg";
+    // Bits per channel of a video's frames: 8 (JPEG), 16 (PNG, through ffmpeg
+    // whatever the decoder setting) or 0, 16 for a D-Log M clip and 8 otherwise.
+    int   frame_bits = 0;
+    VideoColorRead read_color = nullptr;
 
     // The photographs' colour space. Frames convert to sRGB before the
     // segmenter sees them, which is what it was trained on.
@@ -417,10 +424,25 @@ struct PrepResult {
     bool frames_rebuilt = false;
 };
 
-// Everything that decides which pictures land in images/, and nothing that
-// decides what becomes of them: masking and the reconstruction stamp their own
-// settings, and folding those in would re-extract a video over a prompt.
-inline ReconStamp frames_stamp(const PrepJob& job) {
+// PrepJob::frame_bits for one input whose clip reads as `mode`. 16 only where
+// extract_video_ffmpeg has a 16-bit path: not photos, 360 packings or packed lenses.
+inline int frame_bits_for(const PrepJob& job, const PrepInput& in,
+                          sfm::VideoColorMode mode) {
+    if (!in.is_video || in.packed_lenses >= 2 ||
+        (in.pano360.valid() && job.pano.mode != app::Pano360Mode::Off))
+        return 8;
+    if (job.frame_bits == 16) return 16;
+    return job.frame_bits == 0 && mode == sfm::VideoColorMode::DlogM ? 16 : 8;
+}
+
+// The same, reading the clip: `read`, else job.read_color, else sfm::video_color.
+int resolved_frame_bits(const PrepJob& job, const PrepInput& in,
+                        VideoColorRead read = nullptr);
+
+// Everything that decides which pictures land in images/ (`bits`: resolved per
+// input, empty reads no clip), and nothing that decides what becomes of them --
+// folding masking or the reconstruction in would re-extract over a prompt.
+inline ReconStamp frames_stamp(const PrepJob& job, const std::vector<int>& bits = {}) {
     auto num = [](double v) {
         char b[32];
         std::snprintf(b, sizeof b, "%g", v);
@@ -441,11 +463,16 @@ inline ReconStamp frames_stamp(const PrepJob& job) {
                "--360-size",    num(job.pano.size),
                "--360-orient",  num(job.pano.yaw) + "," + num(job.pano.pitch) +
                                     "," + num(job.pano.roll)};
-    for (const PrepInput& in : job.inputs) {
+    for (size_t i = 0; i < job.inputs.size(); i++) {
+        const PrepInput& in = job.inputs[i];
         st.args.push_back("--input");
         st.args.push_back(in.path);
         st.args.push_back(in.subdir);
         st.args.push_back(num(in.fps));
+        st.args.push_back("--bits");
+        st.args.push_back(num(i < bits.size()
+                                  ? bits[i]
+                                  : frame_bits_for(job, in, sfm::VideoColorMode::NotRecorded)));
     }
     return st;
 }
@@ -522,6 +549,12 @@ struct VideoFacts {
 };
 bool ffmpeg_probe_video(const std::string& ffmpeg_exe, const std::string& path,
                         VideoFacts& out, const std::atomic<bool>& cancel);
+
+// How an ffmpeg whose `-version` first line this is writes every frame exactly
+// once: -fps_mode from 5.1, -vsync before (9.0 rejects it). Unparsed = new.
+std::vector<std::string> passthrough_args_for(const std::string& version_line);
+// ... for the ffmpeg at `ffmpeg_exe`, asked once per path.
+std::vector<std::string> passthrough_args(const std::string& ffmpeg_exe);
 
 // What one still has to reproduce of the run's own ffmpeg invocation.
 struct FfmpegStillOpts {
@@ -642,7 +675,6 @@ std::vector<std::string> workspace_artifacts(const std::string& workspace,
 // The picture profile each input was shot in, read off its DJI metadata by
 // `read` (null: sfm::video_color), for the dataset's colour record. `notes` gets
 // a line per input whose metadata could not be read.
-using VideoColorRead = sfm::VideoColor (*)(const std::string& path);
 spirula::DatasetColor clip_colors(const std::vector<PrepInput>& inputs,
                                   std::vector<std::string>* notes,
                                   VideoColorRead read = nullptr);
@@ -729,6 +761,16 @@ private:
     bool extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
                               const std::string& images, PrepResult& out,
                               std::string& error);
+    // Its 16-bit half: the sharpest of each group chosen on track 0's JPEG
+    // candidates, then every track decoded again for those alone as PNG16.
+    bool extract_video_ffmpeg16(const PrepJob& job, const PrepInput& in,
+                                const std::string& images, size_t streams,
+                                bool fisheye, int width, int height,
+                                std::string& error);
+    // resolved_frame_bits for an input of the running job, read once in run().
+    int bits_of(const PrepJob& job, const PrepInput& in) const;
+    // The built-in decoder reads this input: allowed, working, and 8-bit.
+    bool builtin_decode(const PrepJob& job, const PrepInput& in) const;
     // A 360 capture through ffmpeg: one decode writing the EAC canvas, frame
     // selection over those, then our own resampler into the views. ffmpeg is
     // never asked to warp -- see app/Pano360.h.
@@ -797,6 +839,7 @@ private:
     // extracted rather than per video.
     std::vector<std::vector<int64_t>> _plans;
     std::vector<bool> _planned;
+    std::vector<int> _bits;
     StageTally _frames_tally, _masks_tally;
 };
 

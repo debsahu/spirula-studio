@@ -98,10 +98,32 @@ codes and decoded by the trainer's own GT upload, the 8-bit error came to 0.49
 RMS / 1.3 at p99.9 / 3.9 max display levels (16-bit codes: 0.002 RMS). The max
 exceeds the table's because the table stops at code 0.95 and uses grey only:
 on the grey axis the gap between adjacent 8-bit codes reaches 3.6 levels in the
-highlights above code 0.5, where display values pass 1.0. Usable for a first
-test; 16-bit extraction (a 16-bit PNG from ffmpeg, which the trainer already
-reads) is the refinement, at about 44x the disk per frame (48 MB against
-1.1 MB at 3840²).
+highlights above code 0.5, where display values pass 1.0. On footage shot in
+D-Log M (a frame of `..._0130_D.OSV`, 230,400 pixels) 8-bit codes cost 0.47
+RMS / 1.77 at p99.9 / 2.73 max display levels.
+
+### 16-bit frames
+
+`PrepJob::frame_bits` (the GUI's "Video frame depth"; preset key `frame_bits`)
+is 0 = auto, 8 or 16. Auto is 16 for a clip whose djmd reads D-Log M and 8
+for everything else, so a Normal clip costs nothing extra. A 16-bit input
+always goes through ffmpeg, whatever the decoder setting: the built-in path
+packs `uint8`. The candidates stay JPEG and the sharpest of each group is
+chosen on **track 0 alone**; every track is then decoded again and only those
+candidates are written, as 16-bit PNG named by candidate index. Both lenses
+hold the same stems, so the capture is recorded lockstep.
+
+The conversion is ffmpeg's `colorspace` filter with a 12-bit 4:4:4
+intermediate, then `rgb48be`. swscale's own 10-bit to RGB48 conversion is not
+used: on grey it is a 0.9962 gain (Y=940 lands on 65283, not 65535), and on
+saturated chroma it misses BT.709 by up to 8.2% of full scale. With the filter
+Y=64/502/940 land on 0/32768/65520 and colour stays within 0.22%.
+
+Cost, measured on the Osmo 360's 3840² fisheye frames: about 32-37 MB per
+frame against 0.6 MB for JPEG, and a second decode of every track. A 9 s clip
+at 2 fps (36 frames) wrote 1.3 GB in 78 s. The prep log states the estimate
+before the second pass. Keep `cache_images = disk` for such a dataset: `cpu`
+holds every frame decoded, 88.5 MB each.
 
 ## Telling a D-Log M clip from a normal one
 
