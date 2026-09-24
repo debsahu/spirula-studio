@@ -508,6 +508,39 @@ SunBlob detect_sun(const Gray& luma, const std::vector<uint8_t>& inside, const P
     return sun;
 }
 
+// The sun as the largest blob clipped in every channel (a saturated colour
+// clips one), when that blob is sun-sized and round. `r_max` in working px.
+SunBlob detect_clipped_sun(const Image& img, const std::vector<uint8_t>& inside, double r_max,
+                           const Params& fp) {
+    SunBlob sun;
+    const float level = code_to_linear((float)fp.clip_code, img.encoding);
+    std::vector<uint8_t> mask(inside.size(), 0);
+    for (size_t i = 0; i < mask.size(); ++i) {
+        const float* p = &img.rgb[i * 3];
+        mask[i] = inside[i] && std::min({p[0], p[1], p[2]}) >= level ? 1 : 0;
+    }
+    const std::vector<Blob> blobs = find_blobs(mask, img.w, img.h, nullptr);
+    const Blob* best = nullptr;
+    for (const Blob& b : blobs)
+        if (!best || b.area > best->area) best = &b;
+    if (!best || best->area < fp.sun_min_area) return sun;
+    const double n = best->area, cx = best->cx(), cy = best->cy();
+    const double vxx = std::max(best->sxx / n - cx * cx, 0.0), vyy = std::max(best->syy / n - cy * cy, 0.0);
+    const double vxy = best->sxy / n - cx * cy;
+    const double disc = std::sqrt(0.25 * (vxx - vyy) * (vxx - vyy) + vxy * vxy);
+    const double l1 = 0.5 * (vxx + vyy) + disc, l2 = std::max(0.5 * (vxx + vyy) - disc, 1e-12);
+    // A solid ellipse has variances a^2/4 and b^2/4, so its area is 4 pi sqrt(l1 l2).
+    const double radius = std::sqrt(n / kPi);
+    if (radius > fp.clip_max_radius * r_max || std::sqrt(l1 / l2) > fp.clip_max_aspect ||
+        n / (4.0 * kPi * std::sqrt(l1 * l2)) < fp.clip_min_fill)
+        return sun;
+    sun.found = true;
+    sun.x = cx;
+    sun.y = cy;
+    sun.radius = radius;
+    return sun;
+}
+
 // ============================================================================
 // Seeding and fitting
 // ============================================================================
@@ -747,7 +780,9 @@ bool Params::valid() const {
     return all_finite(sun_level_fraction, sun_min_ratio_to_median, corridor_deg, background_sigma,
                       seed_contrast, max_texture, min_contrast, min_fit_r2) &&
            sun_level_fraction > 0.0 && sun_level_fraction <= 1.0 && background_sigma > 0.5 &&
-           max_ghosts >= 0 && corridor_deg >= 0.0 && factor >= 1 && factor <= 16;
+           max_ghosts >= 0 && corridor_deg >= 0.0 && factor >= 1 && factor <= 16 &&
+           all_finite(clip_code, clip_max_radius, clip_max_aspect, clip_min_fill) && clip_code > 0.0 &&
+           clip_code <= 1.0;
 }
 
 double Ghost::reach() const {
@@ -787,7 +822,8 @@ bool analyse(const Image& image, const Lens& lens, const Params& fp, LensFlare& 
             const double dx = x + 0.5 - ocx, dy = y + 0.5 - ocy;
             inside[(size_t)y * W + x] = dx * dx + dy * dy < r2_max ? 1 : 0;
         }
-    const SunBlob sun = detect_sun(luma, inside, fp);
+    SunBlob sun = detect_sun(luma, inside, fp);
+    if (!sun.found && image.coded) sun = detect_clipped_sun(image, inside, r_max, fp);
     if (!sun.found) return true;
     out.sun_found = true;
     out.sun_x = sun.x * f;
@@ -981,6 +1017,8 @@ bool downsample(const Frame& fr, Encoding e, uint32_t factor, Image& out, std::s
     }
     const std::vector<float> lut = decode_table(fr.bits, e);
     out.factor = factor;
+    out.coded = true;
+    out.encoding = e;
     out.w = (fr.w + factor - 1) / factor;
     out.h = (fr.h + factor - 1) / factor;
     out.rgb.assign((size_t)out.w * out.h * 3, 0.0f);

@@ -21,11 +21,17 @@ namespace app::flare {
 
 inline constexpr int kMaxGhosts = 4;
 
+// How a frame's code values map to native linear light (OpenOSV's
+// osvCodeToLinear): D-Log M per channel, or the BT.709 camera curve.
+enum class Encoding { DlogM, Rec709 };
+
 // A native-linear RGB image of one lens. Pixel (x, y) is the mean of a 2 x 2
 // sample grid inside the lens's `factor`-sized block at (x, y) * factor.
 struct Image {
     uint32_t w = 0, h = 0, factor = 1;
     std::vector<float> rgb;  // interleaved, w * h * 3
+    bool coded = false;      // decoded from code values by `encoding`; enables the clipped-sun path
+    Encoding encoding = Encoding::Rec709;
     bool valid() const {
         return w > 0 && h > 0 && factor > 0 && w <= 16384 && h <= 16384 &&
                rgb.size() == (size_t)w * h * 3;
@@ -68,6 +74,13 @@ struct Params {
     double sun_max_aspect = 1.8;
     double sun_min_fill = 0.5;
     double sun_min_area = 3.0;             // working px
+    // The clipped path, tried on a coded image when the ratio above finds no
+    // sun: the largest blob clipped in every channel. Limits measured on three
+    // Avata D-Log M suns at the rim (docs/notes/flare.md).
+    double clip_code = 0.95;               // every channel at or above this code
+    double clip_max_radius = 0.12;         // equivalent radius / circle radius; suns 0.056-0.067
+    double clip_max_aspect = 2.0;          // second-moment aspect; suns 1.22-1.56
+    double clip_min_fill = 0.6;            // area / its moment ellipse; suns 0.77-0.94
     double corridor_deg = 20.0;            // azimuth tolerance about the sun line
     double background_sigma = 12.0;        // working px
     double seed_contrast = 0.03;
@@ -110,9 +123,6 @@ void remove_at(const std::vector<KernelGhost>& ghosts, float px, float py, float
 
 // ---- frames in code values ----
 
-// How a frame's code values map to native linear light (OpenOSV's
-// osvCodeToLinear): D-Log M per channel, or the BT.709 camera curve.
-enum class Encoding { DlogM, Rec709 };
 // False for a log profile with no decode here. Normal, unknown and unrecorded
 // clips are read as BT.709.
 bool encoding_for(sfm::VideoColorMode mode, Encoding& e);
