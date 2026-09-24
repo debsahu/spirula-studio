@@ -53,7 +53,7 @@ is why the subtraction cannot happen on the codes.
 
 Which curve: from the clip's `djmd` record (`sfm::video_color`). D-Log M uses
 the D-Log M curve; Normal uses BT.709; another DJI log profile is skipped with
-a log line; an unknown or unrecorded mode (an Avata 360 today) is read as
+a log line; an unknown or unrecorded mode is read as
 BT.709 and logged as an assumption.
 
 ## What it does, per frame
