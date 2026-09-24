@@ -50,7 +50,7 @@ enum class DatasetColorVerdict { None, DlogM, NotLog, UnsupportedLog, Unknown, M
 struct DatasetColorSummary {
     DatasetColorVerdict verdict = DatasetColorVerdict::None;
     int dlogm = 0, not_log = 0, other_log = 0, unknown = 0, unrecorded = 0;
-    std::string first_unknown, first_unknown_proto;   // for the line that names one
+    std::string first_unknown;   // for the line that names one
     std::string first_other_log;
     int first_other_code = -1;
 };

@@ -377,6 +377,17 @@ static Bytes dji_color_raw(const Bytes& field4) {
     return cat({pb_bytes(1, pb_bytes(1, hdr)), pb_bytes(2, stream)});
 }
 
+// An Avata 360 sample 0, shaped as the real ones read: field 2.2.4 is
+// `meta24` (tag included; empty leaves it out), and StreamMeta field 4 is
+// fov_type, empty on every real clip.
+static Bytes avata_color_sample(const Bytes& meta24, const Bytes& stream4 = pb_bytes(4, Bytes{})) {
+    Bytes hdr = cat({pb_str(1, "dvtm_AVATA360.proto"), pb_str(10, "cam")});
+    Bytes meta = cat({pb_bytes(3, pb_str(1, "SN")), meta24, pb_bytes(5, Bytes{})});
+    Bytes stream = cat({pb_bytes(1, pb_str(3, "video")), pb_bytes(2, meta),
+                        pb_bytes(3, pb_v(1, 3840)), stream4});
+    return cat({pb_bytes(1, pb_bytes(1, hdr)), pb_bytes(2, stream)});
+}
+
 static VideoColor color_of(const Bytes& b) { return djmd_color(b.data(), b.size()); }
 
 static void test_dji_color() {
@@ -409,12 +420,42 @@ static void test_dji_color() {
     check(color_of(dji_color_raw(pb_bytes(4, pb_v(2, 19)))).mode == VideoColorMode::Unknown,
           "color: Osmo 360 wrapper holding only other fields is Unknown");
 
-    // An Avata 360 records D-Log M somewhere else; its StreamMeta field 4 is fov_type.
-    for (const char* proto : {"dvtm_AVATA360.proto", "dvtm_wa530.proto", "dvtm_wm169.proto"}) {
+    // Kills reading the Avata 360 as Unknown, or at the Osmo's 2.4 (empty there: Normal).
+    const VideoColor av19 = color_of(avata_color_sample(pb_bytes(4, pb_v(1, 19))));
+    check(av19.mode == VideoColorMode::DlogM && av19.code == 19 && av19.proto == "dvtm_AVATA360.proto",
+          "color: Avata 360 color_mode 19 at 2.2.4.1 reads as D-Log M");
+    // Kills reading it at 2.4, where a fov_type of 2 would be log, unsupported.
+    const VideoColor avn = color_of(avata_color_sample(pb_bytes(4, Bytes{}), pb_bytes(4, pb_v(1, 2))));
+    check(avn.mode == VideoColorMode::Normal && avn.code == 0,
+          "color: Avata 360 empty 2.2.4 reads as Normal");
+    // Kills the Osmo's code table on the Avata: only 19 and empty were seen on samples.
+    for (int code : {0, 2, 22}) {
+        const VideoColor c = color_of(avata_color_sample(pb_bytes(4, pb_v(1, (uint64_t)code))));
+        check(c.mode == VideoColorMode::Unknown && c.issue == VideoColorIssue::UnverifiedColorCode &&
+                  c.code == code,
+              "color: Avata 360 color_mode " + std::to_string(code) + " is Unknown");
+    }
+    // Kills a missing or reshaped 2.2.4 falling through to Normal.
+    const VideoColor avmiss = color_of(avata_color_sample(Bytes{}, pb_bytes(4, pb_v(1, 19))));
+    check(avmiss.mode == VideoColorMode::Unknown && avmiss.issue == VideoColorIssue::NoColorField,
+          "color: Avata 360 without 2.2.4 is Unknown, whatever 2.4 holds");
+    for (const Bytes& bad : {pb_v(4, 19), pb_bytes(4, Bytes{0xff, 0xff}), pb_bytes(4, pb_v(2, 19)),
+                             pb_bytes(4, pb_bytes(1, pb_v(1, 19)))}) {
+        const VideoColor c = color_of(avata_color_sample(bad));
+        check(c.mode == VideoColorMode::Unknown && c.issue == VideoColorIssue::MalformedColorField,
+              "color: Avata 360 malformed 2.2.4 is Unknown");
+    }
+    // Kills the Osmo taking the Avata path: an empty 2.4 is Normal though 2.2.4.1 says 19.
+    const Bytes osmo_decoy = cat({pb_bytes(1, pb_bytes(1, cat({pb_str(1, "dvtm_oq101.proto")}))),
+                                  pb_bytes(2, cat({pb_bytes(2, pb_bytes(4, pb_v(1, 19))),
+                                                   pb_bytes(4, Bytes{})}))});
+    check(color_of(osmo_decoy).mode == VideoColorMode::Normal,
+          "color: Osmo 360 reads 2.4 only, never the Avata's 2.2.4");
+    for (const char* proto : {"dvtm_wa530.proto", "dvtm_wm169.proto"}) {
         for (int code : {-1, 19}) {
-            const VideoColor avata = color_of(dji_color_sample(proto, code));
-            check(avata.mode == VideoColorMode::Unknown && avata.proto == proto &&
-                      avata.issue == VideoColorIssue::NotOsmoLayout,
+            const VideoColor other = color_of(dji_color_sample(proto, code));
+            check(other.mode == VideoColorMode::Unknown && other.proto == proto &&
+                      other.issue == VideoColorIssue::UnknownLayout,
                   std::string("color: ") + proto + " is Unknown, never Normal (field 4 = " +
                       std::to_string(code) + ")");
         }

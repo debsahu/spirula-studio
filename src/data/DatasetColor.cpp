@@ -119,10 +119,7 @@ DatasetColorSummary summarize_dataset_color(const DatasetColor& d) {
                 }
                 break;
             case ClipColor::Unknown:
-                if (s.unknown++ == 0) {
-                    s.first_unknown = e.source;
-                    s.first_unknown_proto = e.proto;
-                }
+                if (s.unknown++ == 0) s.first_unknown = e.source;
                 break;
             default: s.unrecorded++; break;
         }

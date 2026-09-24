@@ -2370,34 +2370,6 @@ SS_MSG(dataset_color_unsupported_log,
        "örneğin D-Log ya da D-Log2. Veri kümesini onsuz hazırlayın ya da "
        "çözmeden eğitmek için girdi log eğrisini none yapın (--image-color-log "
        "none)"));
-SS_MSG(dataset_color_unknown_avata,
-    EN("{0}: Avata 360 colour mode not readable yet; set --image-color-log if "
-       "the clip is D-Log M."),
-    JA("{0}: Avata 360 のカラーモードはまだ読み取れません。クリッ"
-       "プが D-Log M なら --image-color-log を設定し"
-       "てください。"),
-    ZH_HANS("{0}：尚无法读取 Avata 360 的色彩模式；如果片段是 D-Lo"
-            "g M，请设置 --image-color-log。"),
-    ZH_HANT("{0}：尚無法讀取 Avata 360 的色彩模式；如果片段是 D-Lo"
-            "g M，請設定 --image-color-log。"),
-    KO("{0}: Avata 360 색 모드는 아직 읽을 수 없습니다. 클립이 D-Log M이면 --image-color-log를 "
-       "설정하세요."),
-    DE("{0}: Farbmodus der Avata 360 noch nicht lesbar; --image-color-log "
-       "setzen, wenn der Clip D-Log M ist."),
-    FR("{0} : mode couleur de l'Avata 360 pas encore lisible ; définissez "
-       "--image-color-log si le clip est en D-Log M."),
-    ES("{0}: el modo de color de la Avata 360 aún no se puede leer; defina "
-       "--image-color-log si el clip está en D-Log M."),
-    PT("{0}: o modo de cor da Avata 360 ainda não pode ser lido; defina --image-"
-       "color-log se o clipe estiver em D-Log M."),
-    IT("{0}: la modalità colore dell'Avata 360 non è ancora leggibile; impostare"
-       " --image-color-log se la clip è in D-Log M."),
-    NL("{0}: kleurmodus van de Avata 360 nog niet leesbaar; stel --image-color-"
-       "log in als de clip D-Log M is."),
-    RU("{0}: цветовой режим Avata 360 пока не читается; задайте --image-color-"
-       "log, если клип снят в D-Log M."),
-    TR("{0}: Avata 360 renk modu henüz okunamıyor; klip D-Log M ise --image-"
-       "color-log ayarlayın."));
 SS_MSG(dataset_color_resumed,
     EN("Input log curve from the resumed run: {0}"),
     JA("再開した実行の入力ログカーブ: {0}"),

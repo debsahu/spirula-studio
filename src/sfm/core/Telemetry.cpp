@@ -1368,14 +1368,17 @@ VideoColor djmd_color(const uint8_t* sample, size_t n) {
     out.proto = pb_string(pb_find(hdr, 1));
     if (out.proto.empty()) return out;
     out.mode = VideoColorMode::Unknown;
-    // The Avata 360's StreamMeta has fov_type at field 4, so this path would
-    // read an unrelated 0 there as Normal.
-    if (out.proto != "dvtm_oq101.proto") {
-        out.issue = VideoColorIssue::NotOsmoLayout;
+    // The Avata 360 keeps fov_type at the Osmo's 2.4, empty on its samples,
+    // which the Osmo reading would take as Normal.
+    const bool osmo = out.proto == "dvtm_oq101.proto";
+    const bool avata = out.proto == "dvtm_AVATA360.proto";
+    if (!osmo && !avata) {
+        out.issue = VideoColorIssue::UnknownLayout;
         return out;
     }
     const auto stream = pb_sub(pb_find(top, 2));
-    const PbField* wrapper = pb_find(stream, 4);
+    const auto avata_meta = pb_sub(pb_find(stream, 2));
+    const PbField* wrapper = pb_find(osmo ? stream : avata_meta, 4);
     if (!wrapper) {
         out.issue = VideoColorIssue::NoColorField;
         return out;
@@ -1389,6 +1392,11 @@ VideoColor djmd_color(const uint8_t* sample, size_t n) {
     if (wrapper->len > 0 && (!v || v->wire != 0)) return out;
     out.issue = VideoColorIssue::None;
     out.code = v ? (int)v->varint : 0;
+    // Avata 360 samples have shown only 19 (D-Log M) and an empty wrapper (Normal).
+    if (avata && v && out.code != 19) {
+        out.issue = VideoColorIssue::UnverifiedColorCode;
+        return out;
+    }
     out.mode = out.code == 19 ? VideoColorMode::DlogM
              : out.code == 0  ? VideoColorMode::Normal
                               : VideoColorMode::OtherLog;

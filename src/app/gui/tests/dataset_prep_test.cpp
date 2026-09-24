@@ -394,11 +394,11 @@ sfm::VideoColor fake_djmd(const std::string& path) {
     if (f == "dlogm.OSV")  { c.mode = sfm::VideoColorMode::DlogM; c.code = 19; }
     if (f == "normal.OSV") { c.mode = sfm::VideoColorMode::Normal; c.code = 0; }
     if (f == "dlog2.OSV")  { c.mode = sfm::VideoColorMode::OtherLog; c.code = 22; }
-    if (f == "avata.OSV") {
+    if (f == "wa530.OSV") {
         c.mode = sfm::VideoColorMode::Unknown;
-        c.issue = sfm::VideoColorIssue::NotOsmoLayout;
+        c.issue = sfm::VideoColorIssue::UnknownLayout;
     }
-    if (f != "plain.mp4") c.proto = f == "avata.OSV" ? "dvtm_AVATA360.proto" : "dvtm_oq101.proto";
+    if (f != "plain.mp4") c.proto = f == "wa530.OSV" ? "dvtm_wa530.proto" : "dvtm_oq101.proto";
     return c;
 }
 
@@ -409,7 +409,7 @@ void test_clip_colors_mapping() {
         {"dlogm.OSV", spirula::ClipColor::DlogM, 19},
         {"normal.OSV", spirula::ClipColor::Normal, 0},
         {"dlog2.OSV", spirula::ClipColor::OtherLog, 22},
-        {"avata.OSV", spirula::ClipColor::Unknown, -1},
+        {"wa530.OSV", spirula::ClipColor::Unknown, -1},
         {"plain.mp4", spirula::ClipColor::NotRecorded, -1},
     };
     std::vector<gui::PrepInput> inputs;
@@ -428,12 +428,12 @@ void test_clip_colors_mapping() {
     for (size_t i = 0; all && i < 5; i++)
         all = d.clips[i].mode == cases[i].want && d.clips[i].code == cases[i].code &&
               d.clips[i].source == cases[i].file;
-    check(all, "clip_colors: D-Log M, Normal, D-Log2, Avata and plain videos map to their modes");
-    check(d.clips.size() == 6 && d.clips[3].proto == "dvtm_AVATA360.proto" && d.clips[4].proto.empty(),
+    check(all, "clip_colors: D-Log M, Normal, D-Log2, unknown-layout and plain videos map to their modes");
+    check(d.clips.size() == 6 && d.clips[3].proto == "dvtm_wa530.proto" && d.clips[4].proto.empty(),
           "clip_colors: the metadata layout is recorded");
     check(d.clips.size() == 6 && d.clips[5].mode == spirula::ClipColor::NotRecorded,
           "clip_colors: a photo folder is never read as a video");
-    check(notes.size() == 1 && notes[0].find("avata.OSV") != std::string::npos,
+    check(notes.size() == 1 && notes[0].find("wa530.OSV") != std::string::npos,
           "clip_colors: the unreadable input is logged");
 }
 

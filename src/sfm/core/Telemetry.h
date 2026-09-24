@@ -96,12 +96,14 @@ bool telemetry_read(uint64_t size, const TelemetryRead& read, Telemetry& out, st
 // container's own boxes carry it. Empty when the file names none.
 VideoProjection video_projection(const std::string& path);
 
-// A DJI clip's picture profile: StreamMeta.color_mode (DJI's ColorModeType,
-// 19 = D-Log M, 0 = Normal, anything else a profile this build cannot decode).
-// Read only on the Osmo 360 layout (dvtm_oq101); other DJI clips are Unknown.
+// A DJI clip's picture profile: DJI's ColorModeType, 19 = D-Log M, 0 = Normal.
+// Read on the Osmo 360 (dvtm_oq101, field 2.4.1) and the Avata 360
+// (dvtm_AVATA360, field 2.2.4.1); other DJI layouts are Unknown.
 enum class VideoColorMode { NotRecorded, Normal, DlogM, OtherLog, Unknown };
 // Why a DJI clip is Unknown.
-enum class VideoColorIssue { None, NotOsmoLayout, NoColorField, MalformedColorField, NoClipHeader };
+enum class VideoColorIssue {
+    None, UnknownLayout, NoColorField, MalformedColorField, UnverifiedColorCode, NoClipHeader
+};
 struct VideoColor {
     VideoColorMode mode = VideoColorMode::NotRecorded;
     VideoColorIssue issue = VideoColorIssue::None;

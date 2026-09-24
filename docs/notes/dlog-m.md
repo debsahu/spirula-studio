@@ -154,8 +154,12 @@ From the clip's metadata, never from its pixels. The Osmo 360 records the mode
 in the `.OSV` file's `djmd` metadata track: in sample 0, top-level field 2
 (stream meta), then field 4, then field 1 is the colour mode -- **19 is D-Log
 M**, 0 is Normal (an empty field 4 decodes to 0). The video stream's own tags
-say `bt709` either way. `sfm::video_color` (`src/sfm/core/Telemetry.cpp`) reads
-it; five real clips read as recorded (three D-Log M, two Normal).
+say `bt709` either way. The Avata 360 (`dvtm_AVATA360.proto`) keeps the same
+wrapper one level deeper, at field 2, then 2, then 4, then 1: 19 for D-Log M,
+and an empty field 2.2.4 for Normal. `sfm::video_color`
+(`src/sfm/core/Telemetry.cpp`) reads both; five real Osmo clips read as recorded
+(three D-Log M, two Normal), and three real Avata clips too (two D-Log M, one
+Normal).
 
 What it returns:
 
@@ -165,14 +169,17 @@ What it returns:
 | `dvtm_oq101.proto`, colour mode 0 or an empty field 4 | Normal |
 | `dvtm_oq101.proto`, any other colour mode (D-Log 2, D-Log2 22, HLG 9...) | log, unsupported |
 | `dvtm_oq101.proto`, field 4 missing, of the wrong wire type, unparseable, or holding anything but a varint field 1 | unknown |
-| any other DJI layout (Avata 360, ...) | unknown |
+| `dvtm_AVATA360.proto`, 2.2.4.1 = 19 | D-Log M |
+| `dvtm_AVATA360.proto`, an empty 2.2.4 | Normal |
+| `dvtm_AVATA360.proto`, any other 2.2.4.1 (no sample has shown one), or 2.2.4 missing or malformed as above | unknown |
+| any other DJI layout | unknown |
 | a `djmd` track whose first 8 samples hold no readable clip header | unknown |
 | no `djmd` track | not recorded |
 
-Only an empty field 4 is proto3's unwritten 0. Any other shape the Osmo path
-was not written against is unknown, never Normal. The Avata 360
-(`dvtm_AVATA360.proto`) has `fov_type` at StreamMeta field 4, where the Osmo has
-the colour mode, so reading it the Osmo way would find a 0 that means nothing.
+Only an empty wrapper is proto3's unwritten 0. Any other shape the reader was
+not written against is unknown, never Normal. The Avata 360 has `fov_type` at
+field 2.4, where the Osmo has the colour mode, and it is empty on every Avata
+sample, so reading the Avata the Osmo way would call every clip Normal.
 
 ### The record
 
@@ -212,7 +219,7 @@ settles from that record and logs:
 | every input D-Log M | `dlogm-osmo360` |
 | D-Log M beside anything else (Normal, another profile, unknown, photos) | refused: split the dataset, or set the flag only if every input is D-Log M |
 | any input in another DJI log profile | refused: prepare without it, or set `none` to train it undecoded |
-| an `unknown` input, no D-Log M | no curve, and a line naming the input and asking for the flag (for the Avata 360: "Avata 360 colour mode not readable yet") |
+| an `unknown` input, no D-Log M | no curve, and a line naming the input and asking for the flag |
 | every input Normal | no curve |
 | no record | no curve, nothing logged |
 

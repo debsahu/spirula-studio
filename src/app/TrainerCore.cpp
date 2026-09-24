@@ -186,9 +186,7 @@ std::string adopt_dataset_color(TrainConfig& c, const DatasetColor& d) {
         case DatasetColorVerdict::NotLog:
             return lfmt(lmsg::dataset_color_not_log, {(long long)s.not_log});
         case DatasetColorVerdict::Unknown:
-            return s.first_unknown_proto == "dvtm_AVATA360.proto"
-                       ? lfmt(lmsg::dataset_color_unknown_avata, {s.first_unknown})
-                       : lfmt(lmsg::dataset_color_unknown, {s.first_unknown});
+            return lfmt(lmsg::dataset_color_unknown, {s.first_unknown});
         case DatasetColorVerdict::UnsupportedLog:
             throw std::runtime_error(lfmt(lmsg::dataset_color_unsupported_log,
                 {s.first_other_log, (long long)s.first_other_code}));

@@ -159,10 +159,10 @@ void test_adopt() {
     check(curve_after(unset, record({C::Normal, C::Unknown}), &line) == IC::None &&
               has(line, "clip 1.OSV") && has(line, "--image-color-log"),
           "unknown beside Normal: asks for the flag, not 'not log'");
-    // Review M9.
+    // The Avata 360's mode is read now, so an unknown one gets the same line as any other.
     curve_after(unset, record({C::Unknown}, "dvtm_AVATA360.proto"), &line);
-    check(has(line, "Avata 360 colour mode not readable yet") && has(line, "--image-color-log"),
-          "unknown (Avata 360): the start line says so plainly");
+    check(!has(line, "not readable yet") && has(line, "clip 0.OSV") && has(line, "--image-color-log"),
+          "unknown (Avata 360): the start line names the input and asks for the flag");
 
     {
         TrainConfig c = unset;
