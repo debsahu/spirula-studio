@@ -17,11 +17,19 @@ The decode takes a code value to scene-linear light (mid grey 0.18) and
 through the Osmo 360's primaries matrix to **linear Rec.2020**. That output is
 fixed, so the flag also fixes the other two halves of the image side:
 
-| resolved | value | explicitly set to something else |
+| resolved | value | set explicitly |
 |---|---|---|
-| `--image-color-is-linear` | on | refused |
-| `--image-color-gamut` | `Rec.2020` | refused |
+| `--image-color-is-linear` | on | `1` agrees; `0` gives way (plain sRGB, below) unless the gamut says Rec.2020 |
+| `--image-color-gamut` | `Rec.2020` | `Rec.2020` agrees; `Rec.709` gives way unless linear is on; anything else is refused |
 | `--image-color-transfer` | unchanged (`srgb` unless set) | allowed |
+
+"Plain sRGB" -- gamut unset or `Rec.709`, and not linear -- is what an
+ordinary photo is, and it is what the `hdr` preset states for its input. The
+log flag is the more specific statement, so it wins over it silently:
+`spirula train hdr --image-color-log dlogm-osmo360` decodes the images to
+linear Rec.2020 and keeps the preset's linear ACEScg splats. A statement that
+names another space (`ACEScg` input, linear Rec.709, display-encoded Rec.2020)
+contradicts the decode and is refused.
 
 After the decode, the existing conversion in `docs/notes/color-transfer.md`
 runs unchanged: `display = TONE(M · c)` with `M` the Rec.2020 -> Rec.709
@@ -36,10 +44,19 @@ still decoded; only the splats' storage changes.
 `--point-color-log` is the seed cloud's curve. Unset (`none`) follows the
 images, which is right for a cloud the SfM sampled from the same log frames:
 without the decode those seeds start about 1.15 stops too bright (code 0.4 is
-0.18 decoded, 0.4 read as linear). `off` says the colours are not log -- use
-it with `--init-ply`, whose DC goes through the same conversion as the seeds,
-or for a cloud made from other footage. A log point side is forced to linear
+0.18 decoded, 0.4 read as linear). A log point side is forced to linear
 Rec.2020 the same way the image side is.
+
+`off` says the colours are **ordinary sRGB**, for a cloud made from other
+footage: the point side then stops following the (decoded) image side and is
+read exactly as it would be in a run with no log flag at all, unless
+`--point-color-is-linear` / `--point-color-gamut` say otherwise.
+
+An `--init-ply` DC goes through the point conversion too. For a PLY trained by
+an earlier D-Log M run with default splats (linear Rec.2020), pass
+`--point-color-log off --point-color-is-linear 1 --point-color-gamut Rec.2020`.
+One point setting covers both sources, so `--init-ply-add-points` cannot mix
+such a PLY with log SfM points; seed from one or the other.
 
 ## Where it runs
 
@@ -54,8 +71,11 @@ Rec.2020 the same way the image side is.
   `gt_decode_dlogm` holds the device to both.
 - **Not decoded:** SfM, masking and `spirula geometry` load frames through
   `stbi_load` and see the flat log images. Features and masks on flat footage
-  are likely somewhat worse (not measured). The image-compare panel's
-  "source" pane shows the file undecoded by design; its GT pane is decoded.
+  are likely somewhat worse (not measured).
+- **Image compare:** the GT pane shows the decoded GT. The "source file" pane
+  decodes a log file into the space the render pane shows (the splat working
+  space, or display values), so the pair compares light with light
+  (`source_pixel_for_compare`, `TrainerCore.cpp`).
 
 `InputCurve` (`core/ColorSpace.h`) is its own axis, deliberately not a value of
 `colorspace::Transfer`: `Transfer` is an *output* curve, and its numbering is
@@ -121,49 +141,27 @@ unlicensed repository), its older `kDlogMDjiRefit`, its Rec.709 "look", and
 its tests' table of measured DJI LUT values. The tests here check the curve's
 own anchors instead.
 
-### OpenOSV NOTICE (the parts that pertain to this port)
+### OpenOSV NOTICE
 
-```
-OpenOSV
-Copyright 2026 The OpenOSV Contributors
-
-This product is licensed under the Apache License, Version 2.0 (see LICENSE).
-
-OpenOSV is an independent project.  It is not affiliated with, endorsed by or
-sponsored by SZ DJI Technology Co., Ltd. ("DJI") or Adobe Inc.  DJI, Osmo and
-Osmo 360 are trademarks of DJI; Adobe, Premiere Pro and After Effects are
-trademarks of Adobe; NVIDIA and CUDA are trademarks of NVIDIA Corporation.
-They are used only to say what OpenOSV is compatible with.  See docs/LEGAL.md.
-
-* The "Osmo 360" D-Log M decoding curve (kDlogMOsmo360, the default) is an
-  analytic 7-parameter fit of the same form, produced by
-  `scripts/fit_dlogm.py --from-cube DJI_Osmo360_DLogM_to_Rec709.cube` from the
-  33 neutral-axis (R == G == B) samples of DJI's publicly distributed Osmo 360
-  D-Log M to Rec.709 LUT (as bundled with DJI Studio).  Measuring a transfer
-  function is what was done, not copying a table: what is shipped is the
-  seven fitted constants (include/osv/color/DlogM.h) and the 33 measured
-  diagonal values, recorded as the tests' reference
-  (tests/unit/DjiReference.h).  The fit scripts read the LUT from a local
-  copy (DJI Studio installs one) and print only fitted constants.
-* The Osmo 360 native primaries matrix (kNativeToRec2020_Osmo360, the
-  default) is OpenOSV's least-squares fit, produced by
-  `scripts/fit_primaries.py --from-cube DJI_Osmo360_DLogM_to_Rec709.cube`
-  from measurements of all 35937 entries of the same LUT.  Only the nine
-  fitted constants are shipped (include/osv/color/Matrices.h).
-```
-
-Paths in the excerpt are OpenOSV's, not this repository's. The files that
-carry the port -- `src/core/DlogM.h` and `src/shaders/dlogm.slang` -- say so
-in an SPDX header, and the licence text is `LICENSES/Apache-2.0.txt`. A binary
-release should carry this excerpt with it (Apache-2.0 §4(d)).
+The parts of OpenOSV's NOTICE that pertain to this port are in
+`LICENSES/NOTICE-OpenOSV.txt`, verbatim, with a short preface. It includes
+the NOTICE's bullet on the `kDlogMDjiRefit` curve, which is not ported,
+because the Osmo 360 bullet's "of the same form" refers back to it. The files
+that carry the port -- `src/core/DlogM.h` and `src/shaders/dlogm.slang` -- say
+so in an SPDX header, and the licence text is `LICENSES/Apache-2.0.txt`.
+`tools/package_macos.sh` copies `LICENSE` and `LICENSES/` into the app bundle
+(`Contents/Resources`), so the macOS DMG carries both (Apache-2.0 §4(a), §4(d)).
+That also covers the Apache-2.0 code the tree already had (`shaders/ppisp.slang`,
+`shaders/harmonics.slang`), which shipped without the licence text before.
 
 ## Tests
 
 | test | holds |
 |---|---|
 | `dlogm_osmo360` | the curve's anchors on both branches, continuity at the cut, the round trip (2e-5), the matrix's row sums, determinant and layout, and code -> Rec.709 through spirula's own Rec.2020 matrix |
-| `color_resolution_test` | what `resolve_color` makes of the two flags, the refusals, and the seed colours |
-| `gt_decode_dlogm` | the device decode against the host curve and the mean-luma mirror, and that `engine_reset` clears it |
+| `color_resolution_test` | what `resolve_color` makes of the two flags, the refusals, the `hdr` preset, the transfer left alone, the seed colours (including `off` against a run with no flag), and the compare panel's source decode |
+| `gt_decode_dlogm` | the device decode against the host curve and the mean-luma mirror, the misuse guard, and that `engine_reset` clears it |
+| `dlogm_session_test` | the flag through `TrainerSession::setup_engine` and one real step: the decode is armed, the uploaded GT is decoded, and the brightness match measures decoded light |
 
 None of them uses D-Log M footage: none was available. What was checked
 instead is ordinary footage encoded to D-Log M codes with the inverse curve.
