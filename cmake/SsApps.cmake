@@ -364,6 +364,11 @@ add_executable(color_resolution_test
     ${SS_SRC}/app/tests/color_resolution_test.cpp)
 ss_configure_app(color_resolution_test)
 
+# The same flag through TrainerSession's own setup and one real step.
+add_executable(dlogm_session_test
+    ${SS_SRC}/app/tests/dlogm_session_test.cpp)
+ss_configure_app(dlogm_session_test)
+
 # The stencil shapes, spelling and fill, with no GUI: FrameMask.cpp is compiled
 # into the CLI too, so this must link without imgui.
 add_executable(frame_mask_test

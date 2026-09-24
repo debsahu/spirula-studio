@@ -92,6 +92,18 @@ int main() {
 
     engine_reset();
     check(engine().color_space.image_curve == 0, "reset: the decode does not outlive the run");
+
+    // The decode hands the conversion linear Rec.2020; a display-encoded image
+    // side would push it through the sRGB EOTF a second time.
+    engine_init_color_space(false, 0, false, {}, true, 0, false,
+                            std::vector<float>(m.begin(), m.end()));
+    bool refused = false;
+    try {
+        engine_init_image_decode((int)colorspace::InputCurve::DlogMOsmo360);
+    } catch (const std::exception&) { refused = true; }
+    check(refused && engine().color_space.image_curve == 0,
+          "guard: the decode is refused on a display-encoded image side");
+    engine_reset();
     std::printf("%s\n", g_failures ? "FAILED" : "all ok");
     return g_failures ? 1 : 0;
 }
