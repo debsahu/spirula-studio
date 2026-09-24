@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include <unistd.h>
+#include <random>
 
 namespace fs = std::filesystem;
 using namespace spirula;
@@ -287,7 +287,7 @@ void test_session(const fs::path& tmp) {
 
 int main() {
     test_adopt();
-    const fs::path tmp = fs::temp_directory_path() / ("dataset_color_test_" + std::to_string(::getpid()));
+    const fs::path tmp = fs::temp_directory_path() / ("dataset_color_test_" + std::to_string(std::random_device{}()));
     fs::create_directories(tmp);
     test_record(tmp);
     test_session(tmp);

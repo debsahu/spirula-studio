@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include <unistd.h>
+#include <random>
 
 namespace fs = std::filesystem;
 using namespace spirula;
@@ -59,7 +59,7 @@ fs::path write_dataset(const fs::path& root) {
 // read `display`.
 void run(float exposure, float display, const char* gt_what, const char* luma_what) {
     const fs::path tmp = fs::temp_directory_path() /
-                         ("dlogm_session_test_" + std::to_string(::getpid()));
+                         ("dlogm_session_test_" + std::to_string(std::random_device{}()));
     const fs::path data = write_dataset(tmp / "data");
 
     TrainerSession s;

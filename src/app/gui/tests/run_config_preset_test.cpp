@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include <unistd.h>
+#include <random>
 
 namespace fs = std::filesystem;
 using namespace spirula;
@@ -63,7 +63,7 @@ gui::TrainPreset run_then_preset(const fs::path& tmp, const char* name, ClipColo
 
 int main() {
     const fs::path tmp =
-        fs::temp_directory_path() / ("run_config_preset_test_" + std::to_string(::getpid()));
+        fs::temp_directory_path() / ("run_config_preset_test_" + std::to_string(std::random_device{}()));
     fs::create_directories(tmp);
 
     const gui::TrainPreset log = run_then_preset(tmp, "dlogm", ClipColor::DlogM);
