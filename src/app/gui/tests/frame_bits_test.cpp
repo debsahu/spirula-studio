@@ -35,17 +35,19 @@ fs::path scratch(const char* name) {
     return d;
 }
 
-// Two FFV1 tracks, 878x64, 6 frames at 30 fps, Cb = Cr = 512: row 0 a luma ramp
+// Two FFV1 tracks, 878x64, `frames` at 30 fps, Cb = Cr = 512: row 0 a luma ramp
 // 64..940 (track 1 reversed), row 1 64 + N (no repeats for FrameSelect to drop),
 // then a checkerboard on even frames and flat grey on odd ones, the blurrier.
-bool make_fixture(const fs::path& out) {
+bool make_fixture(const fs::path& out, int frames) {
     auto lum = [](const char* ramp) {
         const std::string row0 = ramp;
         return "if(eq(Y\\,0)\\," + row0 +
                "\\,if(eq(Y\\,1)\\,64+N\\,if(mod(N\\,2)\\,502\\,if(mod(X+Y\\,2)\\,940\\,64))))";
     };
     auto src = [&](const char* ramp) {
-        return "nullsrc=s=878x64:d=0.2:r=30,format=yuv420p10le,geq=lum='" + lum(ramp) +
+        return "nullsrc=s=878x64:d=" + std::to_string((frames + 1) / 30.0) +
+               ":r=30,trim=end_frame=" + std::to_string(frames) +
+               ",format=yuv420p10le,geq=lum='" + lum(ramp) +
                "':cb=512:cr=512";
     };
     const std::vector<std::string> argv{
@@ -248,6 +250,24 @@ void test_selected_16(const fs::path& clip) {
           "T2c: the capture is recorded lockstep");
 }
 
+// More keepers than ffmpeg's expression parser takes as one flat sum (100).
+void test_many_keepers(const fs::path& clip) {
+    const fs::path ws = scratch("t2d");
+    gui::PrepResult out;
+    std::string err;
+    check(run_prep(job_for(clip, ws, 16, 15.0f, 2), out, err),
+          "T2d: 125 keepers prep runs: " + err);
+    const std::vector<std::string> got = names_in(ws / "images" / "cam0");
+    bool even = got.size() == 125;
+    for (size_t i = 0; even && i < got.size(); i++) {
+        char name[16];
+        std::snprintf(name, sizeof name, "%05d.png", (int)(2 * i));
+        even = got[i] == name;
+    }
+    check(even, "T2d: cam0 holds the 125 even frames (got " + std::to_string(got.size()) + ")");
+    check(names_in(ws / "images" / "cam1") == got, "T2d: cam1 holds the same stems");
+}
+
 // ---------------------------------------------------------------------------
 // T5: the passthrough spelling each ffmpeg accepts
 // ---------------------------------------------------------------------------
@@ -283,13 +303,14 @@ int main() {
     fs::remove_all(g_root, ec);
     fs::create_directories(g_root, ec);
 
-    const fs::path clip = g_root / "ramp.osv";
-    const bool have = make_fixture(clip);
+    const fs::path clip = g_root / "ramp.osv", longer = g_root / "long.osv";
+    const bool have = make_fixture(clip, 6) && make_fixture(longer, 250);
     check(have, "fixture: two lossless 10-bit tracks");
     if (have) {
         test_every_frame_16(clip);
         test_auto_and_forced_8(clip);
         test_selected_16(clip);
+        test_many_keepers(longer);
     }
     if (g_failures == 0) fs::remove_all(g_root, ec);
     std::printf(g_failures ? "frame_bits_test: %d FAILED\n" : "frame_bits_test: OK\n",

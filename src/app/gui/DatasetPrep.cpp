@@ -125,6 +125,14 @@ long long progress_frame(const std::string& line) {
     return end == first ? -1 : frame;
 }
 
+// `select` true on frames keep[lo, hi), as a balanced sum: ffmpeg's expression
+// parser fails ("Cannot allocate memory") on a flat sum of more than 100 terms.
+std::string select_expr(const std::vector<long long>& keep, size_t lo, size_t hi) {
+    if (hi - lo == 1) return "eq(n\\," + std::to_string(keep[lo]) + ")";
+    const size_t mid = lo + (hi - lo) / 2;
+    return "(" + select_expr(keep, lo, mid) + "+" + select_expr(keep, mid, hi) + ")";
+}
+
 // Throw away what a previous run generated, for a step being re-done. Only
 // under the workspace: photos read where they are belong to the user, and a
 // re-run must not be able to delete the capture.
@@ -2172,10 +2180,7 @@ bool DatasetPrep::extract_video_ffmpeg16(const PrepJob& job, const PrepInput& in
     // lands Y=940 on 65283 (docs/notes/dlog-m.md, "Bit depth").
     std::string vf = "colorspace=iall=bt709:irange=tv:all=bt709:range=pc:format=yuv444p12";
     if (!every) {
-        std::string pick;
-        for (long long k : keep)
-            pick += (pick.empty() ? "" : "+") + std::string("eq(n\\,") + std::to_string(k) + ")";
-        vf = std::string(rate) + "," + vf + ",select='" + pick + "'";
+        vf = std::string(rate) + "," + vf + ",select='" + select_expr(keep, 0, keep.size()) + "'";
     }
     const std::vector<std::string> pass = passthrough_args(job.ffmpeg_exe);
     enter(Stage::Frames, lmsg::stage_extract_ffmpeg.get());
