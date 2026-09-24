@@ -86,9 +86,9 @@ struct ColorResolution {
 
 ColorResolution resolve_color(const TrainConfig& c);
 
-// `--image-color-log auto` settled from what the dataset recorded of its clips
-// (data/DatasetColor.h); any other value is the user's and is kept. Returns the
-// line to log, "" for none; throws on a dataset mixing D-Log M with anything else.
+// `--image-color-log auto` settled from the dataset's record of its inputs
+// (data/DatasetColor.h) into image_color_log_resolved; the flag is left as asked.
+// Returns the line to log, "" for none; throws where `auto` must not guess.
 std::string adopt_dataset_color(TrainConfig& c, const DatasetColor& d);
 
 // The profile a dataset's record adds up to, as the GUI and the log name it.

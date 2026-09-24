@@ -345,6 +345,9 @@ struct TrainConfig {
     type member = default_;
     SS_CONFIG_FIELDS(SS_DECLARE_FIELD)
 #undef SS_DECLARE_FIELD
+    // Not a flag: the curve `image_color_log auto` settled on for this run's
+    // dataset. Written to config.json beside the flag; only a resume reads it.
+    std::string image_color_log_resolved;
 };
 
 // Fields whose default ({}) is not a usable value. Checked after flag

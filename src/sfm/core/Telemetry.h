@@ -97,18 +97,22 @@ bool telemetry_read(uint64_t size, const TelemetryRead& read, Telemetry& out, st
 VideoProjection video_projection(const std::string& path);
 
 // A DJI clip's picture profile: StreamMeta.color_mode (DJI's ColorModeType,
-// 19 = D-Log M) in a djmd sample. Read only on a product whose layout is
-// verified, the Osmo 360 (dvtm_oq101); any other DJI clip is Unknown.
-enum class VideoColorMode { NotRecorded, Normal, DlogM, Other, Unknown };
+// 19 = D-Log M, 0 = Normal, anything else a profile this build cannot decode).
+// Read only on the Osmo 360 layout (dvtm_oq101); other DJI clips are Unknown.
+enum class VideoColorMode { NotRecorded, Normal, DlogM, OtherLog, Unknown };
+// Why a DJI clip is Unknown.
+enum class VideoColorIssue { None, NotOsmoLayout, NoColorField, MalformedColorField, NoClipHeader };
 struct VideoColor {
     VideoColorMode mode = VideoColorMode::NotRecorded;
+    VideoColorIssue issue = VideoColorIssue::None;
     int code = -1;        // ColorModeType as read; -1 when none was
     std::string proto;    // the clip header's proto name
 };
 
 // One djmd sample. NotRecorded when it carries no clip header.
 VideoColor djmd_color(const uint8_t* sample, size_t n);
-// The first djmd sample that carries a clip header; NotRecorded without one.
+// The first djmd sample that carries a clip header; Unknown when a djmd track
+// has none that reads, NotRecorded when there is no djmd track.
 VideoColor video_color(const std::string& path);
 VideoColor video_color(const uint8_t* data, size_t size);
 

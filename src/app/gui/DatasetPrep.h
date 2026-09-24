@@ -30,6 +30,8 @@
 #include "app/gui/FilmReel.h"
 #include "app/gui/PrepProgress.h"
 #include "app/gui/ReconStamp.h"
+#include "data/DatasetColor.h"
+#include "sfm/core/Telemetry.h"
 
 #include <algorithm>
 #include <atomic>
@@ -636,6 +638,14 @@ WorkspaceState probe_workspace(const std::string& workspace,
 // user picked are not leftovers, which is probe_workspace's rule reused.
 std::vector<std::string> workspace_artifacts(const std::string& workspace,
                                              const std::vector<PrepInput>& inputs);
+
+// The picture profile each input was shot in, read off its DJI metadata by
+// `read` (null: sfm::video_color), for the dataset's colour record. `notes` gets
+// a line per input whose metadata could not be read.
+using VideoColorRead = sfm::VideoColor (*)(const std::string& path);
+spirula::DatasetColor clip_colors(const std::vector<PrepInput>& inputs,
+                                  std::vector<std::string>* notes,
+                                  VideoColorRead read = nullptr);
 
 // Is this the mask half of one of those layouts, rather than an input of its
 // own? By name, which is what makes it a convention: `--mask-dir masks` is the

@@ -18,9 +18,7 @@
 #include "data/DatasetColor.h"
 #include "core/ImageOrient.h"
 #include "sfm/core/Exif.h"
-#ifdef SS_TOOL_SFM
 #include "sfm/core/Telemetry.h"
-#endif
 #include "external/stb_image.h"      // stbi_info (image size probe), stbi_load
 #include "external/stb_image_write.h"  // stbi_write_jpg (the photo re-encode)
 
@@ -170,6 +168,31 @@ fs::path under_root(const fs::path& file, const fs::path& root) {
 bool inside(const fs::path& p, const fs::path& root) {
     const fs::path rel = p.lexically_relative(root);
     return !rel.empty() && *rel.begin() != "..";
+}
+
+// Frames an input the job no longer names left in the dataset's images/: they
+// would be trained on beside the new ones, and the colour record says nothing
+// of them. Never a folder an input is read from. Returns what was removed.
+std::vector<std::string> prune_removed_inputs(const fs::path& images, const fs::path& ws,
+                                              const std::vector<PrepInput>& inputs) {
+    std::vector<std::string> removed;
+    std::set<std::string> kept;
+    std::error_code ec;
+    for (const PrepInput& in : inputs) {
+        const fs::path src = fs::absolute(in.path, ec).lexically_normal();
+        if (inside(src, images) || inside(images, src)) return removed;
+        // A lone input owns images/ itself, so nothing else in it is kept.
+        if (!in.subdir.empty()) kept.insert(fs::path(in.subdir).begin()->string());
+    }
+    std::vector<fs::path> gone;
+    for (fs::directory_iterator it(images, ec), end; !ec && it != end; it.increment(ec))
+        if (!kept.count(it->path().filename().string())) gone.push_back(it->path());
+    for (const fs::path& p : gone) {
+        if (fs::is_directory(p, ec)) clear_generated(p, ws);
+        else fs::remove(p, ec);
+        if (!fs::exists(p, ec)) removed.push_back(p.filename().string());
+    }
+    return removed;
 }
 
 // The frame number the masker should be given for each file, taken from the
@@ -796,31 +819,6 @@ std::string leaf_name(const fs::path& p) {
                                 : p.filename().string();
 }
 
-// Extracted frames carry no trace of the clip's picture profile, so it is read
-// off each input now and kept beside them for the trainer (data/DatasetColor.h).
-spirula::DatasetColor clip_colors(const std::vector<PrepInput>& inputs) {
-    spirula::DatasetColor d;
-    for (const PrepInput& in : inputs) {
-        spirula::ClipColorEntry e;
-        e.source = leaf_name(fs::path(in.path));
-#ifdef SS_TOOL_SFM
-        if (in.is_video) {
-            const sfm::VideoColor c = sfm::video_color(in.path);
-            e.code = c.code;
-            switch (c.mode) {
-                case sfm::VideoColorMode::Normal:  e.mode = spirula::ClipColor::Normal; break;
-                case sfm::VideoColorMode::DlogM:   e.mode = spirula::ClipColor::DlogM; break;
-                case sfm::VideoColorMode::Other:   e.mode = spirula::ClipColor::Other; break;
-                case sfm::VideoColorMode::Unknown: e.mode = spirula::ClipColor::Unknown; break;
-                default: break;
-            }
-        }
-#endif
-        d.clips.push_back(e);
-    }
-    return d;
-}
-
 bool named(const fs::path& p, const char* what) {
     std::string n = leaf_name(p);
     for (auto& c : n) c = (char)std::tolower((unsigned char)c);
@@ -989,6 +987,35 @@ WorkspaceState probe_workspace(const std::string& workspace,
     st.geometry = has_content(ws / "normals") || has_content(ws / "depths");
     st.recon_stamp = fs::exists(ws / kReconStampFile, ec);
     return st;
+}
+
+spirula::DatasetColor clip_colors(const std::vector<PrepInput>& inputs,
+                                  std::vector<std::string>* notes, VideoColorRead read) {
+#ifdef SS_TOOL_SFM
+    if (!read) read = sfm::video_color;
+#endif
+    spirula::DatasetColor d;
+    for (const PrepInput& in : inputs) {
+        spirula::ClipColorEntry e;
+        e.source = leaf_name(fs::path(in.path));
+        if (in.is_video && read) {
+            const sfm::VideoColor c = read(in.path);
+            e.code = c.code;
+            e.proto = c.proto;
+            switch (c.mode) {
+                case sfm::VideoColorMode::Normal:   e.mode = spirula::ClipColor::Normal; break;
+                case sfm::VideoColorMode::DlogM:    e.mode = spirula::ClipColor::DlogM; break;
+                case sfm::VideoColorMode::OtherLog: e.mode = spirula::ClipColor::OtherLog; break;
+                case sfm::VideoColorMode::Unknown:  e.mode = spirula::ClipColor::Unknown; break;
+                default: break;
+            }
+            if (notes && e.mode == spirula::ClipColor::Unknown)
+                notes->push_back(fmt(lmsg::clip_color_unreadable,
+                                     {e.source, e.proto.empty() ? std::string("djmd") : e.proto}));
+        }
+        d.clips.push_back(e);
+    }
+    return d;
 }
 
 std::vector<std::string> workspace_artifacts(const std::string& workspace,
@@ -1313,6 +1340,13 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     } else {
         out.image_dir = (ws / "images").string();
         out.image_dir_cfg = "images";
+        if (frames_stale(job)) {
+            const std::vector<std::string> gone =
+                prune_removed_inputs(fs::path(out.image_dir), ws, job.inputs);
+            std::string names;
+            for (const std::string& g : gone) names += (names.empty() ? "" : ", ") + g;
+            if (!names.empty()) log(fmt(lmsg::frames_removed_inputs, {names}), /*detail=*/false);
+        }
         // Every input is measured before any of them is extracted, so the bar
         // covers the whole step from the first frame rather than restarting on
         // each input (StageTally).
@@ -1385,7 +1419,20 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     // Written once the images are there, so an interrupted extraction is not
     // recorded as having produced what it was asked for.
     write_recon_stamp(ws.string(), frames_now, kFramesStampFile);
-    spirula::write_dataset_color(ws.string(), clip_colors(job.inputs));
+    {
+        std::vector<std::string> notes;
+        const spirula::DatasetColor colors = clip_colors(job.inputs, &notes);
+        for (const std::string& n : notes) log(n, /*detail=*/false);
+        const spirula::ColorRecordResult rec = spirula::write_dataset_color(ws.string(), colors);
+        const std::string rec_path = (ws / spirula::kDatasetColorFile).string();
+        // A record left stale would decode every frame the wrong way, silently.
+        if (rec.status == spirula::ColorRecordWrite::FailedStale) {
+            error = fmt(lmsg::color_record_stale, {rec_path, rec.error});
+            return false;
+        }
+        if (rec.status == spirula::ColorRecordWrite::Failed)
+            log(fmt(lmsg::color_record_failed, {rec_path, rec.error}), /*detail=*/false);
+    }
 
     out.n_images = count_images(out.image_dir, skip_dir);
     log(fmt(lmsg::found_images, {(long long)out.n_images, out.image_dir}),

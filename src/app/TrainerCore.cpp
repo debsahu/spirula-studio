@@ -118,8 +118,10 @@ ColorResolution resolve_color(const TrainConfig& c) {
     r.image_gamut    = unset(c.image_color_gamut)
                            ? std::string() : resolved_gamut(c.image_color_gamut);
     r.image_linear   = c.image_color_is_linear.value_or(false);
-    r.image_curve    = colorspace::input_curve_or(c.image_color_log,
-                                                  colorspace::InputCurve::None);
+    // `auto` is answered per dataset, in the field beside the flag.
+    const std::string& log = c.image_color_log == "auto" ? c.image_color_log_resolved
+                                                         : c.image_color_log;
+    r.image_curve    = colorspace::input_curve_or(log, colorspace::InputCurve::None);
     apply_log_curve(r.image_curve, "image", c.image_color_is_linear,
                     c.image_color_gamut, r.image_linear, r.image_gamut);
     r.image_transfer = colorspace::transfer_or(c.image_color_transfer,
@@ -149,35 +151,48 @@ ColorResolution resolve_color(const TrainConfig& c) {
 
 std::string dataset_color_label(const DatasetColorSummary& s) {
     switch (s.verdict) {
-        case DatasetColorVerdict::DlogM:   return lmsg::color_profile_dlogm.get();
-        case DatasetColorVerdict::NotLog:  return lmsg::color_profile_not_log.get();
-        case DatasetColorVerdict::Unknown: return lmsg::color_profile_unknown.get();
-        case DatasetColorVerdict::Mixed:   return lmsg::color_profile_mixed.get();
-        default:                           return {};
+        case DatasetColorVerdict::DlogM:          return lmsg::color_profile_dlogm.get();
+        case DatasetColorVerdict::NotLog:         return lmsg::color_profile_not_log.get();
+        case DatasetColorVerdict::UnsupportedLog: return lmsg::color_profile_unsupported_log.get();
+        case DatasetColorVerdict::Unknown:        return lmsg::color_profile_unknown.get();
+        case DatasetColorVerdict::Mixed:          return lmsg::color_profile_mixed.get();
+        default:                                  return {};
     }
 }
 
 std::string adopt_dataset_color(TrainConfig& c, const DatasetColor& d) {
-    const DatasetColorSummary s = summarize_dataset_color(d);
-    const bool from_dataset = c.image_color_log == "auto";
-    // Settled either way, so config.json records what the run decoded with.
-    if (from_dataset) c.image_color_log.clear();
-    if (s.verdict == DatasetColorVerdict::None) return {};
-    if (!from_dataset)
+    // The flag keeps what was asked for; only the resolved field is settled.
+    if (c.image_color_log != "auto") {
+        c.image_color_log_resolved = unset(c.image_color_log) ? "none" : c.image_color_log;
+        const DatasetColorSummary s = summarize_dataset_color(d);
+        if (s.verdict == DatasetColorVerdict::None) return {};
         return lfmt(lmsg::dataset_color_as_set,
-                    {dataset_color_label(s), unset(c.image_color_log) ? std::string("none")
-                                                                      : c.image_color_log});
+                    {dataset_color_label(s), c.image_color_log_resolved});
+    }
+    // A resumed run continues with the curve it was trained with.
+    if (!c.resume.empty() && !c.image_color_log_resolved.empty())
+        return lfmt(lmsg::dataset_color_resumed, {c.image_color_log_resolved});
+    c.image_color_log_resolved = "none";
+    const DatasetColorSummary s = summarize_dataset_color(d);
     switch (s.verdict) {
+        case DatasetColorVerdict::None:
+            return {};
         case DatasetColorVerdict::DlogM:
-            c.image_color_log = "dlogm-osmo360";
+            c.image_color_log_resolved = "dlogm-osmo360";
             return lfmt(lmsg::dataset_color_dlogm, {(long long)s.dlogm});
         case DatasetColorVerdict::NotLog:
             return lfmt(lmsg::dataset_color_not_log, {(long long)s.not_log});
         case DatasetColorVerdict::Unknown:
-            return lfmt(lmsg::dataset_color_unknown, {s.first_unknown});
+            return s.first_unknown_proto == "dvtm_AVATA360.proto"
+                       ? lfmt(lmsg::dataset_color_unknown_avata, {s.first_unknown})
+                       : lfmt(lmsg::dataset_color_unknown, {s.first_unknown});
+        case DatasetColorVerdict::UnsupportedLog:
+            throw std::runtime_error(lfmt(lmsg::dataset_color_unsupported_log,
+                {s.first_other_log, (long long)s.first_other_code}));
         default:
             throw std::runtime_error(lfmt(lmsg::dataset_color_mixed,
-                {(long long)s.dlogm, (long long)(s.not_log + s.unknown + s.unrecorded)}));
+                {(long long)s.dlogm,
+                 (long long)(s.not_log + s.other_log + s.unknown + s.unrecorded)}));
     }
 }
 
@@ -745,6 +760,10 @@ void save_config_json(const TrainConfig& c, const fs::path& out_dir,
     std::fprintf(f, "{\n    \"preset\": \"%s\"", preset.c_str());
     for (const auto& [key, value] : train_config_json_pairs(c))
         std::fprintf(f, ",\n    \"%s\": %s", key, value.c_str());
+    // Not a flag, so presets and batches never read it back (TrainConfig.h).
+    if (!c.image_color_log_resolved.empty())
+        std::fprintf(f, ",\n    \"image_color_log_resolved\": %s",
+                     json_field::emit(c.image_color_log_resolved).c_str());
     std::fprintf(f, "\n}\n");
     std::fclose(f);
 }

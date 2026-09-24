@@ -112,10 +112,45 @@ M**, 0 is Normal (an empty field 4 decodes to 0). The video stream's own tags
 say `bt709` either way. `sfm::video_color` (`src/sfm/core/Telemetry.cpp`) reads
 it; five real clips read as recorded (three D-Log M, two Normal).
 
+What it returns:
+
+| what the file carries | mode |
+|---|---|
+| `dvtm_oq101.proto`, colour mode 19 | D-Log M |
+| `dvtm_oq101.proto`, colour mode 0 or an empty field 4 | Normal |
+| `dvtm_oq101.proto`, any other colour mode (D-Log 2, D-Log2 22, HLG 9...) | log, unsupported |
+| `dvtm_oq101.proto`, field 4 missing, of the wrong wire type, unparseable, or holding anything but a varint field 1 | unknown |
+| any other DJI layout (Avata 360, ...) | unknown |
+| a `djmd` track whose first 8 samples hold no readable clip header | unknown |
+| no `djmd` track | not recorded |
+
+Only an empty field 4 is proto3's unwritten 0. Any other shape the Osmo path
+was not written against is unknown, never Normal. The Avata 360
+(`dvtm_AVATA360.proto`) has `fov_type` at StreamMeta field 4, where the Osmo has
+the colour mode, so reading it the Osmo way would find a 0 that means nothing.
+
+### The record
+
 Extracted frames carry no mode, so the GUI's dataset preparation writes each
 input's mode to `.spirula-color` in the dataset root (`src/data/DatasetColor.h`),
-one line per input: `dlogm`, `normal`, `other` (another DJI profile),
-`unknown` or `unrecorded` (no profile metadata: photos, a non-DJI video).
+one line per input: `<mode> <code> <layout or -> <file name>`, where mode is
+`dlogm`, `normal`, `unsupported-log`, `unknown` or `unrecorded` (photos, a
+non-DJI video). Each unknown input is logged with its layout as it is read.
+
+- It is written to `.spirula-color.tmp` and renamed into place. If that fails,
+  the old record is removed and the failure logged. If even the removal fails,
+  preparation stops and names the file, because a stale record would decode
+  every frame the wrong way.
+- A line that does not parse, and a record that is there but cannot be read,
+  both read as an unknown input.
+- When the inputs change, the frames of inputs no longer in the job are removed
+  from the dataset's `images/`, so nothing is trained that the record does not
+  describe. A folder an input is read from is never removed.
+- Clear project removes the record.
+- `spirula sam extract` writes no record, and warns when the video carries a
+  colour profile.
+
+### What training does with it
 
 `--image-color-log` defaults to `auto`, which `TrainerSession::load_dataset`
 settles from that record and logs:
@@ -123,16 +158,21 @@ settles from that record and logs:
 | record | `auto` becomes |
 |---|---|
 | every input D-Log M | `dlogm-osmo360` |
-| none D-Log M, none unknown | no curve |
-| an `unknown` input, no D-Log M | no curve, and a line asking for the flag |
-| D-Log M beside anything else | refused: set the flag |
+| D-Log M beside anything else (Normal, another profile, unknown, photos) | refused: split the dataset, or set the flag only if every input is D-Log M |
+| any input in another DJI log profile | refused: prepare without it, or set `none` to train it undecoded |
+| an `unknown` input, no D-Log M | no curve, and a line naming the input and asking for the flag (for the Avata 360: "Avata 360 colour mode not readable yet") |
+| every input Normal | no curve |
 | no record | no curve, nothing logged |
 
-Any explicit value, `none` included, is kept. The seed points follow the
-images as before. **Only the Osmo 360's layout (`dvtm_oq101.proto`) is read.**
-Every other DJI product is `unknown`, never Normal: the Avata 360
-(`dvtm_AVATA360.proto`) has `fov_type` at StreamMeta field 4, where the Osmo
-has the colour mode, so the Osmo path reads a 0 there that means nothing.
+Any explicit value, `none` included, is kept and logged as set. The seed
+points follow the images as before.
+
+`config.json` keeps what was asked for under `image_color_log` (`auto`), and
+the curve it settled on under `image_color_log_resolved` (`dlogm-osmo360` or
+`none`). That key is not a flag: a resume reads it and never re-detects, while
+a preset or a batch row made from the file ignores it, so one dataset's answer
+does not follow the preset to the next dataset. A `null` `image_color_log`, as
+older files have, is an explicit `none`.
 
 ## Where the numbers come from
 

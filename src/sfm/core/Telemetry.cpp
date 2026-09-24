@@ -1003,6 +1003,7 @@ VideoColor color_of(const Source& src) {
     std::string error;
     if (!read_movie(src, mv, is_mp4, error)) return {};
     std::vector<uint8_t> buf;
+    VideoColor out;
     for (const Track& tk : mv.tracks) {
         if (tk.sample_type != fourcc("djmd")) continue;
         for (size_t i = 0; i < tk.samples.size() && i < 8; i++) {
@@ -1012,8 +1013,12 @@ VideoColor color_of(const Source& src) {
             const VideoColor c = djmd_color(buf.data(), buf.size());
             if (c.mode != VideoColorMode::NotRecorded) return c;
         }
+        // DJI metadata whose header could not be read says nothing about the
+        // profile, which is not the same as saying there is none.
+        out.mode = VideoColorMode::Unknown;
+        out.issue = VideoColorIssue::NoClipHeader;
     }
-    return {};
+    return out;
 }
 
 // ================
@@ -1365,16 +1370,28 @@ VideoColor djmd_color(const uint8_t* sample, size_t n) {
     out.mode = VideoColorMode::Unknown;
     // The Avata 360's StreamMeta has fov_type at field 4, so this path would
     // read an unrelated 0 there as Normal.
-    if (out.proto != "dvtm_oq101.proto") return out;
+    if (out.proto != "dvtm_oq101.proto") {
+        out.issue = VideoColorIssue::NotOsmoLayout;
+        return out;
+    }
     const auto stream = pb_sub(pb_find(top, 2));
     const PbField* wrapper = pb_find(stream, 4);
-    if (!wrapper || wrapper->wire != 2) return out;
+    if (!wrapper) {
+        out.issue = VideoColorIssue::NoColorField;
+        return out;
+    }
+    // Only an empty wrapper is proto3's unwritten 0; any other shape is a
+    // layout this reader was not written against, never Normal.
+    out.issue = VideoColorIssue::MalformedColorField;
+    if (wrapper->wire != 2) return out;
     const auto color = pb_sub(wrapper);
     const PbField* v = pb_find(color, 1);
-    out.code = v ? (int)v->varint : 0;  // proto3 leaves a zero enum unwritten
+    if (wrapper->len > 0 && (!v || v->wire != 0)) return out;
+    out.issue = VideoColorIssue::None;
+    out.code = v ? (int)v->varint : 0;
     out.mode = out.code == 19 ? VideoColorMode::DlogM
              : out.code == 0  ? VideoColorMode::Normal
-                              : VideoColorMode::Other;
+                              : VideoColorMode::OtherLog;
     return out;
 }
 

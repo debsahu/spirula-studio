@@ -370,6 +370,13 @@ static Bytes dji_color_sample(const char* proto, int color, bool stream4 = true)
     return cat({pb_bytes(1, pb_bytes(1, hdr)), pb_bytes(2, stream)});
 }
 
+// The same with StreamMeta field 4 given as the raw field bytes, tag included.
+static Bytes dji_color_raw(const Bytes& field4) {
+    Bytes hdr = cat({pb_str(1, "dvtm_oq101.proto"), pb_str(10, "cam")});
+    Bytes stream = cat({pb_bytes(3, pb_v(1, 3840)), field4});
+    return cat({pb_bytes(1, pb_bytes(1, hdr)), pb_bytes(2, stream)});
+}
+
 static VideoColor color_of(const Bytes& b) { return djmd_color(b.data(), b.size()); }
 
 static void test_dji_color() {
@@ -381,15 +388,36 @@ static void test_dji_color() {
           "color: Osmo 360 color_mode 0 reads as Normal");
     check(color_of(dji_color_sample("dvtm_oq101.proto", -1)).mode == VideoColorMode::Normal,
           "color: Osmo 360 empty color_mode wrapper reads as Normal");
-    check(color_of(dji_color_sample("dvtm_oq101.proto", 9)).mode == VideoColorMode::Other,
-          "color: Osmo 360 HLG (9) is neither D-Log M nor Normal");
-    check(color_of(dji_color_sample("dvtm_oq101.proto", 19, false)).mode == VideoColorMode::Unknown,
+    for (int code : {2, 9, 22}) {
+        const VideoColor c = color_of(dji_color_sample("dvtm_oq101.proto", code));
+        check(c.mode == VideoColorMode::OtherLog && c.code == code,
+              "color: Osmo 360 color_mode " + std::to_string(code) + " is log, unsupported");
+    }
+    const VideoColor no4 = color_of(dji_color_sample("dvtm_oq101.proto", 19, false));
+    check(no4.mode == VideoColorMode::Unknown && no4.issue == VideoColorIssue::NoColorField,
           "color: Osmo 360 with no color_mode field is Unknown");
+
+    // A reshaped wrapper must never fall through to Normal (review M1).
+    const VideoColor wire0 = color_of(dji_color_raw(pb_v(4, 19)));
+    check(wire0.mode == VideoColorMode::Unknown && wire0.issue == VideoColorIssue::MalformedColorField,
+          "color: Osmo 360 color_mode wrapper sent as a varint is Unknown");
+    check(color_of(dji_color_raw(pb_bytes(4, Bytes{0xff, 0xff}))).mode == VideoColorMode::Unknown,
+          "color: Osmo 360 unparseable color_mode wrapper is Unknown");
+    check(color_of(dji_color_raw(pb_bytes(4, pb_bytes(1, pb_v(1, 19))))).mode ==
+              VideoColorMode::Unknown,
+          "color: Osmo 360 color_mode sent length-delimited is Unknown");
+    check(color_of(dji_color_raw(pb_bytes(4, pb_v(2, 19)))).mode == VideoColorMode::Unknown,
+          "color: Osmo 360 wrapper holding only other fields is Unknown");
+
     // An Avata 360 records D-Log M somewhere else; its StreamMeta field 4 is fov_type.
     for (const char* proto : {"dvtm_AVATA360.proto", "dvtm_wa530.proto", "dvtm_wm169.proto"}) {
-        const VideoColor avata = color_of(dji_color_sample(proto, -1));
-        check(avata.mode == VideoColorMode::Unknown && avata.proto == proto,
-              std::string("color: ") + proto + " is Unknown, never Normal");
+        for (int code : {-1, 19}) {
+            const VideoColor avata = color_of(dji_color_sample(proto, code));
+            check(avata.mode == VideoColorMode::Unknown && avata.proto == proto &&
+                      avata.issue == VideoColorIssue::NotOsmoLayout,
+                  std::string("color: ") + proto + " is Unknown, never Normal (field 4 = " +
+                      std::to_string(code) + ")");
+        }
     }
     check(color_of(pb_bytes(3, pb_bytes(1, pb_v(2, 5)))).mode == VideoColorMode::NotRecorded,
           "color: a frame-only sample records nothing");
@@ -400,6 +428,13 @@ static void test_dji_color() {
     const Bytes file = build_mp4({t}, 30000, 2002, 0);
     check(video_color(file.data(), file.size()).mode == VideoColorMode::DlogM,
           "color: video_color reads a file's first djmd sample");
+    // A djmd track is DJI metadata even when no header can be read (review M2).
+    TrackSpec frames_only{"djmd", "meta", "CAM meta", 30000, 1001, {}};
+    frames_only.samples.push_back(dji_sample(false, 19260734367ull, -1.0f));
+    const Bytes headless = build_mp4({frames_only}, 30000, 1001, 0);
+    const VideoColor hc = video_color(headless.data(), headless.size());
+    check(hc.mode == VideoColorMode::Unknown && hc.issue == VideoColorIssue::NoClipHeader,
+          "color: a djmd track without a readable clip header is Unknown");
     TrackSpec other{"camm", "meta", "", 1000, 100, {Bytes(8, 0)}};
     const Bytes none = build_mp4({other}, 1000, 100, 0);
     check(video_color(none.data(), none.size()).mode == VideoColorMode::NotRecorded,
@@ -520,7 +555,8 @@ static int cmdTelemetryTest(int argc, char** argv) {
             }
             std::printf("%s", telemetry_report(tm, telemetry_check(tm)).c_str());
             const VideoColor vc = video_color(argv[i]);
-            std::printf("color: mode %d code %d proto %s\n", (int)vc.mode, vc.code, vc.proto.c_str());
+            std::printf("color: mode %d code %d proto %s issue %d\n", (int)vc.mode, vc.code, vc.proto.c_str(),
+                        (int)vc.issue);
             if (head > 0) print_head(tm, head);
             if (tm.carrier == TelemetryCarrier::None) rc = 1;
         }

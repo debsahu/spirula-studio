@@ -437,6 +437,14 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/AppPaths.cpp)
     ss_configure_app(preset_roundtrip_test)
 
+    # A run's config.json read back as a preset keeps `--image-color-log auto`.
+    add_executable(run_config_preset_test
+        ${SS_SRC}/app/gui/tests/run_config_preset_test.cpp
+        ${SS_SRC}/app/gui/TrainPreset.cpp
+        ${SS_SRC}/app/gui/PresetFile.cpp
+        ${SS_SRC}/app/AppPaths.cpp)
+    ss_configure_app(run_config_preset_test)
+
     add_executable(stencil_edit_test
         ${SS_SRC}/app/gui/tests/stencil_edit_test.cpp
         ${SS_SRC}/app/gui/StencilEdit.cpp

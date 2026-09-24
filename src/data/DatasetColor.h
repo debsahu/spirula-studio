@@ -9,16 +9,19 @@
 
 namespace spirula {
 
-// In the dataset root, beside .spirula-frames: "<mode> <code> <source>" per line.
+// In the dataset root, beside .spirula-frames, one line per input:
+// "<mode> <code> <proto or -> <source>".
 inline constexpr const char* kDatasetColorFile = ".spirula-color";
 
 // NotRecorded: the input carries no profile metadata at all (photos, a
 // non-DJI video). Unknown: DJI metadata in a layout not verified here.
-enum class ClipColor { NotRecorded, Normal, DlogM, Other, Unknown };
+// OtherLog: a DJI profile this build cannot decode (D-Log, D-Log2, HLG...).
+enum class ClipColor { NotRecorded, Normal, DlogM, OtherLog, Unknown };
 
 struct ClipColorEntry {
     ClipColor mode = ClipColor::NotRecorded;
     int code = -1;
+    std::string proto;    // the DJI metadata layout; empty when none
     std::string source;   // file name only
 };
 
@@ -29,17 +32,27 @@ struct DatasetColor {
 const char* clip_color_token(ClipColor c);
 ClipColor clip_color_from_token(const std::string& token);
 
-// Empty when the dataset has no record.
+// Empty when the dataset has no record. A line that does not parse, or a
+// record that is there but cannot be read, is an Unknown entry.
 DatasetColor read_dataset_color(const std::string& dataset_dir);
-// Removes a stale record when no input carries any profile metadata.
-void write_dataset_color(const std::string& dataset_dir, const DatasetColor& d);
+enum class ColorRecordWrite { Written, Removed, Failed, FailedStale };
+struct ColorRecordResult {
+    ColorRecordWrite status = ColorRecordWrite::Written;
+    std::string error;   // why, when it failed
+};
 
-enum class DatasetColorVerdict { None, DlogM, NotLog, Unknown, Mixed };
+// Written to a temp file and renamed into place; on any failure the old record
+// is removed too, and FailedStale means even that did not work.
+ColorRecordResult write_dataset_color(const std::string& dataset_dir, const DatasetColor& d);
+
+enum class DatasetColorVerdict { None, DlogM, NotLog, UnsupportedLog, Unknown, Mixed };
 
 struct DatasetColorSummary {
     DatasetColorVerdict verdict = DatasetColorVerdict::None;
-    int dlogm = 0, not_log = 0, unknown = 0, unrecorded = 0;
-    std::string first_unknown;   // for the line that names one
+    int dlogm = 0, not_log = 0, other_log = 0, unknown = 0, unrecorded = 0;
+    std::string first_unknown, first_unknown_proto;   // for the line that names one
+    std::string first_other_log;
+    int first_other_code = -1;
 };
 
 // Mixed is D-Log M beside anything that is not: a guess either way decodes
