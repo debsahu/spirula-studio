@@ -995,6 +995,27 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
     return true;
 }
 
+// Only the first samples are read: a clip header is in sample 0 on every
+// djmd file seen, and an .OSV runs to thousands of samples.
+VideoColor color_of(const Source& src) {
+    Movie mv;
+    bool is_mp4 = false;
+    std::string error;
+    if (!read_movie(src, mv, is_mp4, error)) return {};
+    std::vector<uint8_t> buf;
+    for (const Track& tk : mv.tracks) {
+        if (tk.sample_type != fourcc("djmd")) continue;
+        for (size_t i = 0; i < tk.samples.size() && i < 8; i++) {
+            const Sample& sm = tk.samples[i];
+            if (sm.size < 2 || sm.size > (16u << 20) || !src.readVec(sm.offset, sm.size, buf))
+                continue;
+            const VideoColor c = djmd_color(buf.data(), buf.size());
+            if (c.mode != VideoColorMode::NotRecorded) return c;
+        }
+    }
+    return {};
+}
+
 // ================
 // Insta360 trailer
 // ================
@@ -1333,6 +1354,41 @@ VideoProjection video_projection(const std::string& path) {
     std::string error;
     if (!read_movie(src, mv, is_mp4, error)) return VideoProjection();
     return mv.projection;
+}
+
+VideoColor djmd_color(const uint8_t* sample, size_t n) {
+    VideoColor out;
+    const auto top = pb_fields(sample, n);
+    const auto hdr = pb_sub(pb_find(pb_sub(pb_find(top, 1)), 1));
+    out.proto = pb_string(pb_find(hdr, 1));
+    if (out.proto.empty()) return out;
+    out.mode = VideoColorMode::Unknown;
+    // The Avata 360's StreamMeta has fov_type at field 4, so this path would
+    // read an unrelated 0 there as Normal.
+    if (out.proto != "dvtm_oq101.proto") return out;
+    const auto stream = pb_sub(pb_find(top, 2));
+    const PbField* wrapper = pb_find(stream, 4);
+    if (!wrapper || wrapper->wire != 2) return out;
+    const auto color = pb_sub(wrapper);
+    const PbField* v = pb_find(color, 1);
+    out.code = v ? (int)v->varint : 0;  // proto3 leaves a zero enum unwritten
+    out.mode = out.code == 19 ? VideoColorMode::DlogM
+             : out.code == 0  ? VideoColorMode::Normal
+                              : VideoColorMode::Other;
+    return out;
+}
+
+VideoColor video_color(const std::string& path) {
+    FileSource src;
+    if (!src.open(path)) return {};
+    return color_of(src);
+}
+
+VideoColor video_color(const uint8_t* data, size_t size) {
+    MemorySource src;
+    src.p = data;
+    src.n = size;
+    return color_of(src);
 }
 
 bool telemetry_read(const uint8_t* data, size_t size, Telemetry& out, std::string& error) {

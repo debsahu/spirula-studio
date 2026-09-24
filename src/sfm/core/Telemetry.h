@@ -96,6 +96,22 @@ bool telemetry_read(uint64_t size, const TelemetryRead& read, Telemetry& out, st
 // container's own boxes carry it. Empty when the file names none.
 VideoProjection video_projection(const std::string& path);
 
+// A DJI clip's picture profile: StreamMeta.color_mode (DJI's ColorModeType,
+// 19 = D-Log M) in a djmd sample. Read only on a product whose layout is
+// verified, the Osmo 360 (dvtm_oq101); any other DJI clip is Unknown.
+enum class VideoColorMode { NotRecorded, Normal, DlogM, Other, Unknown };
+struct VideoColor {
+    VideoColorMode mode = VideoColorMode::NotRecorded;
+    int code = -1;        // ColorModeType as read; -1 when none was
+    std::string proto;    // the clip header's proto name
+};
+
+// One djmd sample. NotRecorded when it carries no clip header.
+VideoColor djmd_color(const uint8_t* sample, size_t n);
+// The first djmd sample that carries a clip header; NotRecorded without one.
+VideoColor video_color(const std::string& path);
+VideoColor video_color(const uint8_t* data, size_t size);
+
 // Whether the readings look like a working sensor, not whether they are
 // precise: units, coverage of the video, sample-rate regularity, a gravity
 // norm, a GPS that moves rather than repeating one stale fix.
