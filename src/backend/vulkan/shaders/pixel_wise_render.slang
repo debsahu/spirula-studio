@@ -225,14 +225,16 @@ void working_to_display_fwd(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
 
 // ---------------------------------------------------------------------------
 // input_curve_decode_forward: log GT codes -> linear Rec.2020, ahead of
-// working_to_display_fwd. One curve so far (colorspace::InputCurve).
+// working_to_display_fwd. curve is colorspace::InputCurve.
 // ---------------------------------------------------------------------------
 
-struct InputCurveDecodeParams {  // 24 bytes: pushed directly
+struct InputCurveDecodeParams {  // 32 bytes: pushed directly
     float* rgb;           // [B,H,W,3]
     float* out_rgb;       // [B,H,W,3]
     uint32_t total;       // B*H*W
     uint32_t wgs_per_row;
+    int32_t curve;
+    uint32_t _pad0;
 };
 
 [shader("compute")]
@@ -243,7 +245,7 @@ void input_curve_decode_fwd(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     if (idx >= p.total) return;
     float3 rgb = float3(p.rgb[3 * idx], p.rgb[3 * idx + 1],
                         p.rgb[3 * idx + 2]);
-    rgb = dlogm_osmo360_to_rec2020(rgb);
+    rgb = input_curve_to_rec2020(p.curve, rgb);
     p.out_rgb[3 * idx] = rgb.x;
     p.out_rgb[3 * idx + 1] = rgb.y;
     p.out_rgb[3 * idx + 2] = rgb.z;

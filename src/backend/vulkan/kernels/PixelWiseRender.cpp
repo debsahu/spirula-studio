@@ -46,8 +46,10 @@ static_assert(sizeof(RgbToSrgbParams) == 3 * 8 + 2 * 4, "layout");
 struct InputCurveDecodeParams {
     uint64_t rgb, out_rgb;
     uint32_t total, wgs_per_row;
+    int32_t curve;
+    uint32_t _pad0;
 };
-static_assert(sizeof(InputCurveDecodeParams) == 2 * 8 + 2 * 4, "layout");
+static_assert(sizeof(InputCurveDecodeParams) == 2 * 8 + 4 * 4, "layout");
 
 // Mirrors DepthToNormalParams.
 struct DepthToNormalParams {
@@ -159,11 +161,12 @@ void input_curve_decode_forward(
     DeviceTensor3D<float3> rgb,
     DeviceTensor3D<float3> out_rgb
 ) {
-    if (curve != 1)
+    if (curve != 1 && curve != 2)
         throw std::runtime_error("input_curve_decode_forward: unknown curve " +
                                  std::to_string(curve));
     const int64_t total = rgb.size<0>() * rgb.size<1>() * rgb.size<2>();
     InputCurveDecodeParams p{};
+    p.curve = curve;
     p.rgb = (uint64_t)rgb.data_ptr();
     p.out_rgb = (uint64_t)out_rgb.data_ptr();
     p.total = (uint32_t)total;

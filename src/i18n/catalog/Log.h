@@ -2149,33 +2149,92 @@ SS_MSG(color_profile_mixed,
     IT("misto"), NL("gemengd"), RU("смешанный"), TR("karışık"));
 SS_MSG(dataset_color_dlogm,
     EN("Colour profile from the inputs' metadata: D-Log M (inputs: {0}); reading"
-       " the input with --image-color-log dlogm-osmo360"),
+       " the input with --image-color-log {1}"),
     JA("入力のメタデータによる色プロファイル: D-Log M（入力数: {0}"
-       "）。入力を --image-color-log dlogm-osmo36"
-       "0 で読み込みます"),
+       "）。入力を --image-color-log {1} で読み込みます"),
     ZH_HANS("输入元数据中的色彩配置：D-Log M（输入数：{0}）；按 --ima"
-            "ge-color-log dlogm-osmo360 读取输入"),
+            "ge-color-log {1} 读取输入"),
     ZH_HANT("輸入中繼資料中的色彩設定：D-Log M（輸入數：{0}）；依 --im"
-            "age-color-log dlogm-osmo360 讀取輸入"),
-    KO("입력 메타데이터의 색 프로필: D-Log M(입력 수: {0}). 입력을 --image-color-log dlogm-"
-       "osmo360으로 읽습니다"),
+            "age-color-log {1} 讀取輸入"),
+    KO("입력 메타데이터의 색 프로필: D-Log M(입력 수: {0}). 입력을 --image-color-log {1}"
+       "(으)로 읽습니다"),
     DE("Farbprofil laut Metadaten der Eingaben: D-Log M (Eingaben: {0}); die "
-       "Eingabe wird mit --image-color-log dlogm-osmo360 gelesen"),
+       "Eingabe wird mit --image-color-log {1} gelesen"),
     FR("Profil colorimétrique d'après les métadonnées des entrées : D-Log M "
-       "(entrées : {0}) ; l'entrée est lue avec --image-color-log dlogm-osmo360"),
+       "(entrées : {0}) ; l'entrée est lue avec --image-color-log {1}"),
     ES("Perfil de color según los metadatos de las entradas: D-Log M (entradas: "
-       "{0}); la entrada se lee con --image-color-log dlogm-osmo360"),
+       "{0}); la entrada se lee con --image-color-log {1}"),
     PT("Perfil de cor segundo os metadados das entradas: D-Log M (entradas: "
-       "{0}); a entrada é lida com --image-color-log dlogm-osmo360"),
+       "{0}); a entrada é lida com --image-color-log {1}"),
     IT("Profilo colore dai metadati degli ingressi: D-Log M (ingressi: {0}); "
-       "l'ingresso viene letto con --image-color-log dlogm-osmo360"),
+       "l'ingresso viene letto con --image-color-log {1}"),
     NL("Kleurprofiel volgens de metadata van de invoer: D-Log M "
        "(invoerbestanden: {0}); de invoer wordt gelezen met --image-color-log "
-       "dlogm-osmo360"),
+       "{1}"),
     RU("Цветовой профиль по метаданным входов: D-Log M (входов: {0}); вход "
-       "читается с --image-color-log dlogm-osmo360"),
+       "читается с --image-color-log {1}"),
     TR("Girdilerin meta verisine göre renk profili: D-Log M (girdi sayısı: {0});"
-       " girdi --image-color-log dlogm-osmo360 ile okunuyor"));
+       " girdi --image-color-log {1} ile okunuyor"));
+SS_MSG(dataset_color_dlogm_cameras,
+    EN("The dataset mixes D-Log M inputs from an Osmo 360 (inputs: {0}) and an "
+       "Avata 360 (inputs: {1}), and each camera has its own curve. Prepare a "
+       "dataset from one camera's inputs, or set the input log curve "
+       "(--image-color-log) only if every input really was shot on that camera"),
+    JA("このデータセットには Osmo 360 の D-Log M 入力（{0} 件）と Avata 360 の"
+       " D-Log M 入力（{1} 件）が混在しており、カメラごとにカーブが異なります。"
+       "1 台のカメラの入力だけでデータセットを作成するか、すべての入力が本当に"
+       "そのカメラで撮影された場合に限り入力のログカーブ（--image-color-log）"
+       "を設定してください"),
+    ZH_HANS("数据集混合了 Osmo 360 的 D-Log M 输入（{0} 个）和 Avata 360 的 D-Log M "
+            "输入（{1} 个），而每台相机有各自的曲线。请只用一台相机的输入准备数据集，"
+            "或仅在所有输入确实都由该相机拍摄时设置输入对数曲线（--image-color-log）"),
+    ZH_HANT("資料集混合了 Osmo 360 的 D-Log M 輸入（{0} 個）和 Avata 360 的 D-Log M "
+            "輸入（{1} 個），而每台相機有各自的曲線。請只用一台相機的輸入準備資料集，"
+            "或僅在所有輸入確實都由該相機拍攝時設定輸入對數曲線（--image-color-log）"),
+    KO("데이터셋에 Osmo 360의 D-Log M 입력({0}개)과 Avata 360의 D-Log M 입력({1}개)이 "
+       "섞여 있으며, 카메라마다 커브가 다릅니다. 한 카메라의 입력만으로 데이터셋을 "
+       "준비하거나, 모든 입력이 정말 그 카메라로 촬영된 경우에만 입력 로그 커브"
+       "(--image-color-log)를 설정하세요"),
+    DE("Der Datensatz mischt D-Log-M-Eingaben einer Osmo 360 (Eingaben: {0}) und "
+       "einer Avata 360 (Eingaben: {1}), und jede Kamera hat ihre eigene Kurve. "
+       "Bereiten Sie einen Datensatz aus den Eingaben einer Kamera vor, oder "
+       "setzen Sie die Log-Kurve der Eingabe (--image-color-log) nur, wenn "
+       "wirklich jede Eingabe mit dieser Kamera aufgenommen wurde"),
+    FR("Le jeu de données mélange des entrées D-Log M d'une Osmo 360 (entrées : "
+       "{0}) et d'une Avata 360 (entrées : {1}), et chaque caméra a sa propre "
+       "courbe. Préparez un jeu de données à partir des entrées d'une seule "
+       "caméra, ou réglez la courbe log d'entrée (--image-color-log) seulement si"
+       " chaque entrée a vraiment été filmée avec cette caméra"),
+    ES("El conjunto de datos mezcla entradas D-Log M de una Osmo 360 (entradas: "
+       "{0}) y de una Avata 360 (entradas: {1}), y cada cámara tiene su propia "
+       "curva. Prepare un conjunto con las entradas de una sola cámara, o fije "
+       "la curva logarítmica de entrada (--image-color-log) solo si todas las "
+       "entradas se grabaron de verdad con esa cámara"),
+    PT("O conjunto de dados mistura entradas D-Log M de uma Osmo 360 (entradas: "
+       "{0}) e de uma Avata 360 (entradas: {1}), e cada câmera tem sua própria "
+       "curva. Prepare um conjunto com as entradas de uma só câmera, ou defina a"
+       " curva log de entrada (--image-color-log) só se todas as entradas foram "
+       "mesmo gravadas com essa câmera"),
+    IT("Il dataset mescola ingressi D-Log M di una Osmo 360 (ingressi: {0}) e di"
+       " una Avata 360 (ingressi: {1}), e ogni fotocamera ha la sua curva. "
+       "Prepara un dataset con gli ingressi di una sola fotocamera, oppure "
+       "imposta la curva log in ingresso (--image-color-log) solo se ogni "
+       "ingresso è stato davvero girato con quella fotocamera"),
+    NL("De dataset mengt D-Log M-invoer van een Osmo 360 (invoerbestanden: {0})"
+       " en van een Avata 360 (invoerbestanden: {1}), en elke camera heeft zijn "
+       "eigen kromme. Bereid een dataset voor uit de invoer van één camera, of "
+       "stel de log-kromme van de invoer (--image-color-log) alleen in als alle "
+       "invoer echt met die camera is opgenomen"),
+    RU("Набор смешивает входы D-Log M с Osmo 360 (входов: {0}) и с Avata 360 "
+       "(входов: {1}), а у каждой камеры своя кривая. Подготовьте набор из "
+       "входов одной камеры или задайте логарифмическую кривую входа "
+       "(--image-color-log), только если все входы действительно сняты этой "
+       "камерой"),
+    TR("Veri kümesi bir Osmo 360'ın D-Log M girdilerini (girdi sayısı: {0}) ve "
+       "bir Avata 360'ın D-Log M girdilerini (girdi sayısı: {1}) karıştırıyor ve "
+       "her kameranın kendi eğrisi var. Tek bir kameranın girdilerinden bir veri"
+       " kümesi hazırlayın ya da girdi log eğrisini (--image-color-log) yalnızca"
+       " her girdi gerçekten o kamerayla çekildiyse ayarlayın"));
 SS_MSG(dataset_color_not_log,
     EN("Colour profile from the inputs' metadata: not log (inputs: {0}); the "
        "input is not decoded (--image-color-log)"),

@@ -110,7 +110,10 @@ DatasetColorSummary summarize_dataset_color(const DatasetColor& d) {
     DatasetColorSummary s;
     for (const ClipColorEntry& e : d.clips) {
         switch (e.mode) {
-            case ClipColor::DlogM:  s.dlogm++; break;
+            case ClipColor::DlogM:
+                s.dlogm++;
+                if (e.proto == "dvtm_AVATA360.proto") s.dlogm_avata++;
+                break;
             case ClipColor::Normal: s.not_log++; break;
             case ClipColor::OtherLog:
                 if (s.other_log++ == 0) {

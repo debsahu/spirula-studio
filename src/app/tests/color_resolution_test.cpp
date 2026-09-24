@@ -221,9 +221,47 @@ void test_exposure() {
           "exposure: an sRGB seed cloud is not brightened");
 }
 
+// The Avata curve through every host site that decodes: resolve, compare,
+// seeds. Each would silently fall back to the Osmo constants if it tested
+// for DlogMOsmo360 by name.
+void test_avata() {
+    TrainConfig av;
+    av.image_color_log = "dlogm-avata360";
+    const ColorResolution r = resolve_color(av);
+    check(r.image_curve == colorspace::InputCurve::DlogMAvata360 &&
+              r.point_curve == colorspace::InputCurve::DlogMAvata360,
+          "avata: dlogm-avata360 selects the Avata decode, seeds follow");
+    check(r.image_linear && r.image_gamut == "Rec.2020",
+          "avata: the Avata decode pins linear Rec.2020 too");
+    av.image_color_gamut = "ACEScg";
+    std::string why;
+    try { resolve_color(av); } catch (const std::exception& e) { why = e.what(); }
+    check(why.find("dlogm-avata360") != std::string::npos,
+          "avata: a contradicting gamut is refused naming the Avata flag");
+
+    float want[3] = {0.6f, 0.3f, 0.2f}, osmo[3] = {0.6f, 0.3f, 0.2f};
+    colorspace::dlogm_avata360_to_rec2020(want);
+    colorspace::dlogm_osmo360_to_rec2020(osmo);
+    float raw[3] = {0.6f, 0.3f, 0.2f};
+    source_pixel_for_compare(r, true, raw);
+    check(std::fabs(raw[0] - want[0]) < 1e-5f && std::fabs(raw[1] - want[1]) < 1e-5f &&
+              std::fabs(raw[2] - want[2]) < 1e-5f && std::fabs(raw[0] - osmo[0]) > 0.05f,
+          "avata: the compare source decodes with the Avata constants");
+
+    TrainConfig av2;
+    av2.image_color_log = "dlogm-avata360";
+    float seed_want[3] = {140 / 255.0f, 110 / 255.0f, 100 / 255.0f};
+    colorspace::dlogm_avata360_to_rec2020(seed_want);
+    const auto sat = seed_color(av2, 140, 110, 100);
+    check(std::fabs(sat[0] - seed_want[0]) < 1e-4f && std::fabs(sat[1] - seed_want[1]) < 1e-4f &&
+              std::fabs(sat[2] - seed_want[2]) < 1e-4f,
+          "avata: a coloured seed goes through the Avata curve and matrix");
+}
+
 }  // namespace
 
 int main() {
+    test_avata();
     test_exposure();
     test_image_side();
     test_point_side();

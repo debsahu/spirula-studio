@@ -454,6 +454,7 @@ __global__ void working_to_display_forward_kernel(
 }
 
 __global__ void input_curve_decode_forward_kernel(
+    int curve,
     const TensorView<float, 4> in_rgb,
     TensorView<float, 4> out_rgb
 ) {
@@ -464,7 +465,7 @@ __global__ void input_curve_decode_forward_kernel(
         return;
     unsigned y = gid / W;
     unsigned x = gid % W;
-    float3 rgb = SlangPixelWise::dlogm_osmo360_to_rec2020(in_rgb.load3(bid, y, x));
+    float3 rgb = SlangPixelWise::input_curve_to_rec2020(curve, in_rgb.load3(bid, y, x));
     out_rgb.store3(bid, y, x, rgb);
 }
 
@@ -507,16 +508,16 @@ __global__ void working_to_display_backward_kernel(
 // A log GT -> linear Rec.2020 (colorspace::InputCurve); in place is safe.
 /*[AutoHeaderGeneratorExport]*/
 void input_curve_decode_forward(
-    int curve,                           // colorspace::InputCurve, 1 = D-Log M
+    int curve,                           // colorspace::InputCurve: 1 Osmo, 2 Avata
     DeviceTensor3D<float3> rgb,          // [B, H, W, 3] code values
     DeviceTensor3D<float3> out_rgb       // [B, H, W, 3]
 ) {
-    if (curve != 1)
+    if (curve != 1 && curve != 2)
         throw std::runtime_error("input_curve_decode_forward: unknown curve " +
                                  std::to_string(curve));
     long b = rgb.size<0>(), h = rgb.size<1>(), w = rgb.size<2>();
     input_curve_decode_forward_kernel<<<_LAUNCH_ARGS_2D(h*w, b, 256, 1)>>>(
-        _dt3d_to_tv4<float>(rgb), _dt3d_to_tv4<float>(out_rgb));
+        curve, _dt3d_to_tv4<float>(rgb), _dt3d_to_tv4<float>(out_rgb));
     CHECK_DEVICE_ERROR(cudaGetLastError());
 }
 

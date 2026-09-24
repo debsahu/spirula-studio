@@ -120,7 +120,23 @@ void test_adopt() {
     check(curve_after(explicit_log, record({C::Normal})) == IC::DlogMOsmo360,
           "explicit dlogm-osmo360: wins over a Normal dataset");
 
+    // Each camera has its own curve: the record's layout says which shot a clip.
+    check(curve_after(unset, record({C::DlogM, C::DlogM}, "dvtm_AVATA360.proto"), &line) ==
+              IC::DlogMAvata360,
+          "avata: an Avata 360 D-Log M dataset decodes as dlogm-avata360");
+    check(has(line, "dlogm-avata360") && !has(line, "dlogm-osmo360"),
+          "avata: the start line names the Avata curve");
     std::string why;
+    {
+        DatasetColor both = record({C::DlogM});
+        both.clips.push_back({C::DlogM, 19, "dvtm_AVATA360.proto", "clip 1.OSV"});
+        check(refused(unset, both, &why), "cameras: Osmo and Avata D-Log M in one dataset is refused");
+        check(has(why, "--image-color-log") && has(why, "1"),
+              "cameras: the refusal names the flag and counts each camera's inputs");
+        TrainConfig av = unset;
+        av.image_color_log = "dlogm-avata360";
+        check(!refused(av, both), "cameras: an explicit curve is not refused");
+    }
     check(refused(unset, record({C::DlogM, C::Normal}), &why), "mixed: D-Log M beside Normal is refused");
     check(has(why, "--image-color-log") && !has(why, "clips"),
           "mixed: the refusal names the flag and counts inputs, not clips");

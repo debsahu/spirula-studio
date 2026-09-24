@@ -96,10 +96,10 @@ inline Transfer transfer_or(const std::string& name, Transfer fallback) {
 
 inline const char* transfer_name(Transfer t) { return kTransfers[(int)t]; }
 
-// Input curve: a log encoding decoded off the images before gamut and transfer
-// apply. Its own axis, not a Transfer value -- Transfer's numbering reaches the
-// viewport combo and the web viewer. core/DlogM.h holds the curve itself.
-enum class InputCurve : int { None = 0, DlogMOsmo360 = 1 };
+// A log encoding decoded off the images before gamut and transfer (core/DlogM.h).
+// Not a Transfer value: that numbering reaches the viewport and the web viewer;
+// this one reaches engine_init_image_decode and the decode kernels.
+enum class InputCurve : int { None = 0, DlogMOsmo360 = 1, DlogMAvata360 = 2 };
 
 // "" and "none" are unset, as for transfer_or; "off" is an explicit no-curve.
 // "auto" left over after adopt_dataset_color found no record reads as unset.
@@ -107,7 +107,16 @@ inline InputCurve input_curve_or(const std::string& name, InputCurve fallback) {
     if (name.empty() || name == "none" || name == "auto") return fallback;
     if (name == "off") return InputCurve::None;
     if (name == "dlogm-osmo360") return InputCurve::DlogMOsmo360;
+    if (name == "dlogm-avata360") return InputCurve::DlogMAvata360;
     throw std::runtime_error("unsupported input curve: " + name);
+}
+
+inline const char* input_curve_name(InputCurve c) {
+    switch (c) {
+        case InputCurve::DlogMOsmo360:  return "dlogm-osmo360";
+        case InputCurve::DlogMAvata360: return "dlogm-avata360";
+        default:                        return "none";
+    }
 }
 
 inline constexpr float kTransferWhite = 11.2f;

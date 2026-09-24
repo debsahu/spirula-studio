@@ -98,7 +98,8 @@ static void apply_log_curve(colorspace::InputCurve curve, const char* side,
                             const std::string& gamut, bool& linear_out,
                             std::string& gamut_out) {
     if (curve == colorspace::InputCurve::None) return;
-    const std::string flag = std::string("--") + side + "-color-log dlogm-osmo360";
+    const std::string flag =
+        std::string("--") + side + "-color-log " + colorspace::input_curve_name(curve);
     const bool srgb_gamut = unset(gamut) || gamut == "Rec.709";
     const bool plain_srgb = srgb_gamut && !is_linear.value_or(false);
     if (!plain_srgb) {
@@ -181,8 +182,14 @@ std::string adopt_dataset_color(TrainConfig& c, const DatasetColor& d) {
         case DatasetColorVerdict::None:
             return {};
         case DatasetColorVerdict::DlogM:
-            c.image_color_log_resolved = "dlogm-osmo360";
-            return lfmt(lmsg::dataset_color_dlogm, {(long long)s.dlogm});
+            if (s.dlogm_avata > 0 && s.dlogm_avata < s.dlogm)
+                throw std::runtime_error(lfmt(lmsg::dataset_color_dlogm_cameras,
+                    {(long long)(s.dlogm - s.dlogm_avata), (long long)s.dlogm_avata}));
+            c.image_color_log_resolved = colorspace::input_curve_name(
+                s.dlogm_avata > 0 ? colorspace::InputCurve::DlogMAvata360
+                                  : colorspace::InputCurve::DlogMOsmo360);
+            return lfmt(lmsg::dataset_color_dlogm,
+                        {(long long)s.dlogm, c.image_color_log_resolved});
         case DatasetColorVerdict::NotLog:
             return lfmt(lmsg::dataset_color_not_log, {(long long)s.not_log});
         case DatasetColorVerdict::Unknown:
@@ -198,8 +205,8 @@ std::string adopt_dataset_color(TrainConfig& c, const DatasetColor& d) {
 }
 
 void source_pixel_for_compare(const ColorResolution& c, bool raw, float v[3]) {
-    if (c.image_curve != colorspace::InputCurve::DlogMOsmo360) return;
-    colorspace::dlogm_osmo360_to_rec2020(v);
+    if (c.image_curve == colorspace::InputCurve::None) return;
+    colorspace::input_curve_to_rec2020(c.image_curve, v);
     for (int d = 0; d < 3; d++) v[d] *= c.image_gain;
     colorspace::apply3x3(gamut_to_rec709("Rec.2020"), v);
     if (!raw) {
@@ -276,8 +283,8 @@ public:
     void operator()(float col[3]) const {
         if (identity_) return;
         // A log seed is linear once decoded (resolve_color forces point_linear).
-        if (c_.point_curve == colorspace::InputCurve::DlogMOsmo360) {
-            colorspace::dlogm_osmo360_to_rec2020(col);
+        if (c_.point_curve != colorspace::InputCurve::None) {
+            colorspace::input_curve_to_rec2020(c_.point_curve, col);
             for (int d = 0; d < 3; d++) col[d] *= c_.point_gain;
         }
         for (int d = 0; d < 3; d++)

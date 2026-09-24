@@ -82,8 +82,7 @@ void engine_init_image_decode(int curve) {
 void _engine_color_space_gt_pixel(float c[3]) {
     const auto& cs = engine().color_space;
     if (!cs.image_enabled) return;
-    if (cs.image_curve == (int)colorspace::InputCurve::DlogMOsmo360)
-        colorspace::dlogm_osmo360_to_rec2020(c);
+    colorspace::input_curve_to_rec2020((colorspace::InputCurve)cs.image_curve, c);
     if (!cs.image_is_linear)
         for (int k = 0; k < 3; k++) c[k] = colorspace::srgb_to_linear(c[k]);
     colorspace::apply3x3(cs.image_color_matrix_host, c);

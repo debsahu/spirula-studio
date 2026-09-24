@@ -9623,7 +9623,11 @@ SS_MSG(image_color_log_help,
        "else (Normal, another profile, an unknown input or photos), and one shot"
        " in a DJI log profile this build cannot decode. An input whose profile "
        "cannot be read gets no curve and a line asking for this flag. `none` "
-       "says the input is not log."),
+       "says the input is not log."
+       " `dlogm-avata360` is the same for an Avata 360, from our own fit to "
+       "DJI Studio's D-Log M export, since DJI publishes no Avata LUT. `auto` "
+       "picks it when every input is Avata 360 D-Log M, and refuses a dataset "
+       "mixing Osmo 360 and Avata 360 D-Log M."),
     JA("入力を撮影したログカーブで、ほかの何よりも先にデコードされます。"
        "dlogm-osmo360 は Osmo 360 の DJI D-Log M で、リニアな Rec.2020 に"
        "デコードされます。そのため入力はリニアかつ Rec.2020 となり、どちらかを"
@@ -9636,7 +9640,13 @@ SS_MSG(image_color_log_help,
        "ットと、このビルドでデコードできない DJI ログプロファイルで撮影した"
        "データセットは拒否します。プロファイルを読み取れない入力はカーブなしとな"
        "り、このフラグの設定を求める行が出ます。none は入力がログではないこ"
-       "とを示します。"),
+       "とを示します。"
+       "dlogm-avata360 は Avata 360 用の同じもので"
+       "、DJI が Avata の LUT を公開していないため、DJI "
+       "Studio の D-Log M 書き出しへの独自のフィットです。a"
+       "uto はすべての入力が Avata 360 の D-Log M な"
+       "らこれを選び、Osmo 360 と Avata 360 の D-Lo"
+       "g M が混在するデータセットは拒否します。"),
     ZH_HANS("拍摄输入时所用的对数曲线，在其他一切之前解码。dlogm-osmo360 是 "
             "Osmo 360 的 DJI D-Log M，解码为线性 Rec.2020，因此输入随之成为线性"
             "且为 Rec.2020，把其中任一项设为别的值都会报错。只有训练图像会被"
@@ -9646,7 +9656,12 @@ SS_MSG(image_color_log_help,
             "混合 D-Log M 与其他内容（Normal、其他配置、未知输入或照片"
             "）的数据集，以及用此版本无法解码的 DJI 对数配置拍摄的数据集会被拒绝"
             "。无法读取配置的输入不用曲线，并会输出一行要求设置此标志。none 表示"
-            "输入不是对数。"),
+            "输入不是对数。"
+            "dlogm-avata360 是 Avata 360 的对应曲线；D"
+            "JI 未公开 Avata 的 LUT，它来自我们对 DJI Stud"
+            "io D-Log M 导出的拟合。所有输入都是 Avata 360 "
+            "的 D-Log M 时 auto 选择它，混合 Osmo 360 与"
+            " Avata 360 D-Log M 的数据集会被拒绝。"),
     ZH_HANT("拍攝輸入時所用的對數曲線，在其他一切之前解碼。dlogm-osmo360 是 "
             "Osmo 360 的 DJI D-Log M，解碼為線性 Rec.2020，因此輸入隨之成為線性"
             "且為 Rec.2020，把其中任一項設為別的值都會報錯。只有訓練影像會被"
@@ -9656,7 +9671,12 @@ SS_MSG(image_color_log_help,
             "。混合 D-Log M 與其他內容（Normal、其他設定、未知輸入或照"
             "片）的資料集，以及用此版本無法解碼的 DJI 對數設定拍攝的資料集會被拒"
             "絕。無法讀取設定的輸入不用曲線，並會輸出一行要求設定此旗標。none 表"
-            "示輸入不是對數。"),
+            "示輸入不是對數。"
+            "dlogm-avata360 是 Avata 360 的對應曲線；D"
+            "JI 未公開 Avata 的 LUT，它來自我們對 DJI Stud"
+            "io D-Log M 匯出的擬合。所有輸入都是 Avata 360 "
+            "的 D-Log M 時 auto 選擇它，混合 Osmo 360 與"
+            " Avata 360 D-Log M 的資料集會被拒絕。"),
     KO("입력을 촬영한 로그 커브로, 다른 무엇보다 먼저 디코딩됩니다. "
        "dlogm-osmo360은 Osmo 360의 DJI D-Log M이며 선형 Rec.2020으로 "
        "디코딩되므로, 입력은 선형이자 Rec.2020이 되고 둘 중 하나를 다른 값으로 "
@@ -9665,7 +9685,10 @@ SS_MSG(image_color_log_help,
        " 기본값 auto는 데이터셋 준비 때 각 입력의 메타데이터에서 읽은 내용으로 정합니다. 모든 입력이 D-Log M이면 dlogm-"
        "osmo360, 하나도 아니면 커브 없음입니다. D-Log M과 그 밖의 것(Normal, 다른 프로필, 알 수 없는 입력, "
        "사진)이 섞인 데이터셋과, 이 빌드가 디코딩할 수 없는 DJI 로그 프로필로 촬영한 데이터셋은 거부합니다. 프로필을 읽을 수 없는"
-       " 입력은 커브 없이 처리되고 이 플래그를 설정하라는 줄이 출력됩니다. none은 입력이 로그가 아니라는 뜻입니다."),
+       " 입력은 커브 없이 처리되고 이 플래그를 설정하라는 줄이 출력됩니다. none은 입력이 로그가 아니라는 뜻입니다."
+       " dlogm-avata360은 Avata 360용 같은 커브로, DJI가 Avata LUT를 공개하지 않아 DJI Studio의 "
+       "D-Log M 내보내기에 직접 맞춘 것입니다. 모든 입력이 Avata 360 D-Log M이면 auto가 이것을 고르고, "
+       "Osmo 360과 Avata 360 D-Log M이 섞인 데이터셋은 거부합니다."),
     DE("Die Log-Kurve, mit der die Eingabe aufgenommen wurde; sie wird vor "
        "allem anderen decodiert. `dlogm-osmo360` ist DJI D-Log M einer Osmo 360 "
        "und decodiert nach linearem Rec.2020, daher ist die Eingabe danach linear "
@@ -9679,7 +9702,12 @@ SS_MSG(image_color_log_help,
        "Profil, eine unbekannte Eingabe oder Fotos), sowie einer in einem DJI-"
        "Log-Profil, das dieser Build nicht decodieren kann. Eine Eingabe, deren "
        "Profil sich nicht lesen lässt, bekommt keine Kurve und eine Zeile, die "
-       "nach diesem Flag fragt. `none` sagt, dass die Eingabe kein Log ist."),
+       "nach diesem Flag fragt. `none` sagt, dass die Eingabe kein Log ist."
+       " `dlogm-avata360` ist dasselbe für eine Avata 360, aus unserer eigenen "
+       "Anpassung an den D-Log-M-Export von DJI Studio, da DJI keine Avata-LUT "
+       "veröffentlicht. `auto` wählt es, wenn jede Eingabe Avata-360-D-Log-M "
+       "ist, und lehnt einen Datensatz ab, der D-Log M von Osmo 360 und Avata "
+       "360 mischt."),
     FR("La courbe log dans laquelle l'entrée a été filmée, décodée avant tout le "
        "reste. « dlogm-osmo360 » est le D-Log M de DJI d'une Osmo 360 ; il se "
        "décode en Rec.2020 linéaire, l'entrée est donc ensuite linéaire et en "
@@ -9694,7 +9722,12 @@ SS_MSG(image_color_log_help,
        "photos), ainsi qu'un jeu filmé dans un profil log DJI que cette version "
        "ne sait pas décoder. Une entrée dont le profil est illisible n'a pas de "
        "courbe et une ligne demande ce paramètre. « none » indique que l'entrée "
-       "n'est pas en log."),
+       "n'est pas en log."
+       " « dlogm-avata360 » est l'équivalent pour une Avata 360, issu de notre "
+       "propre ajustement à l'export D-Log M de DJI Studio, car DJI ne publie "
+       "pas de LUT Avata. « auto » le choisit quand chaque entrée est en D-Log "
+       "M d'Avata 360, et refuse un jeu de données qui mélange le D-Log M "
+       "d'Osmo 360 et d'Avata 360."),
     ES("La curva logarítmica con la que se grabó la entrada, decodificada antes "
        "que nada. «dlogm-osmo360» es el D-Log M de DJI de una Osmo 360; se "
        "decodifica a Rec.2020 lineal, así que la entrada pasa a ser lineal y "
@@ -9708,7 +9741,12 @@ SS_MSG(image_color_log_help,
        "perfil, una entrada desconocida o fotos), y uno grabado en un perfil log"
        " de DJI que esta versión no sabe decodificar. Una entrada cuyo perfil no"
        " se puede leer queda sin curva y una línea pide este parámetro. «none» "
-       "indica que la entrada no es log."),
+       "indica que la entrada no es log."
+       " «dlogm-avata360» es lo mismo para una Avata 360, a partir de nuestro "
+       "propio ajuste a la exportación D-Log M de DJI Studio, ya que DJI no "
+       "publica una LUT para la Avata. «auto» lo elige cuando todas las entradas "
+       "son D-Log M de Avata 360, y rechaza un conjunto que mezcla D-Log M "
+       "de Osmo 360 y de Avata 360."),
     PT("A curva log em que a entrada foi gravada, decodificada antes de tudo. "
        "«dlogm-osmo360» é o D-Log M da DJI de uma Osmo 360; ele é decodificado "
        "para Rec.2020 linear, então a entrada passa a ser linear e Rec.2020, e "
@@ -9722,7 +9760,12 @@ SS_MSG(image_color_log_help,
        "desconhecida ou fotos), e um gravado em um perfil log da DJI que esta "
        "versão não consegue decodificar. Uma entrada cujo perfil não pode ser "
        "lido fica sem curva e uma linha pede este parâmetro. «none» diz que a "
-       "entrada não é log."),
+       "entrada não é log."
+       " «dlogm-avata360» é o mesmo para uma Avata 360, a partir do nosso "
+       "próprio ajuste à exportação D-Log M do DJI Studio, já que a DJI não "
+       "publica uma LUT para a Avata. «auto» o escolhe quando todas as entradas "
+       "são D-Log M da Avata 360, e recusa um conjunto que mistura D-Log M "
+       "da Osmo 360 e da Avata 360."),
     IT("La curva log con cui è stato girato l'ingresso, decodificata prima di "
        "ogni altra cosa. «dlogm-osmo360» è il D-Log M di DJI di una Osmo 360; "
        "si decodifica in Rec.2020 lineare, quindi l'ingresso diventa lineare e "
@@ -9736,7 +9779,12 @@ SS_MSG(image_color_log_help,
        "ingresso sconosciuto o foto), e uno girato in un profilo log DJI che "
        "questa versione non sa decodificare. Un ingresso il cui profilo non si "
        "legge resta senza curva e una riga chiede questo parametro. «none» "
-       "indica che l'ingresso non è log."),
+       "indica che l'ingresso non è log."
+       " «dlogm-avata360» è lo stesso per una Avata 360, dal nostro adattamento "
+       "all'esportazione D-Log M di DJI Studio, poiché DJI non pubblica una "
+       "LUT per la Avata. «auto» lo sceglie quando ogni ingresso è D-Log M "
+       "di Avata 360, e rifiuta un dataset che mescola D-Log M di Osmo 360 "
+       "e di Avata 360."),
     NL("De log-kromme waarmee de invoer is opgenomen, gedecodeerd vóór al het "
        "andere. `dlogm-osmo360` is DJI D-Log M van een Osmo 360; die decodeert "
        "naar lineair Rec.2020, dus de invoer is daarna lineair en Rec.2020, en "
@@ -9750,7 +9798,11 @@ SS_MSG(image_color_log_help,
        "wordt geweigerd, net als een die is opgenomen in een DJI-logprofiel dat "
        "deze versie niet kan decoderen. Invoer waarvan het profiel niet te lezen"
        " is krijgt geen kromme en een regel die om deze vlag vraagt. `none` zegt"
-       " dat de invoer geen log is."),
+       " dat de invoer geen log is."
+       " `dlogm-avata360` is hetzelfde voor een Avata 360, uit onze eigen "
+       "fit op de D-Log M-export van DJI Studio, omdat DJI geen Avata-LUT "
+       "publiceert. `auto` kiest hem als alle invoer Avata 360 D-Log M is, "
+       "en weigert een dataset die D-Log M van Osmo 360 en Avata 360 mengt."),
     RU("Логарифмическая кривая, в которой снят вход; она декодируется раньше "
        "всего остального. «dlogm-osmo360» -- DJI D-Log M с Osmo 360; он "
        "декодируется в линейный Rec.2020, поэтому вход становится линейным и "
@@ -9764,7 +9816,11 @@ SS_MSG(image_color_log_help,
        " или фотографии), а также снятый в логарифмическом профиле DJI, который "
        "эта сборка не умеет декодировать. Вход, профиль которого не читается, "
        "остаётся без кривой, и выводится строка с просьбой задать этот флаг. "
-       "«none» означает, что вход не логарифмический."),
+       "«none» означает, что вход не логарифмический."
+       " «dlogm-avata360» -- то же для Avata 360, по нашей собственной подгонке "
+       "к экспорту D-Log M из DJI Studio, так как DJI не публикует LUT для "
+       "Avata. «auto» выбирает его, если все входы в D-Log M с Avata 360, "
+       "и отклоняет набор, где смешаны D-Log M с Osmo 360 и с Avata 360."),
     TR("Girdinin çekildiği log eğrisi; her şeyden önce çözülür. "
        "`dlogm-osmo360`, bir Osmo 360'ın DJI D-Log M'sidir ve doğrusal "
        "Rec.2020'ye çözülür; bu yüzden girdi bundan sonra doğrusal ve Rec.2020 "
@@ -9777,7 +9833,11 @@ SS_MSG(image_color_log_help,
        "profil, bilinmeyen bir girdi ya da fotoğraflar) karıştıran bir veri "
        "kümesini ve bu sürümün çözemediği bir DJI log profiliyle çekilmiş olanı "
        "reddeder. Profili okunamayan bir girdi eğrisiz kalır ve bu bayrağı "
-       "isteyen bir satır yazılır. `none`, girdinin log olmadığını söyler."));
+       "isteyen bir satır yazılır. `none`, girdinin log olmadığını söyler."
+       " `dlogm-avata360`, bir Avata 360 için aynısıdır; DJI Avata için LUT "
+       "yayımlamadığından DJI Studio'nun D-Log M dışa aktarımına kendi uydurmamızdan "
+       "gelir. Her girdi Avata 360 D-Log M ise `auto` bunu seçer ve Osmo 360 "
+       "ile Avata 360 D-Log M'yi karıştıran bir veri kümesini reddeder."));
 
 SS_MSG(image_color_log_exposure,
     EN("Exposure after the log decode (stops)"), JA("ログデコード後の露出（段）"),
