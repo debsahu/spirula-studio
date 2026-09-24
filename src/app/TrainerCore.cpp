@@ -91,19 +91,24 @@ static std::string resolved_gamut(const std::string& name) {
 }
 
 // A log curve decodes to linear Rec.2020, which fixes the other two halves of
-// its side; an explicit contradiction is refused rather than silently ignored.
+// its side. Plain sRGB (a preset's "not linear, Rec.709") gives way to it; any
+// other explicit claim contradicts it and is refused.
 static void apply_log_curve(colorspace::InputCurve curve, const char* side,
                             const std::optional<bool>& is_linear,
                             const std::string& gamut, bool& linear_out,
                             std::string& gamut_out) {
     if (curve == colorspace::InputCurve::None) return;
     const std::string flag = std::string("--") + side + "-color-log dlogm-osmo360";
-    if (is_linear.has_value() && !*is_linear)
-        throw std::runtime_error(lfmt(lmsg::log_curve_needs_linear,
-            {flag, std::string("--") + side + "-color-is-linear"}));
-    if (!unset(gamut) && gamut != "Rec.2020")
-        throw std::runtime_error(lfmt(lmsg::log_curve_needs_rec2020,
-            {flag, std::string("--") + side + "-color-gamut", gamut}));
+    const bool srgb_gamut = unset(gamut) || gamut == "Rec.709";
+    const bool plain_srgb = srgb_gamut && !is_linear.value_or(false);
+    if (!plain_srgb) {
+        if (!unset(gamut) && gamut != "Rec.2020")
+            throw std::runtime_error(lfmt(lmsg::log_curve_needs_rec2020,
+                {flag, std::string("--") + side + "-color-gamut", gamut}));
+        if (is_linear.has_value() && !*is_linear)
+            throw std::runtime_error(lfmt(lmsg::log_curve_needs_linear,
+                {flag, std::string("--") + side + "-color-is-linear"}));
+    }
     linear_out = true;
     gamut_out = "Rec.2020";
 }
@@ -128,14 +133,31 @@ ColorResolution resolve_color(const TrainConfig& c) {
     r.splat_linear = c.splat_color_is_linear.value_or(r.image_linear);
     r.splat_transfer = colorspace::transfer_or(c.splat_color_transfer, r.image_transfer);
 
-    r.point_gamut = unset(c.point_color_gamut) ? r.image_gamut
+    // `off` says the cloud is ordinary sRGB, so it stops inheriting the image
+    // side, which a log curve has made linear Rec.2020.
+    const bool point_plain = c.point_color_log == "off";
+    const std::string point_gamut_default = point_plain ? std::string() : r.image_gamut;
+    r.point_gamut = unset(c.point_color_gamut) ? point_gamut_default
                                                : resolved_gamut(c.point_color_gamut);
-    r.point_linear = c.point_color_is_linear.value_or(r.image_linear);
+    r.point_linear = c.point_color_is_linear.value_or(!point_plain && r.image_linear);
     r.point_transfer = colorspace::transfer_or(c.point_color_transfer, r.image_transfer);
     r.point_curve = colorspace::input_curve_or(c.point_color_log, r.image_curve);
     apply_log_curve(r.point_curve, "point", c.point_color_is_linear,
                     c.point_color_gamut, r.point_linear, r.point_gamut);
     return r;
+}
+
+void source_pixel_for_compare(const ColorResolution& c, bool raw, float v[3]) {
+    if (c.image_curve != colorspace::InputCurve::DlogMOsmo360) return;
+    colorspace::dlogm_osmo360_to_rec2020(v);
+    colorspace::apply3x3(gamut_to_rec709("Rec.2020"), v);
+    if (!raw) {
+        for (int d = 0; d < 3; d++) v[d] = colorspace::tone_encode(v[d], c.image_transfer);
+        return;
+    }
+    colorspace::apply3x3(invert3x3(gamut_to_rec709(c.splat_gamut)), v);
+    for (int d = 0; d < 3; d++)
+        if (!c.splat_linear) v[d] = colorspace::linear_to_srgb(v[d]);
 }
 
 static WarpFaceFit resolve_face_fit(const TrainConfig& c) {

@@ -85,6 +85,11 @@ struct ColorResolution {
 
 ColorResolution resolve_color(const TrainConfig& c);
 
+// One pixel of an image file, taken into the space the image-compare panel's
+// render pane shows: the splat working space when `raw`, display values
+// otherwise. Only a log curve changes it; without one the file is the answer.
+void source_pixel_for_compare(const ColorResolution& c, bool raw, float v[3]);
+
 
 // ===========================================================================
 // LR schedule

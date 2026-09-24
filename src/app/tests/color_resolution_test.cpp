@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <array>
 #include <string>
 
 using namespace spirula;
@@ -61,7 +62,18 @@ void test_image_side() {
 
     TrainConfig c = dlogm();
     c.image_color_is_linear = false;
-    check(throws(c), "image: dlogm with --image-color-is-linear off is refused");
+    c.image_color_gamut = "Rec.2020";
+    check(throws(c), "image: dlogm with display-encoded Rec.2020 is refused");
+    c = dlogm();
+    c.image_color_is_linear = true;
+    c.image_color_gamut = "Rec.709";
+    check(throws(c), "image: dlogm with linear Rec.709 is refused");
+    c = dlogm();
+    c.image_color_transfer = "aces";
+    const ColorResolution t = resolve_color(c);
+    check(t.image_transfer == colorspace::Transfer::Aces &&
+              t.splat_transfer == colorspace::Transfer::Aces,
+          "image: a log curve leaves the output transfer alone");
     c = dlogm();
     c.image_color_gamut = "ACEScg";
     check(throws(c), "image: dlogm with a gamut other than Rec.2020 is refused");
@@ -87,12 +99,58 @@ void test_point_side() {
     TrainConfig c = dlogm();
     c.point_color_log = "off";
     const ColorResolution o = resolve_color(c);
-    check(o.point_curve == colorspace::InputCurve::None && o.point_is_splat(),
-          "point: `off` leaves the seeds undecoded");
+    check(o.point_curve == colorspace::InputCurve::None,
+          "point: `off` turns the seed decode off");
+
+    check(o.point_gamut.empty() && !o.point_linear,
+          "point: `off` reads the cloud as sRGB, not the decoded image side");
 
     c = dlogm();
     c.point_color_is_linear = false;
-    check(throws(c), "point: a log seed with --point-color-is-linear off is refused");
+    c.point_color_gamut = "Rec.2020";
+    check(throws(c), "point: a log seed stated display-encoded Rec.2020 is refused");
+}
+
+// The hdr preset states plain sRGB input; the log flag has to win over that,
+// not trip on a flag the user never passed.
+void test_hdr_preset() {
+    TrainConfig c;
+    const bool known = train_apply_preset(c, "hdr");
+    c.image_color_log = "dlogm-osmo360";
+    bool ok = known;
+    ColorResolution r;
+    try { r = resolve_color(c); } catch (const std::exception&) { ok = false; }
+    check(ok, "hdr preset: composes with --image-color-log");
+    check(ok && r.image_linear && r.image_gamut == "Rec.2020" &&
+              r.splat_gamut == "ACEScg" && r.splat_linear,
+          "hdr preset: images decode to Rec.2020, splats stay the preset's ACEScg");
+}
+
+// What a colour is on screen, from a splat-space value.
+float display_of(const ColorResolution& r, std::array<float, 3> col, int k) {
+    float v[3] = {col[0], col[1], col[2]};
+    for (int d = 0; d < 3; d++) if (!r.splat_linear) v[d] = colorspace::srgb_to_linear(v[d]);
+    colorspace::apply3x3(colorspace::gamut_to_rec709(r.splat_gamut), v);
+    return colorspace::tone_encode(v[k], r.splat_transfer);
+}
+
+void test_compare_source() {
+    const ColorResolution r = resolve_color(dlogm());
+    float raw[3] = {0.4f, 0.4f, 0.4f};
+    source_pixel_for_compare(r, true, raw);
+    check(std::fabs(raw[0] - 0.18f) < 1e-5f && std::fabs(raw[2] - 0.18f) < 1e-5f,
+          "compare: a log source is decoded into the raw splat space");
+    TrainConfig c = dlogm();
+    c.splat_color_gamut = "Rec.709";
+    c.splat_color_is_linear = false;
+    float disp[3] = {0.4f, 0.4f, 0.4f};
+    source_pixel_for_compare(resolve_color(c), false, disp);
+    check(std::fabs(disp[1] - 0.461356f) < 1e-4f,
+          "compare: a log source is decoded to display values");
+    float plain[3] = {0.4f, 0.3f, 0.2f};
+    source_pixel_for_compare(resolve_color(TrainConfig{}), true, plain);
+    check(plain[0] == 0.4f && plain[1] == 0.3f && plain[2] == 0.2f,
+          "compare: without a log curve the file is shown as stored");
 }
 
 void test_seeds() {
@@ -109,10 +167,18 @@ void test_seeds() {
               std::fabs(sat[2] - want[2]) < 1e-4f,
           "seed: a saturated code goes through the Osmo matrix");
 
+    // `off` on a D-Log M run must show an sRGB cloud exactly as a plain run
+    // would, even though the two runs store splats in different spaces.
     TrainConfig c = dlogm();
     c.point_color_log = "off";
-    const auto raw = seed_color(c, 102, 102, 102);
-    check(std::fabs(raw[0] - 0.4f) < 1e-4f, "seed: `off` keeps the stored value");
+    const TrainConfig plain;
+    const auto off = seed_color(c, 153, 51, 102);
+    const auto ref = seed_color(plain, 153, 51, 102);
+    bool same = true;
+    for (int k = 0; k < 3; k++)
+        same &= std::fabs(display_of(resolve_color(c), off, k) -
+                          display_of(resolve_color(plain), ref, k)) < 1e-4f;
+    check(same, "seed: `off` shows an sRGB cloud as a run without the flag does");
 }
 
 }  // namespace
@@ -121,6 +187,8 @@ int main() {
     test_image_side();
     test_point_side();
     test_seeds();
+    test_hdr_preset();
+    test_compare_source();
     std::printf("%s\n", g_failures ? "FAILED" : "all ok");
     return g_failures ? 1 : 0;
 }

@@ -10109,54 +10109,62 @@ SS_MSG(point_color_log,
 SS_MSG(point_color_log_help,
     EN("The log curve the seed point cloud's colors are in. `none` follows the "
        "input, which is right for a cloud SfM sampled from those log frames. "
-       "`off` says the colors are not log, as for an --init-ply or a cloud "
-       "made elsewhere."),
+       "`off` says the colors are ordinary sRGB, as for a cloud made from other "
+       "footage: they are read exactly as they would be without any log flag."),
     JA("初期点群の色が使っているログカーブです。none は入力に合わせ、そのログ"
-       "フレームから SfM が色を取った点群ならこれが正解です。off は色がログで"
-       "ないことを示し、--init-ply やほかで作った点群に使います。"),
+       "フレームから SfM が色を取った点群ならこれが正解です。off は色が普通の "
+       "sRGB であることを示し、ほかの映像から作った点群に使います。ログの指定が"
+       "ないときとまったく同じに読まれます。"),
     ZH_HANS("初始点云颜色所用的对数曲线。none 跟随输入，适用于 SfM 从这些对数帧"
-            "中采样颜色的点云。off 表示颜色不是对数编码，用于 --init-ply 或在别"
-            "处生成的点云。"),
+            "中采样颜色的点云。off 表示颜色是普通的 sRGB，用于由其他素材生成的"
+            "点云：读取方式与完全不设对数曲线时相同。"),
     ZH_HANT("初始點雲顏色所用的對數曲線。none 跟隨輸入，適用於 SfM 從這些對數影"
-            "格中取樣顏色的點雲。off 表示顏色不是對數編碼，用於 --init-ply 或在"
-            "別處產生的點雲。"),
+            "格中取樣顏色的點雲。off 表示顏色是普通的 sRGB，用於由其他素材產生的"
+            "點雲：讀取方式與完全不設對數曲線時相同。"),
     KO("초기 포인트 클라우드 색이 쓰는 로그 커브입니다. none은 입력을 따르며, "
        "SfM이 그 로그 프레임에서 색을 가져온 포인트 클라우드라면 이것이 맞습니다. "
-       "off는 색이 로그가 아니라는 뜻으로, --init-ply나 다른 곳에서 만든 포인트 "
-       "클라우드에 씁니다."),
+       "off는 색이 일반 sRGB라는 뜻으로, 다른 영상에서 만든 포인트 클라우드에 "
+       "씁니다. 로그 설정이 없을 때와 똑같이 읽힙니다."),
     DE("Die Log-Kurve, in der die Farben der Startpunktwolke vorliegen. `none` "
        "folgt der Eingabe; das stimmt für eine Wolke, deren Farben das SfM aus "
-       "diesen Log-Bildern entnommen hat. `off` sagt, dass die Farben nicht log "
-       "sind, etwa bei --init-ply oder einer anderswo erzeugten Wolke."),
+       "diesen Log-Bildern entnommen hat. `off` sagt, dass die Farben gewöhnliches "
+       "sRGB sind, etwa bei einer Wolke aus anderem Material: Sie werden genau so "
+       "gelesen wie ohne jede Log-Angabe."),
     FR("La courbe log des couleurs du nuage de points initial. « none » suit "
        "l'entrée, ce qui convient à un nuage dont la SfM a prélevé les couleurs "
-       "dans ces images log. « off » indique que les couleurs ne sont pas en "
-       "log, comme pour --init-ply ou un nuage produit ailleurs."),
+       "dans ces images log. « off » indique que les couleurs sont du sRGB "
+       "ordinaire, comme pour un nuage issu d'autres images : elles sont lues "
+       "exactement comme sans aucune option log."),
     ES("La curva logarítmica en la que están los colores de la nube de puntos "
        "inicial. «none» sigue a la entrada, lo correcto para una nube cuyos "
-       "colores tomó la SfM de esos fotogramas log. «off» indica que los "
-       "colores no son log, como en --init-ply o una nube hecha en otro lugar."),
+       "colores tomó la SfM de esos fotogramas log. «off» indica que los colores "
+       "son sRGB normal, como en una nube hecha con otras imágenes: se leen "
+       "exactamente igual que sin ninguna opción log."),
     PT("A curva log em que estão as cores da nuvem de pontos inicial. «none» "
        "segue a entrada, o certo para uma nuvem cujas cores o SfM tirou desses "
-       "quadros log. «off» indica que as cores não são log, como em --init-ply "
-       "ou numa nuvem gerada em outro lugar."),
+       "quadros log. «off» indica que as cores são sRGB comum, como numa nuvem "
+       "feita com outras imagens: elas são lidas exatamente como sem nenhuma "
+       "opção log."),
     IT("La curva log in cui sono i colori della nuvola di punti iniziale. "
        "«none» segue l'ingresso, il che è corretto per una nuvola i cui colori "
-       "la SfM ha preso da quei fotogrammi log. «off» indica che i colori non "
-       "sono log, come per --init-ply o una nuvola creata altrove."),
+       "la SfM ha preso da quei fotogrammi log. «off» indica che i colori sono "
+       "sRGB normale, come per una nuvola fatta da altre riprese: vengono letti "
+       "esattamente come senza alcuna opzione log."),
     NL("De log-kromme waarin de kleuren van de startpuntenwolk staan. `none` "
        "volgt de invoer, wat klopt voor een wolk waarvan de SfM de kleuren uit "
-       "die log-beelden nam. `off` zegt dat de kleuren niet log zijn, zoals bij "
-       "--init-ply of een elders gemaakte wolk."),
+       "die log-beelden nam. `off` zegt dat de kleuren gewoon sRGB zijn, zoals "
+       "bij een wolk uit ander beeldmateriaal: ze worden precies zo gelezen als "
+       "zonder enige log-instelling."),
     RU("Логарифмическая кривая, в которой заданы цвета исходного облака точек. "
        "«none» следует за входом -- это верно для облака, чьи цвета SfM взял из "
-       "этих логарифмических кадров. «off» говорит, что цвета не "
-       "логарифмические, как для --init-ply или облака, сделанного в другом "
-       "месте."),
+       "этих логарифмических кадров. «off» говорит, что цвета -- обычный sRGB, "
+       "как у облака из другой съёмки: они читаются точно так же, как без "
+       "всякого логарифмического флага."),
     TR("Başlangıç nokta bulutu renklerinin log eğrisi. `none` girdiyi izler; "
        "renklerini SfM'in o log karelerinden aldığı bir bulut için doğrusu "
-       "budur. `off`, renklerin log olmadığını söyler; --init-ply ya da başka "
-       "yerde üretilmiş bir bulut içindir."));
+       "budur. `off`, renklerin sıradan sRGB olduğunu söyler; başka "
+       "görüntülerden üretilmiş bir bulut içindir ve renkler hiçbir log ayarı "
+       "yokmuş gibi okunur."));
 
 
 // ===========================================================================
