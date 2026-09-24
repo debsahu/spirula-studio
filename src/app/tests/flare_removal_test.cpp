@@ -15,10 +15,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -516,108 +514,6 @@ std::string slurp(const fs::path& p) {
     return ss.str();
 }
 
-// ---- the clipped-sun path ----------------------------------------------------
-
-// A coded lens over a sky bright enough that the frame maximum is under 6x the
-// median, so only the clipped path can find a sun. `shape` pixels carry `code`
-// in every channel, or in red alone.
-Image clipped_scene(Encoding e, const std::function<bool(double, double)>& shape, float code = 1.0f,
-                    bool red_only = false, float sky_code = 0.65f) {
-    Image img;
-    img.w = img.h = 600;
-    img.factor = 1;
-    img.coded = true;
-    img.encoding = e;
-    const float sky = code_to_linear(sky_code, e), top = code_to_linear(code, e);
-    img.rgb.assign(600u * 600u * 3u, sky);
-    for (uint32_t y = 0; y < img.h; ++y)
-        for (uint32_t x = 0; x < img.w; ++x) {
-            if (!shape(x + 0.5, y + 0.5)) continue;
-            float* dst = &img.rgb[((size_t)y * img.w + x) * 3];
-            dst[0] = top;
-            if (!red_only) dst[1] = dst[2] = top;
-        }
-    return img;
-}
-
-std::function<bool(double, double)> disc(double cx, double cy, double r) {
-    return [=](double x, double y) { return std::hypot(x - cx, y - cy) < r; };
-}
-
-// Each check names what it kills: the path absent; a threshold fixed to the
-// D-Log M curve; no size, aspect or fill limit; clipping judged against the
-// frame maximum, or on any one channel; the clipped path tried before the ratio.
-void test_clipped_sun() {
-    const auto sun = disc(300.0, 130.0, 12.0);
-    Image img = clipped_scene(Encoding::DlogM, sun);
-    LensFlare lf = analyse_ok(img);
-    check(lf.sun_found && close_to(lf.sun_x, 300.0, 0.5) && close_to(lf.sun_y, 130.0, 0.5) &&
-              close_to(lf.sun_radius, 12.0, 1.0),
-          "clipped: a D-Log M sun over a bright sky is found by its clipped pixels");
-    img.coded = false;
-    check(!analyse_ok(img).sun_found, "clipped: control, the 6x ratio alone misses that sun");
-    check(analyse_ok(clipped_scene(Encoding::Rec709, sun, 1.0f, false, 0.60f)).sun_found,
-          "clipped: a BT.709 sun is clipped against the BT.709 curve's top");
-    check(!analyse_ok(clipped_scene(Encoding::DlogM, [](double x, double y) {
-               return std::fabs(x - 300.0) < 75.0 && std::fabs(y - 260.0) < 75.0;
-           })).sun_found,
-          "clipped: a window-sized clipped region is not the sun");
-    check(!analyse_ok(clipped_scene(Encoding::DlogM, [](double x, double y) {
-               return std::fabs(x - 300.0) < 30.0 && std::fabs(y - 130.0) < 6.0;
-           })).sun_found,
-          "clipped: a clipped bar of aspect 5 is not the sun");
-    check(!analyse_ok(clipped_scene(Encoding::DlogM, [](double x, double y) {
-               const double d = std::hypot(x - 300.0, y - 130.0);
-               return d < 14.0 && d >= 10.0;
-           })).sun_found,
-          "clipped: a clipped ring is not the sun");
-    check(!analyse_ok(clipped_scene(Encoding::DlogM, sun, 0.90f)).sun_found,
-          "clipped: a disc at code 0.90 is bright, not clipped");
-    check(!analyse_ok(clipped_scene(Encoding::DlogM, sun, 1.0f, true)).sun_found,
-          "clipped: a disc clipped in red alone is not the sun");
-    // A 7 px core at the top code in a 12 px halo at code 0.96, which is
-    // clipped but under 92% of the frame maximum, over a dark sky.
-    Image cored = clipped_scene(Encoding::DlogM, sun, 0.96f, false, 0.30f);
-    for (uint32_t y = 0; y < cored.h; ++y)
-        for (uint32_t x = 0; x < cored.w; ++x)
-            if (std::hypot(x + 0.5 - 300.0, y + 0.5 - 130.0) < 7.0)
-                for (int c = 0; c < 3; ++c)
-                    cored.rgb[((size_t)y * cored.w + x) * 3 + c] = code_to_linear(1.0f, Encoding::DlogM);
-    lf = analyse_ok(cored);
-    check(lf.sun_found && close_to(lf.sun_radius, 7.0, 1.0),
-          "clipped: where the 6x ratio finds a sun, its core is the sun, not the clipped halo");
-}
-
-// Real frames, when given: SS_FLARE_SUN_FRAME must show a sun, and
-// SS_FLARE_WINDOW_FRAME (a blown window, no sun) must not; both 16-bit D-Log M.
-void test_real_frames() {
-    const auto sun_of = [](const char* path, bool& found) {
-        int w = 0, h = 0, n = 0;
-        Frame fr;
-        fr.data16 = stbi_load_16(path, &w, &h, &n, 0);
-        fr.w = w;
-        fr.h = h;
-        fr.channels = n;
-        fr.bits = 16;
-        Image img;
-        std::string err;
-        LensFlare lf;
-        const bool ok = fr.data16 && downsample(fr, Encoding::DlogM, Params{}.factor, img, err) &&
-                        analyse(img, centred_lens(w, h), Params{}, lf, err);
-        stbi_image_free(fr.data16);
-        found = lf.sun_found;
-        std::printf("  %s: sun %s at (%.0f, %.0f) r %.0f, %u candidates, %zu ghosts\n", path,
-                    found ? "found" : "not found", lf.sun_x, lf.sun_y, lf.sun_radius, lf.candidates,
-                    lf.ghosts.size());
-        return ok;
-    };
-    bool found = false;
-    if (const char* p = std::getenv("SS_FLARE_SUN_FRAME"))
-        check(sun_of(p, found) && found, "real: the sun at the rim of an Avata D-Log M frame is found");
-    if (const char* p = std::getenv("SS_FLARE_WINDOW_FRAME"))
-        check(sun_of(p, found) && !found, "real: a blown-out window is not taken for the sun");
-}
-
 // Kills: rewriting a file with nothing removed; a 16-bit writer that loses bits.
 void test_process_file(const fs::path& dir) {
     Params p;
@@ -669,8 +565,6 @@ int main() {
     test_recovers_planted_ghost();
     test_recovers_rim_and_tilt();
     test_refusals();
-    test_clipped_sun();
-    test_real_frames();
     test_flattens_ghost();
     test_downsample();
     test_curves();

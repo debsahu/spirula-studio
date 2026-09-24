@@ -62,10 +62,7 @@ BT.709 and logged as an assumption.
    lens), each pixel the mean of a 2 x 2 sample grid in its block.
 2. **Sun**: the largest region within 92% of the frame maximum, which must be
    compact (aspect <= 1.8, fill >= 0.5), with the maximum at least 6x the
-   median (OpenOSV's test). When that finds none, the largest region clipped
-   in every channel (code >= 0.95 on the frame's own curve, so a saturated
-   colour, which clips one channel, never counts) if it is sun-sized and round.
-   Otherwise there is no sun and the frame is not touched.
+   median. Otherwise there is no sun and the frame is not touched.
 3. **Seeds**: relative band-pass bumps over 3% within +-20 degrees of the sun
    line (either side of the axis), beyond 3 sun radii, on low texture only.
 4. **Fit**: Levenberg-Marquardt over a rotated rounded rectangle, the
@@ -128,21 +125,6 @@ two-track clip and checks a resumed run skips it.
 On real frames of an Osmo 360 D-Log M clip (indoors, no sun; one frame with a
 large bright window, one with a window at the lens rim taken for the sun and
 six candidates tried): no frame changed, files byte-identical.
-
-**The clipped path exists for bright skies.** D-Log M tops out at 3.76
-linear, so a frame whose median inside the circle exceeds 0.63 can never pass
-the 6x test; three Avata 360 D-Log M frames with the sun at the rim measured
-4.2-4.9x. Its limits, measured on those three suns at code >= 0.95:
-equivalent radius <= 0.12 of the circle radius (suns 0.056-0.067; the blown
-window of an Osmo 360 indoor frame 0.44, and it is the largest clipped
-region, so it is refused), second-moment aspect <= 2 (suns 1.22-1.56, flattened
-near the rim), area >= 0.6 of its moment ellipse (suns 0.77-0.94; a ring or a
-ragged sky patch falls below). With it, `sam flare` on six Avata frames found
-the sun in all three that hold it and changed two. **Both changes are wrong**:
-each subtracts a small bright cloud on smooth sky beside the sun line, which
-the ghost gates accept. The same cloud is accepted with the sun found by the
-6x test (gate lowered to 4x), so it is the ghost stage's, not the detection's.
-The third frame (sun at the rim, red glow beyond the circle) fits no ghost.
 
 OpenOSV's sample clip is not published, so its before/after could only be
 approximated from the 8-bit display crop in its `research/flare/`
