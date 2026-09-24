@@ -1,6 +1,6 @@
 // DJI D-Log M, Osmo 360: code value -> scene-linear Rec.2020 (grey 0.18).
 // Device copy of core/DlogM.h; the constants must match it, and the
-// gt_decode_dlogm engine test compares the two.
+// gt_decode_dlogm engine test compares the two. See docs/notes/dlog-m.md.
 // Based on https://github.com/Kemerd/OpenOSV/blob/3a39776272efb5dfdc1d29711ae746e855383084/include/osv/color/DlogM.h
 // and https://github.com/Kemerd/OpenOSV/blob/3a39776272efb5dfdc1d29711ae746e855383084/include/osv/color/Matrices.h
 // SPDX-FileCopyrightText: Copyright 2026 The OpenOSV Contributors
