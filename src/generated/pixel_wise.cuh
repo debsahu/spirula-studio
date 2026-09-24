@@ -368,6 +368,21 @@ inline __device__ float splat_dc_decode(float x_8)
     return ((F32_exp((0.5f * x_8))) - 1.0f) * 1.77245378494262695f;
 }
 
+inline __device__ float dlogm_osmo360_to_linear_0(float code_0)
+{
+    float t_0 = (F32_exp2((6.69145584106445312f * code_0 + 0.63083583116531372f))) + -2.36086249351501465f;
+    float pw_0;
+    if(t_0 < 0.4061998724937439f)
+    {
+        pw_0 = t_0 * 1.01188600063323975f + 0.82205605506896973f;
+    }
+    else
+    {
+        pw_0 = t_0 * 3.03565812110900879f;
+    }
+    return pw_0 * 0.00786506105214357f;
+}
+
 struct DiffPair_matrixx3Cfloatx2C3x2C3x3E_0
 {
     Matrix<float, 3, 3>  primal_0;
@@ -440,6 +455,11 @@ inline __device__ float3  mul_0(Matrix<float, 3, 3>  left_1, float3  right_1)
     return result_6;
 }
 
+inline __device__ float3  dlogm_osmo360_to_rec2020(float3  code_1)
+{
+    return mul_0(makeMatrix<float, 3, 3> (0.80726855993270874f, 0.15266364812850952f, 0.04006779193878174f, 0.0428781621158123f, 0.9907376766204834f, -0.0336158275604248f, -0.00960387196391821f, -0.09426373988389969f, 1.10386765003204346f), make_float3 (dlogm_osmo360_to_linear_0(code_1.x), dlogm_osmo360_to_linear_0(code_1.y), dlogm_osmo360_to_linear_0(code_1.z)));
+}
+
 inline __device__ void xfer_pass_grad_0(DiffPair_float_0 * dp_0, float v_out_1)
 {
     dp_0->primal_0 = (*dp_0).primal_0;
@@ -454,9 +474,9 @@ inline __device__ float xfer_max0_0(float x_9)
 
 inline __device__ float xfer_filmic_0(float x_10)
 {
-    float t_0 = xfer_max0_0(x_10 - 0.00400000018998981f);
-    float _S41 = 6.19999980926513672f * t_0;
-    return t_0 * (_S41 + 0.5f) / (t_0 * (_S41 + 1.70000004768371582f) + 0.05999999865889549f);
+    float t_1 = xfer_max0_0(x_10 - 0.00400000018998981f);
+    float _S41 = 6.19999980926513672f * t_1;
+    return t_1 * (_S41 + 0.5f) / (t_1 * (_S41 + 1.70000004768371582f) + 0.05999999865889549f);
 }
 
 inline __device__ float xfer_aces_0(float x_11)

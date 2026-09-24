@@ -8,6 +8,7 @@
 #include "checkpoint/SplatPly.h"
 #include "config/TrainConfigJson.h"
 #include "core/ColorSpace.h"
+#include "core/DlogM.h"
 #include "core/ExrImage.h"
 #include "i18n/catalog/Log.h"
 #include "data/CameraMath.h"
@@ -89,11 +90,33 @@ static std::string resolved_gamut(const std::string& name) {
     return name == "Rec.709" ? std::string() : name;
 }
 
+// A log curve decodes to linear Rec.2020, which fixes the other two halves of
+// its side; an explicit contradiction is refused rather than silently ignored.
+static void apply_log_curve(colorspace::InputCurve curve, const char* side,
+                            const std::optional<bool>& is_linear,
+                            const std::string& gamut, bool& linear_out,
+                            std::string& gamut_out) {
+    if (curve == colorspace::InputCurve::None) return;
+    const std::string flag = std::string("--") + side + "-color-log dlogm-osmo360";
+    if (is_linear.has_value() && !*is_linear)
+        throw std::runtime_error(lfmt(lmsg::log_curve_needs_linear,
+            {flag, std::string("--") + side + "-color-is-linear"}));
+    if (!unset(gamut) && gamut != "Rec.2020")
+        throw std::runtime_error(lfmt(lmsg::log_curve_needs_rec2020,
+            {flag, std::string("--") + side + "-color-gamut", gamut}));
+    linear_out = true;
+    gamut_out = "Rec.2020";
+}
+
 ColorResolution resolve_color(const TrainConfig& c) {
     ColorResolution r;
     r.image_gamut    = unset(c.image_color_gamut)
                            ? std::string() : resolved_gamut(c.image_color_gamut);
     r.image_linear   = c.image_color_is_linear.value_or(false);
+    r.image_curve    = colorspace::input_curve_or(c.image_color_log,
+                                                  colorspace::InputCurve::None);
+    apply_log_curve(r.image_curve, "image", c.image_color_is_linear,
+                    c.image_color_gamut, r.image_linear, r.image_gamut);
     r.image_transfer = colorspace::transfer_or(c.image_color_transfer,
                                                colorspace::Transfer::Srgb);
 
@@ -109,6 +132,9 @@ ColorResolution resolve_color(const TrainConfig& c) {
                                                : resolved_gamut(c.point_color_gamut);
     r.point_linear = c.point_color_is_linear.value_or(r.image_linear);
     r.point_transfer = colorspace::transfer_or(c.point_color_transfer, r.image_transfer);
+    r.point_curve = colorspace::input_curve_or(c.point_color_log, r.image_curve);
+    apply_log_curve(r.point_curve, "point", c.point_color_is_linear,
+                    c.point_color_gamut, r.point_linear, r.point_gamut);
     return r;
 }
 
@@ -176,6 +202,9 @@ public:
 
     void operator()(float col[3]) const {
         if (identity_) return;
+        // A log seed is linear once decoded (resolve_color forces point_linear).
+        if (c_.point_curve == colorspace::InputCurve::DlogMOsmo360)
+            colorspace::dlogm_osmo360_to_rec2020(col);
         for (int d = 0; d < 3; d++)
             if (!c_.point_linear) col[d] = colorspace::srgb_to_linear(col[d]);
         colorspace::apply3x3(to_709_, col);
@@ -1024,6 +1053,7 @@ void TrainerSession::setup_engine() {
             splat_cs_on ? vec(gamut_to_rec709(color.splat_gamut)) : std::vector<float>{},
             image_cs_on, (int)color.image_transfer, color.image_linear,
             image_cs_on ? vec(gamut_to_rec709(color.image_gamut)) : std::vector<float>{});
+        engine_init_image_decode((int)color.image_curve);
     }
 
     // ---- DataManager ---------------------------------------------------

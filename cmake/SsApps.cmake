@@ -359,6 +359,11 @@ add_executable(packed_lens_test
     ${SS_SRC}/app/Pano360.cpp)
 ss_configure_app(packed_lens_test)
 
+# resolve_color() and the seed colours; both live in the engine library.
+add_executable(color_resolution_test
+    ${SS_SRC}/app/tests/color_resolution_test.cpp)
+ss_configure_app(color_resolution_test)
+
 # The stencil shapes, spelling and fill, with no GUI: FrameMask.cpp is compiled
 # into the CLI too, so this must link without imgui.
 add_executable(frame_mask_test

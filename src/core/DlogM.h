@@ -1,6 +1,8 @@
 #pragma once
 
 // DJI D-Log M, Osmo 360: code value -> scene-linear Rec.2020 (grey 0.18).
+// Host copy; shaders/dlogm.slang is the device copy and must hold the same
+// constants (gt_decode_dlogm compares the two).
 // Based on https://github.com/Kemerd/OpenOSV/blob/3a39776272efb5dfdc1d29711ae746e855383084/include/osv/color/DlogM.h
 // and https://github.com/Kemerd/OpenOSV/blob/3a39776272efb5dfdc1d29711ae746e855383084/include/osv/color/Matrices.h
 // SPDX-FileCopyrightText: Copyright 2026 The OpenOSV Contributors

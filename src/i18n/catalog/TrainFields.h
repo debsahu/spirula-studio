@@ -9603,6 +9603,87 @@ SS_MSG(image_color_gamut_help,
        "derse desin sRGB ana renklerini sabitler. Hiçbir ton eşlemesi "
        "uygulanmaz."));
 
+SS_MSG(image_color_log,
+    EN("Input log curve"), JA("入力のログカーブ"),
+    ZH_HANS("输入对数曲线"), ZH_HANT("輸入對數曲線"),
+    KO("입력 로그 커브"), DE("Log-Kurve der Eingabe"),
+    FR("Courbe log d'entrée"), ES("Curva logarítmica de entrada"),
+    PT("Curva log de entrada"), IT("Curva log in ingresso"),
+    NL("Log-kromme van de invoer"), RU("Логарифмическая кривая входа"),
+    TR("Girdi log eğrisi"));
+SS_MSG(image_color_log_help,
+    EN("The log curve the input was shot in, decoded before anything else. "
+       "`dlogm-osmo360` is DJI D-Log M from an Osmo 360; it decodes to linear "
+       "Rec.2020, so the input is then linear and Rec.2020, and setting either "
+       "to anything else is an error. Only the training images are decoded: "
+       "masking, SfM and depth still see the flat log frames."),
+    JA("入力を撮影したログカーブで、ほかの何よりも先にデコードされます。"
+       "dlogm-osmo360 は Osmo 360 の DJI D-Log M で、リニアな Rec.2020 に"
+       "デコードされます。そのため入力はリニアかつ Rec.2020 となり、どちらかを"
+       "別の値にするとエラーになります。デコードされるのは学習画像だけで、"
+       "マスク・SfM・深度は平坦なログのフレームのまま見ます。"),
+    ZH_HANS("拍摄输入时所用的对数曲线，在其他一切之前解码。dlogm-osmo360 是 "
+            "Osmo 360 的 DJI D-Log M，解码为线性 Rec.2020，因此输入随之成为线性"
+            "且为 Rec.2020，把其中任一项设为别的值都会报错。只有训练图像会被"
+            "解码：蒙版、SfM 和深度看到的仍是平淡的对数帧。"),
+    ZH_HANT("拍攝輸入時所用的對數曲線，在其他一切之前解碼。dlogm-osmo360 是 "
+            "Osmo 360 的 DJI D-Log M，解碼為線性 Rec.2020，因此輸入隨之成為線性"
+            "且為 Rec.2020，把其中任一項設為別的值都會報錯。只有訓練影像會被"
+            "解碼：遮罩、SfM 和深度看到的仍是平淡的對數影格。"),
+    KO("입력을 촬영한 로그 커브로, 다른 무엇보다 먼저 디코딩됩니다. "
+       "dlogm-osmo360은 Osmo 360의 DJI D-Log M이며 선형 Rec.2020으로 "
+       "디코딩되므로, 입력은 선형이자 Rec.2020이 되고 둘 중 하나를 다른 값으로 "
+       "설정하면 오류입니다. 디코딩되는 것은 학습 이미지뿐이며 마스크, SfM, "
+       "깊이는 여전히 밋밋한 로그 프레임을 봅니다."),
+    DE("Die Log-Kurve, mit der die Eingabe aufgenommen wurde; sie wird vor "
+       "allem anderen decodiert. `dlogm-osmo360` ist DJI D-Log M einer Osmo 360 "
+       "und decodiert nach linearem Rec.2020, daher ist die Eingabe danach linear "
+       "und Rec.2020, und beides anders zu setzen ist ein Fehler. Decodiert "
+       "werden nur die Trainingsbilder: Maskierung, SfM und Tiefe sehen weiter "
+       "die flachen Log-Bilder."),
+    FR("La courbe log dans laquelle l'entrée a été filmée, décodée avant tout le "
+       "reste. « dlogm-osmo360 » est le D-Log M de DJI d'une Osmo 360 ; il se "
+       "décode en Rec.2020 linéaire, l'entrée est donc ensuite linéaire et en "
+       "Rec.2020, et régler l'un ou l'autre autrement est une erreur. Seules les "
+       "images d'entraînement sont décodées : le masquage, la SfM et la "
+       "profondeur voient toujours les images log plates."),
+    ES("La curva logarítmica con la que se grabó la entrada, decodificada antes "
+       "que nada. «dlogm-osmo360» es el D-Log M de DJI de una Osmo 360; se "
+       "decodifica a Rec.2020 lineal, así que la entrada pasa a ser lineal y "
+       "Rec.2020, y fijar cualquiera de las dos en otro valor es un error. Solo "
+       "se decodifican las imágenes de entrenamiento: el enmascarado, la SfM y "
+       "la profundidad siguen viendo los fotogramas log planos."),
+    PT("A curva log em que a entrada foi gravada, decodificada antes de tudo. "
+       "«dlogm-osmo360» é o D-Log M da DJI de uma Osmo 360; ele é decodificado "
+       "para Rec.2020 linear, então a entrada passa a ser linear e Rec.2020, e "
+       "definir qualquer um dos dois com outro valor é um erro. Só as imagens "
+       "de treinamento são decodificadas: o mascaramento, o SfM e a "
+       "profundidade continuam vendo os quadros log lavados."),
+    IT("La curva log con cui è stato girato l'ingresso, decodificata prima di "
+       "ogni altra cosa. «dlogm-osmo360» è il D-Log M di DJI di una Osmo 360; "
+       "si decodifica in Rec.2020 lineare, quindi l'ingresso diventa lineare e "
+       "Rec.2020, e impostare uno dei due diversamente è un errore. Vengono "
+       "decodificate solo le immagini di addestramento: mascheratura, SfM e "
+       "profondità vedono ancora i fotogrammi log piatti."),
+    NL("De log-kromme waarmee de invoer is opgenomen, gedecodeerd vóór al het "
+       "andere. `dlogm-osmo360` is DJI D-Log M van een Osmo 360; die decodeert "
+       "naar lineair Rec.2020, dus de invoer is daarna lineair en Rec.2020, en "
+       "een van beide anders instellen is een fout. Alleen de trainingsbeelden "
+       "worden gedecodeerd: maskeren, SfM en diepte zien nog de vlakke "
+       "log-beelden."),
+    RU("Логарифмическая кривая, в которой снят вход; она декодируется раньше "
+       "всего остального. «dlogm-osmo360» -- DJI D-Log M с Osmo 360; он "
+       "декодируется в линейный Rec.2020, поэтому вход становится линейным и "
+       "в Rec.2020, и задать одно из них иначе -- ошибка. Декодируются только "
+       "обучающие изображения: маскирование, SfM и глубина по-прежнему видят "
+       "плоские логарифмические кадры."),
+    TR("Girdinin çekildiği log eğrisi; her şeyden önce çözülür. "
+       "`dlogm-osmo360`, bir Osmo 360'ın DJI D-Log M'sidir ve doğrusal "
+       "Rec.2020'ye çözülür; bu yüzden girdi bundan sonra doğrusal ve Rec.2020 "
+       "olur, ikisinden birini başka bir değere ayarlamak hatadır. Yalnızca "
+       "eğitim görüntüleri çözülür: maskeleme, SfM ve derinlik hâlâ düz log "
+       "karelerini görür."));
+
 SS_MSG(splat_color_is_linear,
     EN("Train splats in linear light"), JA("スプラットをリニアで学習"),
     ZH_HANS("在线性光下训练泼溅"), ZH_HANT("在線性光下訓練潑濺"),
@@ -10013,6 +10094,69 @@ SS_MSG(point_color_gamut_help,
        "görüntülerini izler. Sade sRGB'de kalmış bir bulut için, örneğin nokta "
        "renklerini yerleşik SfM'in sRGB olarak yazdığı bir bulut için Rec.709 "
        "seçin."));
+
+SS_MSG(point_color_log,
+    EN("Seed point log curve"), JA("初期点群のログカーブ"),
+    ZH_HANS("初始点云对数曲线"), ZH_HANT("初始點雲對數曲線"),
+    KO("초기 포인트 로그 커브"), DE("Log-Kurve der Startpunkte"),
+    FR("Courbe log des points initiaux"),
+    ES("Curva logarítmica de los puntos iniciales"),
+    PT("Curva log dos pontos iniciais"),
+    IT("Curva log dei punti iniziali"),
+    NL("Log-kromme van de startpunten"),
+    RU("Логарифмическая кривая начальных точек"),
+    TR("Başlangıç noktası log eğrisi"));
+SS_MSG(point_color_log_help,
+    EN("The log curve the seed point cloud's colors are in. `none` follows the "
+       "input, which is right for a cloud SfM sampled from those log frames. "
+       "`off` says the colors are not log, as for an --init-ply or a cloud "
+       "made elsewhere."),
+    JA("初期点群の色が使っているログカーブです。none は入力に合わせ、そのログ"
+       "フレームから SfM が色を取った点群ならこれが正解です。off は色がログで"
+       "ないことを示し、--init-ply やほかで作った点群に使います。"),
+    ZH_HANS("初始点云颜色所用的对数曲线。none 跟随输入，适用于 SfM 从这些对数帧"
+            "中采样颜色的点云。off 表示颜色不是对数编码，用于 --init-ply 或在别"
+            "处生成的点云。"),
+    ZH_HANT("初始點雲顏色所用的對數曲線。none 跟隨輸入，適用於 SfM 從這些對數影"
+            "格中取樣顏色的點雲。off 表示顏色不是對數編碼，用於 --init-ply 或在"
+            "別處產生的點雲。"),
+    KO("초기 포인트 클라우드 색이 쓰는 로그 커브입니다. none은 입력을 따르며, "
+       "SfM이 그 로그 프레임에서 색을 가져온 포인트 클라우드라면 이것이 맞습니다. "
+       "off는 색이 로그가 아니라는 뜻으로, --init-ply나 다른 곳에서 만든 포인트 "
+       "클라우드에 씁니다."),
+    DE("Die Log-Kurve, in der die Farben der Startpunktwolke vorliegen. `none` "
+       "folgt der Eingabe; das stimmt für eine Wolke, deren Farben das SfM aus "
+       "diesen Log-Bildern entnommen hat. `off` sagt, dass die Farben nicht log "
+       "sind, etwa bei --init-ply oder einer anderswo erzeugten Wolke."),
+    FR("La courbe log des couleurs du nuage de points initial. « none » suit "
+       "l'entrée, ce qui convient à un nuage dont la SfM a prélevé les couleurs "
+       "dans ces images log. « off » indique que les couleurs ne sont pas en "
+       "log, comme pour --init-ply ou un nuage produit ailleurs."),
+    ES("La curva logarítmica en la que están los colores de la nube de puntos "
+       "inicial. «none» sigue a la entrada, lo correcto para una nube cuyos "
+       "colores tomó la SfM de esos fotogramas log. «off» indica que los "
+       "colores no son log, como en --init-ply o una nube hecha en otro lugar."),
+    PT("A curva log em que estão as cores da nuvem de pontos inicial. «none» "
+       "segue a entrada, o certo para uma nuvem cujas cores o SfM tirou desses "
+       "quadros log. «off» indica que as cores não são log, como em --init-ply "
+       "ou numa nuvem gerada em outro lugar."),
+    IT("La curva log in cui sono i colori della nuvola di punti iniziale. "
+       "«none» segue l'ingresso, il che è corretto per una nuvola i cui colori "
+       "la SfM ha preso da quei fotogrammi log. «off» indica che i colori non "
+       "sono log, come per --init-ply o una nuvola creata altrove."),
+    NL("De log-kromme waarin de kleuren van de startpuntenwolk staan. `none` "
+       "volgt de invoer, wat klopt voor een wolk waarvan de SfM de kleuren uit "
+       "die log-beelden nam. `off` zegt dat de kleuren niet log zijn, zoals bij "
+       "--init-ply of een elders gemaakte wolk."),
+    RU("Логарифмическая кривая, в которой заданы цвета исходного облака точек. "
+       "«none» следует за входом -- это верно для облака, чьи цвета SfM взял из "
+       "этих логарифмических кадров. «off» говорит, что цвета не "
+       "логарифмические, как для --init-ply или облака, сделанного в другом "
+       "месте."),
+    TR("Başlangıç nokta bulutu renklerinin log eğrisi. `none` girdiyi izler; "
+       "renklerini SfM'in o log karelerinden aldığı bir bulut için doğrusu "
+       "budur. `off`, renklerin log olmadığını söyler; --init-ply ya da başka "
+       "yerde üretilmiş bir bulut içindir."));
 
 
 // ===========================================================================
@@ -11302,6 +11446,12 @@ SS_MSG(choice_same_as_input,
     ES("igual que la entrada"), PT("igual à entrada"), IT("come l'ingresso"),
     NL("zoals de invoer"),  RU("как у входа"),  TR("girdiyle aynı"));
 
+SS_MSG(choice_not_log,
+    EN("not log"), JA("ログではない"), ZH_HANS("非对数"), ZH_HANT("非對數"),
+    KO("로그 아님"), DE("kein Log"), FR("pas en log"), ES("sin log"),
+    PT("sem log"), IT("non log"), NL("geen log"), RU("не логарифм"),
+    TR("log değil"));
+
 SS_MSG(choice_never,
     EN("never"),
     JA("しない"),
@@ -11478,15 +11628,18 @@ inline constexpr ChoiceText kChoiceText[] = {
     {"cache_images", "gpu",  &choice_gpu},
     {"cache_images", "disk", &choice_disk},
 
-    // `none` is the UNSET value for these six, not a colour space -- Rec.709
-    // and `srgb` are the explicit ones. Labelled so the dropdown cannot read
-    // as "no gamut" / "no transfer".
+    // `none` is the UNSET value for these, not a colour space -- Rec.709,
+    // `srgb` and `off` are the explicit ones. Labelled so the dropdown cannot
+    // read as "no gamut" / "no transfer".
     {"image_color_gamut", "none", &choice_from_the_file},
     {"splat_color_gamut", "none", &choice_same_as_input},
     {"image_color_transfer", "none", &choice_srgb_default},
     {"splat_color_transfer", "none", &choice_same_as_input},
     {"point_color_gamut", "none", &choice_same_as_input},
     {"point_color_transfer", "none", &choice_same_as_input},
+    {"image_color_log", "none", &choice_not_log},
+    {"point_color_log", "none", &choice_same_as_input},
+    {"point_color_log", "off", &choice_not_log},
 
     {"random_init", "never",  &choice_never},
     {"random_init", "auto",   &choice_without_points},

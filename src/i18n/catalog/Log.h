@@ -2053,6 +2053,44 @@ SS_MSG(ppisp_before_color_space_order,
     RU("{0} требует {1}: покадровая коррекция цвета всегда применяется в sRGB"),
     TR("{0}, {1} gerektirir: fotoğraf başına renk düzeltmesi her zaman sRGB'de "
        "uygulanır"));
+SS_MSG(log_curve_needs_linear,
+    EN("{0} decodes to linear light, so {1} cannot be off"),
+    JA("{0} はリニアな光にデコードするため、{1} をオフにはできません"),
+    ZH_HANS("{0} 解码为线性光，因此不能关闭 {1}"),
+    ZH_HANT("{0} 解碼為線性光，因此不能關閉 {1}"),
+    KO("{0}은(는) 선형 빛으로 디코딩하므로 {1}을(를) 끌 수 없습니다"),
+    DE("{0} decodiert in lineares Licht, daher kann {1} nicht aus sein"),
+    FR("{0} décode en lumière linéaire, donc {1} ne peut pas être désactivé"),
+    ES("{0} decodifica a luz lineal, así que {1} no puede estar desactivado"),
+    PT("{0} decodifica para luz linear, então {1} não pode estar desligado"),
+    IT("{0} decodifica in luce lineare, quindi {1} non può essere disattivato"),
+    NL("{0} decodeert naar lineair licht, dus {1} kan niet uit staan"),
+    RU("{0} декодирует в линейный свет, поэтому {1} нельзя выключать"),
+    TR("{0} doğrusal ışığa çözer, bu yüzden {1} kapalı olamaz"));
+SS_MSG(log_curve_needs_rec2020,
+    EN("{0} decodes to Rec.2020, so {1} must be Rec.2020 or unset, not {2}"),
+    JA("{0} は Rec.2020 にデコードするため、{1} は Rec.2020 か未設定にして"
+       "ください（{2} ではなく）"),
+    ZH_HANS("{0} 解码为 Rec.2020，因此 {1} 必须是 Rec.2020 或不设置，而不是 {2}"),
+    ZH_HANT("{0} 解碼為 Rec.2020，因此 {1} 必須是 Rec.2020 或不設定，而不是 {2}"),
+    KO("{0}은(는) Rec.2020으로 디코딩하므로 {1}은(는) {2}이(가) 아니라 "
+       "Rec.2020이거나 설정하지 않아야 합니다"),
+    DE("{0} decodiert nach Rec.2020, daher muss {1} Rec.2020 oder nicht gesetzt "
+       "sein, nicht {2}"),
+    FR("{0} décode en Rec.2020, donc {1} doit valoir Rec.2020 ou rester non "
+       "défini, pas {2}"),
+    ES("{0} decodifica a Rec.2020, así que {1} debe ser Rec.2020 o quedar sin "
+       "definir, no {2}"),
+    PT("{0} decodifica para Rec.2020, então {1} precisa ser Rec.2020 ou ficar "
+       "sem definir, não {2}"),
+    IT("{0} decodifica in Rec.2020, quindi {1} deve essere Rec.2020 o non "
+       "impostato, non {2}"),
+    NL("{0} decodeert naar Rec.2020, dus {1} moet Rec.2020 of niet ingesteld "
+       "zijn, niet {2}"),
+    RU("{0} декодирует в Rec.2020, поэтому {1} должен быть Rec.2020 или не "
+       "задан, а не {2}"),
+    TR("{0} Rec.2020'ye çözer, bu yüzden {1} {2} değil, Rec.2020 olmalı ya da "
+       "ayarlanmamalı"));
 SS_MSG(bad_quantization_level,
     EN("quantization_level must be 0 or 1"),
     JA("quantization_level は 0 か 1 にしてください"),

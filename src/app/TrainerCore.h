@@ -61,6 +61,10 @@ struct ColorResolution {
     colorspace::Transfer splat_transfer = colorspace::Transfer::Srgb;
     colorspace::Transfer image_transfer = colorspace::Transfer::Srgb;
     colorspace::Transfer point_transfer = colorspace::Transfer::Srgb;
+    // A log curve decoded off the file before everything above; it forces
+    // the side it is on to linear Rec.2020 (core/DlogM.h).
+    colorspace::InputCurve image_curve = colorspace::InputCurve::None;
+    colorspace::InputCurve point_curve = colorspace::InputCurve::None;
 
     // Whether the render needs the conversion pass at all.
     bool splat_on() const {
@@ -69,11 +73,13 @@ struct ColorResolution {
     }
     bool image_on() const {
         return image_linear || image_transfer != colorspace::Transfer::Srgb ||
-               !image_gamut.empty();
+               !image_gamut.empty() || image_curve != colorspace::InputCurve::None;
     }
+    // Splats never hold log values, so a log seed is never already there.
     bool point_is_splat() const {
         return point_linear == splat_linear && point_transfer == splat_transfer &&
-               point_gamut == splat_gamut;
+               point_gamut == splat_gamut &&
+               point_curve == colorspace::InputCurve::None;
     }
 };
 
