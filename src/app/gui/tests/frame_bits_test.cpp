@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -389,6 +390,37 @@ void test_passthrough_args() {
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// T8: sun ghost removal over the frames a prep wrote
+// ---------------------------------------------------------------------------
+
+// Kills: DatasetPrep::run not calling remove_flare, and a pass that ignores
+// its `.spirula-flare` record (a resumed run would read every frame again).
+void test_flare_pass(const fs::path& clip) {
+    const fs::path ws = scratch("t8");
+    gui::PrepJob job = job_for(clip, ws, 16, 0.0f, 1);
+    job.read_color = as_dlogm;
+    job.flare_removal = true;
+    gui::PrepResult out;
+    std::string err;
+    std::vector<std::string> lines;
+    check(run_prep(job, out, err, &lines), "T8a: prep with sun ghost removal runs: " + err);
+    const std::vector<std::string> sum = logged(lines, lmsg::flare_summary);
+    check(sum.size() == 3 && sum[1] == "0" && sum[2] == "12",
+          "T8a: the pass read all 12 frames and changed none, having no sun (got " +
+              (sum.size() == 3 ? sum[1] + " of " + sum[2] : std::string("no line")) + ")");
+    int recorded = 0;
+    for (const char* cam : {"cam0", "cam1"}) {
+        std::ifstream rec(ws / "images" / cam / ".spirula-flare");
+        for (std::string l; std::getline(rec, l);) recorded++;
+    }
+    check(recorded == 12, "T8b: each lens folder records the frames it passed (got " +
+                              std::to_string(recorded) + ")");
+    lines.clear();
+    check(run_prep(job, out, err, &lines) && logged(lines, lmsg::flare_summary).empty(),
+          "T8c: a resumed run passes no frame twice");
+}
+
 int main() {
     test_passthrough_args();
     test_no_16bit_writer();
@@ -410,6 +442,7 @@ int main() {
         test_selected_16(clip);
         test_many_keepers(longer);
         test_disk_space(clip);
+        test_flare_pass(clip);
     }
     if (g_failures == 0) fs::remove_all(g_root, ec);
     std::printf(g_failures ? "frame_bits_test: %d FAILED\n" : "frame_bits_test: OK\n",

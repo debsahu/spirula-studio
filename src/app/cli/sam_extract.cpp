@@ -21,6 +21,7 @@
 //   spirula-sam extract dish.mov --model sam3-f16.ggml --text food \
 //                      --neg-text "cooked food" --mask-keep subject
 
+#include "app/FlareRemoval.h"
 #include "app/FrameExtract.h"
 #include "app/Tools.h"
 #include "i18n/catalog/Cli.h"
@@ -90,6 +91,7 @@ void usage() {
     help_row("    --adaptive", H::xh_adaptive);
     help_row("    --adaptive-range <f>", H::xh_adaptive_range);
     help_row("    --threads <n>", H::xh_threads);
+    help_row("    --flare-removal", H::xh_flare_removal);
 
     std::fprintf(stderr, "\n%s\n", H::xh_360_section.get());
     help_row("    --360 <mode>", H::xh_360);
@@ -128,6 +130,7 @@ struct Options {
     bool   adaptive = false;
     float  adaptive_range = 4.0f;
     int    threads = 0;
+    bool   flare_removal = false;
 
     std::string pano_mode = "faces";
     app::Pano360Options pano;
@@ -170,6 +173,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--adaptive-range")
             o.adaptive_range = std::strtof(next("--adaptive-range"), nullptr);
         else if (a == "--threads") o.threads = std::atoi(next("--threads"));
+        else if (a == "--flare-removal") o.flare_removal = true;
         else if (a == "--360") o.pano_mode = next("--360");
         else if (a == "--360-size") o.pano.size = std::atoi(next("--360-size"));
         else if (a == "--360-orient") {
@@ -218,6 +222,11 @@ bool parse_args(int argc, char** argv, Options& o) {
         }
     }
     if (o.input.empty()) return false;
+    // Masks are made in the same pass as the frames, before a ghost could go.
+    if (o.flare_removal && !o.model.empty()) {
+        std::fprintf(stderr, "%s\n", spirula::i18n::msg::cli::sam_flare_with_model.get());
+        return false;
+    }
     if (o.skip < 1) o.skip = 1;
     if (o.keep < 0) o.keep = (int)(0.5 * o.skip + 0.5);
     if (o.rotate % 90 != 0) {
@@ -337,6 +346,44 @@ int sam_cli_extract(int argc, char** argv) {
                      spirula::i18n::format(spirula::i18n::msg::cli::error_line,
                                            {error}).c_str());
         rc = 1;
+    }
+    if (rc == 0 && o.flare_removal) {
+        namespace lm = spirula::i18n::msg::log;
+        const std::string name = input.filename().string();
+        sfm::VideoColorMode mode = sfm::VideoColorMode::NotRecorded;
+#ifdef SS_TOOL_SFM
+        mode = sfm::video_color(o.input).mode;
+#endif
+        app::flare::Encoding enc;
+        if (!job.views.empty()) {
+            std::fprintf(stderr, "%s\n", spirula::i18n::format(lm::flare_not_fisheye, {name}).c_str());
+        } else if (!app::flare::encoding_for(mode, enc)) {
+            std::fprintf(stderr, "%s\n", spirula::i18n::format(lm::flare_unsupported_log, {name}).c_str());
+        } else {
+            if (mode != sfm::VideoColorMode::DlogM && mode != sfm::VideoColorMode::Normal)
+                std::fprintf(stderr, "%s\n", spirula::i18n::format(lm::flare_assume_709, {name}).c_str());
+            app::flare::TreeReport rep;
+            std::string ferr;
+            if (!app::flare::process_tree(
+                    base.string(), enc, app::flare::Params{}, 4,
+                    [](const std::string& path, const app::flare::FileReport& r) {
+                        if (r.written)
+                            std::fprintf(stderr, "%s\n",
+                                         spirula::i18n::format(lm::flare_frame,
+                                                               {fs::path(path).filename().string(),
+                                                                (long long)r.ghosts,
+                                                                (long long)r.changed}).c_str());
+                    },
+                    nullptr, rep, ferr)) {
+                std::fprintf(stderr, "%s\n",
+                             spirula::i18n::format(lm::flare_failed, {name, ferr}).c_str());
+                rc = 1;
+            } else {
+                std::fprintf(stderr, "%s\n",
+                             spirula::i18n::format(lm::flare_summary,
+                                                   {name, (long long)rep.changed, (long long)rep.files}).c_str());
+            }
+        }
     }
     std::printf("%s", app::format_extract_stats(stats, base.string(),
                                                 !o.model.empty()).c_str());

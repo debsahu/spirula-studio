@@ -56,6 +56,7 @@ int main() {
     moves("adaptive switch", [](gui::PrepJob& j) { j.adaptive_fps = true; });
     moves("sharpness window", [](gui::PrepJob& j) { j.sharp_window = 5; });
     moves("frame bit depth", [](gui::PrepJob& j) { j.frame_bits = 16; });
+    moves("sun ghost removal", [](gui::PrepJob& j) { j.flare_removal = true; });
     moves("input list", [](gui::PrepJob& j) { j.inputs.pop_back(); });
 
     // And what does NOT: masking and the reconstruction stamp their own

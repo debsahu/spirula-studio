@@ -2,6 +2,7 @@
 
 #include "app/gui/DatasetPrep.h"
 
+#include "app/FlareRemoval.h"
 #include "app/gui/ReconStamp.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "sfm/core/Resume.h"
@@ -1521,6 +1522,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
                 if (!extract_video(job, in, p.images, p.masks, out, p.have_masks,
                                    error))
                     return false;
+                if (!remove_flare(job, in, p.images, error)) return false;
             } else if (!gather_photos(job, in, p.images, p.masks, p.have_masks,
                                       error)) {
                 return false;
@@ -1750,6 +1752,53 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
                                 lockstep_extraction(job, in, false,
                                                     bits16 && !every_frame(job, in))});
     return ok && split_packed_frames(in, images, out, error);
+}
+
+// ---------------------------------------------------------------------------
+// Sun ghost removal
+// ---------------------------------------------------------------------------
+
+bool DatasetPrep::remove_flare(const PrepJob& job, const PrepInput& in,
+                               const std::string& images, std::string& error) {
+    if (!job.flare_removal || !in.is_video) return true;
+    const std::string name = leaf_name(fs::path(in.path));
+    // The ghost search runs along the line from the optical centre through the
+    // sun, which only a lens's own frame has; a 360 view or panorama does not.
+    if (!has_fisheye_lens(in) || (in.pano360.valid() && job.pano.mode != app::Pano360Mode::Off)) {
+        log(fmt(lmsg::flare_not_fisheye, {name}), /*detail=*/false);
+        return true;
+    }
+    VideoColorRead read = job.read_color;
+#ifdef SS_TOOL_SFM
+    if (!read) read = sfm::video_color;
+#endif
+    const sfm::VideoColorMode mode = read ? read(in.path).mode : sfm::VideoColorMode::NotRecorded;
+    app::flare::Encoding enc;
+    if (!app::flare::encoding_for(mode, enc)) {
+        log(fmt(lmsg::flare_unsupported_log, {name}), /*detail=*/false);
+        return true;
+    }
+    if (mode != sfm::VideoColorMode::DlogM && mode != sfm::VideoColorMode::Normal)
+        log(fmt(lmsg::flare_assume_709, {name}), /*detail=*/false);
+    // ~0.3 s a 3840 x 3840 16-bit frame, nearly all of it the PNG decode; four
+    // at a time hold ~1 GB.
+    app::flare::TreeReport rep;
+    const bool ok = app::flare::process_tree(
+        images, enc, app::flare::Params{}, 4,
+        [&](const std::string& path, const app::flare::FileReport& r) {
+            if (r.written)
+                log(fmt(lmsg::flare_frame, {fs::path(path).filename().string(), (long long)r.ghosts,
+                                            (long long)r.changed}));
+        },
+        &_cancel, rep, error);
+    if (!ok) {
+        if (error != "cancelled") error = fmt(lmsg::flare_failed, {name, error});
+        return false;
+    }
+    if (rep.files > 0)
+        log(fmt(lmsg::flare_summary, {name, (long long)rep.changed, (long long)rep.files}),
+            /*detail=*/false);
+    return true;
 }
 
 #ifdef SS_HAVE_VIDEO

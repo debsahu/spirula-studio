@@ -671,6 +671,21 @@ SS_MSG(sam_unknown_option,
     RU("неизвестный или неверно записанный параметр: {0}"),
     TR("bilinmeyen ya da bozuk seçenek: {0}"));
 
+SS_MSG(sam_flare_with_model,
+    EN("--flare-removal cannot be combined with --model: masks would be made from the frames before their ghosts were removed. Extract first, then mask the folder with 'sam track --frames'."),
+    JA("--flare-removal は --model と併用できません。ゴースト除去前のフレームからマスクが作られてしまいます。先に抽出し、そのフォルダを 'sam track --frames' でマスクしてください。"),
+    ZH_HANS("--flare-removal 不能与 --model 同用：遮罩会基于去除鬼影之前的帧生成。请先提取，再用 'sam track --frames' 为该文件夹生成遮罩。"),
+    ZH_HANT("--flare-removal 不能與 --model 同用：遮罩會以去除鬼影之前的影格產生。請先擷取，再用 'sam track --frames' 為該資料夾產生遮罩。"),
+    KO("--flare-removal 은 --model 과 함께 쓸 수 없습니다. 고스트를 제거하기 전의 프레임으로 마스크가 만들어집니다. 먼저 추출한 뒤 그 폴더를 'sam track --frames' 로 마스킹하세요."),
+    DE("--flare-removal lässt sich nicht mit --model kombinieren: die Masken entstünden aus den Bildern, bevor ihre Geisterbilder entfernt sind. Erst extrahieren, dann den Ordner mit 'sam track --frames' maskieren."),
+    FR("--flare-removal ne peut pas être combiné avec --model : les masques seraient faits sur les images avant le retrait de leurs fantômes. Extrayez d'abord, puis masquez le dossier avec 'sam track --frames'."),
+    ES("--flare-removal no se puede combinar con --model: las máscaras se harían con los fotogramas antes de quitarles los fantasmas. Extraiga primero y luego enmascare la carpeta con 'sam track --frames'."),
+    PT("--flare-removal não pode ser combinado com --model: as máscaras seriam feitas a partir dos quadros antes de os fantasmas serem removidos. Extraia primeiro e depois mascare a pasta com 'sam track --frames'."),
+    IT("--flare-removal non si può combinare con --model: le maschere verrebbero fatte dai fotogrammi prima di rimuoverne i fantasmi. Prima estrai, poi maschera la cartella con 'sam track --frames'."),
+    NL("--flare-removal kan niet samen met --model: de maskers zouden gemaakt worden van de beelden voordat hun spiegelingen zijn verwijderd. Eerst extraheren, daarna de map maskeren met 'sam track --frames'."),
+    RU("--flare-removal нельзя сочетать с --model: маски были бы построены по кадрам до удаления бликов. Сначала извлеките кадры, затем маскируйте папку через 'sam track --frames'."),
+    TR("--flare-removal, --model ile birlikte kullanılamaz: maskeler hayaletler giderilmeden önceki karelerden yapılırdı. Önce çıkarın, sonra klasörü 'sam track --frames' ile maskeleyin."));
+
 SS_MSG(sam_unexpected_argument,
     EN("unexpected argument: {0}"),
     JA("余分な引数: {0}"),

@@ -18,8 +18,10 @@
 // Diagnostics go to stderr, the result table to stdout, so a run pipes cleanly:
 //   spirula-sam segment ... 2>/dev/null > detections.tsv
 
+#include "app/FlareRemoval.h"
 #include "app/Tools.h"
 #include "i18n/catalog/Cli.h"
+#include "i18n/catalog/Log.h"
 #include "i18n/catalog/SamHelp.h"
 #include "app/FrameLook.h"
 #include "app/FrameMask.h"
@@ -150,6 +152,11 @@ void usage() {
     for (const std::string& l : spirula::i18n::wrap(
              spirula::i18n::format(H::cmd_extract_more, {prog}), 76))
         std::fprintf(stderr, "        %s\n", l.c_str());
+    std::fprintf(stderr, "\n");
+
+    line("flare <images> --curve dlogm|bt709");
+    para(H::cmd_flare);
+    help_row("--curve <c>", H::fl_curve);
     std::fprintf(stderr, "\n");
 
     std::fprintf(stderr, "%s --device <index|name|auto|uuid:hex>  --vram  "
@@ -771,6 +778,51 @@ int cmd_video(const Options& o) {
 int sam_cli_extract(int argc, char** argv);
 #endif
 
+// `flare <images> --curve dlogm|bt709`: app::flare::process_tree over a folder
+// of frames already on disk, which is the only route on a machine without the
+// in-process decoder `extract --flare-removal` needs.
+static int cmd_flare(int argc, char** argv) {
+    namespace lm = spirula::i18n::msg::log;
+    std::string dir, curve;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--curve" && i + 1 < argc) curve = argv[++i];
+        else if (a[0] != '-' && dir.empty()) dir = a;
+        else {
+            std::fprintf(stderr, "%s\n", format(cmsg::sam_unknown_option, {a}).c_str());
+            return 2;
+        }
+    }
+    if (curve != "dlogm" && curve != "bt709") {
+        std::fprintf(stderr, "%s\n", format(cmsg::sam_unknown_option, {"--curve " + curve}).c_str());
+        return 2;
+    }
+    if (dir.empty()) {
+        usage();
+        return 2;
+    }
+    const app::flare::Encoding enc =
+        curve == "dlogm" ? app::flare::Encoding::DlogM : app::flare::Encoding::Rec709;
+    app::flare::TreeReport rep;
+    std::string err;
+    const bool ok = app::flare::process_tree(
+        dir, enc, app::flare::Params{}, 4,
+        [](const std::string& path, const app::flare::FileReport& r) {
+            if (r.written)
+                std::fprintf(stderr, "%s\n",
+                             format(lm::flare_frame, {path, (long long)r.ghosts, (long long)r.changed})
+                                 .c_str());
+        },
+        nullptr, rep, err);
+    if (!ok) {
+        std::fprintf(stderr, "%s\n", format(lm::flare_failed, {dir, err}).c_str());
+        return 1;
+    }
+    std::fprintf(stderr, "%s\n",
+                 format(lm::flare_summary, {dir, (long long)rep.changed, (long long)rep.files}).c_str());
+    return 0;
+}
+
 int spirula_sam_main(int argc, char** argv) {
     app::set_program_name(argc > 0 ? argv[0] : nullptr, "spirula sam");
     if (argc >= 2 &&
@@ -779,6 +831,7 @@ int spirula_sam_main(int argc, char** argv) {
         usage();
         return 0;
     }
+    if (argc >= 2 && std::strcmp(argv[1], "flare") == 0) return cmd_flare(argc - 1, argv + 1);
     if (argc >= 2 && std::strcmp(argv[1], "extract") == 0) {
 #ifdef SS_HAVE_VIDEO
         int rc = sam_cli_extract(argc - 1, argv + 1);

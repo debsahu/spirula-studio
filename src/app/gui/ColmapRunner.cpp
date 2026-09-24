@@ -528,6 +528,7 @@ void ColmapRunner::run(ColmapJob job) {
             pj.ffmpeg_exe = job.ffmpeg_exe;
             pj.force_external_decode = job.force_external_decode;
             pj.frame_bits = job.frame_bits;
+            pj.flare_removal = job.flare_removal;
             pj.mask_enable = job.mask_enable;
             pj.mask_prompt = job.mask_prompt;
             pj.mask_negative_prompt = job.mask_negative_prompt;

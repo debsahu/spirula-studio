@@ -66,6 +66,7 @@ static void test_dataset_preset() {
     s.sfm.prep.auto_rotate = false;
     s.sfm.prep.force_external_decode = true;
     s.sfm.prep.frame_bits = 16;
+    s.sfm.prep.flare_removal = true;
     s.sfm.prep.pano.mode = app::Pano360Mode::Equirect;
     s.sfm.prep.pano.size = 2048;
     s.sfm.prep.pano.yaw = 10.0f;
@@ -182,6 +183,7 @@ static void test_dataset_preset() {
     CHECK_EQ(b.sfm.prep.auto_rotate, s.sfm.prep.auto_rotate);
     CHECK_EQ(b.sfm.prep.force_external_decode, s.sfm.prep.force_external_decode);
     CHECK_EQ(b.sfm.prep.frame_bits, s.sfm.prep.frame_bits);
+    CHECK_EQ(b.sfm.prep.flare_removal, s.sfm.prep.flare_removal);
     CHECK(b.sfm.prep.pano.mode == s.sfm.prep.pano.mode);
     CHECK_EQ(b.sfm.prep.pano.size, s.sfm.prep.pano.size);
     CHECK_EQ(b.sfm.prep.pano.yaw, s.sfm.prep.pano.yaw);

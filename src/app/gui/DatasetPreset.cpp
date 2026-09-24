@@ -31,6 +31,7 @@ namespace {
     X("auto_rotate",                sfm.prep.auto_rotate)                     \
     X("force_external_decode",      sfm.prep.force_external_decode)           \
     X("frame_bits",                 sfm.prep.frame_bits)                      \
+    X("flare_removal",              sfm.prep.flare_removal)                   \
     X("pano_mode",                  sfm.prep.pano.mode)                       \
     X("pano_size",                  sfm.prep.pano.size)                       \
     X("pano_yaw",                   sfm.prep.pano.yaw)                        \

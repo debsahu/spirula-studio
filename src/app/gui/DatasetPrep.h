@@ -283,6 +283,9 @@ struct PrepJob {
     // Bits per channel of a video's frames: 8 (JPEG), 16 (PNG, through ffmpeg
     // whatever the decoder setting) or 0, 16 for a D-Log M clip and 8 otherwise.
     int   frame_bits = 0;
+    // Subtract the sun's lens ghosts from a fisheye clip's frames, in the lens's
+    // native linear light, before anything reads them (app/FlareRemoval.h).
+    bool  flare_removal = false;
     VideoColorRead read_color = nullptr;
     // Bytes free where the workspace is; null asks the filesystem.
     std::uintmax_t (*free_space)(const std::string& dir) = nullptr;
@@ -474,6 +477,8 @@ inline ReconStamp frames_stamp(const PrepJob& job, const std::vector<int>& bits 
                "--360-size",    num(job.pano.size),
                "--360-orient",  num(job.pano.yaw) + "," + num(job.pano.pitch) +
                                     "," + num(job.pano.roll)};
+    // Only when on, so datasets extracted before the option existed stay current.
+    if (job.flare_removal) st.args.insert(st.args.end(), {"--flare", "1"});
     for (size_t i = 0; i < job.inputs.size(); i++) {
         const PrepInput& in = job.inputs[i];
         st.args.push_back("--input");
@@ -778,6 +783,10 @@ private:
                                 const std::string& images, size_t streams,
                                 bool fisheye, int width, int height,
                                 long long frames, std::string& error);
+    // PrepJob::flare_removal over one input's frames. Each file is done once:
+    // `.spirula-flare` beside them records it, so a resumed run skips it.
+    bool remove_flare(const PrepJob& job, const PrepInput& in, const std::string& images,
+                      std::string& error);
     // resolved_frame_bits for an input of the running job, read once in run().
     int bits_of(const PrepJob& job, const PrepInput& in) const;
     // The built-in decoder reads this input: allowed, working, and 8-bit.

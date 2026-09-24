@@ -669,6 +669,7 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("subprocess", cfg_str(j.subprocess));
     line("force_external_decode", cfg_str(j.prep.force_external_decode));
     line("frame_bits", std::to_string(j.prep.frame_bits));
+    line("flare_removal", cfg_str(j.prep.flare_removal));
     line("force_external_masking", cfg_str(j.prep.force_external_masking));
     line("video_fps", cfg_str(j.prep.video_fps));
     line("adaptive_fps", cfg_str(j.prep.adaptive_fps));
@@ -3328,6 +3329,7 @@ void GuiApp::sync_dataset_jobs() {
     prep.max_frames = _sfm_job.prep.max_frames;
     prep.force_external_decode = _sfm_job.prep.force_external_decode;
     prep.frame_bits = _sfm_job.prep.frame_bits;
+    prep.flare_removal = _sfm_job.prep.flare_removal;
     prep.sync_tracks = _sfm_job.prep.sync_tracks;
     prep.ffmpeg_exe = _ffmpeg_exe;
     prep.python_exe = _python_exe;
@@ -3369,6 +3371,7 @@ void GuiApp::sync_dataset_jobs() {
     _colmap_job.max_frames = prep.max_frames;
     _colmap_job.force_external_decode = prep.force_external_decode;
     _colmap_job.frame_bits = prep.frame_bits;
+    _colmap_job.flare_removal = prep.flare_removal;
     _colmap_job.photo_import = prep.photo_import;
     _colmap_job.force_external_masking = prep.force_external_masking;
     _colmap_job.colmap_exe = _colmap_exe;
@@ -5992,6 +5995,8 @@ void GuiApp::draw_sfm_advanced() {
             bits = pick == 1 ? 8 : pick == 2 ? 16 : 0;
         ui::help_on_hover(dmsg::frame_bits_help);
     }
+    ui::Checkbox(dmsg::flare_removal, &_sfm_job.prep.flare_removal);
+    ui::help_on_hover(dmsg::flare_removal_help);
     ImGui::BeginDisabled(!backends().builtin_masking);
     ui::Checkbox(dmsg::use_python_masking, &_sfm_job.prep.force_external_masking);
     ImGui::EndDisabled();
