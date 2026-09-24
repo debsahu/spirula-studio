@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
@@ -283,6 +284,8 @@ struct PrepJob {
     // whatever the decoder setting) or 0, 16 for a D-Log M clip and 8 otherwise.
     int   frame_bits = 0;
     VideoColorRead read_color = nullptr;
+    // Bytes free where the workspace is; null asks the filesystem.
+    std::uintmax_t (*free_space)(const std::string& dir) = nullptr;
 
     // The photographs' colour space. Frames convert to sRGB before the
     // segmenter sees them, which is what it was trained on.
@@ -433,6 +436,14 @@ inline int frame_bits_for(const PrepJob& job, const PrepInput& in,
         return 8;
     if (job.frame_bits == 16) return 16;
     return job.frame_bits == 0 && mode == sfm::VideoColorMode::DlogM ? 16 : 8;
+}
+
+// A 16-bit extraction needing `need` bytes where `free` are: past 80% of it the
+// run warns, past all of it the run refuses before writing a frame.
+enum class DiskVerdict { Fits, Tight, TooBig };
+inline DiskVerdict disk_verdict(double need, double free) {
+    if (need > free) return DiskVerdict::TooBig;
+    return need > 0.8 * free ? DiskVerdict::Tight : DiskVerdict::Fits;
 }
 
 // The same, reading the clip: `read`, else job.read_color, else sfm::video_color.
@@ -766,7 +777,7 @@ private:
     bool extract_video_ffmpeg16(const PrepJob& job, const PrepInput& in,
                                 const std::string& images, size_t streams,
                                 bool fisheye, int width, int height,
-                                std::string& error);
+                                long long frames, std::string& error);
     // resolved_frame_bits for an input of the running job, read once in run().
     int bits_of(const PrepJob& job, const PrepInput& in) const;
     // The built-in decoder reads this input: allowed, working, and 8-bit.

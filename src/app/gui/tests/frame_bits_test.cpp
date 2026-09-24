@@ -5,6 +5,7 @@
 #include "app/gui/DatasetPrep.h"
 #include "app/gui/Subprocess.h"
 #include "external/stb_image.h"
+#include "i18n/catalog/Log.h"
 
 #include <algorithm>
 #include <atomic>
@@ -15,6 +16,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+namespace lmsg = spirula::i18n::msg::log;
 
 namespace {
 
@@ -86,15 +88,26 @@ gui::PrepJob job_for(const fs::path& clip, const fs::path& ws, int bits, float f
     return job;
 }
 
-bool run_prep(const gui::PrepJob& job, gui::PrepResult& out, std::string& err) {
+bool run_prep(const gui::PrepJob& job, gui::PrepResult& out, std::string& err,
+              std::vector<std::string>* lines = nullptr) {
     gui::RunProgress prog;
     std::atomic<bool> cancel{false};
     gui::DatasetPrep prep(&prog, gui::RunFilms{}, cancel);
     const bool ok = prep.run(job, out, err);
-    if (!ok)
-        for (const gui::RunLine& l : prog.drain())
-            std::printf("      log: %s\n", l.text.c_str());
+    for (const gui::RunLine& l : prog.drain()) {
+        if (!ok) std::printf("      log: %s\n", l.text.c_str());
+        if (lines) lines->push_back(l.text);
+    }
     return ok;
+}
+
+// The placeholders of the first line printed with `m`; empty when none was.
+std::vector<std::string> logged(const std::vector<std::string>& lines,
+                                const spirula::i18n::Msg& m) {
+    std::vector<std::string> got;
+    for (const std::string& l : lines)
+        if (spirula::i18n::scan(m, l, got)) return got;
+    return {};
 }
 
 std::vector<std::string> names_in(const fs::path& dir) {
@@ -153,8 +166,13 @@ void test_every_frame_16(const fs::path& clip) {
     const fs::path ws = scratch("t1a");
     gui::PrepResult out;
     std::string err;
-    check(run_prep(job_for(clip, ws, 16, 0.0f, 1), out, err),
+    std::vector<std::string> lines;
+    check(run_prep(job_for(clip, ws, 16, 0.0f, 1), out, err, &lines),
           "T1a: forced 16-bit prep runs: " + err);
+    const std::vector<std::string> est = logged(lines, lmsg::frames_16bit_estimate);
+    check(est.size() == 2 && est[1] == "12",
+          "T7c: every-frame mode prints the estimate, for 12 frames (got " +
+              (est.size() == 2 ? est[1] : std::string("no line")) + ")");
     const fs::path c0 = ws / "images" / "cam0", c1 = ws / "images" / "cam1";
     check(fs::exists(c0 / "00000.png") && fs::exists(c1 / "00000.png"),
           "T1a: cam0/00000.png and cam1/00000.png exist");
@@ -269,6 +287,85 @@ void test_many_keepers(const fs::path& clip) {
 }
 
 // ---------------------------------------------------------------------------
+// T6: inputs with no 16-bit writer stay 8-bit, whatever the job asks
+// ---------------------------------------------------------------------------
+
+void test_no_16bit_writer() {
+    auto bits = [](int asked, int lenses, bool pano, app::Pano360Mode mode) {
+        gui::PrepJob job;
+        job.frame_bits = asked;
+        job.read_color = as_dlogm;
+        job.pano.mode = mode;
+        gui::PrepInput in;
+        in.path = "/x.osv";
+        in.is_video = true;
+        in.packed_lenses = lenses;
+        if (pano) in.pano360.face = 1344;
+        return gui::resolved_frame_bits(job, in);
+    };
+    using M = app::Pano360Mode;
+    check(bits(16, 0, false, M::Off) == 16 && bits(0, 0, false, M::Off) == 16,
+          "T6: a plain D-Log M video is 16-bit, forced or auto");
+    check(bits(16, 1, false, M::Off) == 16, "T6: one lens is not a packing");
+    check(bits(16, 2, false, M::Off) == 8 && bits(0, 2, false, M::Off) == 8,
+          "T6: packed lenses stay 8-bit, forced or auto");
+    check(bits(16, 0, true, M::Faces) == 8 && bits(16, 0, true, M::Equirect) == 8 &&
+              bits(0, 0, true, M::Faces) == 8,
+          "T6: a 360 packing that is unwrapped stays 8-bit");
+    check(bits(16, 0, true, M::Off) == 16, "T6: a 360 packing left packed is 16-bit");
+    check(bits(16, 0, false, M::Faces) == 16, "T6: the unwrap mode alone does not demote");
+    gui::PrepJob photos;
+    photos.frame_bits = 16;
+    gui::PrepInput dir;
+    dir.path = "/photos";
+    check(gui::resolved_frame_bits(photos, dir) == 8, "T6: photos stay 8-bit");
+}
+
+// ---------------------------------------------------------------------------
+// T7: free space against the estimate
+// ---------------------------------------------------------------------------
+
+std::uintmax_t one_mb_free(const std::string&) { return 1000000; }
+std::uintmax_t eight_tenths_mb_free(const std::string&) { return 800000; }
+
+void test_disk_space(const fs::path& clip) {
+    using V = gui::DiskVerdict;
+    check(gui::disk_verdict(79, 100) == V::Fits && gui::disk_verdict(80, 100) == V::Fits &&
+              gui::disk_verdict(81, 100) == V::Tight && gui::disk_verdict(100, 100) == V::Tight &&
+              gui::disk_verdict(101, 100) == V::TooBig,
+          "T7a: fits to 80%, warns to 100%, refuses past it");
+
+    // Three keepers of 878x64 on two tracks: 6 x 40e6 x 56192 / 3840^2 = 914,592 bytes.
+    {
+        const fs::path ws = scratch("t7warn");
+        gui::PrepJob job = job_for(clip, ws, 16, 15.0f, 2);
+        job.free_space = one_mb_free;
+        gui::PrepResult out;
+        std::string err;
+        std::vector<std::string> lines;
+        check(run_prep(job, out, err, &lines), "T7b: a tight disk still runs: " + err);
+        check(!logged(lines, lmsg::frames_16bit_disk_tight).empty(),
+              "T7b: a tight disk warns");
+        check(names_in(ws / "images" / "cam0").size() == 3, "T7b: and writes the frames");
+    }
+    {
+        const fs::path ws = scratch("t7refuse");
+        gui::PrepJob job = job_for(clip, ws, 16, 15.0f, 2);
+        job.free_space = eight_tenths_mb_free;
+        gui::PrepResult out;
+        std::string err;
+        check(!run_prep(job, out, err), "T7b: a full disk refuses the run");
+        std::vector<std::string> got;
+        check(spirula::i18n::scan(lmsg::err_frames_16bit_disk, err, got),
+              "T7b: with the disk message (got: " + err + ")");
+        std::error_code ec;
+        check(names_in(ws / "images" / "cam0").empty() && !fs::exists(ws / "frames16_tmp", ec) &&
+                  !fs::exists(ws / "track_cam0.mp4", ec),
+              "T7b: having written nothing and left no scratch");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // T5: the passthrough spelling each ffmpeg accepts
 // ---------------------------------------------------------------------------
 
@@ -294,6 +391,7 @@ void test_passthrough_args() {
 
 int main() {
     test_passthrough_args();
+    test_no_16bit_writer();
     if (!gui::command_exists("ffmpeg")) {
         std::printf("SKIP: ffmpeg not found\n");
         return g_failures ? 1 : 0;
@@ -311,6 +409,7 @@ int main() {
         test_auto_and_forced_8(clip);
         test_selected_16(clip);
         test_many_keepers(longer);
+        test_disk_space(clip);
     }
     if (g_failures == 0) fs::remove_all(g_root, ec);
     std::printf(g_failures ? "frame_bits_test: %d FAILED\n" : "frame_bits_test: OK\n",

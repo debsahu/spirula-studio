@@ -125,6 +125,15 @@ long long progress_frame(const std::string& line) {
     return end == first ? -1 : frame;
 }
 
+// One argument's ceiling: ~17 bytes a keeper, so about 60k keepers on macOS.
+#if defined(_WIN32)
+constexpr size_t kMaxArgBytes = 30000;    // CreateProcess: 32767 for the whole line
+#elif defined(__APPLE__)
+constexpr size_t kMaxArgBytes = 900000;   // ARG_MAX 1 MiB, shared with the environment
+#else
+constexpr size_t kMaxArgBytes = 130000;   // MAX_ARG_STRLEN: 128 KiB for one argument
+#endif
+
 // `select` true on frames keep[lo, hi), as a balanced sum: ffmpeg's expression
 // parser fails ("Cannot allocate memory") on a flat sum of more than 100 terms.
 std::string select_expr(const std::vector<long long>& keep, size_t lo, size_t hi) {
@@ -1960,7 +1969,7 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
                          facts.tracks[0].first == facts.tracks[0].second;
     if (bits16)
         return extract_video_ffmpeg16(job, in, images, streams, fisheye, facts.width,
-                                      facts.height, error);
+                                      facts.height, facts.frames, error);
     for (size_t tr = 0; tr < streams; tr++) {
         std::string track_path = in.path;
         const fs::path out_dir = streams > 1
@@ -2061,7 +2070,7 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
 bool DatasetPrep::extract_video_ffmpeg16(const PrepJob& job, const PrepInput& in,
                                          const std::string& images, size_t streams,
                                          bool fisheye, int width, int height,
-                                         std::string& error) {
+                                         long long frames, std::string& error) {
     const fs::path ws = job.workspace;
     const bool every = every_frame(job, in);
     const int window = every ? 1 : std::max(job.sharp_window, 1);
@@ -2166,15 +2175,29 @@ bool DatasetPrep::extract_video_ffmpeg16(const PrepJob& job, const PrepInput& in
         if (keep.empty()) return failed(lmsg::err_no_frames_extracted.get());
     }
 
+    long long per_track = (long long)keep.size();
+    if (every) per_track = job.max_frames > 0 ? std::min<long long>(frames, job.max_frames) : frames;
     // 40 MB per 3840² PNG16: the mean over 374 frames of a 187 s D-Log M clip.
-    const double gb = 40.0e-3 * (double)std::max<size_t>(keep.size(), 1) * (double)streams *
-                      ((double)width * height / (3840.0 * 3840.0));
-    char gbs[32];
-    std::snprintf(gbs, sizeof gbs, "%.1f", gb);
-    if (!every)
-        log(fmt(lmsg::frames_16bit_estimate, {std::string(gbs),
-                                              (long long)(keep.size() * streams)}),
-            /*detail=*/false);
+    const double need = 40.0e6 * (double)std::max<long long>(per_track, 1) * (double)streams *
+                        ((double)width * height / (3840.0 * 3840.0));
+    auto gb = [](double bytes) {
+        char s[32];
+        std::snprintf(s, sizeof s, "%.1f", bytes / 1e9);
+        return std::string(s);
+    };
+    log(fmt(lmsg::frames_16bit_estimate, {gb(need), per_track * (long long)streams}),
+        /*detail=*/false);
+    std::error_code sec;
+    const double free = job.free_space ? (double)job.free_space(ws.string())
+                                       : (double)fs::space(ws, sec).available;
+    if (!sec) {
+        const DiskVerdict v = disk_verdict(need, free);
+        if (v == DiskVerdict::TooBig)
+            return failed(fmt(lmsg::err_frames_16bit_disk, {gb(need), gb(free), ws.string()}));
+        if (v == DiskVerdict::Tight)
+            log(fmt(lmsg::frames_16bit_disk_tight, {gb(need), gb(free), ws.string()}),
+                /*detail=*/false);
+    }
 
     // Full range at 12 bits before the RGB conversion: swscale's own 10-bit to
     // rgb48 misses BT.709 by up to 8.2% of full scale on saturated chroma and
@@ -2182,6 +2205,10 @@ bool DatasetPrep::extract_video_ffmpeg16(const PrepJob& job, const PrepInput& in
     std::string vf = "colorspace=iall=bt709:irange=tv:all=bt709:range=pc:format=yuv444p12";
     if (!every) {
         vf = std::string(rate) + "," + vf + ",select='" + select_expr(keep, 0, keep.size()) + "'";
+        if (vf.size() > kMaxArgBytes)
+            return failed(fmt(lmsg::err_frames_16bit_argv,
+                              {(long long)keep.size(),
+                               (long long)(keep.size() * kMaxArgBytes / vf.size())}));
     }
     const std::vector<std::string> pass = passthrough_args(job.ffmpeg_exe);
     enter(Stage::Frames, lmsg::stage_extract_ffmpeg.get());
