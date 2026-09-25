@@ -45,7 +45,7 @@ static void test_cut_and_shape() {
     const float cut = k.intercept / (k.slope2 - k.slope);
     const float cut_code = (std::log2(cut - k.x_shift) - k.y_shift) / k.scale;
     check(std::fabs(cut_code - 0.161364f) < 1e-4f, "cut: branches meet at code 0.1614");
-    // Same bound as the Osmo fit (OpenOSV's fit_dlogm.py): the slope may kink
+    // Same bound as OpenOSV's Osmo fit: the slope may kink
     // by at most 3x at the cut.
     check(k.slope2 / k.slope <= 3.0f * (1.0f + 1e-6f), "shape: slope2 / slope <= 3");
 

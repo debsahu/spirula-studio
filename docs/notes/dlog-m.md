@@ -310,8 +310,9 @@ Method:
    because the form has two exact degeneracies and they fix the gauge. The fit
    lands on the same two bounds the Osmo fit does (`lin(0) = 0`, ratio 3). The
    matrix rows sum to 1; its determinant is 1.0752 and all three implied
-   primaries have positive luminance. `e` is fitted separately and is not in
-   the curve.
+   primaries have positive luminance, but the red one lies outside the
+   spectral locus (Z < 0), so it is a fitted transform, not a physical sensor
+   primary. `e` is fitted separately and is not in the curve.
 5. **Display transfer.** BT.709, not sRGB. Both reach the floor on held-out
    frames, but BT.709 fits the toe (codes under 0.2: 3.1 levels off at the
    median against 11.9 for sRGB) and survives a cross-lens test that sRGB fails:
