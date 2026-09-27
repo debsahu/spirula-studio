@@ -56,6 +56,7 @@ constexpr const char* kToolSam   = "sam";
 constexpr const char* kToolGeometry = "geometry";
 constexpr const char* kToolGui   = "gui";
 constexpr const char* kToolEncode = "encode";
+constexpr const char* kToolPartition = "partition";
 
 }  // namespace app
 
@@ -79,4 +80,7 @@ int spirula_gui_main(int argc, char** argv);
 #endif
 #ifdef SS_TOOL_ENCODE
 int spirula_encode_main(int argc, char** argv);
+#endif
+#ifdef SS_TOOL_PARTITION
+int spirula_partition_main(int argc, char** argv);
 #endif

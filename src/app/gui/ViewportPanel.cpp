@@ -155,13 +155,9 @@ void ViewportPanel::compute_framing(const spirula::TrainerSession& session) {
 
     // Scene radius (drives only the preview depth range): spread of the
     // camera positions in the client frame.
-    double A[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     const auto& ds = session.ds;
-    if (ds.train_frame_scale != 1.0f) {
-        double T[16];
-        for (int i = 0; i < 16; i++) T[i] = ds.train_to_normalized[i];
-        dsparse::invert_affine4x4(T, A);
-    }
+    double A[16];
+    dsparse::train_to_normalized_inverse(ds, A);
     double radius = 1.0;
     for (int64_t i = 0; i < ds.num_cameras; i++) {
         float p[3] = {ds.c2w[i*12 + 3], ds.c2w[i*12 + 7], ds.c2w[i*12 + 11]};
@@ -716,7 +712,8 @@ void ViewportPanel::attach_preview_data(const ParsedDataset& ds,
                                        const PostSplitCameras& post,
                                        const std::string& key, float radius,
                                        bool with_cameras,
-                                       const uint8_t* cam_selected) {
+                                       const uint8_t* cam_selected,
+                                       const float* cam_rgb) {
     const bool first = key != _framed_key;
     detach();
     _has_cameras = with_cameras;
@@ -724,7 +721,7 @@ void ViewportPanel::attach_preview_data(const ParsedDataset& ds,
     // watching the cameras find their places. Only on the first attach, so a
     // refresh does not undo the switch.
     if (first) _show_cams = with_cameras;
-    if (!_preview.build(ds, post, cam_selected)) {
+    if (!_preview.build(ds, post, cam_selected, cam_rgb)) {
         _last_error = "preview renderer unavailable (OpenGL 3.2 required)";
         return;
     }

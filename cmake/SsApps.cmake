@@ -87,6 +87,11 @@ endif()
 list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/main.cpp)
 list(APPEND SS_TOOL_DEFS SS_TOOL_TRAIN=1)
 
+# ---- scene partitioning: split a dataset for training in parts, merge back ----
+# Host-only over the parsers and the splat PLY reader, so every build has it.
+list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/partition_main.cpp)
+list(APPEND SS_TOOL_DEFS SS_TOOL_PARTITION=1)
+
 # ---- mesh extraction ----
 # Both backends: the host side is portable (mesh/OccupancyEvaluator.cpp) and
 # each has kernels (mesh/Meshing.cu, backend/vulkan/kernels/Meshing.cpp).

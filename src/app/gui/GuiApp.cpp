@@ -5,7 +5,9 @@
 #include "core/ColorSpace.h"
 #include "core/ExrImage.h"
 
+#include "checkpoint/SplatMerge.h"
 #include "checkpoint/SplatPly.h"
+#include "data/ScenePartition.h"
 #include "data/Json.h"
 #include "app/AppPaths.h"
 #include "app/CrashLog.h"
@@ -23,6 +25,7 @@
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/Gui.h"
 #include "i18n/catalog/MaskEdit.h"
+#include "i18n/catalog/Partition.h"
 #include "i18n/catalog/Render.h"
 #include "i18n/catalog/Train.h"
 #include "i18n/catalog/TrainFields.h"
@@ -303,6 +306,8 @@ void GuiApp::shutdown() {
     _mask_editor.close();
     _mask_editor.sam_drain_retiring();   // before nn::shutdown() frees the device
     _geometry_panel.destroy_gl();
+    _partition_panel.destroy_gl();
+    if (_merge_thread.joinable()) _merge_thread.join();
     _colmap.cancel();
     _sfm.cancel();
     reset_dataset_preview();
@@ -889,6 +894,7 @@ DatasetSettings GuiApp::capture_dataset_settings() const {
     s.colmap = _colmap_job;
     s.mask = _mask;
     s.mask_model_id = _model_id;
+    s.mask_detector_id = _mask_detector_id;
     s.use_found_masks = _use_found_masks;
     s.border_enable = _border_enable;
     s.frame_shapes = _frame_shapes;
@@ -923,6 +929,7 @@ void GuiApp::apply_dataset_settings(const DatasetSettings& in) {
     _mask.object_count = objects;
     _mask.current_object = current;
     if (find_model(s.mask_model_id)) _model_id = s.mask_model_id;
+    if (find_detector(s.mask_detector_id)) _mask_detector_id = s.mask_detector_id;
     _use_found_masks = s.use_found_masks;
     _border_enable = s.border_enable;
     _frame_shapes = s.frame_shapes;
@@ -1269,6 +1276,7 @@ void GuiApp::close_splat() {
 void GuiApp::close_native_previews() {
     _segment.close();
     _geometry_panel.close();
+    _partition_panel.close();
 }
 
 // Every site that starts inference (or tears it down) calls this, never the
@@ -1425,9 +1433,12 @@ BatchCapabilities GuiApp::batch_capabilities() const {
     caps.colmap = colmap_available();
     caps.masking = backends().builtin_masking;
     caps.geometry = geometry_availability().empty();
-    caps.mask_model_ready = [](const std::string& id) {
+    caps.mask_model_ready = [](const std::string& id, const std::string& detector_id) {
+        return !cached_mask_model(id, detector_id).empty();
+    };
+    caps.mask_model_prompted = [](const std::string& id) {
         const ModelEntry* e = find_model(id);
-        return e && model_is_cached(*e);
+        return !e || e->kind != MaskModelKind::Subject;
     };
     caps.geometry_model_ready = [](const std::string& id) {
         return geometry_model_cached(id);
@@ -1523,6 +1534,7 @@ bool GuiApp::batch_stage_busy(BatchStage stage) const {
     switch (stage) {
         case BatchStage::Dataset: return dataset_busy();
         case BatchStage::Mesh:    return _mesh.busy();
+        case BatchStage::Merge:   return _merge_busy.load();
         case BatchStage::Train: {
             const TrainRunner::Phase ph = _runner.phase();
             return ph == TrainRunner::Phase::Preparing ||
@@ -1595,6 +1607,13 @@ void GuiApp::record_batch_task() {
             if (ok) t.result = _mesh.output_path();
             break;
         }
+        case BatchStage::Merge: {
+            if (_merge_thread.joinable()) _merge_thread.join();
+            ok = _merge_error.empty();
+            error = _merge_error;
+            if (ok) t.result = _merge_result;
+            break;
+        }
     }
 
     if (ok) {
@@ -1662,6 +1681,11 @@ bool GuiApp::launch_batch_train(BatchTask& task, const BatchRow& row) {
         flipped = made->mask_flipped;
     }
 
+    if (image_dir.empty() && !row.image_dir.empty()) {
+        image_dir = row.image_dir;
+        mask_dir = row.mask_dir;
+        flipped = row.mask_flipped;
+    }
     TrainConfig cfg;
     std::string base, error;
     if (!batch_build_train_config(row, task.variant, dataset, image_dir, mask_dir,
@@ -1726,6 +1750,7 @@ bool GuiApp::launch_batch_task(BatchTask& task) {
             case BatchStage::Dataset: return launch_batch_dataset(task, row);
             case BatchStage::Train:   return launch_batch_train(task, row);
             case BatchStage::Mesh:    return launch_batch_mesh(task, row);
+            case BatchStage::Merge:   return launch_batch_merge(task, row);
         }
     } catch (const std::exception& e) {
         // Nothing below here is supposed to throw, and a queue that dies on
@@ -1781,6 +1806,13 @@ void GuiApp::finish_batch() {
         else if (t.status == BatchStatus::Failed) failed++;
         else other++;
     }
+    // A row that ran through is left unticked: re-running the list should
+    // not redo it, and "clear done rows" is what removes it.
+    for (int i = 0; i < (int)_batch.size(); i++)
+        if (_batch[(size_t)i].enabled && batch_row_done(i)) {
+            _batch[(size_t)i].enabled = false;
+            _batch_dirty = true;
+        }
     _batch_active = false;
     _batch_launched = false;
     _batch_current = -1;
@@ -1842,6 +1874,7 @@ void GuiApp::follow_batch_screen(BatchStage stage) {
         case BatchStage::Dataset: _screen = Screen::NewDataset; break;
         case BatchStage::Train:   _screen = Screen::Train; break;
         case BatchStage::Mesh:    _screen = Screen::Mesh; break;
+        case BatchStage::Merge:   break;
     }
 }
 
@@ -2620,7 +2653,14 @@ void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
             _pick_row = -1;
             break;
         case PickAction::BatchPresetFile:
-            if (!path.empty() && _pick_row >= 0 &&
+            if (!path.empty() && _pick_row == -2) {
+                try {
+                    TrainPreset p = load_preset(path);
+                    _pq.run.preset = {p.path, p.name};
+                } catch (const std::exception& e) {
+                    log(e.what());
+                }
+            } else if (!path.empty() && _pick_row >= 0 &&
                 _pick_row < (int)_batch.size()) {
                 try {
                     TrainPreset p = load_preset(path);
@@ -2683,10 +2723,13 @@ std::string GuiApp::state_json() {
     out += ",\"dataset\":" + quoted(_cfg.data);
     out += ",\"mask_editor_open\":";
     out += _mask_editor.is_open() ? "true" : "false";
+    out += ",\"partition_panel_open\":";
+    out += _partition_panel.is_open() ? "true" : "false";
     // The app's one segmentation checkpoint, which both screens pick and fetch.
     static const char* kDownload[] = {"idle", "running", "done", "failed", "cancelled"};
     out += ",\"model_id\":" + quoted(_model_id);
-    out += ",\"model_path\":" + quoted(selected_model_path());
+    out += ",\"detector_id\":" + quoted(_mask_detector_id);
+    out += ",\"model_path\":" + quoted(selected_mask_model().model);
     out += ",\"model_download\":\"";
     out += kDownload[(int)_download.state()];
     out += "\",\"license_prompt\":" + quoted(_license_prompt);
@@ -2778,6 +2821,11 @@ void GuiApp::frame() {
     // are queues, stepped on from somewhere that runs whatever screen is up.
     _geom_download.pump();
     _feat_download.pump();
+    if (!_download_model_id.empty() && _download.state() == FileDownload::State::Done) {
+        const ModelEntry* e = find_model(_download_model_id);
+        if (!e || !_download.start(*e, detector_for(*e, _download_detector_id)))
+            _download_model_id.clear();
+    }
     pump_source_probes();
     // Before the reload check below: between two batch rows the runner is
     // briefly idle, and a stale _parse_dirty would start a dataset parse right
@@ -2857,9 +2905,11 @@ void GuiApp::frame() {
         _mask_editor.set_sam_blocker(mask::MaskSession::sam_blocker(
             _segment.is_open(), _geometry_panel.is_open(), native_work_busy()));
         // Every frame: a pick, or a finished download, lands now.
+        // The editor drives a SAM session itself and pairs no text detector,
+        // so SAM 2.1 there is clicks, no words.
         const ModelEntry* me = find_model(_mask_editor_model_id);
         _mask_editor.set_sam_model(cached_model_path(_mask_editor_model_id),
-                                   me && me->text_prompts);
+                                   me && me->text_prompts && me->kind == MaskModelKind::Sam);
         _mask_editor.draw();
     }
     // After every screen and the editor, so either can raise the one consent modal.
@@ -3263,20 +3313,30 @@ bool GuiApp::license_accepted(const std::string& family) const {
                      family) != _accepted_licenses.end();
 }
 
-std::string GuiApp::selected_model_path() const { return cached_model_path(_model_id); }
+MaskModelFiles GuiApp::selected_mask_model() const {
+    return cached_mask_model(_model_id, _mask_detector_id);
+}
 
 // Fetch the selected checkpoint, from wherever the screen offers it. Consent
-// first, every time the family has not been agreed to (ModelCache.h says why).
-void GuiApp::request_model_download(const std::string& id) {
+// first, every time the family has not been agreed to (ModelCache.h says why):
+// the checkpoint's, then the detector's, one modal each, and then the files.
+void GuiApp::request_model_download(const std::string& id, const std::string& detector_id) {
     const ModelEntry* e = find_model(id);
-    if (!e || model_is_cached(*e)) return;
-    if (_download.state() == ModelDownload::State::Running) return;
-    if (license_accepted(e->family)) {
-        _download.start(*e);
-    } else {
-        _license_prompt = e->family;
-        _license_model_id = id;
-        _license_tick = false;
+    if (!e || _download.state() == ModelDownload::State::Running) return;
+    const TextDetector* d = detector_for(*e, detector_id);
+    const std::string families[] = {model_is_cached(*e) ? "" : e->family,
+                                    d && !detector_is_cached(*d) ? "gdino" : ""};
+    for (const std::string& family : families)
+        if (!family.empty() && !license_accepted(family)) {
+            _license_prompt = family;
+            _license_model_id = id;
+            _license_detector_id = detector_id;
+            _license_tick = false;
+            return;
+        }
+    if (_download.start(*e, d)) {
+        _download_model_id = id;
+        _download_detector_id = detector_id;
     }
 }
 
@@ -3292,7 +3352,7 @@ bool GuiApp::mask_model_missing() const {
     for (const PrepInput& s : _sources)
         all_bring_masks = all_bring_masks && !s.mask_dir.empty();
     if (all_bring_masks) return false;
-    return selected_model_path().empty();
+    return selected_mask_model().empty();
 }
 
 const WorkspaceState& GuiApp::workspace_state() {
@@ -3334,8 +3394,10 @@ void GuiApp::sync_dataset_jobs() {
     prep.mask_enable = _mask_enable;
     prep.flip_found_masks = _use_found_masks && _flip_found_masks;
     prep.photo_import = _photo_import;
-    prep.mask_prompt = _mask.prompt;
-    prep.mask_negative_prompt = _mask.negative_prompt;
+    // A click-only pick hides the prompt boxes, so what is left in them is not run.
+    const MaskModelFiles mask_model = selected_mask_model();
+    prep.mask_prompt = mask_model.text ? _mask.prompt : "";
+    prep.mask_negative_prompt = mask_model.text ? _mask.negative_prompt : "";
     prep.mask_keep_subject = _mask.keep_subject;
     prep.mask_max_image_size = _mask.max_image_size;
     prep.mask_dilate_ratio = _mask.boundary_ratio();
@@ -3345,7 +3407,9 @@ void GuiApp::sync_dataset_jobs() {
     prep.mask_detect_every = _mask_detect_every;
     prep.mask_memory_frames = _mask_memory_frames;
     prep.mask_clicks = _mask.clicks;
-    prep.mask_model_path = selected_model_path();
+    prep.mask_model_path = mask_model.model;
+    prep.mask_detector_path = mask_model.detector;
+    prep.mask_detector_threshold = _mask.box_threshold;
     prep.force_external_masking = _sfm_job.prep.force_external_masking;
     if (const ModelEntry* e = find_model(_model_id))
         prep.mask_model_name = e->legacy_name;
@@ -3387,6 +3451,8 @@ void GuiApp::sync_dataset_jobs() {
     _colmap_job.mask_memory_frames = prep.mask_memory_frames;
     _colmap_job.mask_clicks = prep.mask_clicks;
     _colmap_job.mask_model_path = prep.mask_model_path;
+    _colmap_job.mask_detector_path = prep.mask_detector_path;
+    _colmap_job.mask_detector_threshold = prep.mask_detector_threshold;
     _colmap_job.mask_model = prep.mask_model_name;
 
     _sfm_job.prep.redo_frames = _colmap_job.redo_frames = _redo_frames;
@@ -4665,7 +4731,7 @@ void GuiApp::open_mask_preview() {
     close_splat();
     if (!freeze_native_device()) return;
     _segment.open(preview_source((size_t)_mask_preview_input),
-                  _mask_enable ? selected_model_path() : "");
+                  _mask_enable ? selected_mask_model() : MaskModelFiles{});
 }
 
 void GuiApp::draw_masking_options() {
@@ -4732,12 +4798,25 @@ void GuiApp::draw_masking_options() {
     const bool builtin_masking = backends().builtin_masking;
 
     if (_mask_enable && builtin_masking) {
-        draw_mask_model_picker(_model_id, _download,
-                               [this] { request_model_download(_model_id); });
+        const ModelEntry* before = entry;
+        draw_mask_model_picker(_model_id, &_mask_detector_id, _download, [this] {
+            request_model_download(_model_id, _mask_detector_id);
+        });
         entry = find_model(_model_id);
-        if (entry && !entry->text_prompts && _mask.clicks.empty())
+        const bool was_subject = before && before->kind == MaskModelKind::Subject;
+        const bool is_subject = entry && entry->kind == MaskModelKind::Subject;
+        // BiRefNet is for object captures, so picking it means keeping what it
+        // finds; leaving it for an empty SAM prompt goes back to removing.
+        if (is_subject && !was_subject) _mask.keep_subject = true;
+        if (was_subject && !is_subject && _mask.prompt.empty()) _mask.keep_subject = false;
+        if (is_subject) {
+            ImGui::PushTextWrapPos(px(560.0f));
+            ui::TextDisabled(dmsg::mask_subject_note);
+            ImGui::PopTextWrapPos();
+        } else if (!selected_mask_model().text && _mask.clicks.empty()) {
             ui::TextColored(kWarn, dmsg::mask_no_text_prompts);
-        if (!_mask.clicks.empty()) {
+        }
+        if (!is_subject && !_mask.clicks.empty()) {
             int objects = 0;
             for (const MaskClick& c : _mask.clicks)
                 objects = std::max(objects, c.object + 1);
@@ -4751,7 +4830,7 @@ void GuiApp::draw_masking_options() {
             ui::help_on_hover(dmsg::mask_forget_clicks_help);
             const std::string unprompted =
                 inputs_without_clicks(_sources, _mask.clicks);
-            if (!unprompted.empty() && _mask.prompt.empty())
+            if (!unprompted.empty() && (_mask.prompt.empty() || !selected_mask_model().text))
                 ui::TextColoredWrapped(kWarn, dmsg::mask_inputs_need_clicks,
                                        {unprompted});
         }
@@ -4795,50 +4874,85 @@ void GuiApp::draw_masking_options() {
     // Polarity above the two prompts, which are labelled by it -- the same
     // box means "take this out" or "this is the subject" depending on the
     // radio. Same order and same wording as the preview panel.
+    const MaskModelFiles picked = selected_mask_model();
+    const MaskModelKind kind = picked.kind;
+    const bool subject = kind == MaskModelKind::Subject;
     int polarity = _mask.keep_subject ? 1 : 0;
-    if (ui::RadioButton(dmsg::mask_remove_named, polarity == 0)) polarity = 0;
-    ImGui::SameLine();
-    if (ui::RadioButton(dmsg::mask_keep_named, polarity == 1)) polarity = 1;
-    _mask.keep_subject = polarity == 1;
-    ui::help_on_hover(dmsg::mask_polarity_help);
+    if (subject) {
+        // No prompt to label: the choice is about the one thing it finds.
+        if (ui::RadioButton(dmsg::mask_subject_keep, polarity == 1)) polarity = 1;
+        ImGui::SameLine();
+        if (ui::RadioButton(dmsg::mask_subject_remove, polarity == 0)) polarity = 0;
+        _mask.keep_subject = polarity == 1;
+        ui::help_on_hover(dmsg::mask_subject_polarity_help);
+    } else {
+        if (ui::RadioButton(dmsg::mask_remove_named, polarity == 0)) polarity = 0;
+        ImGui::SameLine();
+        if (ui::RadioButton(dmsg::mask_keep_named, polarity == 1)) polarity = 1;
+        _mask.keep_subject = polarity == 1;
+        ui::help_on_hover(dmsg::mask_polarity_help);
+    }
     const bool keep_subject = _mask.keep_subject;
+    if (subject) {
+        if (ui::CollapsingHeader(dmsg::mask_advanced)) {
+            ImGui::SetNextItemWidth(px(220.0f));
+            if (ui::InputInt(dmsg::mask_max_size, &_mask.max_image_size))
+                _mask.max_image_size = std::max(0, _mask.max_image_size);
+            ui::help_on_hover(dmsg::mask_max_size_help);
+            draw_margin_slider(_mask.dilate_ratio, _mask.shrink_ratio, keep_subject,
+                               px(220.0f), /*inline_label=*/true);
+        }
+        ImGui::Unindent();
+        return;
+    }
+    const bool grounded = kind == MaskModelKind::Grounded;
+    // Clicks only: no boxes to type into, and no scores to threshold.
+    const bool text = picked.text;
 
     // English, whatever the interface language is -- see MaskPrompt.h. The
     // placeholder examples are English for the same reason.
-    ImGui::SetNextItemWidth(px(320.0f));
-    ui::InputTextEnglish(
-        keep_subject ? dmsg::mask_what_to_keep : dmsg::mask_what_to_remove,
-        keep_subject ? "the statue; its pedestal" : "person; car; shadow of a person",
-        &_mask.prompt);
-    ui::help_on_hover(keep_subject ? dmsg::mask_prompt_help_keep
-                                   : dmsg::mask_prompt_help_remove);
-    ImGui::SetNextItemWidth(px(320.0f));
-    ui::InputTextEnglish(
-        keep_subject ? dmsg::mask_but_remove : dmsg::mask_but_keep,
-        keep_subject ? "the hand holding it" : "person in a painting",
-        &_mask.negative_prompt);
-    ui::help_on_hover(keep_subject ? dmsg::mask_negative_help_keep
-                                   : dmsg::mask_negative_help_remove);
+    if (text) {
+        ImGui::SetNextItemWidth(px(320.0f));
+        ui::InputTextEnglish(
+            keep_subject ? dmsg::mask_what_to_keep : dmsg::mask_what_to_remove,
+            keep_subject ? "the statue; its pedestal" : "person; car; shadow of a person",
+            &_mask.prompt);
+        ui::help_on_hover(keep_subject ? dmsg::mask_prompt_help_keep
+                                       : dmsg::mask_prompt_help_remove);
+        ImGui::SetNextItemWidth(px(320.0f));
+        ui::InputTextEnglish(
+            keep_subject ? dmsg::mask_but_remove : dmsg::mask_but_keep,
+            keep_subject ? "the hand holding it" : "person in a painting",
+            &_mask.negative_prompt);
+        ui::help_on_hover(keep_subject ? dmsg::mask_negative_help_keep
+                                       : dmsg::mask_negative_help_remove);
 
-    // Only worth saying when the interface is not already English: for an
-    // English user the box being English is not news.
-    if (i18n::current() != i18n::Lang::en) {
-        ImGui::PushTextWrapPos(px(560.0f));
-        ui::TextDisabled(dmsg::mask_english_only);
-        ImGui::PopTextWrapPos();
+        // Only worth saying when the interface is not already English: for an
+        // English user the box being English is not news.
+        if (i18n::current() != i18n::Lang::en) {
+            ImGui::PushTextWrapPos(px(560.0f));
+            ui::TextDisabled(dmsg::mask_english_only);
+            ImGui::PopTextWrapPos();
+        }
+        draw_subject_palette(_mask.prompt, _mask.negative_prompt, keep_subject);
     }
-    draw_subject_palette(_mask.prompt, _mask.negative_prompt, keep_subject);
 
     if (ui::CollapsingHeader(dmsg::mask_advanced)) {
-        // The preview reads these three off the same fields, so a prompt tried
-        // there is tried at the settings that will run.
-        ImGui::SetNextItemWidth(px(220.0f));
-        ui::SliderFloat(dmsg::mask_threshold, &_mask.threshold, 0.05f, 0.95f,
-                        "%.2f");
-        ui::help_on_hover(dmsg::mask_threshold_help);
-        ImGui::SetNextItemWidth(px(220.0f));
-        ui::SliderFloat(dmsg::mask_nms, &_mask.nms, 0.05f, 0.95f, "%.2f");
-        ui::help_on_hover(dmsg::mask_nms_help);
+        // The preview reads these off the same fields. Grounding DINO scores
+        // on its own scale, so the slider is its threshold there, and it keeps
+        // every box, so there is no NMS to set.
+        if (text) {
+            ImGui::SetNextItemWidth(px(220.0f));
+            ui::SliderFloat(dmsg::mask_threshold,
+                            grounded ? &_mask.box_threshold : &_mask.threshold, 0.05f, 0.95f,
+                            "%.2f");
+            ui::help_on_hover(dmsg::mask_threshold_help);
+        }
+        if (text && !grounded) {
+            ImGui::SetNextItemWidth(px(220.0f));
+            ui::SliderFloat(dmsg::mask_nms, &_mask.nms, 0.05f, 0.95f, "%.2f");
+            ui::help_on_hover(dmsg::mask_nms_help);
+        }
         ImGui::SetNextItemWidth(px(220.0f));
         if (ui::InputInt(dmsg::mask_max_size, &_mask.max_image_size))
             _mask.max_image_size = std::max(0, _mask.max_image_size);
@@ -4862,10 +4976,13 @@ void GuiApp::draw_masking_options() {
 
             ImGui::Indent();
             ImGui::BeginDisabled(!memory);
-            ImGui::SetNextItemWidth(px(200.0f));
-            if (ui::InputInt(dmsg::mask_detect_every, &_mask_detect_every))
-                _mask_detect_every = std::clamp(_mask_detect_every, 1, 1000);
-            ui::help_on_hover_disabled(dmsg::mask_detect_every_help);
+            // Grounding DINO searches every frame; only clicks are tracked.
+            if (!grounded) {
+                ImGui::SetNextItemWidth(px(200.0f));
+                if (ui::InputInt(dmsg::mask_detect_every, &_mask_detect_every))
+                    _mask_detect_every = std::clamp(_mask_detect_every, 1, 1000);
+                ui::help_on_hover_disabled(dmsg::mask_detect_every_help);
+            }
             ImGui::SetNextItemWidth(px(200.0f));
             if (ui::InputInt(dmsg::mask_memory_frames, &_mask_memory_frames))
                 _mask_memory_frames = std::clamp(_mask_memory_frames, 0, 7);
@@ -5529,6 +5646,9 @@ void GuiApp::draw_dataset_open_buttons(const DatasetFolders& f, bool model) {
             request_open_splat(f.dir);
         }
         ui::help_on_hover(emsg::sparse_edit_help);
+        ImGui::SameLine();
+        if (ui::Button(spirula::i18n::msg::partition::open_button)) open_partition_panel(f);
+        ui::help_on_hover(spirula::i18n::msg::partition::open_button_help);
     }
     if (!f.mask_dir.empty()) {
         if (model) ImGui::SameLine();
@@ -5548,6 +5668,40 @@ void GuiApp::draw_dataset_open_buttons(const DatasetFolders& f, bool model) {
     }
 }
 
+void GuiApp::open_partition_panel(const DatasetFolders& f) {
+    if (dataset_busy() || native_work_busy()) return;
+    PartitionPanel::Hooks hooks;
+    hooks.log = [this](const std::string& s) { log(s); };
+    hooks.open_splat = [this](const std::string& path) { request_open_splat(path); };
+    hooks.queue_batch = [this, f](const std::string& partition, int n) {
+        open_partition_queue(f, partition, n);
+        return 0;
+    };
+    hooks.open_batch = [this] {
+        if (!native_work_busy()) _screen = Screen::Batch;
+    };
+    _partition_panel.open(f.dir, std::move(hooks));
+}
+
+int GuiApp::add_batch_partition_rows(const DatasetFolders& f, const std::string& partition,
+                                     int num_parts) {
+    for (int k = 0; k < num_parts; k++) {
+        BatchRow r;
+        r.dataset = f.dir;
+        r.image_dir = f.image_dir;
+        r.mask_dir = f.mask_dir;
+        r.mask_flipped = f.mask_flipped;
+        r.partition = partition;
+        r.partition_part = k;
+        r.does(BatchStage::Train) = true;
+        r.runs.push_back(_pq.run);
+        _batch.push_back(std::move(r));
+    }
+    _batch_open_row = -1;
+    batch_edited();
+    return num_parts;
+}
+
 void GuiApp::open_mask_editor(const std::string& workspace, const std::string& image_dir,
                               const std::string& mask_dir, bool mask_flipped) {
     if (dataset_busy() || native_work_busy()) return;
@@ -5555,8 +5709,8 @@ void GuiApp::open_mask_editor(const std::string& workspace, const std::string& i
     _mask_editor.set_log([this](const std::string& s) { log(s); });
     // The editor's own checkpoint, over the app's one download.
     _mask_editor.set_model_picker([this] {
-        draw_mask_model_picker(_mask_editor_model_id, _download,
-                               [this] { request_model_download(_mask_editor_model_id); });
+        draw_mask_model_picker(_mask_editor_model_id, nullptr, _download,
+                               [this] { request_model_download(_mask_editor_model_id, ""); });
     });
     // SAM loads on the device every other inference user freezes, never nn's
     // default; a failed freeze refuses the prompt with the same sentence.
@@ -6289,7 +6443,7 @@ void GuiApp::draw_dataset_form(float height, bool running) {
             else if (ui::Button(need_mask_model   ? dmsg::mask_get_model
                                 : need_feat_model ? dmsg::feat_get_model
                                                   : dmsg::geom_get_model)) {
-                if (need_mask_model)      request_model_download(_model_id);
+                if (need_mask_model)      request_model_download(_model_id, _mask_detector_id);
                 else if (need_feat_model) request_feature_download();
                 else                      request_geometry_download();
             }
@@ -6436,6 +6590,8 @@ void GuiApp::draw_new_dataset() {
         }
     }
     if (_geometry_panel.is_open()) _geometry_panel.draw(_geometry);
+    if (_partition_panel.is_open()) _partition_panel.draw();
+    draw_partition_queue_modal();
     draw_clear_project_modal();
     draw_drop_intermediate_modal();
     draw_mask_recon_modal();
@@ -6489,7 +6645,9 @@ void GuiApp::draw_license_modal() {
     ui::TextDisabledRaw(li.url);
     ImGui::PopTextWrapPos();
     if (const ModelEntry* e = find_model(_license_model_id))
-        ui::TextDisabled(dmsg::license_download_size, {human_bytes(e->bytes)});
+        ui::TextDisabled(dmsg::license_download_size,
+                         {human_bytes(missing_download_bytes(
+                             *e, detector_for(*e, _license_detector_id)))});
     ImGui::Spacing();
 
     if (li.needs_tick)
@@ -6500,9 +6658,10 @@ void GuiApp::draw_license_modal() {
     if (ui::Button(dmsg::license_download, ImVec2(150, 0))) {
         _accepted_licenses.push_back(_license_prompt);
         save_settings();
-        if (const ModelEntry* e = find_model(_license_model_id)) _download.start(*e);
         _license_prompt.clear();
         ImGui::CloseCurrentPopup();
+        // Raises the detector's modal next if that one is still to agree to.
+        request_model_download(_license_model_id, _license_detector_id);
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
@@ -7205,6 +7364,7 @@ const Msg& GuiApp::batch_stage_name(BatchStage s) const {
     switch (s) {
         case BatchStage::Dataset: return msg::batch_stage_dataset;
         case BatchStage::Mesh:    return msg::batch_stage_mesh;
+        case BatchStage::Merge:   return spirula::i18n::msg::partition::stage_merge;
         default:                  return msg::batch_stage_train;
     }
 }
@@ -7218,6 +7378,7 @@ std::string GuiApp::batch_row_summary(const BatchRow& row) const {
             s += " (+" + std::to_string(row.sources.size() - 1) + ")";
         return s;
     }
+    if (row.does(BatchStage::Merge) && !row.partition.empty()) return row.partition;
     if (!row.dataset.empty()) return row.dataset;
     if (!row.model.empty()) return row.model;
     return {};
@@ -7301,12 +7462,15 @@ void GuiApp::draw_batch() {
     const bool busy_elsewhere =
         !_batch_active && (dataset_busy() || _mesh.busy());
     ImGui::BeginDisabled(_batch.empty());
-    if (ui::Button(msg::batch_clear)) {
-        _batch.clear();
-        _batch_tasks.clear();
-        _batch_open_row = -1;
-        _batch_msg.clear();
-        batch_edited();
+    if (ui::Button(msg::batch_clear)) _batch_confirm = BatchConfirm::ClearList;
+    ImGui::SameLine();
+    {
+        int done = 0;
+        for (int i = 0; i < (int)_batch.size(); i++) done += batch_row_done(i);
+        ImGui::BeginDisabled(done == 0);
+        if (ui::Button(msg::batch_clear_done)) _batch_confirm = BatchConfirm::ClearDone;
+        ui::help_on_hover(msg::batch_clear_done_help);
+        ImGui::EndDisabled();
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(busy_elsewhere);
@@ -7340,9 +7504,231 @@ void GuiApp::draw_batch() {
     draw_batch_issues();
     draw_batch_command();
     draw_batch_plan();
+    draw_batch_confirm_modal();
     ImGui::EndChild();
 
     draw_log_panel(log_h);
+}
+
+bool GuiApp::batch_row_done(int index) const {
+    bool any = false;
+    for (const BatchTask& t : _batch_tasks) {
+        if (t.row != index) continue;
+        if (t.status != BatchStatus::Done) return false;
+        any = true;
+    }
+    return any;
+}
+
+void GuiApp::draw_batch_confirm_modal() {
+    if (_batch_confirm != BatchConfirm::None && !_batch_confirm_shown) {
+        ui::OpenPopup(msg::batch_confirm_title);
+        _batch_confirm_shown = true;
+    }
+    if (!_batch_confirm_shown) return;
+    if (!ui::BeginPopupModal(msg::batch_confirm_title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        _batch_confirm_shown = false;
+        _batch_confirm = BatchConfirm::None;
+        return;
+    }
+    const bool all = _batch_confirm == BatchConfirm::ClearList;
+    ImGui::PushTextWrapPos(px(420.0f));
+    ui::Text(all ? msg::batch_clear_confirm : msg::batch_clear_done_confirm);
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ui::Button(all ? msg::batch_clear : msg::batch_clear_done, ImVec2(px(170.0f), 0))) {
+        if (all) {
+            _batch.clear();
+        } else {
+            std::vector<BatchRow> kept;
+            for (int i = 0; i < (int)_batch.size(); i++)
+                if (!batch_row_done(i)) kept.push_back(_batch[(size_t)i]);
+            _batch.swap(kept);
+        }
+        _batch_tasks.clear();
+        _batch_open_row = -1;
+        _batch_msg.clear();
+        batch_edited();
+        _batch_confirm_shown = false;
+        _batch_confirm = BatchConfirm::None;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ui::Button(msg::cancel, ImVec2(px(170.0f), 0))) {
+        _batch_confirm_shown = false;
+        _batch_confirm = BatchConfirm::None;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+void GuiApp::draw_batch_row_merge(BatchRow& row, int index) {
+    namespace pmsg = spirula::i18n::msg::partition;
+    ui::SeparatorText(pmsg::stage_merge);
+    ui::Text(pmsg::lbl_file);
+    ImGui::SetNextItemWidth(px(-8.0f));
+    if (ui::InputTextRaw("##mergepart", &row.partition)) batch_edited();
+    ui::TextDisabledWrapped(pmsg::merge_row_help);
+    ui::Text(pmsg::lbl_runs);
+    const float bw = ImGui::GetFrameHeight() + 6.0f;
+    ImGui::SetNextItemWidth(-bw);
+    if (ui::InputTextWithHintRaw("##mergeout", msg::batch_output_hint, &row.output_dir))
+        batch_edited();
+    ImGui::SameLine(0, 2);
+    if (ui::ButtonRaw("...##mergeout")) {
+        _pick_row = index;
+        open_pick(PickAction::BatchOutput, msg::batch_pick_output.get(),
+                  FileDialog::Mode::Folder, {}, row.output_dir);
+    }
+}
+
+bool GuiApp::launch_batch_merge(BatchTask& task, const BatchRow& row) {
+    namespace pmsg = spirula::i18n::msg::partition;
+    if (_merge_thread.joinable()) _merge_thread.join();
+    const std::string partition = row.partition;
+    const std::string outputs = row.output_dir.empty()
+                                    ? (fs::path(row.dataset).parent_path() / fs::path(row.dataset).filename() / "outputs").string()
+                                    : row.output_dir;
+    _merge_result.clear();
+    _merge_error.clear();
+    _merge_busy = true;
+    log(i18n::format(pmsg::batch_log_merge, {(long long)(_batch_current + 1), partition}));
+    _merge_thread = std::thread([this, partition, outputs] {
+        try {
+            std::string dataset;
+            const spirula::ScenePartition p = spirula::read_partition(partition, &dataset);
+            const std::vector<std::string> runs =
+                spirula::find_partition_runs(outputs, partition, p.num_parts);
+            int found = 0;
+            for (const std::string& r : runs) found += !r.empty();
+            if (found == 0) throw std::runtime_error(pmsg::err_nothing_to_merge.get());
+            spirula::MergeStats st;
+            const spirula::SplatCloud merged = spirula::merge_partition_splats(p, runs, st);
+            char stamp[32];
+            const std::time_t now = std::time(nullptr);
+            std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
+            const std::string stem = fs::path(dataset.empty() ? fs::path(partition).parent_path().string() : dataset).filename().string();
+            std::error_code ec;
+            fs::create_directories(outputs, ec);
+            const std::string out = (fs::path(outputs) / (stem + "_merged_" + stamp + ".ply")).string();
+            spirula::write_splat_ply(merged, out);
+            _merge_result = out;
+        } catch (const std::exception& e) {
+            _merge_error = e.what();
+        }
+        _merge_busy = false;
+    });
+    (void)task;
+    return true;
+}
+
+// ---- queueing a partition's parts ----
+
+void GuiApp::open_partition_queue(const DatasetFolders& f, const std::string& partition,
+                                  int num_parts) {
+    _pq = PartitionQueue{};
+    _pq.folders = f;
+    _pq.partition = partition;
+    _pq.num_parts = num_parts;
+    _pq.run = batch_run_on_screen();
+    _pq.open = true;
+}
+
+int GuiApp::queue_partition_rows(bool clear_pending) {
+    if (clear_pending) {
+        std::vector<BatchRow> kept;
+        for (int i = 0; i < (int)_batch.size(); i++)
+            if (!_batch[(size_t)i].enabled || batch_row_done(i)) kept.push_back(_batch[(size_t)i]);
+        _batch.swap(kept);
+        _batch_tasks.clear();
+    }
+    const int n = add_batch_partition_rows(_pq.folders, _pq.partition, _pq.num_parts);
+    if (_pq.merge) {
+        BatchRow m;
+        m.dataset = _pq.folders.dir;
+        m.partition = _pq.partition;
+        m.partition_part = -1;
+        for (int i = 0; i < kNumBatchStages; i++) m.stages[i] = false;
+        m.does(BatchStage::Merge) = true;
+        _batch.push_back(std::move(m));
+        batch_edited();
+    }
+    log(i18n::format(spirula::i18n::msg::partition::batch_added, {n}));
+    return n;
+}
+
+void GuiApp::draw_partition_queue_modal() {
+    namespace pmsg = spirula::i18n::msg::partition;
+    if (_pq.open) {
+        ui::OpenPopup(pmsg::pq_title);
+        _pq.open = false;
+        _pq.shown = true;
+    }
+    if (!_pq.shown) return;
+    if (!ui::BeginPopupModal(pmsg::pq_title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        _pq.shown = false;
+        return;
+    }
+    ImGui::PushTextWrapPos(px(520.0f));
+    ui::Text(pmsg::pq_runs, {_pq.num_parts, fs::path(_pq.folders.dir).filename().string()});
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (!_pq.ask_clear) {
+        // The same line a batch row shows: preset, then the three numbers.
+        ImGui::SetNextItemWidth(px(520.0f));
+        draw_batch_run(_pq.run, -2, 0, false);
+        ui::Checkbox(pmsg::pq_merge, &_pq.merge);
+        ui::help_on_hover(pmsg::pq_merge_help);
+        ImGui::Spacing();
+        int pending = 0;
+        for (int i = 0; i < (int)_batch.size(); i++)
+            pending += _batch[(size_t)i].enabled && !batch_row_done(i);
+        ImGui::BeginDisabled(_batch_active);
+        if (ui::Button(pmsg::pq_queue, ImVec2(px(170.0f), 0))) {
+            if (pending > 0) {
+                _pq.ask_clear = true;
+            } else {
+                queue_partition_rows(false);
+                _pq.shown = false;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndDisabled();
+        if (_batch_active) {
+            ImGui::SameLine();
+            ui::TextColored(kDim, msg::batch_busy_elsewhere);
+        }
+        ImGui::SameLine();
+        if (ui::Button(msg::cancel, ImVec2(px(170.0f), 0))) {
+            _pq.shown = false;
+            ImGui::CloseCurrentPopup();
+        }
+    } else {
+        int pending = 0;
+        for (int i = 0; i < (int)_batch.size(); i++)
+            pending += _batch[(size_t)i].enabled && !batch_row_done(i);
+        ImGui::PushTextWrapPos(px(520.0f));
+        ui::Text(pmsg::pq_pending, {pending});
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        if (ui::Button(pmsg::pq_clear, ImVec2(px(170.0f), 0))) {
+            queue_partition_rows(true);
+            _pq.shown = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ui::Button(pmsg::pq_keep, ImVec2(px(170.0f), 0))) {
+            queue_partition_rows(false);
+            _pq.shown = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ui::Button(msg::cancel, ImVec2(px(170.0f), 0))) {
+            _pq.shown = false;
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::EndPopup();
 }
 
 
@@ -7407,6 +7793,12 @@ void GuiApp::draw_batch_row(BatchRow& row, int index, int& remove, int& move) {
         ImGui::SameLine();
         ui::TextDisabled(msg::batch_runs_count, {(long long)batch_num_runs(row)});
     }
+    if (!row.partition.empty() && row.partition_part >= 0) {
+        ImGui::SameLine();
+        ui::TextColored(row.enabled ? kOk : kDim, spirula::i18n::msg::partition::chip_part,
+                        {row.partition_part});
+        ui::help_on_hover_raw(row.partition.c_str());
+    }
     if (const std::string what = batch_row_summary(row); !what.empty()) {
         ImGui::SameLine();
         ui::TextDisabledRaw(what);
@@ -7464,6 +7856,7 @@ void GuiApp::draw_batch_row(BatchRow& row, int index, int& remove, int& move) {
         if (row.does(BatchStage::Dataset)) draw_batch_row_dataset(row, index);
         if (row.does(BatchStage::Train)) draw_batch_row_train(row, index);
         if (row.does(BatchStage::Mesh)) draw_batch_row_mesh(row, index);
+        if (row.does(BatchStage::Merge)) draw_batch_row_merge(row, index);
         ImGui::EndDisabled();
         ImGui::Unindent();
     }
@@ -7878,6 +8271,10 @@ void GuiApp::draw_batch_plan() {
                 }
                 break;
             }
+            case BatchStage::Merge:
+                line = i18n::format(spirula::i18n::msg::partition::plan_merge,
+                                    {n, fs::path(row.partition).parent_path().filename().string()});
+                break;
         }
         ImVec4 color = kDim;
         if (_batch_active) {
@@ -7911,6 +8308,7 @@ float GuiApp::batch_task_fraction() {
             if (pr.total_steps <= 0) return -1.0f;
             return std::min(1.0f, (float)(pr.step + 1) / (float)pr.total_steps);
         }
+        case BatchStage::Merge: return 0.5f;
         case BatchStage::Mesh: return _mesh.progress();
     }
     return -1.0f;
@@ -7946,6 +8344,7 @@ void GuiApp::draw_batch_stop_buttons() {
             switch (_batch_tasks[(size_t)_batch_current].stage) {
                 case BatchStage::Dataset: cancel_dataset_job(); break;
                 case BatchStage::Mesh:    _mesh.cancel(); break;
+                case BatchStage::Merge:   break;
                 default:                  _runner.request_stop(); break;
             }
         }
@@ -7997,6 +8396,7 @@ void GuiApp::draw_batch_progress() {
             switch (st) {
                 case BatchStage::Dataset: _screen = Screen::NewDataset; break;
                 case BatchStage::Mesh:    _screen = Screen::Mesh; break;
+                case BatchStage::Merge:   break;
                 default:                  _screen = Screen::Train; break;
             }
         }

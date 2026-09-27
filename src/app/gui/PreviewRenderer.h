@@ -69,11 +69,11 @@ public:
     // context (GUI thread) and the session's load_dataset() to have
     // completed. Returns false when GL init fails (missing functions).
     bool build(const spirula::TrainerSession& session);
-    // The same over parsed data alone, with no cameras at all handled (a
-    // point file has none, and then no frusta are drawn). `cam_selected` is
-    // one flag per camera of `ds`, drawn in the highlight colour.
+    // The same over parsed data alone (a point file has no cameras, so no
+    // frusta). `cam_selected` is one flag per camera, drawn in the highlight
+    // colour; `cam_rgb`, [N,3] in 0..1, gives every camera its own colour instead.
     bool build(const ParsedDataset& ds, const PostSplitCameras& post,
-               const uint8_t* cam_selected = nullptr);
+               const uint8_t* cam_selected = nullptr, const float* cam_rgb = nullptr);
     // A triangle mesh, drawn shaded instead of a point cloud. `to_normalized`
     // is the similarity that maps the mesh's own coordinates into the frame
     // the viewport navigates (scale + center, as SplatViewer computes for a
@@ -181,6 +181,9 @@ private:
     int64_t _num_cam_verts = 0;
     int64_t _num_cam_sel = 0;
     int64_t _num_cam_bright = 0;
+    // With per-camera colours instead: one draw per distinct colour.
+    struct CamGroup { int64_t first, count; float rgb[3]; };
+    std::vector<CamGroup> _cam_groups;
     float _base_cam_size = 0.1f;
 
     unsigned _fbo = 0, _color_tex = 0, _depth_rb = 0;

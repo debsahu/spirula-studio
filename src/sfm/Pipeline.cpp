@@ -24,6 +24,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -47,6 +48,7 @@
 #include "sfm/feature/PairSelection.h"
 #include "sfm/feature/Pairing.h"
 #include "sfm/feature/RigPairs.h"
+#include "sfm/feature/GpsPairs.h"
 #include "sfm/feature/Sift.h"
 #include "sfm/feature/Verification.h"
 #include "sfm/geometry/TwoView.h"
@@ -191,14 +193,9 @@ std::string metricReason(const MetricFit& f) {
     return {};
 }
 
-// A telemetry file read once per run, with the queries the gauge fit makes.
-struct LoadedCapture {
-    SensorCapture cap;
-    SensorTimeline timeline;
-};
 
-std::vector<std::unique_ptr<LoadedCapture>> loadCaptures(const SfmConfig& cfg, bool verbose) {
-    std::vector<std::unique_ptr<LoadedCapture>> out;
+SensorCaptures loadSensorCaptures(const SfmConfig& cfg, bool verbose) {
+    SensorCaptures out;
     if (cfg.sensor_gauge == "none") return out;
     for (const TelemetryInput& in : cfg.telemetry_inputs) {
         Telemetry t;
@@ -230,10 +227,11 @@ std::vector<std::unique_ptr<LoadedCapture>> loadCaptures(const SfmConfig& cfg, b
         }
         if (verbose)
             for (const std::string& w : c.warnings) L::err_raw(Tag::Orient, w);
-        out.push_back(std::move(lc));
+        out.loaded.push_back(std::move(lc));
     }
     return out;
 }
+
 
 const spirula::i18n::Msg& extrinsicReason(ExtrinsicFail f) {
     switch (f) {
@@ -343,9 +341,142 @@ void reportSensorGauge(size_t i, const SensorGaugeResult& r,
 // The gauge each model is written in: the video's sensors, else the attitude
 // the images record, then a metric reference, else the orient frame -- each
 // where it fits. False when a metric frame was asked for and missed.
+
+// ---------------------------------------------------------------------------
+// The sensors as priors (sfm/map/SensorPriors.h)
+// ---------------------------------------------------------------------------
+
+std::vector<Camera> perImageCameras(const CameraSetup& cs, size_t num_images) {
+    std::vector<Camera> percam(num_images);
+    for (size_t i = 0; i < num_images && i < cs.ids.size(); i++) {
+        auto it = cs.cameras.find(cs.ids[i]);
+        if (it != cs.cameras.end()) percam[i] = it->second;
+    }
+    return percam;
+}
+
+std::unique_ptr<TelemetryPriors> makeSensorPriors(const SfmConfig& cfg,
+                                                  const SensorCaptures& sensors,
+                                                  const MatchesDatabase& db,
+                                                  const std::vector<uint32_t>& cam_ids) {
+    if (sensors.empty() || !(cfg.sensor_verify || cfg.sensor_map || cfg.sensor_pairs))
+        return nullptr;
+    std::vector<std::string> names;
+    names.reserve(db.images.size());
+    for (const ImageEntry& im : db.images) names.push_back(im.name);
+    SensorPriorOptions po;
+    po.max_dt = cfg.sensor_max_dt;
+    po.gps_max_error = cfg.metric_gps != "none" && cfg.metric_max_error > 0 ? cfg.metric_max_error : 5.0;
+    po.gps_max_error_frac = cfg.metric_max_error_frac;
+    po.verbose = !cfg.quiet;
+    auto priors = std::make_unique<TelemetryPriors>(sensors.caps(), names, cam_ids, po);
+    return priors->timedImages() ? std::move(priors) : nullptr;
+}
+
+
+// Relative rotations from two-view geometry on bearings, over the pairs the
+// source can calibrate on, then the source's own hand-eye fit.
+void calibrateSensorPriorsFrom(TelemetryPriors& priors, const std::vector<FeatureSet>& feats,
+                               const std::vector<std::pair<uint32_t, uint32_t>>& pairs,
+                               const std::vector<std::vector<FeatureMatch>>& matches,
+                               const std::vector<Camera>& cams, const TwoViewOptions& tvopt,
+                               int threads, bool verbose, bool inliers_only) {
+    std::vector<size_t> use;
+    for (size_t p = 0; p < pairs.size() && p < matches.size(); p++)
+        if (priors.calibrationPair(pairs[p].first, pairs[p].second) &&
+            (int)matches[p].size() >= std::max(30, tvopt.min_num_inliers))
+            use.push_back(p);
+    // Spread over the capture rather than its first minute: the fit wants
+    // every axis turned, and 600 pairs are plenty for a tenth of a degree.
+    const size_t kMax = 600;
+    if (use.size() > kMax) {
+        std::vector<size_t> thin;
+        const double step = (double)use.size() / (double)kMax;
+        for (size_t k = 0; k < kMax; k++) thin.push_back(use[(size_t)(k * step)]);
+        use.swap(thin);
+    }
+    std::vector<PairRotationObs> obs(use.size());
+    std::vector<char> ok(use.size(), 0);
+    std::atomic<size_t> next{0};
+    auto worker = [&] {
+        for (size_t k = next++; k < use.size(); k = next++) {
+            const size_t p = use[k];
+            const uint32_t i = pairs[p].first, j = pairs[p].second;
+            const std::vector<FeatureMatch>& m = matches[p];
+            std::vector<Vec3> b1(m.size()), b2(m.size());
+            for (size_t q = 0; q < m.size(); q++) {
+                b1[q] = cams[i].bearing({feats[i].keypoints[m[q].idx1].x, feats[i].keypoints[m[q].idx1].y});
+                b2[q] = cams[j].bearing({feats[j].keypoints[m[q].idx2].x, feats[j].keypoints[m[q].idx2].y});
+            }
+            TwoViewOptions tvo = tvopt;
+            tvo.recover_pose = true;
+            // Verified inliers carry no outliers to reject; the homography
+            // test still has to say whether the pair has a translation.
+            const double sc = 0.5 * (feats[i].pixelScale() + feats[j].pixelScale());
+            tvo.ransac.max_error = tvopt.ransac.max_error * sc /
+                                   std::max(1.0, 0.5 * (cams[i].focal() + cams[j].focal()));
+            if (inliers_only) tvo.ransac.max_num_trials = std::min(tvo.ransac.max_num_trials, 500);
+            const TwoViewGeometry g = estimateTwoViewBearing(b1, b2, tvo);
+            if (g.config != TwoViewConfig::Uncalibrated || !g.has_pose || g.num_inliers < 30) continue;
+            obs[k] = {i, j, g.pose.R};
+            ok[k] = 1;
+        }
+    };
+    const unsigned hc = std::thread::hardware_concurrency();
+    const int nt = std::max(1, std::min<int>(threads > 0 ? threads : (hc ? (int)hc : 1),
+                                             (int)std::max<size_t>(use.size(), 1)));
+    std::vector<std::thread> pool;
+    for (int t = 0; t < nt; t++) pool.emplace_back(worker);
+    for (std::thread& t : pool) t.join();
+    std::vector<PairRotationObs> kept;
+    for (size_t k = 0; k < obs.size(); k++)
+        if (ok[k]) kept.push_back(obs[k]);
+    priors.calibrateFromPairs(kept);
+    if (!verbose) return;
+    for (size_t c = 0; c < priors.timeOffsets().size(); c++)
+        if (priors.timeOffsets()[c].found)
+            L::err(Tag::Match, M::sensor_time_offset,
+                   {priors.groups().empty() ? std::string("?") : std::to_string(c),
+                    L::num(1000.0 * priors.timeOffsets()[c].offset, 1),
+                    (long long)priors.timeOffsets()[c].pairs});
+    for (const SensorGroupState& g : priors.groups()) {
+        if (g.ok)
+            L::out(Tag::Match, M::sensor_prior_calib,
+                   {g.name, (long long)g.pairs, L::num(g.fit.sig_rot_deg, 2)});
+        else
+            L::err(Tag::Match, M::sensor_prior_calib_failed,
+                   {g.name, (long long)g.pairs, extrinsicReason(g.fit.reason).get()});
+    }
+}
+
+
+void calibrateSensorPriors(TelemetryPriors& priors, const std::vector<FeatureSet>& feats,
+                           const std::vector<std::pair<uint32_t, uint32_t>>& pairs,
+                           const std::vector<std::vector<FeatureMatch>>& matches,
+                           const std::vector<Camera>& cams, const TwoViewOptions& tvopt,
+                           int threads, bool verbose) {
+    calibrateSensorPriorsFrom(priors, feats, pairs, matches, cams, tvopt, threads, verbose, false);
+}
+
+void calibrateSensorPriorsFromDatabase(TelemetryPriors& priors, const MatchesDatabase& db,
+                                       const std::vector<FeatureSet>& feats,
+                                       const std::vector<Camera>& cams,
+                                       const TwoViewOptions& tvopt, int threads, bool verbose) {
+    std::vector<std::pair<uint32_t, uint32_t>> pairs;
+    std::vector<std::vector<FeatureMatch>> matches;
+    for (const TwoViewMatches& p : db.pairs) {
+        if (p.config != (int)TwoViewConfig::Uncalibrated) continue;
+        if (!priors.calibrationPair(p.image1, p.image2)) continue;
+        pairs.emplace_back(p.image1, p.image2);
+        matches.push_back(p.matches);
+    }
+    calibrateSensorPriorsFrom(priors, feats, pairs, matches, cams, tvopt, threads, verbose, true);
+}
+
+
 bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
-                     const std::string& imagedir, bool verbose,
-                     std::vector<ModelGauge>& gauge) {
+              const std::string& imagedir, bool verbose,
+              std::vector<ModelGauge>& gauge, const SensorCaptures* sensors) {
     const bool gps = cfg.metric_gps != "none";
     const bool flat = cfg.metric_gps == "horizontal";
     const bool file = !cfg.metric_positions.empty();
@@ -369,10 +500,14 @@ bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
     gauge.assign(models.size(), ModelGauge());
 
     // ---- the video's own sensors -----------------------------------------
-    const std::vector<std::unique_ptr<LoadedCapture>> loaded = loadCaptures(cfg, verbose);
+    SensorCaptures own;
+    if (!sensors) {
+        own = loadSensorCaptures(cfg, verbose);
+        sensors = &own;
+    }
+    const std::vector<std::unique_ptr<LoadedCapture>>& loaded = sensors->loaded;
     if (!loaded.empty()) {
-        std::vector<SensorCapture> caps;
-        for (const auto& lc : loaded) caps.push_back(lc->cap);
+        std::vector<SensorCapture> caps = sensors->caps();
         SensorGaugeOptions opt;
         opt.mode = cfg.sensor_gauge == "up" ? SensorMode::Up : SensorMode::Auto;
         opt.gps_full = cfg.metric_gps == "full";
@@ -693,6 +828,59 @@ void writeRigs(const fs::path& dir, const Reconstruction& m, const RigTable* rig
               << ' ' << c.spread_deg[k] << "\n";
         }
     }
+}
+
+RigTable readRigs(const fs::path& dir, Reconstruction& m) {
+    std::ifstream f(dir / "rigs.txt");
+    if (!f) return {};
+    struct Row {
+        std::string member, ref;
+        Quat q;
+        Vec3 t;
+        uint32_t frames = 0;
+        double spread = 0;
+    };
+    std::vector<std::string> order;
+    std::map<std::string, std::vector<Row>> rows;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream ss(line);
+        std::string rig;
+        Row r;
+        if (!(ss >> rig >> r.member >> r.ref >> r.q[0] >> r.q[1] >> r.q[2] >> r.q[3] >> r.t.x >>
+              r.t.y >> r.t.z))
+            throw std::runtime_error((dir / "rigs.txt").string() + ": cannot read '" + line + "'");
+        ss >> r.frames >> r.spread;
+        if (!rows.count(rig)) order.push_back(rig);
+        rows[rig].push_back(r);
+    }
+    std::vector<RigDef> defs;
+    for (const std::string& name : order) {
+        RigDef d;
+        d.name = name;
+        for (const Row& r : rows[name]) d.members.push_back({r.member});
+        defs.push_back(std::move(d));
+    }
+    uint32_t n = 0;
+    for (const auto& kv : m.images) n = std::max(n, kv.first + 1);
+    std::vector<std::string> names(n);
+    for (const auto& kv : m.images) names[kv.first] = kv.second.name;
+    RigTable rigs = buildRigTable(names, defs);
+    m.rigs.assign(rigs.rigs.size(), RigCalib{});
+    for (size_t r = 0; r < order.size(); r++) {
+        const std::vector<Row>& rs = rows[order[r]];
+        RigCalib& c = m.rigs[r];
+        c.resize(rs.size());
+        for (size_t k = 0; k < rs.size(); k++) {
+            c.cam_from_rig[k] = {quaternionToRotation(rs[k].q), rs[k].t};
+            c.established[k] = 1;
+            c.support[k] = rs[k].frames;
+            c.spread_deg[k] = rs[k].spread;
+            if (rs[k].member == rs[k].ref) c.ref = (int)k;
+        }
+    }
+    return rigs;
 }
 
 // Every reconstruction as <dir>/0, <dir>/1, ... (D41) -- COLMAP's layout for a
@@ -1414,6 +1602,15 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
     stats.images = n_images;
     std::vector<std::string> image_names(n_images);
     for (size_t i = 0; i < n_images; i++) image_names[i] = db.images[i].name;
+    // The grouping first: the sensors are keyed by camera group, and the GPS
+    // pairs below go into the list before it is written.
+    if (calib) {
+        calib->cameras = buildCameras(db.images, feats, calib->setup);
+        if (verbose) printCameraSetup(Tag::Match, calib->cameras, calib->setup, feats.size());
+        if (calib->sensors)
+            calib->priors = makeSensorPriors(cfg, *calib->sensors, db, calib->cameras.ids);
+    }
+    TelemetryPriors* priors = calib ? calib->priors.get() : nullptr;
 
     std::vector<std::pair<uint32_t, uint32_t>> pairs;
     // Pair selection is minutes on a large capture and used to look like a
@@ -1513,6 +1710,20 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
         }
     }
 #endif
+    // Images the GPS puts near each other, whatever the shortlist thought.
+    if (priors && cfg.sensor_pairs && !reused_pairs) {
+        size_t positioned = 0;
+        const std::vector<std::pair<uint32_t, uint32_t>> nearby = gpsProximityPairs(
+            *priors, (uint32_t)n_images, cfg.sensor_pair_radius, 20, &positioned);
+        const size_t before = pairs.size();
+        pairs.insert(pairs.end(), nearby.begin(), nearby.end());
+        std::sort(pairs.begin(), pairs.end());
+        pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
+        if (positioned && verbose)
+            L::err(Tag::Match, M::sensor_gps_pairs_added,
+                   {(long long)(pairs.size() - before), L::num(cfg.sensor_pair_radius, 0),
+                    (long long)positioned});
+    }
     if (res && !reused_pairs) resume::writePairs(res->dir / "pairs.bin", res->signature, pairs);
     stats.pairs = pairs.size();
     if (verbose)
@@ -1570,10 +1781,10 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
         // VerifyCalibration. Everything else keeps the pixel path, where the
         // pinhole assumption is exact and results are long settled.
         BearingCache bc;
+        std::vector<Camera> percam;
+        VerifyPriorStats pstats;
         if (calib) {
             CameraSetup& cs = calib->cameras;
-            cs = buildCameras(db.images, feats, calib->setup);
-            if (verbose) printCameraSetup(Tag::Match, cs, calib->setup, feats.size());
             // Both focal searches want the same thing: putative matches for a
             // sample of pairs, spread over the list (a prefix would sample one
             // part of the capture, since pair lists are ordered). The fisheye
@@ -1634,6 +1845,36 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
                 }
             }
         }
+        // The gyro's word on every pair it covers: calibrated on a sample of
+        // time-adjacent pairs first, since the rotation prior needs the
+        // IMU-to-lens rotation and the putative matches are gone after this.
+        if (priors && cfg.sensor_verify && calib) {
+            percam = perImageCameras(calib->cameras, feats.size());
+            std::vector<std::pair<uint32_t, uint32_t>> sample;
+            for (const auto& p : pairs)
+                if (priors->calibrationPair(p.first, p.second)) sample.push_back(p);
+            if (sample.size() > 900) {
+                std::vector<std::pair<uint32_t, uint32_t>> thin;
+                const double step = (double)sample.size() / 900.0;
+                for (size_t k = 0; k < 900; k++) thin.push_back(sample[(size_t)(k * step)]);
+                sample.swap(thin);
+            }
+            std::vector<std::vector<FeatureMatch>> sm, chunk;
+            for (size_t b = 0; b < sample.size(); b += 16) {
+                const size_t e = std::min(b + 16, sample.size());
+                matcher->matchBatch(feats, sample, b, e, chunk);
+                for (size_t k = b; k < e; k++) sm.push_back(std::move(chunk[k - b]));
+            }
+            const double t_c = now();
+            calibrateSensorPriors(*priors, feats, sample, sm, percam, tvopt, cfg.threads, verbose);
+            if (verbose)
+                L::diag(Tag::Match, "[prior] calibrated on %zu pair(s) in %s", sample.size(),
+                        format_duration(now() - t_c).c_str());
+            if (priors->anyRotation()) {
+                vopt.priors = priors;
+                vopt.cameras = &percam;
+            }
+        }
         // A focal either search measured was measured *on that group's own
         // pairs*, which is what focal_known means: the mapper's per-image sweep
         // has nothing to add to it and every reason to leave it alone. On a
@@ -1682,8 +1923,13 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
         // offered the verifier, and verifyPairs writes its own total.
         uint64_t putative = 0;
         std::vector<TwoViewMatches> fresh =
-            verifyPairs(feats, todo, matchFn, vopt, &putative, progress);
+            verifyPairs(feats, todo, matchFn, vopt, &putative, progress, &pstats);
         stats.putative += putative;
+        if (vopt.priors && verbose && pstats.pairs)
+            L::err(Tag::Match, M::sensor_verify_summary,
+                   {(long long)pstats.pairs, (long long)pstats.kept, (long long)pstats.dropped,
+                    (long long)pstats.rescued, (long long)pstats.disagreed,
+                    (long long)pstats.contradicted});
         // Back into the pair list's order, whichever run produced each entry:
         // the mapper's seed ranking breaks ties on it, so a resumed run must
         // hand it over in the order a single run would have.
@@ -1735,7 +1981,7 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
                 vopt.progress_done_base = pairs.size();
                 vopt.progress_total = pairs.size() + mates_todo.size();
                 uint64_t put2 = 0;
-                more = verifyPairs(feats, mates_todo, mateFn, vopt, &put2, progress);
+                more = verifyPairs(feats, mates_todo, mateFn, vopt, &put2, progress, &pstats);
                 stats.putative += put2;
             }
             // In the mates' order whichever run verified each, as above.
@@ -1761,6 +2007,13 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
         sfm::progress::flush();
         events::stage_end(Stage::Match);
         for (const TwoViewMatches& tvm : db.pairs) stats.inliers += tvm.matches.size();
+        // Calibrated on the verified pairs when the sample could not do it
+        // (or was never asked for): the mapper wants the rotations too.
+        if (priors && calib && !priors->anyRotation()) {
+            if (percam.empty()) percam = perImageCameras(calib->cameras, feats.size());
+            calibrateSensorPriorsFromDatabase(*priors, db, feats, percam, tvopt, cfg.threads,
+                                              verbose);
+        }
     } else {
         const size_t batch = std::max(1, opt.batch_pairs);
         std::vector<std::vector<FeatureMatch>> mout;
@@ -1899,6 +2152,8 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
     MatchStats mstats;
     VerifyCalibration calib;
     calib.setup = cfg.camera;
+    const SensorCaptures sensors = loadSensorCaptures(cfg, verbose);
+    calib.sensors = &sensors;
     // What this stage's output depends on: its own settings, the extraction
     // that produced its input, and the feature files themselves -- the pair
     // lists and the journal are indices into a particular set of those.
@@ -1925,6 +2180,11 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
                 mstats.kept = mstats.pairs = db.pairs.size();
                 for (const TwoViewMatches& tvm : db.pairs) mstats.inliers += tvm.matches.size();
                 reused_matches = true;
+                calib.priors = makeSensorPriors(cfg, sensors, db, calib.cameras.ids);
+                if (calib.priors)
+                    calibrateSensorPriorsFromDatabase(
+                        *calib.priors, db, feats, perImageCameras(calib.cameras, feats.size()),
+                        cfg.twoview, cfg.threads, verbose);
             }
         } catch (const std::exception& e) {
             L::warn(Tag::Match, M::match_reuse_failed, {e.what()});
@@ -1994,7 +2254,8 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
         r.exit_code = 2;
         return r;
     }
-    Mapper mapper(db, feats, mapopt, cs.ids, &rigs, &seqs);
+    Mapper mapper(db, feats, mapopt, cs.ids, &rigs, &seqs,
+                  cfg.sensor_map ? calib.priors.get() : nullptr);
     AssembleStats ast;
     std::vector<Reconstruction> models = runMapper(mapper, db, feats, cfg, ast);
     double t_map = now() - t0;
@@ -2012,7 +2273,7 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
 
     resolveImageNames(models, _imagedir);
     std::vector<ModelGauge> gauge;
-    const bool auto_metric = fixGauge(models, cfg, _imagedir, verbose, gauge);
+    const bool auto_metric = fixGauge(models, cfg, _imagedir, verbose, gauge, &sensors);
     recolorPoints(models, cfg);
     // The gauge is what a screen was missing: every snapshot before this one is
     // in the seed pair's frame, so a run watched to the end left a tilted model

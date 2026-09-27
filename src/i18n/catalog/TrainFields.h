@@ -3037,6 +3037,207 @@ SS_MSG(init_ply_add_points_help,
        "doldurur. O model eğitildikten sonra büyümüş bir veri kümesi için; PLY "
        "yoksa hiçbir şey yapmaz."));
 
+SS_MSG(partition,
+    EN("Partition file"), JA("分割ファイル"), ZH_HANS("分区文件"), ZH_HANT("分區檔案"),
+    KO("분할 파일"), DE("Partitionsdatei"), FR("Fichier de partition"),
+    ES("Archivo de partición"), PT("Ficheiro de partição"), IT("File di partizione"),
+    NL("Partitiebestand"), RU("Файл разбиения"), TR("Bölümleme dosyası"));
+SS_MSG(partition_help,
+    EN("A partition.json written by `spirula partition` or the Partition panel. "
+       "The run then trains one part of it: the part's cameras, the ring of "
+       "outside cameras that also see its region, and the seed points they see. "
+       "The models of all parts are merged afterwards."),
+    JA("`spirula partition` または分割パネルが書き出した partition.json です。学習"
+       "はその中の 1 パートだけを使います。パートのカメラ、その領域を見ている外側"
+       "のカメラの輪、そしてそれらが見ている初期点です。全パートのモデルはあとで"
+       "結合します。"),
+    ZH_HANS("由 `spirula partition` 或分区面板写出的 partition.json。本次训练只用"
+            "其中一个分区：该分区的相机、也看到其区域的外围相机环，以及它们看到的"
+            "种子点。所有分区的模型随后合并。"),
+    ZH_HANT("由 `spirula partition` 或分區面板寫出的 partition.json。本次訓練只用"
+            "其中一個分區：該分區的相機、也看到其區域的外圍相機環，以及它們看到的"
+            "種子點。所有分區的模型隨後合併。"),
+    KO("`spirula partition` 또는 분할 패널이 기록한 partition.json입니다. 이 실행"
+       "은 그중 한 파트만 학습합니다. 파트의 카메라, 그 영역을 함께 보는 바깥 카"
+       "메라의 고리, 그리고 그것들이 보는 시드 점입니다. 모든 파트의 모델은 나중에 "
+       "병합됩니다."),
+    DE("Eine von `spirula partition` oder dem Partitionsfenster geschriebene "
+       "partition.json. Der Lauf trainiert dann einen Teil davon: dessen Kameras, "
+       "den Ring äußerer Kameras, die seinen Bereich mitsehen, und die Startpunkte, "
+       "die sie sehen. Die Modelle aller Teile werden danach zusammengeführt."),
+    FR("Un partition.json écrit par `spirula partition` ou le panneau Partition. "
+       "L'entraînement ne porte alors que sur une partie : ses caméras, l'anneau de "
+       "caméras extérieures qui voient aussi sa région, et les points d'amorce "
+       "qu'elles voient. Les modèles de toutes les parties sont fusionnés ensuite."),
+    ES("Un partition.json escrito por `spirula partition` o por el panel Partición. "
+       "El entrenamiento usa entonces una sola parte: sus cámaras, el anillo de "
+       "cámaras externas que también ven su región y los puntos semilla que ven. "
+       "Los modelos de todas las partes se fusionan después."),
+    PT("Um partition.json escrito por `spirula partition` ou pelo painel Partição. "
+       "O treino usa então uma só parte: as suas câmaras, o anel de câmaras "
+       "exteriores que também veem a sua região e os pontos semente que elas veem. "
+       "Os modelos de todas as partes são fundidos depois."),
+    IT("Un partition.json scritto da `spirula partition` o dal pannello Partizione. "
+       "L'addestramento usa allora una sola parte: le sue fotocamere, l'anello di "
+       "fotocamere esterne che vedono anche la sua regione e i punti seme che "
+       "vedono. I modelli di tutte le parti vengono uniti dopo."),
+    NL("Een partition.json geschreven door `spirula partition` of het "
+       "partitiepaneel. De run traint dan één deel ervan: de camera's van het "
+       "deel, de ring van buitencamera's die zijn gebied ook zien, en de zaadpunten "
+       "die zij zien. De modellen van alle delen worden daarna samengevoegd."),
+    RU("Файл partition.json, записанный `spirula partition` или панелью разбиения. "
+       "Обучение берёт из него одну часть: её камеры, кольцо внешних камер, "
+       "которые тоже видят её область, и видимые ими начальные точки. Модели всех "
+       "частей затем объединяются."),
+    TR("`spirula partition` ya da Bölümleme panelinin yazdığı bir partition.json. "
+       "Eğitim bunun tek bir parçasını kullanır: parçanın kameraları, bölgesini de "
+       "gören dış kameraların halkası ve bunların gördüğü tohum noktaları. Tüm "
+       "parçaların modelleri sonra birleştirilir."));
+SS_MSG(partition_part,
+    EN("Part to train"), JA("学習するパート"), ZH_HANS("要训练的分区"),
+    ZH_HANT("要訓練的分區"), KO("학습할 파트"), DE("Zu trainierender Teil"),
+    FR("Partie à entraîner"), ES("Parte a entrenar"), PT("Parte a treinar"),
+    IT("Parte da addestrare"), NL("Te trainen deel"), RU("Обучаемая часть"),
+    TR("Eğitilecek parça"));
+SS_MSG(partition_part_help,
+    EN("Which part of the partition file this run trains, counting from 0. "
+       "Required with --partition."),
+    JA("分割ファイルのどのパートを学習するかを 0 から数えて指定します。"
+       "--partition と一緒に必須です。"),
+    ZH_HANS("本次训练分区文件中的第几个分区，从 0 起算。与 --partition 一起时必填。"),
+    ZH_HANT("本次訓練分區檔案中的第幾個分區，從 0 起算。與 --partition 一起時必填。"),
+    KO("이 실행이 분할 파일의 어느 파트를 학습할지, 0부터 셉니다. --partition과 "
+       "함께 필수입니다."),
+    DE("Welchen Teil der Partitionsdatei dieser Lauf trainiert, ab 0 gezählt. "
+       "Mit --partition erforderlich."),
+    FR("Quelle partie du fichier de partition cet entraînement traite, à partir "
+       "de 0. Obligatoire avec --partition."),
+    ES("Qué parte del archivo de partición entrena esta ejecución, contando desde "
+       "0. Obligatorio con --partition."),
+    PT("Qual parte do ficheiro de partição este treino usa, a contar de 0. "
+       "Obrigatório com --partition."),
+    IT("Quale parte del file di partizione addestra questa esecuzione, contando "
+       "da 0. Obbligatorio con --partition."),
+    NL("Welk deel van het partitiebestand deze run traint, geteld vanaf 0. "
+       "Verplicht met --partition."),
+    RU("Какую часть файла разбиения обучает этот запуск, считая с 0. Обязательно "
+       "вместе с --partition."),
+    TR("Bu çalıştırmanın bölümleme dosyasının hangi parçasını eğittiği, 0'dan "
+       "sayılır. --partition ile zorunludur."));
+
+SS_MSG(roi_region,
+    EN("Region of interest file"), JA("関心領域ファイル"), ZH_HANS("感兴趣区域文件"),
+    ZH_HANT("感興趣區域檔案"), KO("관심 영역 파일"), DE("Datei des Interessenbereichs"),
+    FR("Fichier de région d'intérêt"), ES("Archivo de región de interés"),
+    PT("Ficheiro da região de interesse"), IT("File della regione di interesse"),
+    NL("Bestand met interessegebied"), RU("Файл области интереса"),
+    TR("İlgi bölgesi dosyası"));
+SS_MSG(roi_region_help,
+    EN("A region JSON (boxes, spheres, half-spaces, a partition's label field, "
+       "combined with union, intersection and difference). Splats whose centre "
+       "lies outside it are drawn for relocation and growth with "
+       "--roi-outside-weight instead of 1, so the model stops growing there. A "
+       "partitioned run gets its part's region without this."),
+    JA("領域 JSON（ボックス、球、半空間、分割のラベルフィールドを和・積・差で組み"
+       "合わせたもの）。中心が領域外にあるスプラットは、再配置と成長の抽選で 1 の"
+       "代わりに --roi-outside-weight の重みになり、そこではモデルが成長しなくな"
+       "ります。分割学習ではこれなしでパートの領域が使われます。"),
+    ZH_HANS("区域 JSON（盒、球、半空间、分区的标签场，用并、交、差组合）。中心在区域"
+            "外的泼溅在重定位与增长抽样中以 --roi-outside-weight 而非 1 为权重，"
+            "模型因此不再在那里增长。分区训练无需此项即使用其分区的区域。"),
+    ZH_HANT("區域 JSON（盒、球、半空間、分區的標籤場，用聯集、交集、差集組合）。中"
+            "心在區域外的潑濺在重定位與增長抽樣中以 --roi-outside-weight 而非 1 為"
+            "權重，模型因此不再在那裡增長。分區訓練無需此項即使用其分區的區域。"),
+    KO("영역 JSON(상자, 구, 반공간, 분할의 라벨 필드를 합집합·교집합·차집합으로 "
+       "결합). 중심이 영역 밖인 스플랫은 재배치와 성장 추첨에서 1 대신 "
+       "--roi-outside-weight 가중치를 받아 그곳에서 모델이 더 자라지 않습니다. "
+       "분할 학습은 이것 없이도 파트의 영역을 씁니다."),
+    DE("Eine Regions-JSON (Quader, Kugeln, Halbräume, das Labelfeld einer "
+       "Partition, verknüpft mit Vereinigung, Schnitt und Differenz). Splats mit "
+       "Zentrum außerhalb ziehen bei Verlagerung und Wachstum mit "
+       "--roi-outside-weight statt 1, das Modell wächst dort also nicht weiter. "
+       "Ein partitionierter Lauf bekommt den Bereich seines Teils auch ohne dies."),
+    FR("Un JSON de région (boîtes, sphères, demi-espaces, le champ d'étiquettes "
+       "d'une partition, combinés par union, intersection et différence). Les "
+       "splats dont le centre est en dehors tirent, pour la relocalisation et la "
+       "croissance, avec --roi-outside-weight au lieu de 1 : le modèle cesse d'y "
+       "croître. Un entraînement partitionné reçoit la région de sa partie sans "
+       "cela."),
+    ES("Un JSON de región (cajas, esferas, semiespacios, el campo de etiquetas de "
+       "una partición, combinados con unión, intersección y diferencia). Los "
+       "splats con el centro fuera sortean, para reubicación y crecimiento, con "
+       "--roi-outside-weight en vez de 1, así que el modelo deja de crecer ahí. "
+       "Una ejecución particionada recibe la región de su parte sin esto."),
+    PT("Um JSON de região (caixas, esferas, semiespaços, o campo de rótulos de "
+       "uma partição, combinados por união, interseção e diferença). Os splats "
+       "com o centro fora sorteiam, para realocação e crescimento, com "
+       "--roi-outside-weight em vez de 1, pelo que o modelo deixa de crescer aí. "
+       "Um treino particionado recebe a região da sua parte sem isto."),
+    IT("Un JSON di regione (scatole, sfere, semispazi, il campo di etichette di "
+       "una partizione, combinati con unione, intersezione e differenza). Gli "
+       "splat con il centro fuori estraggono, per ricollocazione e crescita, con "
+       "--roi-outside-weight invece di 1, così il modello smette di crescere lì. "
+       "Un addestramento partizionato riceve la regione della sua parte senza "
+       "questo."),
+    NL("Een regio-JSON (dozen, bollen, halfruimten, het labelveld van een "
+       "partitie, gecombineerd met vereniging, doorsnede en verschil). Splats met "
+       "het middelpunt erbuiten loten bij verplaatsing en groei met "
+       "--roi-outside-weight in plaats van 1, zodat het model daar niet verder "
+       "groeit. Een gepartitioneerde run krijgt het gebied van zijn deel ook "
+       "zonder dit."),
+    RU("JSON области (коробки, сферы, полупространства, поле меток разбиения, "
+       "объединённые операциями объединения, пересечения и разности). Сплаты с "
+       "центром снаружи участвуют в выборке для перемещения и роста с весом "
+       "--roi-outside-weight вместо 1, так что модель там не растёт. "
+       "Разбитый запуск получает область своей части и без этого."),
+    TR("Bir bölge JSON'u (kutular, küreler, yarı uzaylar, bir bölümlemenin etiket "
+       "alanı; birleşim, kesişim ve farkla birleştirilmiş). Merkezi dışarıda "
+       "kalan splatlar yer değiştirme ve büyüme çekilişine 1 yerine "
+       "--roi-outside-weight ile girer; model orada büyümeyi bırakır. "
+       "Bölümlenmiş bir eğitim bunu vermeden parçasının bölgesini alır."));
+SS_MSG(roi_outside_weight,
+    EN("Draw weight outside the region"), JA("領域外の抽選重み"),
+    ZH_HANS("区域外的抽样权重"), ZH_HANT("區域外的抽樣權重"), KO("영역 밖 추첨 가중치"),
+    DE("Ziehgewicht außerhalb des Bereichs"), FR("Poids de tirage hors région"),
+    ES("Peso de sorteo fuera de la región"), PT("Peso de sorteio fora da região"),
+    IT("Peso di estrazione fuori dalla regione"), NL("Lotgewicht buiten het gebied"),
+    RU("Вес выборки вне области"), TR("Bölge dışı çekiliş ağırlığı"));
+SS_MSG(roi_outside_weight_help,
+    EN("What a splat outside the region of interest counts for when "
+       "densification picks where to relocate or add splats, relative to 1 "
+       "inside. 1 turns the region off."),
+    JA("密度化が再配置や追加先を選ぶとき、関心領域の外のスプラットを内側の 1 に対"
+       "してどれだけに数えるか。1 で領域を無効にします。"),
+    ZH_HANS("致密化选择重定位或新增位置时，感兴趣区域外的泼溅相对区域内的 1 算多"
+            "少。取 1 即关闭区域。"),
+    ZH_HANT("緻密化選擇重定位或新增位置時，感興趣區域外的潑濺相對區域內的 1 算多"
+            "少。取 1 即關閉區域。"),
+    KO("밀집화가 재배치나 추가 위치를 고를 때 관심 영역 밖의 스플랫을 안쪽의 1에 "
+       "비해 얼마로 칠지. 1이면 영역을 끕니다."),
+    DE("Wie viel ein Splat außerhalb des Interessenbereichs zählt, wenn die "
+       "Verdichtung wählt, wohin sie verlagert oder ergänzt, gegenüber 1 innen. "
+       "1 schaltet den Bereich ab."),
+    FR("Ce que vaut un splat hors de la région d'intérêt quand la densification "
+       "choisit où relocaliser ou ajouter, par rapport à 1 à l'intérieur. 1 "
+       "désactive la région."),
+    ES("Cuánto cuenta un splat fuera de la región de interés cuando la "
+       "densificación elige dónde reubicar o añadir, frente a 1 dentro. 1 "
+       "desactiva la región."),
+    PT("Quanto vale um splat fora da região de interesse quando a densificação "
+       "escolhe onde realocar ou acrescentar, face a 1 dentro. 1 desliga a "
+       "região."),
+    IT("Quanto conta uno splat fuori dalla regione di interesse quando la "
+       "densificazione sceglie dove ricollocare o aggiungere, rispetto a 1 "
+       "dentro. 1 disattiva la regione."),
+    NL("Hoeveel een splat buiten het interessegebied telt als de verdichting "
+       "kiest waar ze verplaatst of toevoegt, tegenover 1 erbinnen. 1 zet het "
+       "gebied uit."),
+    RU("Сколько весит сплат вне области интереса, когда уплотнение выбирает, "
+       "куда перемещать или добавлять, при 1 внутри. 1 отключает область."),
+    TR("Yoğunlaştırma nereye taşıyacağını ya da ekleyeceğini seçerken ilgi "
+       "bölgesi dışındaki bir splatın içerideki 1'e göre kaça sayıldığı. 1 "
+       "bölgeyi kapatır."));
+
 SS_MSG(scale_init,
     EN("Initial splat size"), JA("スプラットの初期サイズ"),
     ZH_HANS("泼溅初始大小"), ZH_HANT("潑濺初始大小"), KO("스플랫 초기 크기"),

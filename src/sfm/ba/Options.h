@@ -74,6 +74,14 @@ struct BAOverBudget : std::runtime_error {
     double need_mb, budget_mb;
 };
 
+// Where a device solve had got to: its parameters are in the problem's host
+// vectors as of `iterations` LM iterations, so a restart after a device failure
+// resumes from here instead of from the start.
+struct SolverCheckpoint {
+    int iterations = 0;
+    double damping = 0, cost = 0;
+};
+
 struct SolverOptions {
     RealCfg real = RealCfg::F64;
     float loss_param = 1.0f;      // Huber delta / Cauchy c (unused by trivial loss)
@@ -89,6 +97,10 @@ struct SolverOptions {
     bool over_budget_throws = false;
     int cg_max_iters = 100;       // CG iteration cap per LM step
     double cg_tol = 0.1;          // relative residual tolerance eta
+    // ... and CG also stops once a step improves the quadratic model by under
+    // this fraction of the total so far (Nash-Sofer; 0 = off). It settles for a
+    // residual near sqrt of it, so a caller that wants the exact step turns it off.
+    double cg_model_tol = 0.1;
     CgFallback cg_fallback = CgFallback::Auto;
     // The kernels are compiled per (real, loss); `loss` selects the embedded
     // blob "ba_<real>_<loss>". spv_path overrides it with a module from disk
@@ -105,6 +117,9 @@ struct SolverOptions {
     bool validate = false;
     bool verbose = true;
     bool profile = false;
+    // Written by a device solve every few seconds of accepted progress, along
+    // with the problem's parameters. Null = no checkpoints.
+    SolverCheckpoint* checkpoint = nullptr;
 };
 
 struct SolverStats {

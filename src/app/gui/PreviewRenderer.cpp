@@ -761,18 +761,14 @@ bool PreviewRenderer::build(const meshing::MeshData& mesh,
 }
 
 bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& post,
-                            const uint8_t* cam_selected) {
+                            const uint8_t* cam_selected, const float* cam_rgb) {
     destroy_gl();
     if (!ensure_program()) return false;
 
-    // train -> normalized frame similarity (identity when scale == 1),
-    // matching how the viewport frames the scene.
-    double A[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-    if (ds.train_frame_scale != 1.0f) {
-        double T[16];
-        for (int i = 0; i < 16; i++) T[i] = ds.train_to_normalized[i];
-        dsparse::invert_affine4x4(T, A);
-    }
+    // train -> normalized frame similarity, matching how the viewport frames
+    // the scene.
+    double A[16];
+    dsparse::train_to_normalized_inverse(ds, A);
     auto map_pt = [&](const auto* p, float out[3]) {
         for (int r = 0; r < 3; r++)
             out[r] = (float)(A[r*4+0]*p[0] + A[r*4+1]*p[1] + A[r*4+2]*p[2] + A[r*4+3]);
@@ -819,9 +815,29 @@ bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& pos
     // (border + anchors) first, dim interior gridlines after, so render()
     // can draw the two ranges with different colors.
     std::vector<VL> hot, bright, dim;
+    // Per-camera colours: a vertex list per distinct colour (quantized to 8
+    // bits), the dim gridlines at half that colour in their own group.
+    std::unordered_map<uint32_t, std::vector<VL>> by_color;
+    std::vector<uint32_t> color_order;
+    auto color_key = [](const float* c, float mul) {
+        uint32_t k = 0;
+        for (int j = 0; j < 3; j++)
+            k = (k << 8) | (uint32_t)std::lround(std::clamp(c[j] * mul, 0.0f, 1.0f) * 255.0f);
+        return k;
+    };
+    auto color_list = [&](uint32_t key) -> std::vector<VL>& {
+        auto it = by_color.find(key);
+        if (it == by_color.end()) {
+            color_order.push_back(key);
+            it = by_color.emplace(key, std::vector<VL>()).first;
+        }
+        return it->second;
+    };
     std::unordered_map<std::string, FrustumTemplate> templates;
     for (int64_t i = 0; i < ds.num_cameras; i++) {
         const bool selected = cam_selected && cam_selected[i];
+        const uint32_t key_bright = cam_rgb ? color_key(&cam_rgb[i * 3], 1.0f) : 0;
+        const uint32_t key_dim = cam_rgb ? color_key(&cam_rgb[i * 3], 0.5f) : 0;
         const float* M = &ds.c2w[i*12];
         float c[3];
         float t[3] = {M[3], M[7], M[11]};
@@ -866,7 +882,8 @@ bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& pos
             out.push_back(v);
         };
         for (const FrustumLine& line : tmpl.lines) {
-            std::vector<VL>& out = selected ? hot : (line.dim ? dim : bright);
+            std::vector<VL>& out = cam_rgb ? color_list(line.dim ? key_dim : key_bright)
+                                           : (selected ? hot : (line.dim ? dim : bright));
             size_t n = line.pts.size();
             for (size_t j = 0; j + 1 < n; j++) {
                 emit(out, line.pts[j]);
@@ -880,7 +897,7 @@ bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& pos
         // Anchor lines: apex -> corner / view direction, subdivided so they
         // curve correctly under nonlinear display projections.
         for (const P3& p : tmpl.anchors) {
-            std::vector<VL>& out = selected ? hot : bright;
+            std::vector<VL>& out = cam_rgb ? color_list(key_bright) : (selected ? hot : bright);
             for (int j = 0; j < kASeg; j++) {
                 emit(out, {p.x*j/kASeg, p.y*j/kASeg, p.z*j/kASeg});
                 emit(out, {p.x*(j+1)/kASeg, p.y*(j+1)/kASeg, p.z*(j+1)/kASeg});
@@ -892,6 +909,16 @@ bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& pos
     std::vector<VL> cams = std::move(hot);
     cams.insert(cams.end(), bright.begin(), bright.end());
     cams.insert(cams.end(), dim.begin(), dim.end());
+    _cam_groups.clear();
+    for (uint32_t key : color_order) {
+        const std::vector<VL>& v = by_color[key];
+        CamGroup g;
+        g.first = (int64_t)cams.size();
+        g.count = (int64_t)v.size();
+        for (int j = 0; j < 3; j++) g.rgb[j] = ((key >> (8 * (2 - j))) & 255) / 255.0f;
+        _cam_groups.push_back(g);
+        cams.insert(cams.end(), v.begin(), v.end());
+    }
     _num_cam_verts = (int64_t)cams.size();
     fill_line_deltas(cams, /*delta_from_aux=*/true);
 
@@ -1107,11 +1134,17 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
         }
         glx::Uniform4f(_u_color, 1.0f, 0.62f, 0.25f, 1.0f);
         glDrawArrays(GL_LINES, (GLint)_num_cam_sel, (GLsizei)_num_cam_bright);
-        const int64_t rest = _num_cam_verts - _num_cam_sel - _num_cam_bright;
+        int64_t grouped = 0;
+        for (const CamGroup& g : _cam_groups) grouped += g.count;
+        const int64_t rest = _num_cam_verts - _num_cam_sel - _num_cam_bright - grouped;
         if (rest > 0) {
             glx::Uniform4f(_u_color, 0.5f, 0.31f, 0.125f, 1.0f);
             glDrawArrays(GL_LINES, (GLint)(_num_cam_sel + _num_cam_bright),
                          (GLsizei)rest);
+        }
+        for (const CamGroup& g : _cam_groups) {
+            glx::Uniform4f(_u_color, g.rgb[0], g.rgb[1], g.rgb[2], 1.0f);
+            glDrawArrays(GL_LINES, (GLint)g.first, (GLsizei)g.count);
         }
     }
 
@@ -1164,6 +1197,7 @@ void PreviewRenderer::destroy_gl() {
     }
     _built = false;
     _num_points = _num_cam_verts = _num_cam_sel = _num_cam_bright = 0;
+    _cam_groups.clear();
 }
 
 }  // namespace gui

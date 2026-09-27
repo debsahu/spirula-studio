@@ -154,9 +154,10 @@ unless `--ba-real df` says otherwise.
 
 A device that *had* the feature and then failed anyway — `VK_ERROR_DEVICE_LOST`
 (what a Windows TDR reset looks like from here: the watchdog kills a driver
-whose kernel runs past two seconds, and a thousand-image dense factorization
-is one long kernel), or an allocation the driver refused — does not end the
-run. `runGlobalBA` re-runs that solve on the host and sends every later solve
+whose submit runs past two seconds, which the solver's submit sizing is there
+to prevent, ba/README.md "Watchdog"), or an allocation the driver refused —
+does not end the run. `solveBundle` re-runs that solve on the host, from the parameters the
+device last checkpointed (every 5 s of progress), and sends every later solve
 at least that big straight there, because the mapper's problems only grow;
 `VkContext`'s `VK_CHECK` throws rather than exits so it can. The run says so
 once, and `--ba-real cpu --ba-real-coarse cpu` (Spirula Studio: "Bundle
@@ -195,8 +196,10 @@ core/        types shared by every stage, no Vulkan:
                Attitude               the gimbal yaw / pitch / roll a drone writes
                                         into each photo's XMP
                Telemetry              the IMU / GPS a video carries (GPMF, Insta360,
-                                        DJI, CAMM), read by content; unconsumed --
+                                        DJI, CAMM), read by content --
                                         docs/notes/imu-gps-for-sfm.md
+               PriorSource            what a sensor tells the mapper, the verifier
+                                        and the pair list -- docs/notes/sensor-priors.md
                Features / Matches     the on-disk feature and match formats
                Mask                   keypoint masking, sampled in uv
                Model                  Reconstruction + COLMAP binary IO
@@ -209,8 +212,11 @@ geometry/    Essential, Fundamental, Homography, P3P, AbsolutePose,
 optim/       Ransac   LO-RANSAC with MSAC scoring
 ba/          Problem (model registry + problem layout), Solver (LM, dense
                Cholesky / implicit-Schur PCG), SolverCpu (the same two on the
-               host, for devices that run neither fp64 nor df), README.md
+               host, for devices that run neither fp64 nor df), Priors (the
+               camera-side sensor factors both take), README.md
 map/         Mapper, Bundle, CorrespondenceGraph, Merge, Profile,
+               SensorPriors (the IMU / GPS as a PriorSource), ImuExtrinsic,
+               ImuScale, SensorGauge (the gauge of a finished model),
                ModelOps (the passes over a *set* of models: merge validator,
                  audit, split, fold cut, prune -- shared, owned by neither)
                Assemble (the schedule both mappers run once they have models:
@@ -280,8 +286,8 @@ spirula sfm match   feats/ -o matches.bin
 spirula sfm map     matches.bin feats/ -o sparse/ --images IMAGES/
 spirula sfm map     matches.bin feats/ -o sparse/ --no-compact-unused-features
 spirula sfm merge   sparse/ -o merged/
-spirula sfm ba      problem.txt --real df       # solver benchmark on a BAL problem
-spirula sfm ba      sparse/0 --real cpu        # ... the same solve, on the host
+spirula sfm ba      sparse/0 refined/0          # the mapper's global BA on a model
+spirula sfm ba      sparse/0 sparse/0 --real cpu  # ... in place, on the host
 ```
 
 `spirula sfm --help` lists the commands, `spirula sfm <command> --help` (or
@@ -560,6 +566,47 @@ takes 0.3 s; a metric reference the user passes still outranks an upright-only
 sensor frame. `docs/notes/imu-gps-for-sfm.md` records what the files carry
 and what was measured.
 
+**The same sensors inside the reconstruction.** Everything above fixes the
+gauge of a finished model. With telemetry present the run also uses it while
+the model is built (`docs/notes/sensor-priors.md`), through one seam a
+future sensor implements the same way (`core/PriorSource.h`;
+`map/SensorPriors.h` is the IMU/GPS one):
+
+- **Verification** (`--sensor-verify`, on): a pair whose rotation the gyro
+  knows is also verified with that rotation fixed -- a two-point RANSAC over
+  the translation (`geometry/KnownRotation.h`) -- and keeps that inlier set
+  when it explains 70% of what the free estimate did. Matches to equipment
+  moving with the camera, or to a copy of the scene the camera did not turn
+  towards, cannot pass it however many there are. The IMU-to-lens rotation
+  it needs is calibrated first from a sample of time-adjacent pairs' own
+  two-view rotations (the hand-eye fit of `map/ImuExtrinsic.h`, with the
+  clock offset searched on the rotation angles), and the stage reports per
+  camera group what it got and how many pairs it overruled or disagreed with.
+- **Registration** (`--sensor-map`, on): a PnP pose that turns more than
+  `max(2 deg, 3 sigma)` off what a placed neighbour and the gyro predict is
+  re-solved with the rotation fixed (`ransacPnPKnownRotation`, and the rig
+  form for a whole frame) and refused when that finds fewer than the
+  registration's own inlier floor; the seed pair takes the gyro's rotation
+  when it agrees; the audit does not unseat a pose the gyro vouches for.
+- **Bundle adjustment** (`--sensor-map`): every solve, growth and joint alike,
+  takes camera-side factors evaluated on the host and added to whichever
+  linear system the solver builds (`ba/Priors.h`, `ba/README.md`): the gyro's
+  relative rotation between consecutive frames of each lens, gravity in each
+  frame against a world up refitted per solve, the accelerometer's metric
+  scale as one velocity-free triple constraint per three consecutive frames,
+  and GPS positions through a similarity refitted per solve. Every gauge
+  quantity is re-estimated from the poses before each solve and frozen inside
+  the factors, so the solver carries no global parameter and the model stays
+  in its own gauge; the finishing gauge fit above then runs as before.
+- **Pairing** (`--sensor-pairs`, on): images the GPS puts within
+  `--sensor-pair-radius` metres (20) of each other are matched whatever the
+  shortlist thought.
+
+`--sensor-max-dt` (3 s) bounds the gap a gyro rotation may span. The mapper
+ends with how many registrations the gyro re-solved or refused and how many
+factors the last solve held; `SS_SFM_PRIOR_DUMP=1` prints each one. With no
+telemetry none of it runs and the pipeline is the one before it existed.
+
 The sources run in order -- the video's sensors, the recorded attitude, a
 metric reference, the fallback -- and read each other: `gauge.txt`'s two bits
 are the state as well as the record, so a reference is not fitted over a model
@@ -698,6 +745,11 @@ What the run does with it, in the order it happens:
   through the calibration exactly as if they shared those images, so a 360
   capture that reconstructs as one component per direction is merged rather
   than written as pieces (`map/Merge.h` `poseCorrespondences`).
+- **Splitting.** The consistency split (`splitInconsistent`) groups images by
+  the verified pairs a model still agrees with, and counts a calibrated rig
+  frame as joining its images too. Back-to-back fisheyes share no matches, so
+  without that a 4000-image dual-fisheye model with every pair agreeing split
+  into its two lenses and spent five minutes merging them back.
 
 `--final-free-rig` (off) runs one last bundle adjustment with the rig set
 aside, for a mount that flexed or lenses that did not fire together. With no
@@ -803,6 +855,39 @@ adjacent pairs' own two-view geometry, or the video's IMU. `SS_SFM_SEQ_DUMP=1`
 prints one line per registration attempt (near and whole-pool inliers, and
 the rival's) to read such a spot from the log.
 
+### Retriangulation
+
+Every global refinement round after the first starts by completing tracks and
+retriangulating the whole model (`completeAndRetriangulate`, COLMAP's
+CompleteTracks + Retriangulate): each point's correspondences are tested
+against it, and each registered image's free features against their
+registered partners. Both were serial whole-model passes, so on a long video
+they were the stretch between two bundle adjustments where the GPU idles and
+one core works -- 34 s of a 3000-frame capture's 332 s of mapping, as much as
+the seed search and registration together.
+
+Each half now collects its per-item result on every core against the state
+the pass starts from, and commits in the old serial order. A claim only ever
+takes a free feature, so an item's collected result can be wrong only if an
+earlier commit took one of the features it claims; that item is redone
+serially at its turn. The output is the serial pass's exactly -- checked by
+running both on the same state, 0 differences over 373 passes and every
+growth-time triangulation of a 638-image capture. Growth-time triangulation
+after each registration goes the same way, feature by feature.
+
+Most of what the pass then does is futile: on a 4000-image dual-fisheye video
+it tried 166M candidate pairs a pass for 13M free features and made no point
+from any of them in steady state -- neighbouring frames 1/30 s apart are all
+far under the 1.5 degree triangulation angle. Two rays can only reach that
+angle if the angle between them is within both reprojection tolerances of it
+(each bounded as twice the tolerance over the focal), so a candidate further
+off is dropped before triangulation, on world-frame rays cached per pass in
+float (`worldRays`; the fisheye bearing behind each is an iterative inversion,
+and computing it per candidate was the actual cost). That is 94% of the
+candidates there; results are identical with the filter on and off on all
+three stress captures. A pass over the 4000-image model went from 27.3 s to
+4.9 s, over a 3000-frame DJI walk from 8.1 s to 0.6 s.
+
 ### The finishing passes
 
 Reconstruction ends with up to two more global bundle adjustments, on models
@@ -882,6 +967,8 @@ PASS/FAIL and returns 0/1 — the same convention as `src/backend/tests/`.
 | `sfm_mask_test` | mask uv sampling, decode, file discovery | no |
 | `sfm_telemetry_test` | the four telemetry carriers on synthetic files, and the sanity checks; `sfm_telemetry_test FILE` prints what a video carries | no |
 | `sfm_sequence_test` | the sequence table and its window pairs (`--no-gpu` stops there); a synthetic walk past a duplicated room through the mapper | yes |
+| `sfm_prior_test` | pose priors in bundle adjustment: Jacobians against central differences, device against host, a gauge recovered from priors alone (`--no-gpu` keeps to the host) | yes |
+| `sfm_sensor_prior_test` | the fixed-rotation two-view and PnP estimators on scenes with equipment and outliers; the telemetry source's calibration, rotations and factors on the synthetic walk | no |
 
 End to end, the check that matters is a reconstruction on a public dataset
 scored against the reference that ships with it: `tools/sfm/eval_poses.py` reads

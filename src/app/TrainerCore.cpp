@@ -14,6 +14,10 @@
 #include "data/CameraMath.h"
 #include "data/ImageProbe.h"
 #include "data/RandomPoints.h"
+#include "data/ScenePartition.h"
+#include "data/Json.h"
+#include "data/RegionProgram.h"
+#include "data/LabelField.h"
 #include "data/Knn.h"
 #include "sfm/core/Exif.h"
 
@@ -814,6 +818,56 @@ std::string train_config_unsupported(const TrainConfig& c) {
     return {};
 }
 
+void TrainerSession::apply_partition_config(ParsedDataset& d) {
+    if (cfg.partition.empty()) return;
+    const ScenePartition p = read_partition(cfg.partition);
+    if (cfg.partition_part < 0 || cfg.partition_part >= p.num_parts)
+        throw std::runtime_error(lfmt(lmsg::err_partition_part, {p.num_parts}));
+    PartitionApplied a;
+    apply_partition(d, p, cfg.partition_part, a);
+    log(lfmt(lmsg::partition_applied,
+             {cfg.partition_part, (long long)a.frames_after, (long long)a.core,
+              (long long)a.ring, (long long)a.points_after}));
+    if (a.missing > 0) log(lfmt(lmsg::partition_missing_frames, {(long long)a.missing}));
+    if (cfg.roi_region.empty() && p.field)
+        roi = std::make_shared<LabelRegion>(p.field, cfg.partition_part);
+}
+
+void TrainerSession::setup_region() {
+    if (!cfg.roi_region.empty()) {
+        std::string err;
+        std::unique_ptr<Region> r = region_from_json(
+            json_parse_file(cfg.roi_region),
+            fs::path(cfg.roi_region).parent_path().string(), err);
+        if (!r) throw std::runtime_error(cfg.roi_region + ": " + err);
+        roi = std::move(r);
+    }
+    if (!roi) {
+        engine_set_region({}, {}, {}, {}, {}, 1.0f);
+        return;
+    }
+    RegionProgram prog;
+    std::string err;
+    if (!compile_region(*roi, prog, err)) throw std::runtime_error(err);
+    // The training cameras, indexed, orient each splat's normal on the device.
+    std::vector<int32_t> idx((size_t)ds.num_cameras);
+    std::vector<float> centers((size_t)ds.num_cameras * 3);
+    for (int64_t i = 0; i < ds.num_cameras; i++) {
+        idx[(size_t)i] = (int32_t)std::min<int64_t>(i, 254);
+        for (int r = 0; r < 3; r++) centers[(size_t)i * 3 + r] = ds.c2w[(size_t)i * 12 + r * 4 + 3];
+    }
+    const LabelField cams = LabelField::build(centers.data(), idx.data(), nullptr, ds.num_cameras, 4);
+    static const std::vector<float> none;
+    auto tv = [](const std::vector<float>& v) -> TorchTensorView {
+        if (v.empty()) return {};
+        return {(uint64_t)(uintptr_t)v.data(), (uint32_t)sizeof(float), {(int64_t)v.size() / 4, 4}};
+    };
+    engine_set_region(tv(prog.nodes), tv(prog.field ? prog.field->nodes : none),
+                      tv(prog.field ? prog.field->seeds : none), tv(cams.nodes), tv(cams.seeds),
+                      cfg.roi_outside_weight);
+    log(lfmt(lmsg::region_applied, {prog.num_nodes(), cfg.roi_outside_weight}));
+}
+
 // Unported-feature guards: fail early rather than ignore a flag.
 void TrainerSession::check_config() {
     if (std::string what = train_config_unsupported(cfg); !what.empty())
@@ -893,6 +947,7 @@ void TrainerSession::load_dataset() {
     if (std::string line = adopt_dataset_color(cfg, read_dataset_color(cfg.data));
         !line.empty())
         log(line);
+    apply_partition_config(ds);
     if (ds.center_mode != "none") {
         char xyz[96];
         std::snprintf(xyz, sizeof xyz, "%.12g, %.12g, %.12g",
@@ -919,7 +974,7 @@ void TrainerSession::load_dataset() {
 
     // relative_scale scales the world: point means here, and the c2w
     // translations pre-bake so the baked viewmats follow.
-    // auto_scale_poses=false forces the normalized-frame scale to 1.
+    // auto_scale_poses=false makes the normalized frame the training frame.
     if (cfg.relative_scale.has_value()) {
         float rs = *cfg.relative_scale;
         for (auto& v : ds.points.xyz) v *= rs;
@@ -927,7 +982,11 @@ void TrainerSession::load_dataset() {
             for (int r = 0; r < 3; r++)
                 ds.c2w[i*12 + r*4 + 3] *= rs;
     }
-    if (!cfg.auto_scale_poses) ds.train_frame_scale = 1.0f;
+    if (!cfg.auto_scale_poses) {
+        ds.train_frame_scale = 1.0f;
+        ds.train_to_normalized = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        ds.normalized_rotation = {1,0,0, 0,1,0, 0,0,1};
+    }
 
     seed_at_random();
 
@@ -1105,6 +1164,7 @@ void TrainerSession::setup_engine() {
 
     // Binning granularity for the splat-tile intersection (0 = automatic).
     engine_set_bin_tile_size(cfg.bin_tile_size);
+    setup_region();
 
     // Background blending.
     if (cfg.background_mode == "noise")
@@ -1641,6 +1701,7 @@ void TrainerSession::eval() {
     pcfg.split                   = "eval";
 
     ParsedDataset eds = parse_dataset(cfg.data, pcfg, cfg.data_format);
+    apply_partition_config(eds);
     if (eds.num_cameras == 0) {
         log(lmsg::eval_split_empty.get());
         return;

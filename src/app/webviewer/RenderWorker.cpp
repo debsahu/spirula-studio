@@ -29,6 +29,11 @@ TorchTensorView tvp(const void* p, uint32_t elem_size, std::vector<int64_t> shap
 }
 TorchTensorView tv_null() { return {0, 0, {}}; }
 
+bool remaps(const std::array<float, 16>& T) {
+    static const std::array<float, 16> kI{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    return T != kI;
+}
+
 // Grow-only device buffer (viewer scratch; a handful per worker, so no pool).
 struct DevBuf {
     void* ptr = nullptr;
@@ -174,7 +179,7 @@ struct RenderWorker::Impl {
         static const float D[3] = {1.f, -1.f, -1.f};
         float c2w[12];
         std::memcpy(c2w, in_c2w, sizeof c2w);
-        if (cfg.train_frame_scale != 1.0f) {
+        if (remaps(cfg.train_to_normalized)) {
             const auto& T = cfg.train_to_normalized;
             double s = std::sqrt((double)T[0]*T[0] + (double)T[4]*T[4] + (double)T[8]*T[8]);
             for (int r = 0; r < 3; r++) {
@@ -265,7 +270,7 @@ struct RenderWorker::Impl {
         // position, unit rotation on the basis.
         float c2w[12];
         std::memcpy(c2w, q.c2w, sizeof c2w);
-        if (cfg.train_frame_scale != 1.0f) {
+        if (remaps(cfg.train_to_normalized)) {
             const auto& T = cfg.train_to_normalized;
             double s = std::sqrt((double)T[0]*T[0] + (double)T[4]*T[4] + (double)T[8]*T[8]);
             float out[12];
@@ -287,7 +292,7 @@ struct RenderWorker::Impl {
         float grid_dist = q.grid_dist * cfg.train_frame_scale;
         float grid_target[3] = {q.grid_target[0], q.grid_target[1],
                                 q.grid_target[2]};
-        if (cfg.train_frame_scale != 1.0f) {
+        if (remaps(cfg.train_to_normalized)) {
             const auto& T = cfg.train_to_normalized;
             for (int r = 0; r < 3; r++)
                 grid_target[r] = T[r*4+0]*q.grid_target[0] +
@@ -411,7 +416,7 @@ struct RenderWorker::Impl {
                                                  c2w[r*4+2]*dcv[2]);
                     // Train -> client normalized frame (inverse similarity,
                     // same gating as the forward remap above).
-                    if (cfg.train_frame_scale != 1.0f) {
+                    if (remaps(cfg.train_to_normalized)) {
                         const auto& T = cfg.train_to_normalized;
                         double s2 = (double)T[0]*T[0] + (double)T[4]*T[4] +
                                     (double)T[8]*T[8];
