@@ -10,7 +10,7 @@ the wrong exposure. `--image-color-log dlogm-osmo360` (Osmo 360) or
 
 ```
 --image-color-log dlogm-osmo360     # the training images are D-Log M from an Osmo 360
---image-color-log dlogm-avata360    # ... from an Avata 360 (our fit, see below)
+--image-color-log dlogm-avata360    # ... from an Avata 360
 --point-color-log none | off | dlogm-osmo360 | dlogm-avata360
 ```
 
@@ -60,9 +60,8 @@ as measured on clip 0129: after a global gain of about +0.45 stops the decode
 matched the LUT's output to within about 3 display levels. That is one clip,
 not a calibration.
 
-For the Avata 360, **-0.20** matches DJI Studio's export through the BT.709
-transfer its rendering uses, and **-0.45** is the best single value through
-spirula's own sRGB display (see the Avata 360 fit below). One clip again.
+For the Avata 360 no value has been measured yet (see the Avata 360 section
+below).
 
 On the images the gain rides on the GT's Rec.2020 -> Rec.709 matrix, the
 first linear step after the decode, so both backends and the host mean-luma
@@ -269,94 +268,47 @@ unlicensed repository), its older `kDlogMDjiRefit`, its Rec.709 "look", and
 its tests' table of measured DJI LUT values. The tests here check the curve's
 own anchors instead.
 
-### The Avata 360 curve: our fit, not DJI's
+### The Avata 360 curve: fitted to DJI's Avata 360 LUT
 
-DJI publishes no D-Log M LUT for the Avata 360, and the Osmo 360 curve does
-not match what DJI Studio makes of Avata footage. `kDlogMAvata360` and
-`kAvata360ToRec2020` (`src/core/DlogM.h`) were **fitted by us** from the
-operator's paired Avata 360 footage against DJI Studio's own export of the
-same clip with DJI's D-Log M LUT applied. They are a model of that export, not
-a DJI curve and not a radiometric calibration.
+`kDlogMAvata360` and `kAvata360ToRec2020` (`src/core/DlogM.h`) come from
+OpenOSV pull request #3 (https://github.com/Kemerd/OpenOSV/pull/3, head commit
+`343e77eb4c1076d08b0854a23884c7b91f8197de`, Apache-2.0), where they are
+`kDlogMAvata360` and `kNativeToRec2020_Avata360`. Thanks to Kemerd and the
+OpenOSV contributors for finding the LUT and doing the fit.
 
-Data: `DJI_20260712122503_0001_D.OSV` (21.3 s, D-Log M, indoors) against its
-DJI Studio export (6000x3000 equirect, 10-bit BT.709), and as a control
-`..._0003_D.OSV` (Normal) against its export. Both were decoded to 16-bit
-through the same `colorspace` filter the 16-bit prep uses.
+DJI Studio bundles a D-Log M -> Rec.709 LUT for the Avata 360
+(`LOG_Avata360_DLogM`, "DJI Avata 360 D-Log M to Rec.709 V1.cube"). It is its
+own file, not a copy of the Osmo 360 one: a similar grey scale above code
+0.24, a deeper toe, and different colour. OpenOSV fitted the curve to its 33
+neutral-axis entries and the matrix to all 35937, with the same scripts and
+constraints as the Osmo 360 fit above. So, as for the Osmo, these model DJI's
+rendering; they are not a radiometric calibration of the sensor.
 
-Method:
+Checked here with OpenOSV's own scripts at that commit, against the LUT on
+this machine, residuals in HLG code:
 
-1. **Geometry.** Each fisheye was registered to DJI's equirect by dense optical
-   flow and a robust fit of a Kannala-Brandt lens (f, centre, k1..k4) plus a
-   per-frame rotation. On the Normal pair the fit residual is 1.1 px (lens 1)
-   and 2.0 px (lens 0) at the median, 2.1 / 3.7 px at p90, in 3840 px fisheye
-   pixels; the rotation between the two lenses came out the same on all 7
-   frames to within 0.02 degrees. Both lenses fit f = 1047 px with the centre
-   within 15 px of the frame's, so the Osmo 360 preset (f = 1049.5) is close.
-   Export frame n+1 pairs with fisheye frame n.
-2. **Noise floor.** With that geometry the Normal fisheye and DJI's Normal
-   export agree to **0.70 / 0.38 / 0.53** display levels (8-bit, R/G/B) at
-   the median and **1.75 / 0.99 / 1.36** at p90, over flat regions (local
-   gradient under 0.004 per export pixel at 3000 px), more than 15 degrees from
-   the seam, and unclipped. The best global exposure there is 0.004 stops, so
-   the Normal pair is an identity and cannot tell sRGB from BT.709.
-3. **Samples.** 13 frames spread over the D-Log M clip, both lenses, with the
-   same masks: 7 frames to fit, 6 held out (1.29 M held-out samples). Neutral
-   samples (channels within 0.015 code of each other) fit the curve and the
-   exposure; all samples fit the matrix; the two alternate.
-4. **Model.** `display = OETF(2^e · M709 · M · curve(code))`, with the
-   curve in the form above and OpenOSV's constraints: code 0.4 -> 0.18,
-   continuity at the cut, `lin(0) >= 0`, strictly increasing,
-   `slope2 / slope <= 3`. `yShift` and `slope` are held at the Osmo values,
-   because the form has two exact degeneracies and they fix the gauge. The fit
-   lands on the same two bounds the Osmo fit does (`lin(0) = 0`, ratio 3). The
-   matrix rows sum to 1; its determinant is 1.0752 and all three implied
-   primaries have positive luminance, but the red one lies outside the
-   spectral locus (Z < 0), so it is a fitted transform, not a physical sensor
-   primary. `e` is fitted separately and is not in the curve.
-5. **Display transfer.** BT.709, not sRGB. Both reach the floor on held-out
-   frames, but BT.709 fits the toe (codes under 0.2: 3.1 levels off at the
-   median against 11.9 for sRGB) and survives a cross-lens test that sRGB fails:
-   fitted on lens 0 and scored on lens 1, BT.709 reaches p90 4.0-5.4 levels,
-   sRGB 13.5-14.0, and the Osmo curve 10.0-11.2 (5.8-6.2 through sRGB).
-   HLG, which OpenOSV found behind the Osmo LUT, reaches only 1.1 levels at
-   the median here.
-
-Held-out result, display levels, median and p90 per channel (R/G/B), each
-curve with its own fitted exposure:
-
-| through BT.709 | exposure | p50 | p90 |
+| constants | LUT | neutral axis RMS, code >= 0.24 | full cube RMS |
 |---|---|---|---|
-| Normal control (the floor) | 0.00 | 0.70 / 0.38 / 0.53 | 1.75 / 0.99 / 1.36 |
-| Osmo 360 curve and matrix | -0.50 | 3.90 / 3.71 / 4.19 | 10.42 / 10.04 / 10.25 |
-| Avata 360 fit | -0.20 | **0.57 / 0.50 / 0.60** | **1.69 / 1.45 / 1.72** |
+| Avata 360 (these) | Avata 360 | **0.0223** | **0.0567** |
+| Osmo 360 (control) | Osmo 360 | 0.0160 | 0.0450 |
+| earlier Avata 360 footage fit | Avata 360 | 0.0957 | 0.1148 |
 
-By code, the fit is within a level of DJI from code 0.3 to 0.8, 2-3 levels
-bright below 0.3 (few samples; the `lin(0) >= 0` bound will not crush the toe
-as DJI's rendering does), and 4.6 levels bright above 0.8. The Osmo curve is
-6-9 levels dark from code 0.2 to 0.5 and 31-42 levels bright above 0.7.
-Against the Osmo curve the fit is up to 0.18 stops brighter below grey and 1.0
-stop darker by code 0.85.
+The matrix rows sum to 1 (white stays white) and its determinant is 0.782958.
+The curve's branches meet at code 0.1548. Anchors: code 0.40 -> 0.18000,
+0.714 -> 0.95287, 1.0 -> 3.63053.
 
-**Spirula displays through sRGB, not BT.709**, so the viewport does not reach
-that floor. Through sRGB with the best single exposure (-0.45), the fit is
-1.19 / 1.37 / 1.70 levels off at the median and 5.0 / 6.1 / 6.5 at p90,
-against 1.89 / 1.77 / 1.88 and 5.9 / 5.7 / 5.9 for the Osmo curve (-0.73).
-A curve fitted through sRGB instead reaches 0.55 / 0.51 / 0.61, but it puts
-the display transfer's difference into the "linear" light and fails the
-cross-lens test above, so it was not shipped.
+**These replace an earlier fit of ours.** Before the LUT was known, we fitted a
+curve and matrix to one Avata 360 clip against DJI Studio's export of it,
+through a plain BT.709 display transfer. That fit matched the export it was
+fitted to, but it is not DJI's decode: in linear light it is 0.4 stops too
+dark at code 0.6, 0.7 at code 0.714 and 1.4 at code 1.0, and its matrix put the
+red primary far outside the spectral locus. OpenOSV measured both through its
+own Rec.709 pipeline against DJI's Avata 360 LUT: **dE2000 mean 7.35 for the
+footage fit, 1.68 for this one** (their figure, with their Rec.709 look; not
+re-measured here).
 
-Method check: the same procedure run on the Osmo 360 pair (clip 0129 against
-its DJI Studio export, 7 frames, 3 held out) finds HLG behind the export, as
-OpenOSV did, and lands within 0.04 stops of `kDlogMOsmo360` from code 0.15 to
-0.45, 0.10 stops dark at 0.6 and 0.22 at 0.8. Its fitted exposure is about one
-stop above OpenOSV's scene scale (-0.88 against -1.90 stops), which is not
-explained. The Avata fit sits up to 1.0 stop from the Osmo curve, four times
-further than the method's own error on the Osmo pair.
-
-Limits: one clip, one indoor room lit by daylight, a scene of mostly white
-and beige surfaces, and clipped samples excluded, so saturated colours and
-highlights above code 0.8 are weakly constrained. The matrix sends some saturated codes
-outside Rec.2020 (code 0.6 / 0.3 / 0.2 gives -0.068 blue).
+The `-0.20` exposure measured with the footage fit belongs to that curve and
+does not carry over; none has been measured for this one.
 
 ### OpenOSV NOTICE
 
@@ -382,8 +334,7 @@ That also covers the Apache-2.0 code the tree already had (`shaders/ppisp.slang`
 | `dataset_color_test` | `auto` against the record, including an Avata 360 dataset resolving to `dlogm-avata360` and a two-camera D-Log M dataset being refused |
 | `dlogm_session_test` | the flag through `TrainerSession::setup_engine` and one real step: the decode is armed, the uploaded GT is decoded, and the brightness match measures decoded light; again at +1 stop, where both read the doubled light |
 
-None of them reads D-Log M footage; the footage behind the Avata 360
-constants is described above. What was checked for the decode itself is ordinary footage encoded to D-Log M codes with the inverse curve.
+None of them reads D-Log M footage. What was checked for the decode itself is ordinary footage encoded to D-Log M codes with the inverse curve.
 One real 3840² Osmo 360 frame through the trainer's GT upload comes back at
 0.002 display levels RMS from 16-bit codes (0.49 from 8-bit). A 69-photo
 scene at 1/8 resolution, encoded to 8-bit codes and trained for 3000 steps with

@@ -245,7 +245,7 @@ void test_avata() {
     float raw[3] = {0.6f, 0.3f, 0.2f};
     source_pixel_for_compare(r, true, raw);
     check(std::fabs(raw[0] - want[0]) < 1e-5f && std::fabs(raw[1] - want[1]) < 1e-5f &&
-              std::fabs(raw[2] - want[2]) < 1e-5f && std::fabs(raw[0] - osmo[0]) > 0.05f,
+              std::fabs(raw[2] - want[2]) < 1e-5f && std::fabs(raw[0] - osmo[0]) > 0.02f,
           "avata: the compare source decodes with the Avata constants");
 
     TrainConfig av2;

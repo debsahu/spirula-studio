@@ -467,12 +467,12 @@ inline __device__ float3  dlogm_osmo360_to_rec2020(float3  code_2)
 
 inline __device__ float dlogm_avata360_to_linear_0(float code_3)
 {
-    return dlogm_curve_to_linear_0(code_3, -2.06424880027770996f, 0.63083583116531372f, 3.62298870086669922f, 1.01188600063323975f, 3.03565812110900879f, 0.52191758155822754f, 0.02740182168781757f);
+    return dlogm_curve_to_linear_0(code_3, -2.66884827613830566f, 0.67535161972045898f, 6.49093914031982422f, 1.01088047027587891f, 3.03264164924621582f, 1.08352363109588623f, 0.00849230866879225f);
 }
 
 inline __device__ float3  dlogm_avata360_to_rec2020(float3  code_4)
 {
-    return mul_0(makeMatrix<float, 3, 3> (0.70652478933334351f, 0.17651677131652832f, 0.11695844680070877f, -0.18369156122207642f, 1.11619126796722412f, 0.0675002858042717f, -0.30225974321365356f, 0.03349689766764641f, 1.26876282691955566f), make_float3 (dlogm_avata360_to_linear_0(code_4.x), dlogm_avata360_to_linear_0(code_4.y), dlogm_avata360_to_linear_0(code_4.z)));
+    return mul_0(makeMatrix<float, 3, 3> (0.75092697143554688f, 0.19062170386314392f, 0.0584513247013092f, 0.01807462237775326f, 0.94096893072128296f, 0.04095643758773804f, -0.00852079037576914f, -0.10017161071300507f, 1.10869240760803223f), make_float3 (dlogm_avata360_to_linear_0(code_4.x), dlogm_avata360_to_linear_0(code_4.y), dlogm_avata360_to_linear_0(code_4.z)));
 }
 
 inline __device__ float3  input_curve_to_rec2020(int curve_0, float3  code_5)

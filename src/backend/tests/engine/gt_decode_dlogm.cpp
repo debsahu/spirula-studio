@@ -96,7 +96,7 @@ static void run_curve(colorspace::InputCurve curve, void (*host)(float[3]), floa
     std::snprintf(what, sizeof(what), "%s device: code 0.4 grey -> display 0.4614", name);
     check(std::fabs(got[3 * 3] - 0.461356f) < 1e-4f, what);
     // The open sRGB encode lets decoded highlights through above 1; the two
-    // curves part here (Osmo 1.7779, Avata 1.1643).
+    // curves part here (Osmo 1.7779, Avata 1.7504).
     std::snprintf(what, sizeof(what), "%s device: code 1.0 -> display %.4f", name, want_one);
     check(std::fabs(got[5 * 3] - want_one) < 1e-4f, what);
     engine_reset();
@@ -106,7 +106,7 @@ int main() {
     run_curve(colorspace::InputCurve::DlogMOsmo360, colorspace::dlogm_osmo360_to_rec2020,
               1.777905f, "osmo");
     run_curve(colorspace::InputCurve::DlogMAvata360, colorspace::dlogm_avata360_to_rec2020,
-              1.164263f, "avata");
+              1.750400f, "avata");
 
     const colorspace::Mat3 m = colorspace::gamut_to_rec709("Rec.2020");
     engine_init_color_space(false, 0, false, {}, true,

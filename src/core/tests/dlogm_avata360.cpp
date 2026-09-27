@@ -27,24 +27,24 @@ static bool near_rel(double got, double want, double rel) {
 static float lin(float code) { return dlogm_to_linear(kDlogMAvata360, code); }
 
 // Reference values: f32-rounded constants evaluated in double. The Osmo curve
-// gives 0.957746 at 0.714 and 3.764698 at 1.0, so reusing it fails every
-// anchor above grey.
+// gives 0.957746 at 0.714 and 3.764698 at 1.0, and the footage fit this
+// replaced 0.602113 and 1.415233, so either fails every anchor above grey.
 static void test_anchors() {
     check(std::fabs(lin(0.40f) - 0.18) < 1e-5, "anchor: code 0.40 -> 0.18 (mid grey)");
-    check(near_rel(lin(0.714f), 0.602113034, 1e-5), "anchor: code 0.714 -> 0.602113");
-    check(near_rel(lin(1.0f), 1.41523257, 1e-5), "anchor: code 1.0 -> 1.415233");
-    check(near_rel(lin(0.05f), 0.00574413853, 1e-5), "toe: code 0.05 -> 0.005744139");
-    check(near_rel(lin(0.10f), 0.0122567679, 1e-5), "toe: code 0.10 -> 0.012256768");
-    check(near_rel(lin(0.20f), 0.0411330486, 1e-5), "shoulder: code 0.20 -> 0.041133049");
-    check(near_rel(lin(0.60f), 0.409469333, 1e-5), "shoulder: code 0.60 -> 0.409469333");
-    check(near_rel(lin(0.90f), 1.06281076, 1e-5), "shoulder: code 0.90 -> 1.062810760");
+    check(near_rel(lin(0.714f), 0.952865576, 1e-5), "anchor: code 0.714 -> 0.952866");
+    check(near_rel(lin(1.0f), 3.63053028, 1e-5), "anchor: code 1.0 -> 3.630530");
+    check(near_rel(lin(0.05f), 0.00345854239, 1e-5), "toe: code 0.05 -> 0.003458542");
+    check(near_rel(lin(0.10f), 0.00778958649, 1e-5), "toe: code 0.10 -> 0.007789586");
+    check(near_rel(lin(0.20f), 0.0324104444, 1e-5), "shoulder: code 0.20 -> 0.032410444");
+    check(near_rel(lin(0.60f), 0.542951991, 1e-5), "shoulder: code 0.60 -> 0.542951991");
+    check(near_rel(lin(0.90f), 2.29021517, 1e-5), "shoulder: code 0.90 -> 2.290215170");
 }
 
 static void test_cut_and_shape() {
     const DlogMCurve& k = kDlogMAvata360;
     const float cut = k.intercept / (k.slope2 - k.slope);
     const float cut_code = (std::log2(cut - k.x_shift) - k.y_shift) / k.scale;
-    check(std::fabs(cut_code - 0.161364f) < 1e-4f, "cut: branches meet at code 0.1614");
+    check(std::fabs(cut_code - 0.154812f) < 1e-4f, "cut: branches meet at code 0.1548");
     // Same bound as OpenOSV's Osmo fit: the slope may kink
     // by at most 3x at the cut.
     check(k.slope2 / k.slope <= 3.0f * (1.0f + 1e-6f), "shape: slope2 / slope <= 3");
@@ -84,8 +84,8 @@ static void test_matrix_and_chain() {
     for (int r = 0; r < 3; r++)
         rows &= std::fabs(m[r*3] + m[r*3+1] + m[r*3+2] - 1.0f) < 1e-6f;
     check(rows, "matrix: rows sum to 1 (a transpose does not)");
-    // The Osmo matrix has det 0.873348.
-    check(std::fabs(det3(m) - 1.075248) < 1e-5, "matrix: determinant 1.075248");
+    // The Osmo matrix has det 0.873348, the footage fit's 1.075248.
+    check(std::fabs(det3(m) - 0.782958) < 1e-5, "matrix: determinant 0.782958");
 
     const Mat3 to709 = gamut_to_rec709("Rec.2020");
     float white[3] = {1.0f, 1.0f, 1.0f};
@@ -105,9 +105,9 @@ static void test_matrix_and_chain() {
     // Grey is blind to any white-preserving matrix; a saturated code is not.
     float sat[3] = {0.6f, 0.3f, 0.2f};
     dlogm_avata360_to_rec2020(sat);
-    check(std::fabs(sat[0] - 0.312097f) < 1e-5f && std::fabs(sat[1] - 0.041293f) < 1e-5f &&
-              std::fabs(sat[2] + 0.068165f) < 1e-5f,
-          "chain: code (0.6,0.3,0.2) -> Rec.2020 (0.3121,0.0413,-0.0682)");
+    check(std::fabs(sat[0] - 0.426745f) < 1e-5f && std::fabs(sat[1] - 0.095714f) < 1e-5f &&
+              std::fabs(sat[2] - 0.022304f) < 1e-5f,
+          "chain: code (0.6,0.3,0.2) -> Rec.2020 (0.4267,0.0957,0.0223)");
 }
 
 static void test_names_and_dispatch() {

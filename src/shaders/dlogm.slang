@@ -3,6 +3,7 @@
 // gt_decode_dlogm engine test compares the two. See docs/notes/dlog-m.md.
 // Based on https://github.com/Kemerd/OpenOSV/blob/3a39776272efb5dfdc1d29711ae746e855383084/include/osv/color/DlogM.h
 // and https://github.com/Kemerd/OpenOSV/blob/3a39776272efb5dfdc1d29711ae746e855383084/include/osv/color/Matrices.h
+// (Osmo 360); Avata 360 from the same files at 343e77eb4c1076d08b0854a23884c7b91f8197de.
 // SPDX-FileCopyrightText: Copyright 2026 The OpenOSV Contributors
 // SPDX-License-Identifier: Apache-2.0
 
@@ -27,10 +28,10 @@ float dlogm_osmo360_to_linear(float code) {
                                  kDlogMSlope2, kDlogMIntercept, kDlogMMidGray);
 }
 
-// Avata 360: our fit, not DJI's (core/DlogM.h, docs/notes/dlog-m.md).
+// Avata 360: OpenOSV's fit to DJI's Avata 360 LUT (core/DlogM.h).
 float dlogm_avata360_to_linear(float code) {
-    return dlogm_curve_to_linear(code, -2.064248825f, 0.630835854f, 3.622988623f,
-                                 1.011886004f, 3.035658012f, 0.521917605f, 0.027401822f);
+    return dlogm_curve_to_linear(code, -2.668848182f, 0.675351607f, 6.490939315f,
+                                 1.010880517f, 3.032641596f, 1.083523670f, 0.00849230825f);
 }
 
 // Row-major, as mul(M, v) reads it: linear camera-native -> linear Rec.2020.
@@ -49,9 +50,9 @@ float3 dlogm_osmo360_to_rec2020(float3 code) {
 [CudaDeviceExport]
 float3 dlogm_avata360_to_rec2020(float3 code) {
     float3x3 m = float3x3(
-        0.706524789f, 0.176516764f, 0.116958447f,
-        -0.183691555f, 1.116191272f, 0.067500283f,
-        -0.302259748f, 0.033496898f, 1.268762850f);
+        0.750926971f, 0.190621704f, 0.058451325f,
+        0.018074622f, 0.940968931f, 0.040956438f,
+        -0.008520790f, -0.100171611f, 1.108692408f);
     float3 lin = float3(dlogm_avata360_to_linear(code.x),
                         dlogm_avata360_to_linear(code.y),
                         dlogm_avata360_to_linear(code.z));
