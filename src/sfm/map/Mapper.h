@@ -223,6 +223,10 @@ struct MapperOptions {
     // persistent solver instead (D38).
     double ba_growth_ratio = 1.1;      // COLMAP ba_global_images_ratio
     int ba_max_refinements = 5;        // final pass; growth passes use 2
+    // LM cap of a final pass holding absolute centre factors: COLMAP's
+    // ba_global_max_num_iterations. At 25, both of Hickory's final solves under
+    // --metric-gps full stopped at the cap with the damping still at its floor.
+    int ba_final_prior_max_iters = 50;
     double ba_refine_change = 0.0005;  // stop when changed-obs fraction is below
     // Growth-phase BAs stop when relative cost improvement stays below
     // ba_growth_rtol for ba_growth_patience accepted steps (D38): iteration
@@ -4554,6 +4558,7 @@ private:
                 pf = priorFactors(rec_);
                 gps_frame_ = pf.gps;
                 bo.priors = &pf;
+                if (tight && pf.hasAbsoluteCentres()) bo.max_iters = opt_.ba_final_prior_max_iters;
             }
             double cost = runGlobalBA(rec_, bo);
             if (rigs_ && !final_.no_rig) snapRigFrames();
