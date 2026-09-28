@@ -161,32 +161,68 @@ void testJacobians(uint32_t rig) {
 
 // ---- a Cauchy centre factor ------------------------------------------------
 
-// Cost 0.5 a log(1 + s/a) of the whitened residual, and a gradient that is its
-// derivative: the IRLS weight 1/(1 + s/a), not the Huber one.
+// Ceres 2.2 CauchyLoss(7.815) as COLMAP 4.1.1 builds it, sigma 1 m: 0.5 rho(d^2) and
+// rho'(d^2) at d metres, rho(s) = a^2 log(1 + s/a^2), computed in Python, not here.
+struct CeresCauchyRef {
+    double d, half_rho, weight;
+};
+constexpr CeresCauchyRef kCeresCauchy[] = {
+    {1.0, 0.495950760593629, 0.9838902539661188},
+    {3.0, 4.197787518628054, 0.8715647586541271},
+    {7.815, 21.166713431816863, 0.5},
+    {20.0, 61.729829656845325, 0.1324607225658732},
+};
+
+// One factor d metres off: its cost, and its weight read back as g.(J^T r)/|J^T r|^2.
+void testCauchyScale() {
+    for (const CeresCauchyRef& ref : kCeresCauchy) {
+        BAProblem P = synth::makeProblem(3, 7, 40, 1, 0.2, 9, -1, 0, true);
+        PosePriors pr;
+        PriorCentre c;
+        c.n = 1;
+        c.b = cameraCenter(camPose(P, 0)) + Vec3{ref.d, 0.0, 0.0};
+        c.cauchy = 7.815;
+        pr.centres.push_back(c);
+        P.priors = &pr;
+        PriorAssembler pa;
+        pa.init(P);
+        char name[80];
+        snprintf(name, sizeof name, "cauchy centre: Ceres cost at %.3f m", ref.d);
+        report(name, std::fabs(pa.cost(P, P.poses.data(), P.exts.data()) - ref.half_rho) /
+                         ref.half_rho, 1e-9);
+        pa.assemble(P, P.poses.data(), P.exts.data(), 0.0);
+        double r[3], J[3][3][6];
+        uint32_t frames[3];
+        pa.debugFactor(P, P.poses.data(), P.exts.data(), 0, r, J, frames);
+        double gv = 0, vv = 0;
+        for (int p = 0; p < 6; p++) {
+            double v = 0;
+            for (int m = 0; m < 3; m++) v += J[0][m][p] * r[m];
+            gv += pa.gradient()[6 * (size_t)frames[0] + p] * v;
+            vv += v * v;
+        }
+        snprintf(name, sizeof name, "cauchy centre: Ceres weight at %.3f m", ref.d);
+        report(name, std::fabs(gv / vv - ref.weight) / ref.weight, 1e-9);
+    }
+}
+
+// A gradient that is the cost's derivative, over factors at several distances.
 void testCauchyCentre() {
     std::mt19937 rng(3);
     BAProblem P = synth::makeProblem(3, 7, 40, 1, 0.2, 9, -1, 0, true);
     PosePriors pr;
-    const double a = 7.815;
     for (uint32_t i = 0; i < P.num_images; i++) {
         PriorCentre c;
         c.n = 1;
         c.img[0] = i;
         c.b = cameraCenter(camPose(P, i)) + Vec3{2.0 + i, -1.0, 0.5 * i};
         c.sigma = {1.0, 1.0, 1.0};
-        c.cauchy = a;
+        c.cauchy = 7.815;
         pr.centres.push_back(c);
     }
     P.priors = &pr;
     PriorAssembler pa;
     pa.init(P);
-    double want = 0;
-    for (const PriorCentre& c : pr.centres) {
-        const Vec3 d = cameraCenter(camPose(P, c.img[0])) - c.b;
-        want += 0.5 * a * std::log1p(d.dot(d) / a);
-    }
-    report("cauchy centre: cost", std::fabs(pa.cost(P, P.poses.data(), P.exts.data()) - want) / want,
-           1e-12);
     pa.assemble(P, P.poses.data(), P.exts.data(), 0.0);
     std::vector<double> g = pa.gradient(), num(g.size());
     for (size_t k = 0; k < P.poses.size(); k++) {
@@ -198,6 +234,55 @@ void testCauchyCentre() {
         num[k] = (cp - pa.cost(P, x.data(), P.exts.data())) / (2 * h);
     }
     report("cauchy centre: gradient is the cost's derivative", relMax(g, num), 1e-6);
+}
+
+// Every camera between a Cauchy(7.815) centre 10 m along x and a quadratic one
+// where it stands: the free translation x solves (x-10)/(1+(x-10)^2/a^2) + x = 0.
+constexpr double kCauchyEquilibrium = 3.80446213147765;  // a^2 = 61.07, Python
+constexpr double kCauchyUnsquared = 0.7759693441454945;  // a^2 = 7.815: the wrong scale
+
+void testCauchyEquilibrium(RealCfg real, int device, double tol) {
+    BAProblem P0 = synth::makeProblem(3, 12, 150, 1, 0.1, 77, -1, 0, true);
+    {
+        SolverOptions o = baseOptions(RealCfg::CPU, device, false);
+        o.max_iters = 30;
+        BundleSolver s(P0, o);
+        s.init();
+        s.solve();
+    }
+    PosePriors pr;
+    pr.huber = 1e9;
+    for (uint32_t i = 0; i < P0.num_images; i++) {
+        PriorCentre c;
+        c.n = 1;
+        c.img[0] = i;
+        c.b = cameraCenter(camPose(P0, i)) + Vec3{10.0, 0.0, 0.0};
+        c.cauchy = 7.815;
+        pr.centres.push_back(c);
+        c.b = cameraCenter(camPose(P0, i));
+        c.cauchy = 0;
+        pr.centres.push_back(c);
+    }
+    BAProblem P = P0;
+    P.priors = &pr;
+    SolverOptions o = baseOptions(real, device, false);
+    o.max_iters = 400;
+    o.rtol = 1e-12;
+    BundleSolver s(P, o);
+    s.init();
+    s.solve();
+    s.downloadParams();
+    double worst = 0;
+    for (uint32_t i = 0; i < P.num_images; i++) {
+        const Vec3 m = cameraCenter(camPose(P, i)) - cameraCenter(camPose(P0, i));
+        worst = std::max(worst, (m - Vec3{kCauchyEquilibrium, 0.0, 0.0}).norm());
+    }
+    char name[96];
+    snprintf(name, sizeof name, "cauchy centre: settles at the Ceres balance (%s)",
+             realCfgName(real));
+    printf("  %u cameras in %d iterations, worst %.3e m off x = %.5f (the unsquared scale: %.5f)\n",
+           P.num_images, s.stats().iterations, worst, kCauchyEquilibrium, kCauchyUnsquared);
+    report(name, worst, tol);
 }
 
 // ---- device against host ---------------------------------------------------
@@ -315,7 +400,9 @@ int run(int argc, char** argv) {
     }
     testJacobians(0);
     testJacobians(2);
+    testCauchyScale();
     testCauchyCentre();
+    testCauchyEquilibrium(RealCfg::CPU, device, 1e-3);
     testGauge(0, false, RealCfg::CPU, device);
     testGauge(2, false, RealCfg::CPU, device);
     testGauge(0, true, RealCfg::CPU, device);
@@ -328,6 +415,7 @@ int run(int argc, char** argv) {
         testParity(2, true, real, device, tol);
         testGauge(0, false, real, device);
         testGauge(2, true, real, device);
+        testCauchyEquilibrium(real, device, real == RealCfg::F32 ? 2e-2 : 1e-3);
     }
     printf("%s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;

@@ -41,7 +41,7 @@ struct PriorCentre {
     Mat3 A[3] = {mat3Identity(), mat3Identity(), mat3Identity()};
     Vec3 b;
     Vec3 sigma{1, 1, 1};
-    double cauchy = 0;  // > 0: a Cauchy loss of this scale (sigma^2 units), not the Huber knee
+    double cauchy = 0;  // > 0: Ceres' CauchyLoss(a), a in sigmas, not the Huber knee
 };
 
 // The metric frame a source's absolute centre factors were stated in, for
@@ -279,14 +279,15 @@ private:
             for (int p = 0; p < 3; p++) J[m][p] += scale * M[3 * m + p];
     }
 
+    // rho(s) = a^2 log(1 + s/a^2) for Cauchy, as ceres::CauchyLoss(a).
     double robustCost(const double r[3], double cauchy) const {
         const double s = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
-        if (cauchy > 0) return cauchy * std::log1p(s / cauchy);
+        if (cauchy > 0) return cauchy * cauchy * std::log1p(s / (cauchy * cauchy));
         const double k2 = huber_ * huber_;
         return s <= k2 ? s : 2.0 * huber_ * std::sqrt(s) - k2;
     }
     double robustWeight(double s, double cauchy) const {
-        if (cauchy > 0) return 1.0 / (1.0 + s / cauchy);
+        if (cauchy > 0) return 1.0 / (1.0 + s / (cauchy * cauchy));
         const double k2 = huber_ * huber_;
         return s <= k2 ? 1.0 : huber_ / std::sqrt(s);
     }
