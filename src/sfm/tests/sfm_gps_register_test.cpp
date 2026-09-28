@@ -328,13 +328,19 @@ static double finalIters(const Scene& sc, const Reconstruction& model, MapperOpt
 }
 
 // COLMAP's global BA allows 50 LM iterations; the mapper's own cap is 25.
+// The model is put in its first image's frame, at exactly the zero angle-axis and
+// origin a seed pair starts from.
 static void testFinalCap(const Scene& sc, const Reconstruction& full, MapperOptions opt) {
-    // Off the seed's identity rotation, whose angle-axis Jacobian the solver drops.
-    Sim3 turn;
-    turn.R = angleAxisToRotation({0.2, -0.3, 0.1});
     Reconstruction model = full;
-    for (auto& kv : model.images) kv.second.pose = transformPose(turn, kv.second.pose);
-    for (auto& kv : model.points3D) kv.second.xyz = transformPoint(turn, kv.second.xyz);
+    Image& seed = model.images.begin()->second;
+    Sim3 to;
+    to.R = seed.pose.R;
+    to.t = seed.pose.t;
+    for (auto& kv : model.images) kv.second.pose = transformPose(to, kv.second.pose);
+    for (auto& kv : model.points3D) kv.second.xyz = transformPoint(to, kv.second.xyz);
+    seed.pose = {mat3Identity(), {0, 0, 0}};
+    const Vec3 aa = rotationToAngleAxis(seed.pose.R);
+    check(aa.x == 0 && aa.y == 0 && aa.z == 0, "fixture: an image at exactly the zero angle-axis");
     long s1 = 0, s3 = 0, sa = 0;
     const double abs = finalIters(sc, model, opt, 1, s1);
     const double tri = finalIters(sc, model, opt, 3, s3);
