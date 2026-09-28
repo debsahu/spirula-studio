@@ -7,6 +7,7 @@
 //   sfm_sensor_prior_test
 //
 // Prints FAIL lines and returns the count. Needs no GPU.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <random>
@@ -254,7 +255,13 @@ static void testTelemetryPriors() {
     check(pf.ups.size() >= 0.9 * ids.size(), "factors: an up per frame");
     check(pf.rotations.size() >= ids.size() - 2, "factors: a rotation per consecutive pair");
     check(st.scale_ok && std::fabs(st.scale / M.scale - 1.0) < 0.03, "factors: scale within 3%");
-    check(st.gps_ok && st.gps >= 0.8 * (int)ids.size(), "factors: GPS positions");
+    int positioned = 0;
+    for (uint32_t k = 0; k < ids.size(); k++) {
+        Vec3 p;
+        positioned += src.position(k, p);
+    }
+    check(positioned > 0 && st.gps_ok && st.gps == positioned,
+          "factors: GPS positions, one per positioned frame");
     // Every factor's residual at the true poses must be small: the model is
     // the truth, so only the sensors' own noise and the fit's remain.
     double worst_up = 0, worst_rot = 0, worst_c = 0;
@@ -263,7 +270,7 @@ static void testTelemetryPriors() {
         worst_up = std::max(worst_up, angleDeg(mul(camPose(u.i).R, pf.up_w), u.u));
     for (const PriorRotation& r : pf.rotations)
         worst_rot = std::max(worst_rot, angleDeg(mul(r.R_ji, camPose(r.i).R), camPose(r.j).R));
-    int gps_n = 0, tri_n = 0;
+    int gps_n = 0, tri_n = 0, gps_vertical = 0;
     double gps_rms = 0, tri_rel = 0;
     for (const PriorCentre& f : pf.centres) {
         Vec3 sum{0, 0, 0};
@@ -272,6 +279,7 @@ static void testTelemetryPriors() {
         if (f.n == 1) {
             gps_rms += d.x * d.x + d.y * d.y;
             gps_n++;
+            if (f.sigma.z != 0.0) gps_vertical++;
         } else {
             tri_rel = std::max(tri_rel, d.norm() / std::max(1e-9, f.sigma.x));
             tri_n++;
@@ -284,6 +292,8 @@ static void testTelemetryPriors() {
     check(worst_rot < 1.0, "factors: rotation residual");
     check(worst_up < 15.0, "factors: up residual");
     check(gps_n > 0 && gps_rms < 4.0, "factors: gps residual");
+    // With the IMU's up axis the GPS states the level pair only (D75).
+    check(gps_n > 0 && gps_vertical == 0, "factors: gps is horizontal under an up axis");
     check(tri_n >= 10, "factors: triples");
 
     // The same source through a renumbering.
@@ -303,6 +313,72 @@ static void testTelemetryPriors() {
     for (const PriorRotation& r : lp.rotations) in_range = in_range && r.i < 40 && r.j < 40;
     for (const PriorUp& u : lp.ups) in_range = in_range && u.i < 40;
     check(in_range && lp.rotations.size() >= 38, "remapped: factors on local ids");
+
+    // A tenth of the log 30 m north (seconds 3, 13, 23, ...), six gates off.
+    // Further is not reachable: the timeline drops a jump over 50 m/s. Frames
+    // interpolate between 1 Hz fixes, so only some sit the whole 30 m off.
+    Telemetry tr = t;
+    for (TelemetryGps& g : tr.gps)
+        if (std::fmod(std::floor(g.t), 10.0) == 3.0) g.lat += 30.0 / 6378137.0 * 180.0 / M_PI;
+    SensorTimeline tl_r;
+    check(tl_r.init(tr, telemetry_check(tr), err), "rogue timeline init: " + err);
+    SensorCapture cap_r = cap;
+    cap_r.timeline = &tl_r;
+    TelemetryPriors rogue({cap_r}, names, cams, po);
+    rogue.calibrateFromPairs(obs);
+    // The two logs' ENU origins differ by the mean of the moved fixes.
+    std::vector<Vec3> shift(ids.size());
+    std::vector<char> pos_ok(ids.size(), 0);
+    std::vector<double> dn;
+    for (uint32_t k = 0; k < ids.size(); k++) {
+        Vec3 a, b;
+        if (!src.position(k, a) || !rogue.position(k, b)) continue;
+        pos_ok[k] = 1;
+        shift[k] = b - a;
+        dn.push_back(shift[k].y);
+    }
+    std::nth_element(dn.begin(), dn.begin() + dn.size() / 2, dn.end());
+    const double origin = dn.empty() ? 0.0 : dn[dn.size() / 2];
+    std::vector<char> whole(ids.size(), 0), moved(ids.size(), 0);
+    int n_pos = 0, n_whole = 0;
+    for (uint32_t k = 0; k < ids.size(); k++) {
+        if (!pos_ok[k]) continue;
+        const double m = std::hypot(shift[k].x, shift[k].y - origin);
+        moved[k] = m > 2.0;
+        whole[k] = m > 25.0;
+        n_pos++;
+        n_whole += whole[k];
+    }
+    const PosePriors rp = rogue.factors(imgs);
+    const SensorFactorStats rs = rogue.lastFactors();
+    int single = 0, inl_n = 0;
+    double inl_r2 = 0;
+    for (const PriorCentre& f : rp.centres) {
+        if (f.n != 1) continue;
+        single++;
+        if (moved[f.img[0]]) continue;
+        const Vec3 d = mul(f.A[0], cameraCenter(camPose(f.img[0]))) - f.b;
+        inl_r2 += d.x * d.x + d.y * d.y;
+        inl_n++;
+    }
+    const double inl_rms = inl_n ? std::sqrt(inl_r2 / inl_n) : 0;
+    int whole_ok = 0;
+    double whole_lo = 1e9, whole_hi = 0;
+    for (uint32_t k = 0; k < ids.size(); k++) {
+        double d;
+        if (!whole[k] || !rogue.positionError(k, camPose(k), rp.gps, d)) continue;
+        whole_ok += d > 20.0 && d < 40.0;   // the 1 m / 3 m noise of the log on top
+        whole_lo = std::min(whole_lo, d);
+        whole_hi = std::max(whole_hi, d);
+    }
+    std::printf("  check on the moved frames: %.1f-%.1f m\n", whole_lo, whole_hi);
+    std::printf("rogue fixes: %d of %d frames moved whole | %d gps factors (stats %d, out %d), the "
+                "unmoved %.2f m rms at the truth\n", n_whole, n_pos, single, rs.gps, rs.gps_out, inl_rms);
+    check(n_whole >= 10 && n_whole <= 0.15 * n_pos, "rogue: some frames moved whole, a minority");
+    check(rs.gps_ok && single == n_pos && rs.gps == n_pos, "rogue: every positioned frame keeps its factor");
+    check(rs.gps_out >= n_whole, "rogue: the moved frames are beyond the gate");
+    check(inl_n > 0 && inl_rms < 4.0, "rogue: the unmoved factors' residual at the truth");
+    check(rp.gps.ok && rp.gps.flat && whole_ok == n_whole, "rogue: the check reads the 30 m, four radii off");
 }
 
 // ---- a fused attitude with no accelerometer to settle its sense -----------------

@@ -909,7 +909,11 @@ static int cmdMap(int argc, char** argv) {
     if (priors)
         calibrateSensorPriorsFromDatabase(*priors, db, feats, perImageCameras(cs, feats.size()),
                                           cfg.twoview, cfg.threads, opt.verbose);
-    Mapper mapper(db, feats, opt, cs.ids, &rigs, &seqs, priors.get());
+    std::unique_ptr<ExifGpsPriors> exif_priors =
+        cfg.sensor_map && !priors ? makeExifGpsPriors(cfg, cfg.image_dir, db, opt.verbose)
+                                  : nullptr;
+    Mapper mapper(db, feats, opt, cs.ids, &rigs, &seqs,
+                  priors ? (PriorSource*)priors.get() : exif_priors.get());
     std::vector<Reconstruction> models;
     AssembleStats ast;
     if (cfg.resume.empty()) {
