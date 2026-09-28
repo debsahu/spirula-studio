@@ -76,6 +76,7 @@ public:
     void init(const BAProblem& P) {
         const PosePriors* pr = P.priors;
         nfact_ = 0;
+        abs_ = false;
         fact_.clear();
         rows_.clear();
         cols_.clear();
@@ -120,6 +121,7 @@ public:
             for (int k = 0; k < c.n; k++) f.addFrame(frameOf(c.img[k]));
             note(f);
             fact_.push_back(f);
+            abs_ = abs_ || c.n == 1;
         }
         nfact_ = fact_.size();
         // CSR in (row, col) order: std::map iterates that way.
@@ -141,6 +143,8 @@ public:
     }
 
     bool empty() const { return nfact_ == 0; }
+    // Some factor states an image's centre on its own (GPS), not relative to others.
+    bool hasAbsoluteCentres() const { return abs_; }
     uint32_t numEntries() const { return (uint32_t)cols_.size(); }
     const std::vector<uint32_t>& rows() const { return rows_; }
     const std::vector<uint32_t>& cols() const { return cols_; }
@@ -345,6 +349,7 @@ private:
 
     std::vector<Fact> fact_;
     size_t nfact_ = 0;
+    bool abs_ = false;
     uint32_t nframes_ = 0;
     mutable double huber_ = 1.345;
     std::vector<uint32_t> rows_, cols_, erow_;

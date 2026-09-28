@@ -56,6 +56,7 @@ public:
             prior_.init(P_);
             hasPriors_ = !prior_.empty();
         }
+        absCentres_ = hasPriors_ && prior_.hasAbsoluteCentres();
 
         stats_.vram_mb = allocatedMB();
         stats_.solver = useCG_ ? (haveFallback_ ? "cg+fallback" : "cg") : "dense";
@@ -95,15 +96,17 @@ public:
             });
         });
         for (double v : part_) total += v;
-        if (hasPriors_) total += prior_.cost(P_, P_.poses.data(), P_.exts.data());
-        return total;
+        lastPrior_ = hasPriors_ ? prior_.cost(P_, P_.poses.data(), P_.exts.data()) : 0.0;
+        return total + lastPrior_;
     }
 
     void solve() {
         auto t0 = std::chrono::high_resolution_clock::now();
         double damping = opt_.init_damping;
         double cost = computeCost();
+        double prior = lastPrior_;
         stats_.initial_cost = cost;
+        stats_.prior_initial = prior;
         int noimprov = 0;
 
         bool reuse = false;  // after a reject, the assembly still matches the params
@@ -180,14 +183,23 @@ public:
                 }
             }
 
+            const double newPrior = lastPrior_;
             if (std::isfinite(newCost) && newCost <= cost * (1.0 + opt_.rtol)) {
-                if (newCost / cost >= 1.0 - opt_.rtol) {
-                    if (++noimprov >= opt_.patience) { cost = newCost; break; }
+                const LmAccept acc = classifyAccept(opt_, cost, newCost, absCentres_, prior,
+                                                    newPrior, stats_.prior_steps);
+                if (acc == LmAccept::Tie) {
+                    if (++noimprov >= opt_.patience) {
+                        cost = newCost;
+                        prior = newPrior;
+                        break;
+                    }
                 } else {
-                    noimprov = 0;
+                    if (acc == LmAccept::Improved) noimprov = 0;
+                    else stats_.prior_steps++;
                     damping = std::max(damping / 3.0, 1e-8);  // kMinDamping in sfm/ba/Solver.h
                 }
                 cost = newCost;
+                prior = newPrior;
                 stats_.accepted++;
                 reuse = false;
                 reject_mult = 2.0;
@@ -203,6 +215,8 @@ public:
             }
         }
         stats_.final_cost = cost;
+        stats_.prior_final = prior;
+        stats_.final_damping = damping;
         stats_.solve_seconds =
             std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
         if (spirula::env("SFM_MAP_PROF"))
@@ -1433,6 +1447,7 @@ private:
     BAProblem& P_;
     SolverOptions opt_;
     SolverStats stats_;
+    double lastPrior_ = 0;  // the priors' share of the last computeCost()
     Pool* pool_ = nullptr;
     int nthreads_ = 1;
     double lossParam_ = 1.0;
@@ -1468,6 +1483,7 @@ private:
     std::vector<uint32_t> asmSplit_, cgSplit_;
     sfm::PriorAssembler prior_;
     bool hasPriors_ = false;
+    bool absCentres_ = false;
     DenseSpd S_;
     struct { double jac = 0, prep = 0, schur = 0, lin = 0, back = 0, cost = 0; } prof_;
 };
