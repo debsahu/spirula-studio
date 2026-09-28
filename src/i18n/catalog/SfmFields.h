@@ -2108,6 +2108,34 @@ SS_MSG(seam_weld_help,
     TR("Açık dikişleri kaynat: son modelin bu oranın altında açıkladığı, 100+ eşleşmeli "
        "doğrulanmış çift kaynaştırılır ve yeniden ayarlanır; atlamak için 0"));
 
+SS_MSG(gps_scale_band_help,
+    EN("Bundle-adjust early when the last 20 registrations' path, against the whole model's, "
+       "is off the GPS's by more than this fraction; 0 to skip"),
+    JA("直近 20 枚の登録の経路長が、モデル全体と比べて GPS の経路長とこの割合以上ずれたら、"
+       "早めにバンドル調整します。0 で省略"),
+    ZH_HANS("最近 20 次注册的路径长度相对于整个模型、与 GPS 的差异超过此比例时，提前进行光束"
+            "法平差；0 表示跳过"),
+    ZH_HANT("最近 20 次註冊的路徑長度相對於整個模型、與 GPS 的差異超過此比例時，提前進行光束"
+            "法平差；0 表示略過"),
+    KO("최근 20개 등록의 경로 길이가 모델 전체에 비해 GPS와 이 비율 이상 어긋나면 번들 조정을 "
+       "앞당깁니다. 0이면 건너뜁니다"),
+    DE("Früher ausgleichen, wenn der Weg der letzten 20 Registrierungen, am ganzen Modell "
+       "gemessen, um mehr als diesen Anteil vom GPS abweicht; 0 überspringt"),
+    FR("Ajuster plus tôt quand le trajet des 20 derniers recalages, rapporté au modèle entier, "
+       "s'écarte de celui du GPS de plus de cette fraction ; 0 pour sauter"),
+    ES("Ajustar antes cuando el recorrido de los últimos 20 registros, frente al del modelo "
+       "entero, se aparta del GPS en más de esta fracción; 0 para saltarlo"),
+    PT("Ajustar mais cedo quando o percurso dos últimos 20 registros, frente ao do modelo "
+       "inteiro, se afasta do GPS em mais desta fração; 0 para pular"),
+    IT("Ottimizzare prima quando il percorso delle ultime 20 registrazioni, rispetto al modello "
+       "intero, si scosta da quello del GPS di più di questa frazione; 0 per saltare"),
+    NL("Eerder vereffenen wanneer het pad van de laatste 20 registraties, tegen dat van het hele "
+       "model, meer dan deze fractie van het GPS-pad afwijkt; 0 om over te slaan"),
+    RU("Уточнять раньше, когда путь последних 20 регистраций относительно всей модели "
+       "расходится с путём GPS больше чем на эту долю; 0 -- пропустить"),
+    TR("Son 20 kaydın yolu, tüm modelinkine göre GPS'inkinden bu orandan fazla saparsa demet "
+       "ayarını öne al; atlamak için 0"));
+
 SS_MSG(rank_by_visibility_help,
     EN("Rank the next image by how its visible structure spreads over the frame, "
        "not by count"),

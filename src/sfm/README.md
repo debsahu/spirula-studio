@@ -979,6 +979,7 @@ PASS/FAIL and returns 0/1 — the same convention as `src/backend/tests/`.
 | `sfm_telemetry_test` | the four telemetry carriers on synthetic files, and the sanity checks; `sfm_telemetry_test FILE` prints what a video carries | no |
 | `sfm_sequence_test` | the sequence table and its window pairs (`--no-gpu` stops there); a synthetic walk past a duplicated room through the mapper | yes |
 | `sfm_seam_weld_test` | the open-seam detector and weld on a two-front track, with and without capped GPS solves | yes |
+| `sfm_gps_scale_test` | the GPS path-length request during growth (`--gps-scale-band`) on a corridor whose GPS tail is stretched | yes |
 | `sfm_prior_test` | pose priors in bundle adjustment: Jacobians against central differences, device against host, a gauge recovered from priors alone (`--no-gpu` keeps to the host) | yes |
 | `sfm_sensor_prior_test` | the fixed-rotation two-view and PnP estimators on scenes with equipment and outliers; the telemetry source's calibration, rotations and factors on the synthetic walk | no |
 

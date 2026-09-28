@@ -496,6 +496,8 @@ struct SfmConfig {
       merge_tracks)                                                                                \
     F(mapper.seam_weld_frac, "seam-weld", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 1, "",  \
       seam_weld)                                                                                   \
+    F(mapper.gps_scale_band, "gps-scale-band", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 1, \
+      "", gps_scale_band)                                                                          \
     F(mapper.rank_by_visibility, "rank-by-visibility", CMD_AUTO | CMD_MAP, Tier::Advanced,         \
       "mapper", 0, 0, "", rank_by_visibility)                                                      \
     F(mapper.seed_blocking, "seed-blocking", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 0,   \

@@ -260,6 +260,11 @@ struct MapperOptions {
     // (Mapper::weldSeams). Hickory's seam read 0.015-0.15 against a p01 of 0.43. 0 = off.
     double seam_weld_frac = 0.25;
     int seam_min_matches = 100;
+    // Ask for a BA when the chain growth is extending is out of scale with the GPS: model
+    // path over GPS path across the last gps_scale_window registrations outside 1 +- this.
+    // A 6.6 % shrink over Hickory's last 40 m never reaches the 5 m gate. 0 = off.
+    double gps_scale_band = 0.03;
+    int gps_scale_window = 20;
     // Auditing an assembled model (D44). An image is put back only when the
     // structure it did *not* bring supports a competing pose: one that clears
     // the registration gates, explains `audit_alternative_factor` times as
@@ -399,6 +404,7 @@ public:
         uint32_t gps_refused = 0;  // registrations refused as far off the GPS
         uint32_t gps_out = 0;      // registrations beyond the GPS fit's radius
         uint32_t gps_ba = 0;       // global BAs a run of those asked for
+        uint32_t gps_scale_ba = 0; // ... of which the path-length check asked for
         double gps_gate = 0;       // metres, the radius at the last check
     };
     PriorStats priorStats() const {
@@ -1880,6 +1886,60 @@ public:
         return true;
     }
 
+    // The scale half of gpsCheck: a chain that shrinks or stretches by a few percent stays
+    // inside the gate for its whole length. The window's path ratio is read against the
+    // whole model's, not the fitted frame's scale, which is the last solve's starting point.
+    void gpsScaleCheck(uint32_t img) {
+        if (opt_.gps_scale_band <= 0 || !priors_ || !gps_frame_.ok) return;
+        const size_t window = (size_t)std::max(2, opt_.gps_scale_window);
+        scale_window_.push_back(img);
+        if (scale_window_.size() > window) scale_window_.erase(scale_window_.begin());
+        if (scale_window_.size() < window || ba_requested_ || gps_regs_since_ba_ < 10) return;
+        std::vector<uint32_t> all;
+        for (const auto& kv : rec_.images)
+            if (kv.second.registered) all.push_back(kv.first);
+        double wm, wg, am, ag;
+        const size_t n = pathLengths(scale_window_, wm, wg);
+        pathLengths(all, am, ag);
+        if (wg < kGpsScaleMinPath || am <= 0 || ag <= 0 || wm <= 0) return;
+        const double ratio = (wm / wg) / (am / ag);
+        if (std::fabs(ratio - 1.0) <= opt_.gps_scale_band) return;
+        ba_requested_ = true;
+        prior_stats_.gps_scale_ba++;
+        if (opt_.verbose)
+            slog::diag(slog::Tag::Map,
+                       "[prior] GPS: %s ends %zu registrations whose path is %.3f of the GPS's "
+                       "(%.1f m) against the model's; bundle adjusting now\n",
+                       db_.images[img].name.c_str(), n, ratio, wg);
+    }
+
+    // Model and GPS path lengths through `ids` in capture order, over steps between frames
+    // at most kGpsScaleMaxGap apart in one sequence; a flat fit compares horizontals.
+    size_t pathLengths(const std::vector<uint32_t>& ids, double& model, double& gps) const {
+        struct Frame { int64_t seq, pos; Vec3 c, p; };
+        std::vector<Frame> f;
+        for (uint32_t i : ids) {
+            Vec3 p;
+            const Image& im = rec_.images.at(i);
+            if (!im.registered || !priors_->position(i, p)) continue;
+            const int64_t sq = seq_ ? seq_->sequenceOf(i) : 0;
+            const int64_t ps = seq_ && seq_->has(i) ? seq_->pos[i] : (int64_t)i;
+            f.push_back({sq, ps, cameraCenter(im.pose), p});
+        }
+        std::sort(f.begin(), f.end(), [](const Frame& a, const Frame& b) {
+            return a.seq != b.seq ? a.seq < b.seq : a.pos < b.pos;
+        });
+        model = gps = 0;
+        for (size_t k = 0; k + 1 < f.size(); k++) {
+            if (f[k].seq != f[k + 1].seq || f[k + 1].pos - f[k].pos > kGpsScaleMaxGap) continue;
+            Vec3 dm = mul(gps_frame_.A, f[k + 1].c - f[k].c), dg = f[k + 1].p - f[k].p;
+            if (gps_frame_.flat) dm.z = dg.z = 0;
+            model += dm.norm();
+            gps += dg.norm();
+        }
+        return f.size();
+    }
+
     // A length to measure pose differences against, since a reconstruction has
     // no units: the RMS distance of the registered camera centers from their
     // centroid. Cached per adopted model -- the audit asks for it once per
@@ -2396,6 +2456,7 @@ private:
                     }
                     recent_regs_.push_back(img);
                     gps_regs_since_ba_++;
+                    gpsScaleCheck(img);
                     registered_here += completeFrameOf(img) + frame_regs_;
                     frame_regs_ = 0;
                     break;
@@ -2746,6 +2807,7 @@ private:
     // from the same state setup() left behind.
     void resetModel() {
         scale_cache_ = 0;
+        scale_window_.clear();
         gps_frame_ = GpsFrame{};
         rig_refined_at_ = 0;
         rec_.points3D.clear();
@@ -5411,9 +5473,15 @@ private:
     // A registration four fit radii off the GPS with its predecessor inside
     // one is refused; a drifting run is never refused, or its chain stalls.
     static constexpr double kGpsRefuseGates = 4.0;
+    // Below this much GPS track a path ratio is receiver jitter: Hickory's steps alternate
+    // 1.1 / 1.7 m, so 20 frames cover ~16 m. A guess, not a measurement.
+    static constexpr double kGpsScaleMinPath = 5.0;
+    // Two growth fronts share the window; a step between them is not a path. A guess.
+    static constexpr int64_t kGpsScaleMaxGap = 3;
     GpsFrame gps_frame_;               // the last global solve's, on this model
     uint32_t gps_out_run_ = 0;         // consecutive registrations beyond its radius
     uint32_t gps_regs_since_ba_ = 0;   // registrations since a BA gpsCheck asked for
+    std::vector<uint32_t> scale_window_;  // the last registrations, for gpsScaleCheck
     bool ba_requested_ = false;
     std::unordered_set<uint64_t> welded_;  // fused by fuseSeams; the next globalRefine spares them
     // Counted from const passes that fan out over threads (the audit, the
