@@ -45,6 +45,18 @@ public:
         (void)p;
         return false;
     }
+    // Metres between a pose's centre and the image's position through a frame
+    // a factors() call returned for THIS model: a source serves several
+    // models, so it cannot hold the frame itself. False without either.
+    virtual bool positionError(uint32_t img, const Pose& pose, const GpsFrame& f,
+                               double& metres) const {
+        Vec3 p;
+        if (!f.ok || !position(img, p)) return false;
+        Vec3 r = mul(f.A, cameraCenter(pose)) + f.t - p;
+        if (f.flat) r.z = 0;
+        metres = r.norm();
+        return true;
+    }
 };
 
 // A source over a database seen through a renumbering (map/Atoms.h): local
@@ -84,6 +96,7 @@ public:
         PosePriors out;
         out.up_w = pr.up_w;
         out.huber = pr.huber;
+        out.gps = pr.gps;
         for (PriorRotation r : pr.rotations)
             if (local(r.i) && local(r.j)) out.rotations.push_back(r);
         for (PriorUp u : pr.ups)
@@ -97,6 +110,10 @@ public:
     }
     bool position(uint32_t img, Vec3& p) const override {
         return img < to_global_.size() && inner_.position(to_global_[img], p);
+    }
+    bool positionError(uint32_t img, const Pose& pose, const GpsFrame& f,
+                       double& metres) const override {
+        return img < to_global_.size() && inner_.positionError(to_global_[img], pose, f, metres);
     }
 
 private:

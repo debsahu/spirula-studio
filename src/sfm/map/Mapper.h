@@ -385,6 +385,10 @@ public:
         uint32_t vouched = 0;     // audits the neighbours' rotation settled
         uint32_t seeds = 0;       // seed pairs posed with the gyro's rotation
         size_t rotations = 0, ups = 0, centres = 0;   // factors in the last solve
+        uint32_t gps_refused = 0;  // registrations refused as far off the GPS
+        uint32_t gps_out = 0;      // registrations beyond the GPS fit's radius
+        uint32_t gps_ba = 0;       // global BAs a run of those asked for
+        double gps_gate = 0;       // metres, the radius at the last check
     };
     PriorStats priorStats() const {
         PriorStats st = prior_stats_;
@@ -1729,6 +1733,39 @@ public:
         return true;
     }
 
+    // A PnP pose against the GPS, through the last solve's fit: four radii off
+    // right after an in-radius registration is a wrong-place PnP and refused;
+    // three in a row beyond the radius is drift, and asks for a global BA now.
+    bool gpsCheck(uint32_t img, const Pose& pose) {
+        double d;
+        if (!priors_ || !gps_frame_.ok || !priors_->positionError(img, pose, gps_frame_, d))
+            return true;
+        const double gate = gps_frame_.gate;
+        prior_stats_.gps_gate = gate;
+        if (d > kGpsRefuseGates * gate && gps_out_run_ == 0) {
+            reg_fail_.gps_far++;
+            prior_stats_.gps_refused++;
+            if (opt_.verbose)
+                slog::diag(slog::Tag::Map, "[prior] GPS: %s refused, %.1f m off the fit\n",
+                           db_.images[img].name.c_str(), d);
+            return false;
+        }
+        if (d <= gate) {
+            gps_out_run_ = 0;
+            return true;
+        }
+        prior_stats_.gps_out++;
+        if (++gps_out_run_ >= 3 && gps_regs_since_ba_ >= 10 && !ba_requested_) {
+            ba_requested_ = true;
+            if (opt_.verbose)
+                slog::diag(slog::Tag::Map,
+                           "[prior] GPS: %s is %.1f m off the fit, %u in a row beyond %.1f m; "
+                           "bundle adjusting now\n",
+                           db_.images[img].name.c_str(), d, gps_out_run_, gate);
+        }
+        return true;
+    }
+
     // A length to measure pose differences against, since a reconstruction has
     // no units: the RMS distance of the registered camera centers from their
     // centroid. Cached per adopted model -- the audit asks for it once per
@@ -1956,6 +1993,12 @@ private:
                          {(long long)prior_stats_.corrected, (long long)prior_stats_.refused,
                           (long long)prior_stats_.rotations, (long long)prior_stats_.ups,
                           (long long)prior_stats_.centres});
+            if (priors_ && opt_.verbose)
+                slog::diag(slog::Tag::Map,
+                           "[prior] GPS check: %u registrations refused beyond %.0f m, %u bundle "
+                           "adjustments triggered by %u registrations beyond %.0f m\n",
+                           prior_stats_.gps_refused, kGpsRefuseGates * prior_stats_.gps_gate,
+                           prior_stats_.gps_ba, prior_stats_.gps_out, prior_stats_.gps_gate);
             if (covered.size() < db_.images.size())
                 slog::diag(slog::Tag::Map,
                            "[map] registration attempts that failed: %u too few candidates, "
@@ -2119,6 +2162,9 @@ private:
         // images between them.
         double next_ba = std::max(3.0, std::ceil(rec_.numRegistered() * opt_.ba_growth_ratio));
         recent_regs_.clear();
+        gps_regs_since_ba_ = 0;
+        gps_out_run_ = 0;
+        ba_requested_ = false;
         rebuildScores();
         // The overlap budget is spent by *this* pass. A continuation of a model
         // that already shares images with another (a merge just gave it some)
@@ -2168,13 +2214,21 @@ private:
                         triangulateForImage(img);
                     }
                     recent_regs_.push_back(img);
+                    gps_regs_since_ba_++;
                     registered_here += completeFrameOf(img) + frame_regs_;
                     frame_regs_ = 0;
                     break;
                 }
             }
             if (!registered) break;  // nothing in the ranking can be registered
-            if (rec_.numRegistered() >= next_ba) {
+            const bool due = rec_.numRegistered() >= next_ba;
+            if (due || ba_requested_) {
+                if (ba_requested_) {
+                    if (!due) prior_stats_.gps_ba++;
+                    ba_requested_ = false;
+                    gps_out_run_ = 0;
+                    gps_regs_since_ba_ = 0;
+                }
                 if (stop_at_ba) break;
                 checkedRefine(false);
                 // Refinement mutates observations wholesale (filtering,
@@ -2510,6 +2564,7 @@ private:
     // from the same state setup() left behind.
     void resetModel() {
         scale_cache_ = 0;
+        gps_frame_ = GpsFrame{};
         rig_refined_at_ = 0;
         rec_.points3D.clear();
         rec_.cameras.clear();
@@ -3638,6 +3693,7 @@ private:
             seqDump(img, X, nearf, r, rival, "refused (ratio after refinement)");
             return false;
         }
+        if (!gpsCheck(img, r.pose)) return false;
         if (!ratioOk(r.num_inliers, pool) && reg_vouched_ == vouched_before) reg_fail_.strong++;
         seqDump(img, X, nearf, r, rival, reg_vouched_ > vouched_before ? "placed (rival excluded)"
                                                                         : "placed");
@@ -4486,6 +4542,7 @@ private:
             PosePriors pf;
             if (priors_) {
                 pf = priorFactors(rec_);
+                gps_frame_ = pf.gps;
                 bo.priors = &pf;
             }
             double cost = runGlobalBA(rec_, bo);
@@ -5149,11 +5206,19 @@ private:
         uint32_t strong = 0;     // admitted on absolute support with the ratio failed (D69)
         uint32_t ambiguous = 0;  // ... refused instead because a rival pose fit the leftovers
         uint32_t occluded = 0;   // correspondences the accepted pose could not see at all
+        uint32_t gps_far = 0;    // refused as four GPS radii off (gpsCheck)
     } reg_fail_;
     const RigTable* rigs_ = nullptr;  // null = no rigs, or --no-use-rigs
     const SequenceTable* seq_ = nullptr;  // null = no sequences
     PriorSource* priors_ = nullptr;   // null = no sensor priors, or --no-sensor-map
     PriorStats prior_stats_;
+    // A registration four fit radii off the GPS with its predecessor inside
+    // one is refused; a drifting run is never refused, or its chain stalls.
+    static constexpr double kGpsRefuseGates = 4.0;
+    GpsFrame gps_frame_;               // the last global solve's, on this model
+    uint32_t gps_out_run_ = 0;         // consecutive registrations beyond its radius
+    uint32_t gps_regs_since_ba_ = 0;   // registrations since a BA gpsCheck asked for
+    bool ba_requested_ = false;
     // Counted from const passes that fan out over threads (the audit, the
     // seed prefetch).
     mutable std::atomic<uint32_t> prior_vouched_{0}, prior_seeds_{0};

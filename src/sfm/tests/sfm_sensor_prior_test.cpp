@@ -362,12 +362,23 @@ static void testTelemetryPriors() {
         inl_n++;
     }
     const double inl_rms = inl_n ? std::sqrt(inl_r2 / inl_n) : 0;
+    int whole_ok = 0;
+    double whole_lo = 1e9, whole_hi = 0;
+    for (uint32_t k = 0; k < ids.size(); k++) {
+        double d;
+        if (!whole[k] || !rogue.positionError(k, camPose(k), rp.gps, d)) continue;
+        whole_ok += d > 20.0 && d < 40.0;   // the 1 m / 3 m noise of the log on top
+        whole_lo = std::min(whole_lo, d);
+        whole_hi = std::max(whole_hi, d);
+    }
+    std::printf("  check on the moved frames: %.1f-%.1f m\n", whole_lo, whole_hi);
     std::printf("rogue fixes: %d of %d frames moved whole | %d gps factors (stats %d, out %d), the "
                 "unmoved %.2f m rms at the truth\n", n_whole, n_pos, single, rs.gps, rs.gps_out, inl_rms);
     check(n_whole >= 10 && n_whole <= 0.15 * n_pos, "rogue: some frames moved whole, a minority");
     check(rs.gps_ok && single == n_pos && rs.gps == n_pos, "rogue: every positioned frame keeps its factor");
     check(rs.gps_out >= n_whole, "rogue: the moved frames are beyond the gate");
     check(inl_n > 0 && inl_rms < 4.0, "rogue: the unmoved factors' residual at the truth");
+    check(rp.gps.ok && rp.gps.flat && whole_ok == n_whole, "rogue: the check reads the 30 m, four radii off");
 }
 
 int cmdSensorPriorTest(int, char**) {

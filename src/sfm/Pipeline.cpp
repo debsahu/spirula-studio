@@ -1009,7 +1009,9 @@ std::unique_ptr<ExifGpsPriors> makeExifGpsPriors(const SfmConfig& cfg, const std
     if (verbose)
         L::out(Tag::Match, M::metric_gps_read,
                {(long long)with, (long long)db.images.size(), (long long)no_alt});
-    return std::make_unique<ExifGpsPriors>(fixes, sensorPriorOptions(cfg));
+    SensorPriorOptions po = sensorPriorOptions(cfg);
+    po.gps_flat = cfg.metric_gps == "horizontal";
+    return std::make_unique<ExifGpsPriors>(fixes, po);
 }
 
 // The unregistered list as a data file, when SS_UNREG_LOG names one: per

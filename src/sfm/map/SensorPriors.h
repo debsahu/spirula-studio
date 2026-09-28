@@ -45,6 +45,9 @@ struct SensorPriorOptions {
     int calib_min_frames = 20;   // posed frames a group needs for the gravity refit
     double gps_max_error = 5.0;  // metres, the fit's inlier radius
     double gps_max_error_frac = 0.03;
+    // A source with no IMU fits its GPS level-only about the cameras' mean up
+    // (--metric-gps horizontal, D75); a telemetry source has its own up.
+    bool gps_flat = false;
     bool verbose = false;
 };
 
@@ -110,6 +113,12 @@ inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_er
         f.sigma = {sh, sh, up_w ? 0.0 : 3.0 * sh};
         out.centres.push_back(f);
     }
+    out.gps.ok = true;
+    out.gps.flat = up_w != nullptr;
+    out.gps.A = A;
+    out.gps.t = fit.T.t;
+    out.gps.sigma_h = sh;
+    out.gps.gate = fit.max_error;
     return fit;
 }
 
@@ -616,7 +625,7 @@ private:
 
 // A geotagged image set as a PriorSource: each image's EXIF fix, in an
 // east-north-up frame about their mean, for pairs by place and centre factors.
-// No IMU, so no up axis: the GPS fit is full (D75).
+// No IMU, so the GPS fit is full unless gps_flat takes the cameras' up (D75).
 class ExifGpsPriors : public PriorSource {
 public:
     ExifGpsPriors(const std::vector<std::optional<Geodetic>>& fixes, SensorPriorOptions opt)
@@ -630,6 +639,7 @@ public:
             if (fixes[i]) pos_[i] = enu[k++];
     }
 
+    const SensorPriorOptions& options() const { return opt_; }
     size_t positioned() const {
         size_t n = 0;
         for (const std::optional<Vec3>& p : pos_) n += p ? 1 : 0;
@@ -661,8 +671,14 @@ public:
             ref.image_ids.push_back(p.image);
         }
         st.frames = (int)ref.centres.size();
-        const MetricFit fit = gpsCentreFactors(std::move(ref), nullptr, opt_.gps_max_error,
-                                               opt_.gps_max_error_frac, out);
+        // The rule of meanCameraUp (map/Orient.h) over the posed images.
+        Vec3 up{0, 0, 0};
+        for (const PosedImage& p : imgs)
+            if (has(p.image)) up = up + mul(transpose(p.pose.R), Vec3{0, -1, 0});
+        const bool flat = opt_.gps_flat && up.norm() > 0;
+        if (flat) up = up.normalized();
+        const MetricFit fit = gpsCentreFactors(std::move(ref), flat ? &up : nullptr,
+                                               opt_.gps_max_error, opt_.gps_max_error_frac, out);
         st.gps_ok = fit.ok;
         st.gps_rms = fit.rms;
         st.gps_out = fit.ok ? fit.n - fit.inliers : 0;

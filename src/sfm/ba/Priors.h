@@ -43,11 +43,24 @@ struct PriorCentre {
     Vec3 sigma{1, 1, 1};
 };
 
+// The metric frame a source's absolute centre factors were stated in, for
+// checking a pose between solves: a camera centre c is A c + t - p metres off
+// its position p, level components only when flat. The solver never reads it.
+struct GpsFrame {
+    bool ok = false;
+    bool flat = false;
+    Mat3 A = mat3Identity();  // model -> metres: scale, rotation, up alignment
+    Vec3 t{0, 0, 0};
+    double sigma_h = 0;       // metres, the factors' level sigma
+    double gate = 0;          // metres, the fit's inlier radius
+};
+
 // Image indices are whatever the holder says: the mapper fills them with
 // reconstruction image ids, buildBundle remaps them to BA indices.
 struct PosePriors {
     Vec3 up_w{0, 0, 1};    // the world up every PriorUp is measured against
     double huber = 1.345;  // in sigmas, per factor
+    GpsFrame gps;          // where the single-image centres are stated
     std::vector<PriorRotation> rotations;
     std::vector<PriorUp> ups;
     std::vector<PriorCentre> centres;
