@@ -87,6 +87,11 @@ std::unique_ptr<TelemetryPriors> makeSensorPriors(const SfmConfig& cfg,
                                                   const MatchesDatabase& db,
                                                   const std::vector<uint32_t>& cam_ids);
 
+// Each image's EXIF GPS as a prior source (ExifGpsPriors); null when no image
+// under `imagedir` carries a fix, or with --no-sensor-map and --no-sensor-pairs.
+std::unique_ptr<ExifGpsPriors> makeExifGpsPriors(const SfmConfig& cfg, const std::string& imagedir,
+                                                 const MatchesDatabase& db, bool verbose);
+
 // Calibrate `priors` against the gyro from pairs and their matches (a
 // sample's putative ones, or the database's verified ones), reporting per group.
 void calibrateSensorPriors(TelemetryPriors& priors, const std::vector<FeatureSet>& feats,
@@ -115,6 +120,14 @@ struct VerifyCalibration {
     bool used_bearings = false;
     // The sensors over this database, calibrated where the pairs allowed.
     std::unique_ptr<TelemetryPriors> priors;
+    // Where the images are, for their EXIF GPS when no telemetry covers them.
+    std::string image_dir;
+    std::unique_ptr<ExifGpsPriors> exif_priors;
+    // The source mapping and GPS pairing use: the telemetry's, else the EXIF's.
+    PriorSource* positionPriors() const {
+        if (priors) return priors.get();
+        return exif_priors.get();
+    }
 };
 
 // ---------------------------------------------------------------------------

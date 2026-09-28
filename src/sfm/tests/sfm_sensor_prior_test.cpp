@@ -263,7 +263,7 @@ static void testTelemetryPriors() {
         worst_up = std::max(worst_up, angleDeg(mul(camPose(u.i).R, pf.up_w), u.u));
     for (const PriorRotation& r : pf.rotations)
         worst_rot = std::max(worst_rot, angleDeg(mul(r.R_ji, camPose(r.i).R), camPose(r.j).R));
-    int gps_n = 0, tri_n = 0;
+    int gps_n = 0, tri_n = 0, gps_vertical = 0;
     double gps_rms = 0, tri_rel = 0;
     for (const PriorCentre& f : pf.centres) {
         Vec3 sum{0, 0, 0};
@@ -272,6 +272,7 @@ static void testTelemetryPriors() {
         if (f.n == 1) {
             gps_rms += d.x * d.x + d.y * d.y;
             gps_n++;
+            if (f.sigma.z != 0.0) gps_vertical++;
         } else {
             tri_rel = std::max(tri_rel, d.norm() / std::max(1e-9, f.sigma.x));
             tri_n++;
@@ -284,6 +285,8 @@ static void testTelemetryPriors() {
     check(worst_rot < 1.0, "factors: rotation residual");
     check(worst_up < 15.0, "factors: up residual");
     check(gps_n > 0 && gps_rms < 4.0, "factors: gps residual");
+    // With the IMU's up axis the GPS states the level pair only (D75).
+    check(gps_n > 0 && gps_vertical == 0, "factors: gps is horizontal under an up axis");
     check(tri_n >= 10, "factors: triples");
 
     // The same source through a renumbering.

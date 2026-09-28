@@ -34,6 +34,7 @@
 #include "core/ExrImage.h"
 #include "sfm/core/Cancel.h"
 #include "sfm/core/Events.h"
+#include "sfm/core/Exif.h"
 #include "sfm/core/Progress.h"
 #include "sfm/core/CameraSetup.h"
 #include "sfm/core/FeatureCompaction.h"
@@ -355,6 +356,15 @@ std::vector<Camera> perImageCameras(const CameraSetup& cs, size_t num_images) {
     return percam;
 }
 
+static SensorPriorOptions sensorPriorOptions(const SfmConfig& cfg) {
+    SensorPriorOptions po;
+    po.max_dt = cfg.sensor_max_dt;
+    po.gps_max_error = cfg.metric_gps != "none" && cfg.metric_max_error > 0 ? cfg.metric_max_error : 5.0;
+    po.gps_max_error_frac = cfg.metric_max_error_frac;
+    po.verbose = !cfg.quiet;
+    return po;
+}
+
 std::unique_ptr<TelemetryPriors> makeSensorPriors(const SfmConfig& cfg,
                                                   const SensorCaptures& sensors,
                                                   const MatchesDatabase& db,
@@ -364,12 +374,8 @@ std::unique_ptr<TelemetryPriors> makeSensorPriors(const SfmConfig& cfg,
     std::vector<std::string> names;
     names.reserve(db.images.size());
     for (const ImageEntry& im : db.images) names.push_back(im.name);
-    SensorPriorOptions po;
-    po.max_dt = cfg.sensor_max_dt;
-    po.gps_max_error = cfg.metric_gps != "none" && cfg.metric_max_error > 0 ? cfg.metric_max_error : 5.0;
-    po.gps_max_error_frac = cfg.metric_max_error_frac;
-    po.verbose = !cfg.quiet;
-    auto priors = std::make_unique<TelemetryPriors>(sensors.caps(), names, cam_ids, po);
+    auto priors = std::make_unique<TelemetryPriors>(sensors.caps(), names, cam_ids,
+                                                    sensorPriorOptions(cfg));
     return priors->timedImages() ? std::move(priors) : nullptr;
 }
 
@@ -981,6 +987,29 @@ static std::map<std::string, std::string> imageStemMap(const std::string& imaged
             stem2name[stem.generic_string()] = rel.generic_string();
         }
     return stem2name;
+}
+
+std::unique_ptr<ExifGpsPriors> makeExifGpsPriors(const SfmConfig& cfg, const std::string& imagedir,
+                                                 const MatchesDatabase& db, bool verbose) {
+    if (imagedir.empty() || !(cfg.sensor_map || cfg.sensor_pairs)) return nullptr;
+    const std::map<std::string, std::string> stem2name = imageStemMap(imagedir);
+    std::vector<std::optional<Geodetic>> fixes(db.images.size());
+    int with = 0, no_alt = 0;
+    for (size_t i = 0; i < db.images.size(); i++) {
+        auto it = stem2name.find(db.images[i].name);
+        if (it == stem2name.end()) continue;
+        const ExifData e = readExif((fs::path(imagedir) / it->second).string());
+        if (!e.has_gps) continue;
+        // As the metric gauge reads it: a fix with no altitude sits at sea level.
+        fixes[i] = Geodetic{e.lat_deg, e.lon_deg, e.alt_m};
+        with++;
+        if (!e.has_alt) no_alt++;
+    }
+    if (!with) return nullptr;
+    if (verbose)
+        L::out(Tag::Match, M::metric_gps_read,
+               {(long long)with, (long long)db.images.size(), (long long)no_alt});
+    return std::make_unique<ExifGpsPriors>(fixes, sensorPriorOptions(cfg));
 }
 
 // The unregistered list as a data file, when SS_UNREG_LOG names one: per
@@ -1609,8 +1638,11 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
         if (verbose) printCameraSetup(Tag::Match, calib->cameras, calib->setup, feats.size());
         if (calib->sensors)
             calib->priors = makeSensorPriors(cfg, *calib->sensors, db, calib->cameras.ids);
+        if (!calib->priors)
+            calib->exif_priors = makeExifGpsPriors(cfg, calib->image_dir, db, verbose);
     }
     TelemetryPriors* priors = calib ? calib->priors.get() : nullptr;
+    const PriorSource* placed = calib ? calib->positionPriors() : nullptr;
 
     std::vector<std::pair<uint32_t, uint32_t>> pairs;
     // Pair selection is minutes on a large capture and used to look like a
@@ -1711,10 +1743,10 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
     }
 #endif
     // Images the GPS puts near each other, whatever the shortlist thought.
-    if (priors && cfg.sensor_pairs && !reused_pairs) {
+    if (placed && cfg.sensor_pairs && !reused_pairs) {
         size_t positioned = 0;
         const std::vector<std::pair<uint32_t, uint32_t>> nearby = gpsProximityPairs(
-            *priors, (uint32_t)n_images, cfg.sensor_pair_radius, 20, &positioned);
+            *placed, (uint32_t)n_images, cfg.sensor_pair_radius, 20, &positioned);
         const size_t before = pairs.size();
         pairs.insert(pairs.end(), nearby.begin(), nearby.end());
         std::sort(pairs.begin(), pairs.end());
@@ -2152,6 +2184,7 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
     MatchStats mstats;
     VerifyCalibration calib;
     calib.setup = cfg.camera;
+    calib.image_dir = _imagedir;
     const SensorCaptures sensors = loadSensorCaptures(cfg, verbose);
     calib.sensors = &sensors;
     // What this stage's output depends on: its own settings, the extraction
@@ -2185,6 +2218,8 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
                     calibrateSensorPriorsFromDatabase(
                         *calib.priors, db, feats, perImageCameras(calib.cameras, feats.size()),
                         cfg.twoview, cfg.threads, verbose);
+                else
+                    calib.exif_priors = makeExifGpsPriors(cfg, _imagedir, db, verbose);
             }
         } catch (const std::exception& e) {
             L::warn(Tag::Match, M::match_reuse_failed, {e.what()});
@@ -2255,7 +2290,7 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
         return r;
     }
     Mapper mapper(db, feats, mapopt, cs.ids, &rigs, &seqs,
-                  cfg.sensor_map ? calib.priors.get() : nullptr);
+                  cfg.sensor_map ? calib.positionPriors() : nullptr);
     AssembleStats ast;
     std::vector<Reconstruction> models = runMapper(mapper, db, feats, cfg, ast);
     double t_map = now() - t0;
