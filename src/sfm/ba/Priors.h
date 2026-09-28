@@ -41,6 +41,7 @@ struct PriorCentre {
     Mat3 A[3] = {mat3Identity(), mat3Identity(), mat3Identity()};
     Vec3 b;
     Vec3 sigma{1, 1, 1};
+    double cauchy = 0;  // > 0: a Cauchy loss of this scale (sigma^2 units), not the Huber knee
 };
 
 // The metric frame a source's absolute centre factors were stated in, for
@@ -159,7 +160,7 @@ public:
         Eval ev;
         for (const Fact& f : fact_) {
             evaluate(P, poses, exts, f, ev);
-            c += 0.5 * robustCost(ev.r);
+            c += 0.5 * robustCost(ev.r, ev.cauchy);
         }
         return c;
     }
@@ -174,8 +175,8 @@ public:
         for (const Fact& f : fact_) {
             evaluate(P, poses, exts, f, ev);
             const double s = ev.r[0] * ev.r[0] + ev.r[1] * ev.r[1] + ev.r[2] * ev.r[2];
-            c += 0.5 * robustCost(ev.r);
-            const double w = robustWeight(s);
+            c += 0.5 * robustCost(ev.r, ev.cauchy);
+            const double w = robustWeight(s, ev.cauchy);
             for (int a = 0; a < f.nf; a++) {
                 double* ga = &g_[6 * (size_t)f.frame[a]];
                 for (int p = 0; p < 6; p++) {
@@ -237,6 +238,7 @@ private:
     struct Eval {
         double r[3];
         double J[3][3][6];   // per frame slot, 3 x [angle-axis 3 | t 3]
+        double cauchy = 0;   // the factor's PriorCentre::cauchy
     };
 
     // One image's chain: its frame block and the member on top of it.
@@ -277,12 +279,14 @@ private:
             for (int p = 0; p < 3; p++) J[m][p] += scale * M[3 * m + p];
     }
 
-    double robustCost(const double r[3]) const {
+    double robustCost(const double r[3], double cauchy) const {
         const double s = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+        if (cauchy > 0) return cauchy * std::log1p(s / cauchy);
         const double k2 = huber_ * huber_;
         return s <= k2 ? s : 2.0 * huber_ * std::sqrt(s) - k2;
     }
-    double robustWeight(double s) const {
+    double robustWeight(double s, double cauchy) const {
+        if (cauchy > 0) return 1.0 / (1.0 + s / cauchy);
         const double k2 = huber_ * huber_;
         return s <= k2 ? 1.0 : huber_ / std::sqrt(s);
     }
@@ -291,6 +295,7 @@ private:
                   Eval& ev) const {
         const PosePriors& pr = *P.priors;
         huber_ = pr.huber;
+        ev.cauchy = 0;
         for (int a = 0; a < 3; a++)
             for (int m = 0; m < 3; m++)
                 for (int p = 0; p < 6; p++) ev.J[a][m][p] = 0;
@@ -321,6 +326,7 @@ private:
             return;
         }
         const PriorCentre& q = pr.centres[f.index];
+        ev.cauchy = q.cauchy;
         Vec3 sum{0, 0, 0};
         for (int k = 0; k < q.n; k++) {
             const Cam c = camOf(P, poses, exts, q.img[k]);

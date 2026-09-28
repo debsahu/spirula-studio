@@ -182,6 +182,49 @@ static void testFactors() {
     check(none.centres.empty() && !src.lastFactors().gps_ok, "factors: none under five images");
 }
 
+// A trusted source (--metric-gps full) states COLMAP's factor: isotropic 1 m
+// under a Cauchy loss of scale 7.815; the fit, its gate and the fold are unchanged.
+static void testTrustedFactors() {
+    const Loop L = makeLoop(15.0);
+    SensorPriorOptions po;
+    po.trusted_position = true;
+    ExifGpsPriors src(L.fixes, po);
+    const PosePriors pf = src.factors(L.imgs);
+    int bad = 0;
+    for (const PriorCentre& f : pf.centres)
+        if (!(f.sigma.x == 1.0 && f.sigma.y == 1.0 && f.sigma.z == 1.0 && f.cauchy == 7.815)) bad++;
+    check(pf.centres.size() == 39 && bad == 0, "trusted: isotropic 1 m under Cauchy 7.815");
+    check(src.lastFactors().gps_out == 6 && std::fabs(pf.gps.gate - 5.0) < 1e-9,
+          "trusted: the fit and its gate are the untrusted ones");
+    check(std::fabs(pf.gps.sigma_h - 1.0) < 1e-12, "trusted: the frame carries the 1 m sigma");
+
+    ExifGpsPriors plain(L.fixes, SensorPriorOptions{});
+    int huber = 0;
+    for (const PriorCentre& f : plain.factors(L.imgs).centres) huber += f.cauchy == 0.0;
+    check(huber == 39, "untrusted: the shared Huber knee, as before");
+
+    const Loop U = makeLoop(0.0);
+    const Vec3 up = mul(U.Rm, Vec3{0, 0, 1});
+    MetricRef ref;
+    for (const PosedImage& p : U.imgs)
+        if (U.fixes[p.image]) {
+            ref.centres.push_back(cameraCenter(p.pose));
+            ref.targets.push_back(Vec3{0, 0, 0});
+            ref.image_ids.push_back(p.image);
+        }
+    std::vector<Geodetic> g;
+    for (const auto& f : U.fixes)
+        if (f) g.push_back(*f);
+    ref.targets = enuFromGeodetic(g);
+    PosePriors lv;
+    gpsCentreFactors(ref, &up, 5.0, 0.03, lv, true);
+    int level = 0;
+    for (const PriorCentre& f : lv.centres)
+        level += f.sigma.x == 1.0 && f.sigma.y == 1.0 && f.sigma.z == 0.0 && f.cauchy == 7.815;
+    check(!lv.centres.empty() && level == (int)lv.centres.size(),
+          "trusted under an up axis: level only, still Cauchy (D75)");
+}
+
 // Six images 15 m off their fixes, three gates: the fit is the other 33's,
 // and the six still get a factor carrying their whole residual.
 static void testFoldedFactors() {
@@ -402,6 +445,9 @@ static void testBuilder() {
     whole.metric_gps = "full";
     std::unique_ptr<ExifGpsPriors> wsrc = makeExifGpsPriors(whole, dir.string(), db, false);
     check(wsrc && !wsrc->options().gps_flat, "builder: --metric-gps full keeps the vertical");
+    check(wsrc && wsrc->options().trusted_position && src && !src->options().trusted_position &&
+              lsrc && !lsrc->options().trusted_position,
+          "builder: only --metric-gps full trusts the positions");
 
     SfmConfig off = cfg;
     off.sensor_map = false;
@@ -434,6 +480,7 @@ static int run(int, char**) {
     testPositionsAndPairs();
     testFactors();
     testFoldedFactors();
+    testTrustedFactors();
     testPositionError();
     testLevelCheck();
     testBuilder();

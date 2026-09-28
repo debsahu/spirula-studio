@@ -294,6 +294,21 @@ static void testTelemetryPriors() {
     check(gps_n > 0 && gps_rms < 4.0, "factors: gps residual");
     // With the IMU's up axis the GPS states the level pair only (D75).
     check(gps_n > 0 && gps_vertical == 0, "factors: gps is horizontal under an up axis");
+    {
+        // --metric-gps full on video: COLMAP's 1 m Cauchy factor, still level only.
+        SensorPriorOptions tpo;
+        tpo.trusted_position = true;
+        TelemetryPriors trusted({cap}, names, cams, tpo);
+        trusted.calibrateFromPairs(obs);
+        int n = 0, ok = 0, plain = 0;
+        for (const PriorCentre& f : trusted.factors(imgs).centres)
+            if (f.n == 1) {
+                n++;
+                ok += f.cauchy == 7.815 && f.sigma.x == 1.0 && f.sigma.y == 1.0 && f.sigma.z == 0.0;
+            }
+        for (const PriorCentre& f : pf.centres) plain += f.n == 1 && f.cauchy == 0.0;
+        check(n > 0 && ok == n && plain == gps_n, "factors: trusted GPS is 1 m Cauchy, level only");
+    }
     check(tri_n >= 10, "factors: triples");
 
     // The same source through a renumbering.

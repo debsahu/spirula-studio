@@ -48,6 +48,7 @@ struct SensorPriorOptions {
     // A source with no IMU fits its GPS level-only about the cameras' mean up
     // (--metric-gps horizontal, D75); a telemetry source has its own up.
     bool gps_flat = false;
+    bool trusted_position = false;
     bool verbose = false;
 };
 
@@ -90,11 +91,16 @@ inline double gpsLevelSigma(const MetricFit& fit) {
     return std::max(2.0 * fit.rms, 0.6 * fit.max_error);
 }
 
+// A position the user trusts (--metric-gps full) gets COLMAP 4.1.1's factor:
+// prior_position_fallback_stddev 1 m, isotropic, under CauchyLoss(prior_position_loss_scale).
+constexpr double kTrustedGpsSigma = 1.0;
+constexpr double kTrustedGpsCauchy = 7.815;
+
 // A similarity fitted on the inliers, then a centre factor for EVERY positioned
 // image: an inlier mask drops exactly the frames that drifted off between two
 // solves. Horizontal with an up axis (D75), else full with the vertical 3x looser.
 inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_error,
-                                  double max_error_frac, PosePriors& out) {
+                                  double max_error_frac, PosePriors& out, bool trusted = false) {
     MetricFit fit;
     if (ref.centres.size() < 5) return fit;
     const Mat3 R_up = up_w ? rotationUpToZ(*up_w) : mat3Identity();
@@ -102,7 +108,8 @@ inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_er
     fit = fitMetricGauge(ref, max_error, up_w ? MetricAxes::Horizontal : MetricAxes::Full,
                          max_error_frac);
     if (!fit.ok) return fit;
-    const double sh = gpsLevelSigma(fit);
+    const double sh = trusted ? kTrustedGpsSigma : gpsLevelSigma(fit);
+    const double sv = up_w ? 0.0 : trusted ? kTrustedGpsSigma : 3.0 * sh;
     const Mat3 A = mat3Scale(mul(fit.T.R, R_up), fit.T.scale);
     for (size_t i = 0; i < ref.centres.size(); i++) {
         PriorCentre f;
@@ -110,7 +117,8 @@ inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_er
         f.img[0] = ref.image_ids[i];
         f.A[0] = A;
         f.b = ref.targets[i] - fit.T.t;
-        f.sigma = {sh, sh, up_w ? 0.0 : 3.0 * sh};
+        f.sigma = {sh, sh, sv};
+        f.cauchy = trusted ? kTrustedGpsCauchy : 0.0;
         out.centres.push_back(f);
     }
     out.gps.ok = true;
@@ -598,7 +606,7 @@ private:
         }
         const size_t before = out.centres.size();
         const MetricFit fit = gpsCentreFactors(std::move(ref), up_w, opt_.gps_max_error,
-                                               opt_.gps_max_error_frac, out);
+                                               opt_.gps_max_error_frac, out, opt_.trusted_position);
         if (!fit.ok) return;
         stats_.gps_ok = true;
         stats_.gps_rms = fit.rms;
@@ -678,7 +686,8 @@ public:
         const bool flat = opt_.gps_flat && up.norm() > 0;
         if (flat) up = up.normalized();
         const MetricFit fit = gpsCentreFactors(std::move(ref), flat ? &up : nullptr,
-                                               opt_.gps_max_error, opt_.gps_max_error_frac, out);
+                                               opt_.gps_max_error, opt_.gps_max_error_frac, out,
+                                               opt_.trusted_position);
         st.gps_ok = fit.ok;
         st.gps_rms = fit.rms;
         st.gps_out = fit.ok ? fit.n - fit.inliers : 0;
@@ -689,7 +698,7 @@ public:
                        "RMS %.3f m, scale %.4f -> %d centre factor(s), %d beyond the radius, "
                        "sigma %.2f m\n",
                        st.frames, fit.ok ? "fit" : "no fit", fit.inliers, fit.max_error, fit.rms,
-                       fit.T.scale, st.gps, st.gps_out, fit.ok ? gpsLevelSigma(fit) : 0.0);
+                       fit.T.scale, st.gps, st.gps_out, fit.ok ? out.gps.sigma_h : 0.0);
         std::lock_guard<std::mutex> lk(mu_);
         stats_ = st;
         return out;

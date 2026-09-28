@@ -159,6 +159,47 @@ void testJacobians(uint32_t rig) {
     report(name, worst, 1e-6);
 }
 
+// ---- a Cauchy centre factor ------------------------------------------------
+
+// Cost 0.5 a log(1 + s/a) of the whitened residual, and a gradient that is its
+// derivative: the IRLS weight 1/(1 + s/a), not the Huber one.
+void testCauchyCentre() {
+    std::mt19937 rng(3);
+    BAProblem P = synth::makeProblem(3, 7, 40, 1, 0.2, 9, -1, 0, true);
+    PosePriors pr;
+    const double a = 7.815;
+    for (uint32_t i = 0; i < P.num_images; i++) {
+        PriorCentre c;
+        c.n = 1;
+        c.img[0] = i;
+        c.b = cameraCenter(camPose(P, i)) + Vec3{2.0 + i, -1.0, 0.5 * i};
+        c.sigma = {1.0, 1.0, 1.0};
+        c.cauchy = a;
+        pr.centres.push_back(c);
+    }
+    P.priors = &pr;
+    PriorAssembler pa;
+    pa.init(P);
+    double want = 0;
+    for (const PriorCentre& c : pr.centres) {
+        const Vec3 d = cameraCenter(camPose(P, c.img[0])) - c.b;
+        want += 0.5 * a * std::log1p(d.dot(d) / a);
+    }
+    report("cauchy centre: cost", std::fabs(pa.cost(P, P.poses.data(), P.exts.data()) - want) / want,
+           1e-12);
+    pa.assemble(P, P.poses.data(), P.exts.data(), 0.0);
+    std::vector<double> g = pa.gradient(), num(g.size());
+    for (size_t k = 0; k < P.poses.size(); k++) {
+        std::vector<double> x = P.poses;
+        const double h = 1e-6;
+        x[k] += h;
+        const double cp = pa.cost(P, x.data(), P.exts.data());
+        x[k] -= 2 * h;
+        num[k] = (cp - pa.cost(P, x.data(), P.exts.data())) / (2 * h);
+    }
+    report("cauchy centre: gradient is the cost's derivative", relMax(g, num), 1e-6);
+}
+
 // ---- device against host ---------------------------------------------------
 
 void testParity(uint32_t rig, bool cg, RealCfg real, int device, double tol) {
@@ -274,6 +315,7 @@ int run(int argc, char** argv) {
     }
     testJacobians(0);
     testJacobians(2);
+    testCauchyCentre();
     testGauge(0, false, RealCfg::CPU, device);
     testGauge(2, false, RealCfg::CPU, device);
     testGauge(0, true, RealCfg::CPU, device);
