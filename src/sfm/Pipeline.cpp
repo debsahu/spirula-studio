@@ -388,6 +388,7 @@ static SensorPriorOptions sensorPriorOptions(const SfmConfig& cfg) {
     po.max_dt = cfg.sensor_max_dt;
     po.gps_max_error = cfg.metric_gps != "none" && cfg.metric_max_error > 0 ? cfg.metric_max_error : 5.0;
     po.gps_max_error_frac = cfg.metric_max_error_frac;
+    po.trusted_position = cfg.metric_gps == "full";
     po.verbose = !cfg.quiet;
     return po;
 }
