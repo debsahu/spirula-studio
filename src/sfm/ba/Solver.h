@@ -173,6 +173,7 @@ public:
             prior_.init(P_);
             hasPriors_ = !prior_.empty();
         }
+        absCentres_ = hasPriors_ && prior_.hasAbsoluteCentres();
         hostPoses_ = P_.poses;
         hostExts_ = P_.exts;
 
@@ -509,12 +510,14 @@ public:
     // same command buffer read back into the staging buffer.
     double readTotalCost() {
         double c = readCost();
+        trialPrior_ = 0;
         if (!hasPriors_) return c;
         const uint8_t* st = (const uint8_t*)ctx_.stagingDownloadPtr() + kDlPoses;
         unpackReals(trialPoses_, st, P_.poses.size(), opt_.real);
         unpackReals(trialExts_, st + P_.poses.size() * realSize(opt_.real), P_.exts.size(),
                     opt_.real);
-        return c + priorCost(trialPoses_, trialExts_);
+        trialPrior_ = priorCost(trialPoses_, trialExts_);
+        return c + trialPrior_;
     }
 
     void acceptTrialParams() {
@@ -528,7 +531,9 @@ public:
         auto t0 = std::chrono::high_resolution_clock::now();
         double damping = opt_.init_damping;
         double cost = computeCost();
+        double prior = priorCost(hostPoses_, hostExts_);
         stats_.initial_cost = cost;
+        stats_.prior_initial = prior;
         int noimprov = 0;
 
         bool reuse = false;  // after a reject, the assembly still matches the params
@@ -629,18 +634,26 @@ public:
                 }
             }
 
+            const double newPrior = trialPrior_;
             if (std::isfinite(newCost) && newCost <= cost * (1.0 + opt_.rtol)) {
-                if (newCost / cost >= 1.0 - opt_.rtol) {
-                    // tie-zone accept: count toward patience and nudge lambda
-                    // UP -- shrinking it on micro-improvements lets it
-                    // collapse and the solver stall in an ill-conditioned
-                    // plateau (observed with the df config on 871)
-                    if (++noimprov >= opt_.patience) { cost = newCost; break; }
+                const LmAccept acc = classifyAccept(opt_, cost, newCost, absCentres_, prior,
+                                                    newPrior, stats_.prior_steps);
+                if (acc == LmAccept::Tie) {
+                    // tie: count toward patience and leave lambda -- shrinking it on
+                    // every micro-improvement collapses it and stalls the solver in an
+                    // ill-conditioned plateau (observed with the df config on 871)
+                    if (++noimprov >= opt_.patience) {
+                        cost = newCost;
+                        prior = newPrior;
+                        break;
+                    }
                 } else {
-                    noimprov = 0;
+                    if (acc == LmAccept::Improved) noimprov = 0;
+                    else stats_.prior_steps++;
                     damping = std::max(damping / 3.0, kMinDamping);
                 }
                 cost = newCost;
+                prior = newPrior;
                 stats_.accepted++;
                 acceptTrialParams();
                 reuse = false;
@@ -671,6 +684,8 @@ public:
         // must be the last *accepted* parameters.
         flushRestore();
         stats_.final_cost = cost;
+        stats_.prior_final = prior;
+        stats_.final_damping = damping;
         auto t1 = std::chrono::high_resolution_clock::now();
         stats_.solve_seconds = std::chrono::duration<double>(t1 - t0).count();
         ctx_.printProfile();
@@ -1607,6 +1622,8 @@ private:
     // the parameters it is evaluated at (accepted, and the iteration's trial).
     sfm::PriorAssembler prior_;
     bool hasPriors_ = false;
+    bool absCentres_ = false;
     GpuBuffer bPriorRows_, bPriorCols_, bPriorErow_, bPriorBlk_, bPriorG_;
     std::vector<double> hostPoses_, hostExts_, trialPoses_, trialExts_;
+    double trialPrior_ = 0;  // the priors' cost at the trial parameters readTotalCost read
 };
