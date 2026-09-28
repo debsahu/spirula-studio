@@ -356,6 +356,8 @@ std::vector<Camera> perImageCameras(const CameraSetup& cs, size_t num_images) {
     return percam;
 }
 
+// --metric-gps never turns the GPS centre factors off (gps stays true): it sets
+// their radius, whether "full" trusts them, the EXIF flat fit and the written gauge.
 static SensorPriorOptions sensorPriorOptions(const SfmConfig& cfg) {
     SensorPriorOptions po;
     po.max_dt = cfg.sensor_max_dt;
