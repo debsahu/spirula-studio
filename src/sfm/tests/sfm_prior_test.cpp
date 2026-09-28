@@ -65,6 +65,27 @@ Pose camPose(const BAProblem& P, uint32_t img) {
     return composePose(Pose{angleAxisToRotation({e[0], e[1], e[2]}), {e[3], e[4], e[5]}}, f);
 }
 
+// Every camera and point through one Sim(3); the reprojections do not change.
+void moveProblem(BAProblem& P, const Sim3& T) {
+    for (uint32_t f = 0; f < P.num_frames; f++) {
+        double* q = &P.poses[6 * (size_t)f];
+        Pose p{angleAxisToRotation({q[0], q[1], q[2]}), {q[3], q[4], q[5]}};
+        p = transformPose(T, p);
+        const Vec3 aa = rotationToAngleAxis(p.R);
+        q[0] = aa.x; q[1] = aa.y; q[2] = aa.z;
+        q[3] = p.t.x; q[4] = p.t.y; q[5] = p.t.z;
+    }
+    for (uint32_t m = 0; m < P.members.size(); m++)
+        for (int k = 3; k < 6; k++) P.exts[P.members[m].ext_offset + k] *= T.scale;
+    for (uint32_t p = 0; p < P.num_points; p++) {
+        Vec3 X{P.points[3 * (size_t)p], P.points[3 * (size_t)p + 1], P.points[3 * (size_t)p + 2]};
+        X = transformPoint(T, X);
+        P.points[3 * (size_t)p] = X.x;
+        P.points[3 * (size_t)p + 1] = X.y;
+        P.points[3 * (size_t)p + 2] = X.z;
+    }
+}
+
 // Priors stated about the problem's current poses, perturbed by `bias`.
 PosePriors priorsFrom(const BAProblem& P, std::mt19937& rng, double bias, bool centres) {
     std::normal_distribution<double> gauss;
@@ -241,7 +262,10 @@ void testCauchyCentre() {
 constexpr double kCauchyEquilibrium = 3.80446213147765;  // a^2 = 61.07, Python
 constexpr double kCauchyUnsquared = 0.7759693441454945;  // a^2 = 7.815: the wrong scale
 
-void testCauchyEquilibrium(RealCfg real, int device, double tol) {
+// `seed`: the model re-expressed in camera 0's frame, which then sits at exactly
+// the zero angle-axis and origin a seed pair's first image starts from.
+void testCauchyEquilibrium(RealCfg real, int device, double tol, bool seed = false,
+                           bool cg = false) {
     BAProblem P0 = synth::makeProblem(3, 12, 150, 1, 0.1, 77, -1, 0, true);
     {
         SolverOptions o = baseOptions(RealCfg::CPU, device, false);
@@ -249,6 +273,14 @@ void testCauchyEquilibrium(RealCfg real, int device, double tol) {
         BundleSolver s(P0, o);
         s.init();
         s.solve();
+    }
+    if (seed) {
+        const Pose c0 = camPose(P0, 0);
+        Sim3 T;
+        T.R = c0.R;
+        T.t = c0.t;
+        moveProblem(P0, T);
+        for (int k = 0; k < 6; k++) P0.poses[6 * (size_t)P0.image_frame[0] + k] = 0.0;
     }
     PosePriors pr;
     pr.huber = 1e9;
@@ -265,7 +297,7 @@ void testCauchyEquilibrium(RealCfg real, int device, double tol) {
     }
     BAProblem P = P0;
     P.priors = &pr;
-    SolverOptions o = baseOptions(real, device, false);
+    SolverOptions o = baseOptions(real, device, cg);
     o.max_iters = 400;
     o.rtol = 1e-12;
     BundleSolver s(P, o);
@@ -278,8 +310,12 @@ void testCauchyEquilibrium(RealCfg real, int device, double tol) {
         worst = std::max(worst, (m - Vec3{kCauchyEquilibrium, 0.0, 0.0}).norm());
     }
     char name[96];
-    snprintf(name, sizeof name, "cauchy centre: settles at the Ceres balance (%s)",
-             realCfgName(real));
+    if (seed)
+        snprintf(name, sizeof name, "identity seed: settles at the balance (%s %s)",
+                 cg ? "cg" : "dense", realCfgName(real));
+    else
+        snprintf(name, sizeof name, "cauchy centre: settles at the Ceres balance (%s)",
+                 realCfgName(real));
     printf("  %u cameras in %d iterations, worst %.3e m off x = %.5f (the unsquared scale: %.5f)\n",
            P.num_images, s.stats().iterations, worst, kCauchyEquilibrium, kCauchyUnsquared);
     report(name, worst, tol);
@@ -353,23 +389,7 @@ void testGauge(uint32_t rig, bool cg, RealCfg real, int device) {
     T.R = angleAxisToRotation({0.3, -0.2, 0.4});
     T.t = {0.5, -0.3, 0.8};
     BAProblem P = P0;
-    for (uint32_t f = 0; f < P.num_frames; f++) {
-        double* q = &P.poses[6 * (size_t)f];
-        Pose p{angleAxisToRotation({q[0], q[1], q[2]}), {q[3], q[4], q[5]}};
-        p = transformPose(T, p);
-        const Vec3 aa = rotationToAngleAxis(p.R);
-        q[0] = aa.x; q[1] = aa.y; q[2] = aa.z;
-        q[3] = p.t.x; q[4] = p.t.y; q[5] = p.t.z;
-    }
-    for (uint32_t m = 0; m < P.members.size(); m++)
-        for (int k = 3; k < 6; k++) P.exts[P.members[m].ext_offset + k] *= T.scale;
-    for (uint32_t p = 0; p < P.num_points; p++) {
-        Vec3 X{P.points[3 * (size_t)p], P.points[3 * (size_t)p + 1], P.points[3 * (size_t)p + 2]};
-        X = transformPoint(T, X);
-        P.points[3 * (size_t)p] = X.x;
-        P.points[3 * (size_t)p + 1] = X.y;
-        P.points[3 * (size_t)p + 2] = X.z;
-    }
+    moveProblem(P, T);
     P.priors = &pr;
     SolverOptions o = baseOptions(real, device, cg);
     o.max_iters = 60;
@@ -403,6 +423,8 @@ int run(int argc, char** argv) {
     testCauchyScale();
     testCauchyCentre();
     testCauchyEquilibrium(RealCfg::CPU, device, 1e-3);
+    testCauchyEquilibrium(RealCfg::CPU, device, 1e-3, true, false);
+    testCauchyEquilibrium(RealCfg::CPU, device, 1e-3, true, true);
     testGauge(0, false, RealCfg::CPU, device);
     testGauge(2, false, RealCfg::CPU, device);
     testGauge(0, true, RealCfg::CPU, device);
@@ -416,6 +438,8 @@ int run(int argc, char** argv) {
         testGauge(0, false, real, device);
         testGauge(2, true, real, device);
         testCauchyEquilibrium(real, device, real == RealCfg::F32 ? 2e-2 : 1e-3);
+        testCauchyEquilibrium(real, device, real == RealCfg::F32 ? 2e-2 : 1e-3, true, false);
+        testCauchyEquilibrium(real, device, real == RealCfg::F32 ? 2e-2 : 1e-3, true, true);
     }
     printf("%s\n", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
