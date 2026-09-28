@@ -227,6 +227,8 @@ struct MapperOptions {
     // ba_global_max_num_iterations. At 25, both of Hickory's final solves under
     // --metric-gps full stopped at the cap with the damping still at its floor.
     int ba_final_prior_max_iters = 50;
+    // ... and the gradient_tolerance COLMAP sets beside it (Ceres' max-norm test, in metres).
+    double ba_final_prior_gradient_tol = 1.0;
     double ba_refine_change = 0.0005;  // stop when changed-obs fraction is below
     // Growth-phase BAs stop when relative cost improvement stays below
     // ba_growth_rtol for ba_growth_patience accepted steps (D38): iteration
@@ -4558,7 +4560,14 @@ private:
                 pf = priorFactors(rec_);
                 gps_frame_ = pf.gps;
                 bo.priors = &pf;
-                if (tight && pf.hasAbsoluteCentres()) bo.max_iters = opt_.ba_final_prior_max_iters;
+                if (tight && pf.hasAbsoluteCentres()) {
+                    bo.max_iters = opt_.ba_final_prior_max_iters;
+                    bo.gradient_tol = opt_.ba_final_prior_gradient_tol;
+                    // A is scale times a rotation, model -> metres (gpsCentreFactors).
+                    const Mat3& A = pf.gps.A;
+                    if (pf.gps.ok)
+                        bo.metres_per_unit = std::sqrt(A[0] * A[0] + A[3] * A[3] + A[6] * A[6]);
+                }
             }
             double cost = runGlobalBA(rec_, bo);
             if (rigs_ && !final_.no_rig) snapRigFrames();

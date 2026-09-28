@@ -288,7 +288,8 @@ static void testAssembly(const Scene& sc, const Reconstruction& full, MapperOpti
 // iterations. `n` 3 states the same factor as an inertial triple.
 class PullGps : public PriorSource {
 public:
-    explicit PullGps(int n) : n_(n) {}
+    // `metres` > 0 states the factors in a GPS frame of that many metres per unit.
+    explicit PullGps(int n, double metres = 0) : n_(n), metres_(metres) {}
     bool has(uint32_t) const override { return true; }
     bool relativeRotation(uint32_t, uint32_t, Mat3&, double&) const override { return false; }
     std::vector<uint32_t> neighbours(uint32_t) const override { return {}; }
@@ -309,17 +310,21 @@ public:
                 p.centres.push_back(c);
             }
         }
+        p.gps.ok = metres_ > 0;
+        p.gps.A = mat3Identity();
+        for (int k = 0; k < 9; k++) p.gps.A[k] *= metres_;
         return p;
     }
 
 private:
     int n_;
+    double metres_;
 };
 
 // LM iterations per solve of a finishing refinement, and how many solves it ran.
 static double finalIters(const Scene& sc, const Reconstruction& model, MapperOptions opt, int n,
-                         long& solves) {
-    PullGps g(n);
+                         long& solves, double metres = 0) {
+    PullGps g(n, metres);
     Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &g);
     const long b0 = g_map_prof.n_ba, i0 = g_map_prof.n_ba_iters;
     m.refine(model);
@@ -353,6 +358,28 @@ static void testFinalCap(const Scene& sc, const Reconstruction& full, MapperOpti
     check(s1 > 0 && abs == 50, "final cap: a finishing solve on GPS centres runs 50 iterations");
     check(s3 > 0 && tri == 25, "final cap: a finishing solve on inertial triples keeps 25");
     check(sa > 0 && loose == 25, "final cap: a solve that is not a final pass keeps 25");
+
+    // A tolerance no norm can exceed stops exactly the solves the gate names, at once.
+    MapperOptions any = opt, anyAtom = atom;
+    any.ba_final_prior_gradient_tol = anyAtom.ba_final_prior_gradient_tol = 1e300;
+    const double gAbs = finalIters(sc, model, any, 1, s1);
+    const double gTri = finalIters(sc, model, any, 3, s3);
+    const double gLoose = finalIters(sc, model, anyAtom, 1, sa);
+    std::printf("gradient stop: absolute centres %.1f its, inertial triples %.1f, not a final "
+                "pass %.1f\n", gAbs, gTri, gLoose);
+    check(s1 > 0 && gAbs == 0, "gradient stop: a finishing solve on GPS centres stops on it");
+    check(s3 > 0 && gTri == 25, "gradient stop: a finishing solve on inertial triples does not");
+    check(sa > 0 && gLoose == 25, "gradient stop: a solve that is not a final pass does not");
+    // At 1e-12 m per unit every length gradient is 1e12 times larger in metres,
+    // so a 1e12 tolerance stops the solve only if that scale never reached it.
+    MapperOptions tight = opt;
+    tight.ba_final_prior_gradient_tol = 1e12;
+    const double unscaled = finalIters(sc, model, tight, 1, s1);
+    const double scaled = finalIters(sc, model, tight, 1, s1, 1e-12);
+    std::printf("gradient stop at 1e12: GPS frame absent %.1f its, at 1e-12 m per unit %.1f\n",
+                unscaled, scaled);
+    check(unscaled == 0, "fixture: a 1e12 tolerance stops the solve in model units");
+    check(scaled == 50, "gradient stop: lengths are measured in the GPS frame's metres");
 }
 
 static int body(int argc, char** argv) {

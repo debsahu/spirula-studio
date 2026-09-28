@@ -94,6 +94,10 @@ struct SolverOptions {
     // at damping 3e-3 a step cut its GPS prior < 2e-5; 1e-6 is 2.5x f32 noise.
     double prior_rtol = 1e-6;
     int prior_patience = 15;
+    // Stop at an accepted point whose Ceres gradient max-norm (sfm/ba/GradientNorm.h)
+    // is at or under this; 0 = off. Its lengths are metres, metres_per_unit to a model unit.
+    double gradient_tol = 0;
+    double metres_per_unit = 1;
     SolverSel solver = SolverSel::Auto;
     double vram_budget_mb = 0;    // 0 = 90% of the device-local heap (host: half the RAM)
     // Throw BAOverBudget instead of warning and trying anyway. For a caller
@@ -152,4 +156,8 @@ struct SolverStats {
     double prior_initial = 0, prior_final = 0;  // the priors' share of the cost
     int prior_steps = 0;          // ties whose prior decrease shrank the damping
     double final_damping = 0;
+    // The gradient max-norm at each accepted point it was measured at (gradient_tol > 0),
+    // and whether the last of them stopped the solve.
+    std::vector<double> gradient_norms;
+    bool gradient_stop = false;
 };
