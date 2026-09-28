@@ -19,6 +19,7 @@
 #include "sfm/ba/CpuCamera.h"
 #include "sfm/ba/CpuDense.h"
 #include "sfm/ba/CpuParallel.h"
+#include "sfm/ba/GradientNorm.h"
 #include "sfm/ba/Options.h"
 #include "sfm/ba/Priors.h"
 #include "sfm/ba/Problem.h"
@@ -133,6 +134,10 @@ public:
                 tcAge_++;
             }
             double newCost = iterate(damping, reuse, cg);
+            if (stats_.gradient_stop) {
+                stats_.iterations = it;
+                break;
+            }
             // as sfm/ba/Solver.h: a CG that stopped before its first step is
             // retried without the coarse correction, then taken as a failed step
             if (cg && cgIters_ == 0 && !cgConverged_ && tcUse_) {
@@ -227,6 +232,8 @@ public:
     }
 
     const SolverStats& stats() const { return stats_; }
+    const std::vector<double>& lastGradient() const { return gfull_; }
+    double lastPointGradientMax() const { return gptMax_; }
 
     // ---- debug hooks, mirroring BundleSolver's ----
 
@@ -565,6 +572,7 @@ private:
             Bp0_ = Bp_;
         }
         if (hasPriors_) prior_.assemble(P_, P_.poses.data(), P_.exts.data(), damping);
+        if (!reuse && opt_.gradient_tol > 0 && gradientConverged()) return 0;
         prof_.jac += lap();
         pointPrep(damping);
         prof_.prep += lap();
@@ -589,6 +597,34 @@ private:
         const double c = computeCost();
         prof_.cost += lap();
         return c;
+    }
+
+    // Ceres' gradient test at the point the Jacobian pass has just evaluated,
+    // before any Schur reduction: every column and point, priors included.
+    bool gradientConverged() {
+        gfull_.assign(n_, 0.0);
+        uint32_t cols[kMaxCamDof];
+        for (uint32_t a = 0; a < nImg_; a++) {
+            const uint32_t dof = imgCols(a, cols);
+            for (uint32_t t = P_.cam_obs_ranges[a]; t < P_.cam_obs_ranges[a + 1]; t++) {
+                const uint32_t o = P_.cam_obs[t];
+                const double* J = &Jc_[P_.jc_off[o]];
+                const double r0 = res_[2 * (size_t)o], r1 = res_[2 * (size_t)o + 1];
+                for (uint32_t r = 0; r < dof; r++) {
+                    const double v = J[r] * r0 + J[dof + r] * r1;
+                    if (std::isfinite(v)) gfull_[cols[r]] += v;
+                }
+            }
+        }
+        if (hasPriors_)
+            for (uint32_t i = 0; i < poseDim_; i++) gfull_[i] += prior_.gradient()[i];
+        gptMax_ = 0;
+        for (double v : Bp_) gptMax_ = std::max(gptMax_, std::isfinite(v) ? std::fabs(v) : INFINITY);
+        const double gn = sfm::gradientNormParts(P_, P_.poses.data(), P_.exts.data(), gfull_.data(),
+                                                 gptMax_, opt_.metres_per_unit).max();
+        stats_.gradient_norms.push_back(gn);
+        stats_.gradient_stop = gn <= opt_.gradient_tol;
+        return stats_.gradient_stop;
     }
 
     void restore() {
@@ -1465,6 +1501,8 @@ private:
     uint32_t cgMaxit_ = 100, cgIters_ = 0;
 
     std::vector<double> Jc_, Jp_, res_, App_, W_, Bp_, Bp0_, g_;
+    std::vector<double> gfull_;  // gradientConverged's d cost / d column
+    double gptMax_ = 0;
     std::vector<double> poses0_, exts0_, intr0_, points0_;
     std::vector<double> sbuf_, sgbuf_, part_;
     std::vector<double> cgR_, cgZ_, cgP_, cgSp_, cgV_, cgB_, cgM_, cgGIntr_, cgSpIntr_, cgGrp_;
