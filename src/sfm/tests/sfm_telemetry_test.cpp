@@ -360,6 +360,94 @@ static void test_dji() {
     check(tm.gps.empty(), "dji: no gps");
 }
 
+// An Avata 360 frame, numbered as the real ones read. 3.2.10 is Osmo-shaped
+// on purpose: the real 4-byte payload does not parse, so it cannot catch an
+// Avata reader that takes it as accel.
+static Bytes avata_sample(const char* proto, bool with_clip, uint64_t ts_us) {
+    Bytes out;
+    if (with_clip) {
+        Bytes hdr = cat({pb_str(1, proto), pb_str(5, "SN9"), pb_str(6, "01.00.06.00"), pb_str(10, "DJI Avata360")});
+        Bytes clip = cat({pb_bytes(1, hdr), pb_bytes(4, pb_v(1, 21203282)), pb_bytes(8, pb_v(1, 4000)),
+                          pb_bytes(9, pb_f32(1, 59.94f)), pb_bytes(10, pb_v(1, 18446744073709551061ull)),
+                          pb_bytes(11, pb_v(1, 4207))});
+        put_raw(out, pb_bytes(1, clip));
+    }
+    Bytes shutter; pb_varint(shutter, 1); pb_varint(shutter, 5000);
+    Bytes cam = cat({pb_bytes(3, pb_f32(1, 800.0f)), pb_bytes(4, pb_bytes(1, shutter)), pb_bytes(6, pb_v(1, 6217)),
+                     pb_bytes(10, cat({pb_f32(2, 0), pb_f32(3, 0), pb_f32(4, -1.0f)})),
+                     pb_bytes(11, pb_f32(1, 325.291f))});
+    Bytes quat = cat({pb_f32(1, 1.0f), pb_f32(2, 0), pb_f32(3, 0), pb_f32(4, 0)});
+    Bytes att = cat({pb_v(1, ts_us - 770), pb_v(2, 10239), pb_bytes(3, quat), pb_bytes(3, quat), pb_bytes(3, quat)});
+    Bytes coord = cat({pb_f64(2, 42.2174447), pb_f64(3, -83.6715616)});
+    Bytes pos = cat({pb_bytes(4, cat({pb_bytes(1, coord), pb_v(2, 325291), pb_v(4, 1)})),
+                     pb_bytes(5, cat({pb_f32(1, 36700.0f), pb_v(2, 1)}))});
+    Bytes frame = cat({pb_bytes(1, pb_v(2, ts_us)), pb_bytes(2, cam), pb_bytes(3, pb_bytes(2, pb_bytes(1, att))),
+                       pb_bytes(4, pos)});
+    put_raw(out, pb_bytes(3, frame));
+    return out;
+}
+
+static Telemetry read_samples(const std::vector<Bytes>& samples, const std::string& tag) {
+    TrackSpec t{"djmd", "meta", "CAM meta", 60000, 1001, samples};
+    const Bytes file = build_mp4({t}, 60000, (uint32_t)(1001 * samples.size()), 0);
+    Telemetry tm;
+    std::string err;
+    check(telemetry_read(file.data(), file.size(), tm, err), tag + "read (" + err + ")");
+    return tm;
+}
+
+static bool has_note(const Telemetry& tm, const std::string& needle, bool exact) {
+    for (const std::string& n : tm.notes)
+        if (exact ? n == needle : n.find(needle) != std::string::npos) return true;
+    return false;
+}
+
+static void test_dji_avata() {
+    const Telemetry tm = read_samples({avata_sample("dvtm_AVATA360.proto", true, 200830583ull),
+                                       avata_sample("dvtm_AVATA360.proto", false, 200847283ull)}, "avata: ");
+    check(tm.camera == "DJI Avata360" && tm.serial == "SN9" && close_to(tm.frame_readout, 0.021203282, 1e-12),
+          "avata: identity and readout");
+    // Kills the radians rule on a coord with no unit field (2418.9 deg), and GPS read at 3.4.2.
+    check(tm.gps.size() == 2 && close_to(tm.gps[0].lat, 42.2174447, 1e-9) && close_to(tm.gps[0].lon, -83.6715616, 1e-9),
+          "avata: GPS at 3.4.4.1, in degrees");
+    check(!tm.gps.empty() && tm.gps[0].has_alt && close_to(tm.gps[0].alt, 325.291, 1e-9), "avata: abs alt in mm");
+    check(!tm.gps.empty() && tm.gps[0].has_rel_alt && close_to(tm.gps[0].rel_alt, 36.7, 1e-9),
+          "avata: rel alt at 3.4.5.1, f32 mm");
+    check(tm.accel.empty(), "avata: 3.2.10 is not accel");
+    // Kills sensor fps read at 1.11 (every quaternion of a frame on one time).
+    check(tm.orientation.size() == 6 &&
+              close_to(tm.orientation[1].t - tm.orientation[0].t, 1.0 / (double)59.94f / 3, 1e-9),
+          "avata: attitude spread over the frame at 1.9.1 fps");
+    check(has_note(tm, "IMU fusion rate 4000 Hz, sensor 59.940 fps, focal 0.0 px", true),
+          "avata: rate from 1.8.1, fps from 1.9.1, no focal");
+    check(!has_note(tm, "not verified", false), "avata: layout verified");
+    const TelemetryCheck c = telemetry_check(tm);
+    check(c.gps.count == 2 && c.gps_fix_fraction == 1, "avata: 3.4.4.4 is not a fix status");
+}
+
+// An Osmo frame carrying the Avata's numbers must not be read at them.
+static void test_dji_osmo_ignores_avata_fields() {
+    Bytes coord = cat({pb_f64(2, 42.2174447), pb_f64(3, -83.6715616)});
+    Bytes shutter; pb_varint(shutter, 1); pb_varint(shutter, 5000);
+    Bytes cam = cat({pb_bytes(3, pb_f32(1, 800.0f)), pb_bytes(4, pb_bytes(1, shutter)), pb_bytes(6, pb_v(1, 6217))});
+    Bytes pos = cat({pb_bytes(4, cat({pb_bytes(1, coord), pb_v(2, 325291)})), pb_bytes(5, pb_f32(1, 36700.0f))});
+    Bytes decoy = pb_bytes(3, cat({pb_bytes(1, pb_v(2, 19260767733ull)), pb_bytes(2, cam), pb_bytes(4, pos)}));
+    const Telemetry tm = read_samples({dji_sample(true, 19260701001ull, -1.0f), dji_sample(false, 19260734367ull, -1.0f),
+                                       decoy}, "osmo decoy: ");
+    check(tm.gps.empty(), "osmo decoy: Avata 3.4.4 and 3.4.5 not read on the Osmo");
+    check(has_note(tm, "IMU fusion rate 1000 Hz, sensor 30.000 fps, focal 1061.5 px", true) &&
+              has_note(tm, "dvtm proto dvtm_oq101.proto", true),
+          "osmo decoy: Osmo clip fields unchanged");
+}
+
+// A proto nobody has checked keeps the Osmo numbers and says so.
+static void test_dji_unknown_proto() {
+    const Telemetry tm = read_samples({avata_sample("dvtm_wm169.proto", true, 200830583ull),
+                                       avata_sample("dvtm_wm169.proto", false, 200847283ull)}, "wm169: ");
+    check(tm.gps.empty(), "wm169: no Avata GPS on an unknown proto");
+    check(has_note(tm, "(layout not verified on a sample)", false), "wm169: layout flagged unverified");
+}
+
 // Sample 0 of a djmd track: clip header (proto name) and StreamMeta, whose
 // field 4 wraps color_mode. `color` < 0 writes an empty wrapper, as proto3
 // does for 0; `stream4` false leaves field 4 out.
@@ -608,6 +696,9 @@ static int cmdTelemetryTest(int argc, char** argv) {
     test_insta360(false);
     test_insta360(true);
     test_dji();
+    test_dji_avata();
+    test_dji_osmo_ignores_avata_fields();
+    test_dji_unknown_proto();
     test_dji_color();
     test_checks();
     test_rejects();

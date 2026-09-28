@@ -876,27 +876,61 @@ struct DjiClip {
     double sensor_fps = 0, imu_rate = 0, readout = 0, focal = 0;
 };
 
+// Field numbers per dvtm proto; 0 = not carried. The defaults are the Osmo
+// 360's (dvtm_oq101), and stay the guess for any proto not checked on a clip.
+struct DjiLayout {
+    uint32_t clip_focal = 8, clip_rate = 10, clip_fps = 11;
+    uint32_t cam_accel = 10;
+    uint32_t cam_iso = 0, cam_shutter = 0, cam_ct = 0;
+    uint32_t gps = 2, gps_status = 3;
+    bool coord_has_unit = true;   // false: degrees, no unit field
+    uint32_t rel_alt = 0;         // f32 mm
+    bool verified = false;
+};
+
+// Avata 360: checked frame by frame against the SRT of a 139 s flight. Its
+// ClipMeta.8 is the Osmo's .10, the IMU rate (table "ClipMeta.8"):
+// https://github.com/Kemerd/OpenOSV/blob/c09a2bfa017d0799553f01c58ccdd6063ac281cd/docs/FORMAT.md
+DjiLayout dji_layout(const std::string& proto) {
+    DjiLayout l;
+    if (proto == "dvtm_oq101.proto") {
+        l.verified = true;
+    } else if (proto == "dvtm_AVATA360.proto") {
+        l.clip_focal = 0; l.clip_rate = 8; l.clip_fps = 9;
+        l.cam_accel = 0;
+        l.cam_iso = 3; l.cam_shutter = 4; l.cam_ct = 6;
+        l.gps = 4; l.gps_status = 0;
+        l.coord_has_unit = false;
+        l.rel_alt = 5;
+        l.verified = true;
+    }
+    return l;
+}
+
 // A PbField points into the buffer it was parsed from, so a sub-message's
 // field list has to outlive any pointer taken into it.
-void dji_clip(const std::vector<PbField>& clip, DjiClip& c) {
+void dji_clip(const std::vector<PbField>& clip, DjiLayout& layout, DjiClip& c) {
     const auto hdr = pb_sub(pb_find(clip, 1));
     c.proto = pb_string(pb_find(hdr, 1));
     c.serial = pb_string(pb_find(hdr, 5));
     c.firmware = pb_string(pb_find(hdr, 6));
     c.product = pb_string(pb_find(hdr, 10));
+    layout = dji_layout(c.proto);
     const auto readout = pb_sub(pb_find(clip, 4));
     if (const PbField* f = pb_find(readout, 1)) c.readout = (double)f->varint * 1e-9;
-    const auto focal = pb_sub(pb_find(clip, 8));
+    // pb_each never yields field 0, so a layout's 0 finds nothing.
+    const auto focal = pb_sub(pb_find(clip, layout.clip_focal));
     if (const PbField* f = pb_find(focal, 1)) c.focal = f->f32();
-    const auto rate = pb_sub(pb_find(clip, 10));
+    const auto rate = pb_sub(pb_find(clip, layout.clip_rate));
     if (const PbField* f = pb_find(rate, 1)) c.imu_rate = (double)f->varint;
-    const auto fps = pb_sub(pb_find(clip, 11));
+    const auto fps = pb_sub(pb_find(clip, layout.clip_fps));
     if (const PbField* f = pb_find(fps, 1)) c.sensor_fps = f->f32();
 }
 
 bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& error) {
     std::vector<uint8_t> buf;
     DjiClip clip;
+    DjiLayout layout;
     bool have_clip = false, any = false, first = true;
     double t0 = 0;
     size_t attitude_frames = 0;
@@ -907,7 +941,7 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
         if (top.empty()) continue;
         if (!have_clip) {
             if (const PbField* c = pb_find(top, 1)) {
-                dji_clip(pb_sub(c), clip);
+                dji_clip(pb_sub(c), layout, clip);
                 have_clip = !clip.proto.empty();
             }
         }
@@ -921,7 +955,7 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
         const double t = t_abs - t0;
 
         const auto cam = pb_sub(pb_find(frame, 2));
-        if (const PbField* acc = pb_find(cam, 10)) {
+        if (const PbField* acc = pb_find(cam, layout.cam_accel)) {
             const auto a = pb_sub(acc);
             const PbField *x = pb_find(a, 2), *y = pb_find(a, 3), *z = pb_find(a, 4);
             if (x && y && z) {
@@ -959,20 +993,25 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
         }
 
         const auto gimbal = pb_sub(pb_find(frame, 4));
-        if (const PbField* gb = pb_find(gimbal, 2)) {
+        if (const PbField* gb = pb_find(gimbal, layout.gps)) {
             const auto g = pb_sub(gb);
             const auto coord = pb_sub(pb_find(g, 1));
             const PbField *lat = pb_find(coord, 2), *lon = pb_find(coord, 3);
             if (lat && lon) {
                 const PbField* unit = pb_find(coord, 1);
-                const bool rad = !unit || unit->varint == 0;
+                const bool rad = layout.coord_has_unit && (!unit || unit->varint == 0);
                 TelemetryGps gp;
                 gp.t = t;
                 gp.lat = lat->f64() * (rad ? 180 / kPi : 1.0);
                 gp.lon = lon->f64() * (rad ? 180 / kPi : 1.0);
                 if (const PbField* alt = pb_find(g, 2)) { gp.alt = (double)(int32_t)alt->varint * 1e-3; gp.has_alt = true; }
-                const PbField* st = pb_find(g, 3);
+                const PbField* st = pb_find(g, layout.gps_status);
                 gp.fix = !st || st->varint != 1;
+                const auto rel = pb_sub(pb_find(gimbal, layout.rel_alt));
+                if (const PbField* r = pb_find(rel, 1); r && r->wire == 5) {
+                    gp.rel_alt = r->f32() * 1e-3;
+                    gp.has_rel_alt = true;
+                }
                 out.gps.push_back(gp);
                 any = true;
             }
@@ -984,13 +1023,14 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
     out.serial = clip.serial;
     out.firmware = clip.firmware;
     if (clip.readout > 0) out.frame_readout = clip.readout;
-    out.notes.push_back("dvtm proto " + clip.proto + (clip.proto == "dvtm_oq101.proto" ? "" : " (layout not verified on a sample)"));
+    out.notes.push_back("dvtm proto " + clip.proto + (layout.verified ? "" : " (layout not verified on a sample)"));
     if (clip.imu_rate > 0) {
         char s[96];
         std::snprintf(s, sizeof s, "IMU fusion rate %.0f Hz, sensor %.3f fps, focal %.1f px", clip.imu_rate, clip.sensor_fps, clip.focal);
         out.notes.push_back(s);
     }
-    out.notes.push_back("accel is one reading per frame in g, converted; no raw gyro is written");
+    if (layout.cam_accel) out.notes.push_back("accel is one reading per frame in g, converted; no raw gyro is written");
+    else out.notes.push_back("no accelerometer and no raw gyro are written");
     if (attitude_frames) out.notes.push_back("orientation is IMU_attitude_after_fusion: sense not documented, see the check");
     return true;
 }

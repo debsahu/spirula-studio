@@ -44,6 +44,8 @@ struct TelemetryGps {
     double speed = -1;         // m/s over ground; < 0 unknown
     double track = -1;         // degrees clockwise from north; < 0 unknown
     double dop = 0;            // dilution of precision; 0 unknown
+    double rel_alt = 0;        // metres above take-off; read only with has_rel_alt
+    bool has_rel_alt = false;
 };
 
 enum class TelemetryCarrier { None, Gpmf, Insta360, DjiDvtm, Camm };
