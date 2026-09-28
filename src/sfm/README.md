@@ -934,6 +934,17 @@ it.
   twelve intrinsics columns of the reduced system — so on anything but a small
   capture `--ba-solver auto` lands on CG.
 
+The last assembly pass, before those, is the seam weld (`--seam-weld`, 0.25). Two
+registration fronts that meet on thin support leave every point there twice, metres
+apart; no merge test accepts that union and the epipolar check cannot see an offset
+along the baseline. A verified pair of `seam_min_matches` (100) or more whose matches
+the model explains by a shared point below the bar has its duplicated points fused at
+the track-length-weighted mean, and the model is refined with the fused points spared
+the first round's filter and a retriangulation round forced after it. On Hickory's
+woods the seam read 0.015-0.15 against a p01 of 0.43 among the pairs of frames
+1240-1360; over the whole capture, loop revisits read as low (220-481 pairs under
+0.25), so the bar does not isolate the seam there. `[seam]` lines report what it found.
+
 `--mapper flat|bottom-up` picks the schedule (see the stage graph; flat is the
 default for every capture, and there is no size-based switch);
 `--bup-atom-size` and `--bup-overlap` size the atoms and the overlap the
@@ -967,6 +978,7 @@ PASS/FAIL and returns 0/1 — the same convention as `src/backend/tests/`.
 | `sfm_mask_test` | mask uv sampling, decode, file discovery | no |
 | `sfm_telemetry_test` | the four telemetry carriers on synthetic files, and the sanity checks; `sfm_telemetry_test FILE` prints what a video carries | no |
 | `sfm_sequence_test` | the sequence table and its window pairs (`--no-gpu` stops there); a synthetic walk past a duplicated room through the mapper | yes |
+| `sfm_seam_weld_test` | the open-seam detector and weld on a two-front track, with and without capped GPS solves | yes |
 | `sfm_prior_test` | pose priors in bundle adjustment: Jacobians against central differences, device against host, a gauge recovered from priors alone (`--no-gpu` keeps to the host) | yes |
 | `sfm_sensor_prior_test` | the fixed-rotation two-view and PnP estimators on scenes with equipment and outliers; the telemetry source's calibration, rotations and factors on the synthetic walk | no |
 

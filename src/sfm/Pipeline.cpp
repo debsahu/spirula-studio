@@ -1071,7 +1071,7 @@ void printAssembly(const AssembleStats& ast, size_t models, Tag tag) {
            {format_duration(ast.finishSecs()), (long long)f.splits,
             (long long)f.duplicate_splits, (long long)f.reseeded_models,
             (long long)f.dropped_redundant, (long long)f.audited_repaired,
-            (long long)f.audited_out});
+            (long long)f.audited_out, (long long)f.seams_welded});
 }
 
 // Flat or bottom-up, per --mapper; flat is the default and what the

@@ -133,8 +133,9 @@ struct AssembleStats {
     // wildly different amounts, and a single total hides which one is worth its
     // price on a given capture.
     double t_audit = 0, t_split = 0, t_grow_tail = 0, t_reseed = 0, t_final_merge = 0, t_fold = 0;
+    double t_weld = 0;
     double finishSecs() const {
-        return t_audit + t_split + t_grow_tail + t_reseed + t_final_merge + t_fold;
+        return t_audit + t_split + t_grow_tail + t_reseed + t_final_merge + t_fold + t_weld;
     }
 };
 
@@ -689,6 +690,17 @@ inline std::vector<Reconstruction> finishModels(Mapper& mapper,
         st.t_fold = secs(t0, clk());
     }
 
+    // Last, on the models as written: the weld moves poses, and a pass after it that
+    // re-solved without the fused points could reopen what it closed.
+    t0 = clk();
+    for (Reconstruction& m : models) {
+        if (m.numRegistered() < 2) continue;
+        Mapper::SeamStats ss;
+        m = mapper.weldSeams(m, &ss);
+        st.finish.seams_welded += ss.open.size();
+    }
+    st.t_weld = secs(t0, clk());
+
     sortModels(models);
     st.finish.models_after = models.size();
     st.finish.covered_after = coveredImages(models).size();
@@ -700,7 +712,7 @@ inline std::vector<Reconstruction> finishModels(Mapper& mapper,
                   (long long)st.finish.reseeded_models,
                   (long long)st.finish.dropped_redundant,
                   (long long)st.finish.audited_repaired,
-                  (long long)st.finish.audited_out});
+                  (long long)st.finish.audited_out, (long long)st.finish.seams_welded});
     mapper.claimAll(models);
     return models;
 }

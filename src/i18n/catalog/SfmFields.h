@@ -2078,6 +2078,36 @@ SS_MSG(merge_tracks_help,
        "признаком"),
     TR("Bir karşılığın aynı öznitelik dediği iki 3B noktayı kaynaştır"));
 
+SS_MSG(seam_weld_help,
+    EN("Weld open seams: a verified pair of 100+ matches that the finished model explains "
+       "below this fraction is fused and refined; 0 to skip"),
+    JA("開いた継ぎ目を結合します。検証済みの対応が 100 以上あり、完成したモデルがこの割合"
+       "未満しか説明できない画像対を融合して再調整します。0 で省略"),
+    ZH_HANS("合并开放的接缝：已验证匹配 100 个以上、而完成的模型只能解释其中低于此比例的"
+            "图像对，将被融合并重新优化；0 表示跳过"),
+    ZH_HANT("合併開放的接縫：已驗證匹配 100 個以上、而完成的模型只能解釋其中低於此比例的"
+            "影像對，將被融合並重新最佳化；0 表示略過"),
+    KO("열린 이음매를 결합합니다. 검증된 매칭이 100개 이상인데 완성된 모델이 이 비율 "
+       "미만만 설명하는 이미지 쌍을 융합해 다시 최적화합니다. 0이면 건너뜁니다"),
+    DE("Offene Nähte verschweißen: ein geprüftes Paar mit 100+ Treffern, das das fertige "
+       "Modell unter diesem Anteil erklärt, wird verschmolzen und neu ausgeglichen; 0 "
+       "überspringt"),
+    FR("Souder les coutures ouvertes : une paire vérifiée de 100+ correspondances que le "
+       "modèle final explique sous cette fraction est fusionnée et réajustée ; 0 pour sauter"),
+    ES("Soldar costuras abiertas: un par verificado de 100+ correspondencias que el modelo "
+       "final explica por debajo de esta fracción se funde y se reajusta; 0 para saltarlo"),
+    PT("Soldar costuras abertas: um par verificado com 100+ correspondências que o modelo "
+       "final explica abaixo desta fração é fundido e reajustado; 0 para pular"),
+    IT("Saldare le cuciture aperte: una coppia verificata con 100+ corrispondenze che il "
+       "modello finale spiega sotto questa frazione viene fusa e riottimizzata; 0 per saltare"),
+    NL("Open naden lassen: een geverifieerd paar met 100+ overeenkomsten dat het eindmodel "
+       "onder deze fractie verklaart, wordt samengesmolten en opnieuw vereffend; 0 om over "
+       "te slaan"),
+    RU("Сваривать открытые швы: проверенную пару со 100+ соответствиями, которую итоговая "
+       "модель объясняет меньше чем на эту долю, сливают и уточняют заново; 0 -- пропустить"),
+    TR("Açık dikişleri kaynat: son modelin bu oranın altında açıkladığı, 100+ eşleşmeli "
+       "doğrulanmış çift kaynaştırılır ve yeniden ayarlanır; atlamak için 0"));
+
 SS_MSG(rank_by_visibility_help,
     EN("Rank the next image by how its visible structure spreads over the frame, "
        "not by count"),

@@ -255,6 +255,11 @@ struct MapperOptions {
     // AUC@5 on a 1146-image capture, at the cost of the solver time longer
     // tracks bring -- which kMergeMaxTrack is what bounds.
     bool merge_tracks = true;
+    // A verified pair with seam_min_matches matches, of which the finished model explains
+    // fewer than this fraction by a shared 3D point, is an open seam and gets welded
+    // (Mapper::weldSeams). Hickory's seam read 0.015-0.15 against a p01 of 0.43. 0 = off.
+    double seam_weld_frac = 0.25;
+    int seam_min_matches = 100;
     // Auditing an assembled model (D44). An image is put back only when the
     // structure it did *not* bring supports a competing pose: one that clears
     // the registration gates, explains `audit_alternative_factor` times as
@@ -822,6 +827,100 @@ public:
         }
         ba_over_budget_throws_ = false;
         return true;
+    }
+
+    // Two registration fronts that meet without sharing structure leave every point there
+    // twice, metres apart: later passes see both features assigned, and no merge test
+    // accepts a union that far off. `pair` indexes db_.pairs.
+    struct SeamPair {
+        size_t pair = 0;
+        uint32_t a = 0, b = 0;
+        size_t explained = 0, matches = 0;
+        double frac() const { return matches ? (double)explained / (double)matches : 1.0; }
+    };
+    struct SeamStats {
+        size_t strong = 0;              // pairs judged
+        std::vector<SeamPair> open;     // weakest first
+        std::vector<SeamPair> after;    // the same pairs in the welded model
+        size_t points = 0, observations = 0;
+        double reproj_before = 0, reproj_after = 0;
+    };
+
+    std::vector<SeamPair> openSeams(const Reconstruction& m, size_t* strong = nullptr) const {
+        std::vector<SeamPair> open;
+        size_t judged = 0;
+        const size_t min_matches = (size_t)std::max(1, opt_.seam_min_matches);
+        for (size_t k = 0; k < db_.pairs.size(); k++) {
+            const TwoViewMatches& p = db_.pairs[k];
+            if (!p.config || p.matches.size() < min_matches) continue;
+            auto ia = m.images.find(p.image1), ib = m.images.find(p.image2);
+            if (ia == m.images.end() || ib == m.images.end()) continue;
+            if (!ia->second.registered || !ib->second.registered) continue;
+            SeamPair sp{k, p.image1, p.image2, explainedMatches(m, p), p.matches.size()};
+            judged++;
+            if (sp.frac() < opt_.seam_weld_frac) open.push_back(sp);
+        }
+        std::stable_sort(open.begin(), open.end(), [](const SeamPair& x, const SeamPair& y) {
+            return x.frac() < y.frac();
+        });
+        if (strong) *strong = judged;
+        return open;
+    }
+
+    // Fuse the points an open seam holds twice, then refine: the fused points are spared
+    // the filter in the first round, which is what lets them pull the two sides together,
+    // and a retriangulation round always follows. A model with no open seam is returned as is.
+    Reconstruction weldSeams(const Reconstruction& m, SeamStats* out = nullptr) {
+        SeamStats st;
+        st.open = openSeams(m, &st.strong);
+        if (opt_.verbose) {
+            if (st.open.empty()) {
+                slog::diag(slog::Tag::Map, "[seam] 0 open pair(s) of %zu strong pairs", st.strong);
+            } else {
+                const SeamPair& w = st.open.front();
+                slog::diag(slog::Tag::Map,
+                           "[seam] %zu open pair(s) of %zu strong pairs; worst %s-%s explained "
+                           "%zu/%zu", st.open.size(), st.strong, db_.images[w.a].name.c_str(),
+                           db_.images[w.b].name.c_str(), w.explained, w.matches);
+            }
+        }
+        if (st.open.empty()) {
+            if (out) *out = st;
+            return m;
+        }
+        ensureSetup();
+        resetModel();
+        adopt(m);
+        rebuildScores();
+        st.reproj_before = meanReprojPx();
+        fuseSeams(st);
+        globalRefine(true);
+        st.reproj_after = meanReprojPx();
+        Reconstruction r = snapshotModel();
+        for (SeamPair sp : st.open) {
+            sp.explained = explainedMatches(r, db_.pairs[sp.pair]);
+            st.after.push_back(sp);
+        }
+        if (opt_.verbose) {
+            size_t w = 0;
+            for (size_t i = 1; i < st.after.size(); i++)
+                if (st.after[i].frac() < st.after[w].frac()) w = i;
+            slog::diag(slog::Tag::Map,
+                       "[seam] welded: %zu point(s) fused (%zu observation(s)); reprojection "
+                       "%.3f -> %.3f px; weakest welded pair now %s-%s explained %zu/%zu",
+                       st.points, st.observations, st.reproj_before, st.reproj_after,
+                       db_.images[st.after[w].a].name.c_str(),
+                       db_.images[st.after[w].b].name.c_str(), st.after[w].explained,
+                       st.after[w].matches);
+            if (MapProf::enabled())
+                for (size_t i = 0; i < st.open.size(); i++)
+                    slog::diag(slog::Tag::Map, "[seam]   %s-%s %zu/%zu -> %zu/%zu",
+                               db_.images[st.open[i].a].name.c_str(),
+                               db_.images[st.open[i].b].name.c_str(), st.open[i].explained,
+                               st.open[i].matches, st.after[i].explained, st.after[i].matches);
+        }
+        if (out) *out = st;
+        return r;
     }
 
     // One more global bundle adjustment on a *finished* model, with what the
@@ -1875,6 +1974,73 @@ public:
     MapperOptions& options() { return opt_; }
 
 private:
+    size_t explainedMatches(const Reconstruction& m, const TwoViewMatches& p) const {
+        const std::vector<uint64_t>& A = m.images.at(p.image1).point3D_ids;
+        const std::vector<uint64_t>& B = m.images.at(p.image2).point3D_ids;
+        size_t n = 0;
+        for (const FeatureMatch& fm : p.matches)
+            if (fm.idx1 < A.size() && fm.idx2 < B.size() && A[fm.idx1] != kInvalidPoint3D &&
+                A[fm.idx1] == B[fm.idx2])
+                n++;
+        return n;
+    }
+
+    // mergeOne's union without its reprojection and triangulation tests: across an open
+    // seam the two halves are metres apart, which is exactly what those tests refuse.
+    void fuseSeams(SeamStats& st) {
+        std::vector<uint8_t> on_track(db_.images.size(), 0);
+        for (const SeamPair& sp : st.open) {
+            const TwoViewMatches& p = db_.pairs[sp.pair];
+            const Image& ia = rec_.images.at(p.image1);
+            const Image& ib = rec_.images.at(p.image2);
+            for (const FeatureMatch& fm : p.matches) {
+                if (fm.idx1 >= ia.point3D_ids.size() || fm.idx2 >= ib.point3D_ids.size()) continue;
+                const uint64_t keep = ia.point3D_ids[fm.idx1], gone = ib.point3D_ids[fm.idx2];
+                if (keep == kInvalidPoint3D || gone == kInvalidPoint3D || keep == gone) continue;
+                auto ik = rec_.points3D.find(keep), ig = rec_.points3D.find(gone);
+                if (ik == rec_.points3D.end() || ig == rec_.points3D.end()) continue;
+                Point3D& P = ik->second;
+                const Point3D& Q = ig->second;
+                if (P.track.size() + Q.track.size() > kMergeMaxTrack) continue;
+                bool clash = false;
+                for (const TrackElement& a : P.track) on_track[a.image_id] = 1;
+                for (const TrackElement& b : Q.track)
+                    if (on_track[b.image_id]) { clash = true; break; }
+                for (const TrackElement& a : P.track) on_track[a.image_id] = 0;
+                if (clash) continue;
+                const double wa = (double)P.track.size(), wb = (double)Q.track.size();
+                P.xyz = (P.xyz * wa + Q.xyz * wb) * (1.0 / (wa + wb));
+                for (const TrackElement& el : Q.track) {
+                    rec_.images.at(el.image_id).point3D_ids[el.point2D_idx] = keep;
+                    P.track.push_back(el);
+                }
+                st.points++;
+                st.observations += Q.track.size();
+                welded_.erase(gone);
+                welded_.insert(keep);
+                rec_.points3D.erase(ig);
+            }
+        }
+    }
+
+    // The summary's reprojection error (Pipeline.cpp reprojStats), on rec_.
+    double meanReprojPx() const {
+        double s = 0;
+        size_t n = 0;
+        for (const auto& kv : rec_.points3D)
+            for (const TrackElement& t : kv.second.track) {
+                const Image& im = rec_.images.at(t.image_id);
+                if (!im.registered) continue;
+                const Vec3 pc = mul(im.pose.R, kv.second.xyz) + im.pose.t;
+                if (pc.z <= 0) continue;
+                const Vec2 px = camOf(t.image_id).project(pc);
+                const Vec2 o = kp(t.image_id, t.point2D_idx);
+                s += std::hypot(px.x - o.x, px.y - o.y);
+                n++;
+            }
+        return n ? s / (double)n : 0.0;
+    }
+
     // Load an existing model into `rec_`: its poses, its cameras (whose focals
     // are then facts, not guesses), and its points re-added as fresh tracks.
     // Images the model does not hold keep the cleared state resetModel() left.
@@ -4498,10 +4664,13 @@ private:
     // refined model exits (and may re-register later, better) instead of
     // staying and bending everything around it (D36).
     void globalRefine(bool final_pass) {
+        std::unordered_set<uint64_t> welded;
+        welded.swap(welded_);
         if (rec_.numRegistered() < 2 || rec_.points3D.size() < 10) return;
         const bool tight = final_pass && opt_.ba_final_tight;
         int rounds = tight ? opt_.ba_max_refinements : 2;
         for (int i = 0; i < rounds; i++) {
+            const bool weld_round = i == 0 && !welded.empty();
             // Observations shredded by the previous round's filtering (or
             // never triangulated because the poses were still rough) get a
             // second chance against the refined geometry -- COLMAP's
@@ -4582,7 +4751,7 @@ private:
             // AUC@10 83.2 with, 68.7 without.
             if (!final_.no_sanitize) sanitizeCameras();
             int removedObs = 0, removedPts = 0;
-            filterPoints(removedObs, removedPts);
+            filterPoints(removedObs, removedPts, weld_round ? &welded : nullptr);
             if (opt_.verbose) {
                 char cost_s[32];
                 std::snprintf(cost_s, sizeof cost_s, "%.3e", cost);
@@ -4590,6 +4759,7 @@ private:
                          {cost_s, (long long)removedObs, (long long)removedPts,
                           (long long)rec_.points3D.size()});
             }
+            if (weld_round) continue;
             if (!before || (double)removedObs / (double)before <= opt_.ba_refine_change) break;
         }
         int dropped;
@@ -4863,7 +5033,8 @@ private:
     // parallax: a track whose best view pair subtends less than min_tri_angle
     // sits on a near-degenerate cone and feeds PnP unstable geometry (COLMAP
     // filters on both criteria; the old code only checked reprojection).
-    void filterPoints(int& removedObs, int& removedPts) {
+    void filterPoints(int& removedObs, int& removedPts,
+                      const std::unordered_set<uint64_t>* spare = nullptr) {
         // This pass touches every observation in the model on every global
         // refinement round, so it goes through the flat index rather than
         // reprojErr()/errPx()'s five std::map lookups per observation.
@@ -4902,6 +5073,7 @@ private:
                 if (b >= pts.size()) break;
                 const size_t e = std::min(b + kBlock, pts.size());
                 for (size_t pi = b; pi < e; pi++) {
+                    if (spare && spare->count(pts[pi].first)) continue;
                     Point3D& pt = *pts[pi].second;
                     size_t keep = 0;  // compact in place; surviving order unchanged
                     for (size_t r = 0; r < pt.track.size(); r++) {
@@ -5243,6 +5415,7 @@ private:
     uint32_t gps_out_run_ = 0;         // consecutive registrations beyond its radius
     uint32_t gps_regs_since_ba_ = 0;   // registrations since a BA gpsCheck asked for
     bool ba_requested_ = false;
+    std::unordered_set<uint64_t> welded_;  // fused by fuseSeams; the next globalRefine spares them
     // Counted from const passes that fan out over threads (the audit, the
     // seed prefetch).
     mutable std::atomic<uint32_t> prior_vouched_{0}, prior_seeds_{0};

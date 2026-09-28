@@ -494,6 +494,8 @@ struct SfmConfig {
       retri_scale)                                                                                 \
     F(mapper.merge_tracks, "merge-tracks", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 0, "", \
       merge_tracks)                                                                                \
+    F(mapper.seam_weld_frac, "seam-weld", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 1, "",  \
+      seam_weld)                                                                                   \
     F(mapper.rank_by_visibility, "rank-by-visibility", CMD_AUTO | CMD_MAP, Tier::Advanced,         \
       "mapper", 0, 0, "", rank_by_visibility)                                                      \
     F(mapper.seed_blocking, "seed-blocking", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 0,   \
