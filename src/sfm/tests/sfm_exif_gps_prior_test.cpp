@@ -153,8 +153,8 @@ static void testFactors() {
     check(pf.rotations.empty() && pf.ups.empty(), "factors: GPS states no rotation or up");
     check(st.gps_rms > 0.3 && st.gps_rms < 1.2, "factors: fit RMS at the injected noise");
 
-    // Full, not horizontal: no IMU up, so the vertical is kept at 3x the level
-    // sigma, the fit's RMS with a floor of 0.2 of the 5 m inlier radius (D75).
+    // Full, not horizontal: no IMU up, so the vertical is kept at 3x the
+    // level sigma, whose floor is 0.6 of the 5 m inlier radius (D74/D75).
     int wrong_img = 0, bad_sigma = 0;
     double r2 = 0, rz2 = 0;
     for (const PriorCentre& f : pf.centres) {
@@ -162,7 +162,7 @@ static void testFactors() {
             wrong_img++;
             continue;
         }
-        if (!(std::fabs(f.sigma.x - 1.0) < 1e-12 && f.sigma.y == f.sigma.x && f.sigma.z == 3.0 * f.sigma.x))
+        if (!(f.sigma.x >= 3.0 && f.sigma.y == f.sigma.x && f.sigma.z == 3.0 * f.sigma.x))
             bad_sigma++;
         const Vec3 d = mul(f.A[0], cameraCenter(imgs[f.img[0]].pose)) - f.b;
         r2 += d.dot(d);
@@ -249,7 +249,7 @@ static void testPositionError() {
     check(pf.gps.ok && !pf.gps.flat && n == 39 && fold_ok == 6 && rest_ok == 33,
           "check: metres, through the fit");
     check(!src.positionError(7, F2.imgs[7].pose, pf.gps, d), "check: nothing for an image without a fix");
-    check(std::fabs(pf.gps.gate - 5.0) < 1e-9 && std::fabs(pf.gps.sigma_h - 1.0) < 1e-9,
+    check(std::fabs(pf.gps.gate - 5.0) < 1e-9 && std::fabs(pf.gps.sigma_h - 3.0) < 1e-9,
           "check: the frame carries the fit's radius and the factors' sigma");
 
     // Through the renumbering an atom's mapper sees, with the order reversed.
