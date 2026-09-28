@@ -174,9 +174,7 @@ SolverOptions chainOptions(RealCfg real, int device) {
     o.rtol = 1e-4;
     o.patience = 5;
     o.max_iters = 25;
-    // Where a few reprojection-improving steps leave the damping on a growth BA;
-    // at the solver's own 1e-2 a step here moves camera 11 by ~10 um.
-    o.init_damping = 1e-3;
+    o.init_damping = 1e-2;
     return o;
 }
 

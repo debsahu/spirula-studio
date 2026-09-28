@@ -90,9 +90,9 @@ struct SolverOptions {
     double rtol = 1e-6;
     int patience = 10;
     // A step under rtol that still cuts the prior cost by prior_rtol shrinks the
-    // damping, up to prior_patience times, when absolute centres are present: on
-    // Hickory a GPS prior's whole decrease is 1e-5 of the cost, so ties froze it.
-    double prior_rtol = 1e-4;
+    // damping, up to prior_patience times, when absolute centres are present. Hickory:
+    // at damping 3e-3 a step cut its GPS prior < 2e-5; 1e-6 is 2.5x f32 noise.
+    double prior_rtol = 1e-6;
     int prior_patience = 15;
     SolverSel solver = SolverSel::Auto;
     double vram_budget_mb = 0;    // 0 = 90% of the device-local heap (host: half the RAM)
