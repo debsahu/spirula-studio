@@ -78,11 +78,18 @@ struct SensorFactorStats {
     double scale = 0, scale_sigma = 0, g_angle_deg = 0;
     bool gps_ok = false;
     double gps_rms = 0;
+    int gps_out = 0;   // factors stated beyond the fit's inlier radius
 };
 
-// A similarity from the model onto the positions, then one centre factor per
-// inlier, the receiver's error inflated for its correlation (D74: residuals
-// under-state it ~4x). Horizontal with an up axis (D75), else full, vertical 3x looser.
+// The level sigma of a GPS centre factor: the fit's inlier RMS inflated for the
+// receiver's correlated error (D74: residuals under-state it ~4x).
+inline double gpsLevelSigma(const MetricFit& fit) {
+    return std::max(2.0 * fit.rms, 0.6 * fit.max_error);
+}
+
+// A similarity fitted on the inliers, then a centre factor for EVERY positioned
+// image: an inlier mask drops exactly the frames that drifted off between two
+// solves. Horizontal with an up axis (D75), else full with the vertical 3x looser.
 inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_error,
                                   double max_error_frac, PosePriors& out) {
     MetricFit fit;
@@ -92,10 +99,9 @@ inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_er
     fit = fitMetricGauge(ref, max_error, up_w ? MetricAxes::Horizontal : MetricAxes::Full,
                          max_error_frac);
     if (!fit.ok) return fit;
-    const double sh = std::max(2.0 * fit.rms, 0.6 * fit.max_error);
+    const double sh = gpsLevelSigma(fit);
     const Mat3 A = mat3Scale(mul(fit.T.R, R_up), fit.T.scale);
     for (size_t i = 0; i < ref.centres.size(); i++) {
-        if (!fit.inlier_mask[i]) continue;
         PriorCentre f;
         f.n = 1;
         f.img[0] = ref.image_ids[i];
@@ -587,6 +593,7 @@ private:
         if (!fit.ok) return;
         stats_.gps_ok = true;
         stats_.gps_rms = fit.rms;
+        stats_.gps_out = fit.n - fit.inliers;
         stats_.gps = (int)(out.centres.size() - before);
     }
 
@@ -658,13 +665,15 @@ public:
                                                opt_.gps_max_error_frac, out);
         st.gps_ok = fit.ok;
         st.gps_rms = fit.rms;
+        st.gps_out = fit.ok ? fit.n - fit.inliers : 0;
         st.gps = (int)out.centres.size();
         if (opt_.verbose && st.frames >= 5)
             slog::diag(slog::Tag::Map,
                        "[prior] EXIF GPS over %d posed image(s): %s, %d inlier(s) within %.2f m, "
-                       "RMS %.3f m, scale %.4f -> %d centre factor(s)\n",
+                       "RMS %.3f m, scale %.4f -> %d centre factor(s), %d beyond the radius, "
+                       "sigma %.2f m\n",
                        st.frames, fit.ok ? "fit" : "no fit", fit.inliers, fit.max_error, fit.rms,
-                       fit.T.scale, st.gps);
+                       fit.T.scale, st.gps, st.gps_out, fit.ok ? gpsLevelSigma(fit) : 0.0);
         std::lock_guard<std::mutex> lk(mu_);
         stats_ = st;
         return out;

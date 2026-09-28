@@ -89,38 +89,56 @@ static void testPositionsAndPairs() {
 
 // ---- centre factors over a posed model ---------------------------------------
 
-static void testFactors() {
-    // A 40-image loop with a hill, in a model gauge 20x smaller, turned and
-    // shifted; the GPS carries 0.5 m of noise per axis and #7 has no fix.
+// A 40-image loop with a hill, in a model gauge 20x smaller, turned and
+// shifted; the GPS carries 0.5 m of noise per axis and #7 has no fix. `fold`
+// moves images 20-25 that many metres along the loop in the model alone.
+struct Loop {
+    std::vector<std::optional<Geodetic>> fixes;
+    std::vector<PosedImage> imgs;
+    Mat3 Rm;
+    double sm = 0.05;
+};
+
+static Loop makeLoop(double fold) {
     const int n = 40;
     std::mt19937 rng(11);
     std::normal_distribution<double> N(0, 0.5);
-    const Mat3 Rm = angleAxisToRotation({0.4, -0.7, 1.9});
-    const double sm = 0.05;
+    Loop L;
+    L.Rm = angleAxisToRotation({0.4, -0.7, 1.9});
     const Vec3 tm{1, 2, 3};
-    std::vector<std::optional<Geodetic>> fixes((size_t)n);
-    std::vector<PosedImage> imgs;
-    std::vector<Vec3> truth;
+    L.fixes.resize((size_t)n);
     for (int k = 0; k < n; k++) {
         const double t = 2.0 * M_PI * 0.8 * k / n;
         const Vec3 enu{30.0 * std::cos(t), 20.0 * std::sin(t), 6.0 * std::sin(3.0 * t)};
-        truth.push_back(enu);
-        if (k != 7) fixes[(size_t)k] = fixAt(enu.x + N(rng), enu.y + N(rng), kAlt0 + enu.z + N(rng));
+        if (k != 7) L.fixes[(size_t)k] = fixAt(enu.x + N(rng), enu.y + N(rng), kAlt0 + enu.z + N(rng));
+        const Vec3 tangent = Vec3{-30.0 * std::sin(t), 20.0 * std::cos(t), 0.0}.normalized();
+        const Vec3 placed = k >= 20 && k <= 25 ? enu + tangent * fold : enu;
         PosedImage p;
         p.image = (uint32_t)k;
         p.pose.R = angleAxisToRotation({0.1 * k, 0.3, -0.2});
-        const Vec3 c = mul(Rm, enu) * sm + tm;
+        const Vec3 c = mul(L.Rm, placed) * L.sm + tm;
         p.pose.t = mul(p.pose.R, c) * -1.0;
-        imgs.push_back(p);
+        L.imgs.push_back(p);
     }
-    ExifGpsPriors src(fixes, SensorPriorOptions{});
+    return L;
+}
+
+static bool folded(uint32_t img) { return img >= 20 && img <= 25; }
+
+static void testFactors() {
+    const int n = 40;
+    const Loop L = makeLoop(0.0);
+    const std::vector<PosedImage>& imgs = L.imgs;
+    ExifGpsPriors src(L.fixes, SensorPriorOptions{});
     const PosePriors pf = src.factors(imgs);
     const SensorFactorStats st = src.lastFactors();
-    std::printf("factors: %zu centres, %zu rotations, %zu ups | gps ok=%d n=%d rms %.3f m\n",
-                pf.centres.size(), pf.rotations.size(), pf.ups.size(), st.gps_ok, st.gps, st.gps_rms);
+    std::printf("factors: %zu centres, %zu rotations, %zu ups | gps ok=%d n=%d out=%d rms %.3f m\n",
+                pf.centres.size(), pf.rotations.size(), pf.ups.size(), st.gps_ok, st.gps, st.gps_out,
+                st.gps_rms);
     check(st.gps_ok && pf.centres.size() == (size_t)(n - 1),
           "factors: one centre per positioned image (39 of 40)");
     check(st.gps == (int)pf.centres.size(), "factors: the stats count what was stated");
+    check(st.gps_out == 0, "factors: nothing beyond the gate on an unfolded loop");
     check(pf.rotations.empty() && pf.ups.empty(), "factors: GPS states no rotation or up");
     check(st.gps_rms > 0.3 && st.gps_rms < 1.2, "factors: fit RMS at the injected noise");
 
@@ -151,6 +169,40 @@ static void testFactors() {
     const std::vector<PosedImage> few(imgs.begin(), imgs.begin() + 4);
     const PosePriors none = src.factors(few);
     check(none.centres.empty() && !src.lastFactors().gps_ok, "factors: none under five images");
+}
+
+// Six images 15 m off their fixes, three gates: the fit is the other 33's,
+// and the six still get a factor carrying their whole residual.
+static void testFoldedFactors() {
+    const Loop L = makeLoop(15.0);
+    ExifGpsPriors src(L.fixes, SensorPriorOptions{});
+    const PosePriors pf = src.factors(L.imgs);
+    const SensorFactorStats st = src.lastFactors();
+    int fold_ok = 0, rest_ok = 0, fold_n = 0, rest_n = 0;
+    double fold_min = 1e9, fold_max = 0, rest_max = 0, rest_r2 = 0;
+    for (const PriorCentre& f : pf.centres) {
+        const double d = (mul(f.A[0], cameraCenter(L.imgs[f.img[0]].pose)) - f.b).norm();
+        if (folded(f.img[0])) {
+            fold_n++;
+            fold_ok += d > 13.5 && d < 16.5;
+            fold_min = std::min(fold_min, d);
+            fold_max = std::max(fold_max, d);
+        } else {
+            rest_n++;
+            rest_ok += d < 2.5;
+            rest_max = std::max(rest_max, d);
+            rest_r2 += d * d;
+        }
+    }
+    std::printf("folded: %zu centres, out=%d, rms %.3f m | the six %.2f-%.2f m, the rest <= %.2f m\n",
+                pf.centres.size(), st.gps_out, st.gps_rms, fold_min, fold_max, rest_max);
+    check(st.gps_ok && pf.centres.size() == 39 && st.gps == 39, "factors: the fold is stated too");
+    check(st.gps_out == 6, "factors: six stated beyond the gate");
+    check(st.gps_rms > 0.3 && st.gps_rms < 1.2, "factors: RMS over the fit's inliers, not the six");
+    // 0.5 m per axis puts single frames near 1.9 m; the rest are held as an RMS.
+    check(fold_n == 6 && fold_ok == 6 && rest_n == 33 && rest_ok == 33 &&
+              std::sqrt(rest_r2 / 33.0) < 1.5,
+          "factors: the folded six carry their residual");
 }
 
 // ---- the pipeline's builder, off files --------------------------------------
@@ -272,6 +324,7 @@ static void testBuilder() {
 static int run(int, char**) {
     testPositionsAndPairs();
     testFactors();
+    testFoldedFactors();
     testBuilder();
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;
