@@ -876,27 +876,61 @@ struct DjiClip {
     double sensor_fps = 0, imu_rate = 0, readout = 0, focal = 0;
 };
 
+// Field numbers per dvtm proto; 0 = not carried. The defaults are the Osmo
+// 360's (dvtm_oq101), and stay the guess for any proto not checked on a clip.
+struct DjiLayout {
+    uint32_t clip_focal = 8, clip_rate = 10, clip_fps = 11;
+    uint32_t cam_accel = 10;
+    uint32_t cam_iso = 0, cam_shutter = 0, cam_ct = 0;
+    uint32_t gps = 2, gps_status = 3;
+    bool coord_has_unit = true;   // false: degrees, no unit field
+    uint32_t rel_alt = 0;         // f32 mm
+    bool verified = false;
+};
+
+// Avata 360: checked frame by frame against the SRT of a 139 s flight. Its
+// ClipMeta.8 is the Osmo's .10, the IMU rate (table "ClipMeta.8"):
+// https://github.com/Kemerd/OpenOSV/blob/c09a2bfa017d0799553f01c58ccdd6063ac281cd/docs/FORMAT.md
+DjiLayout dji_layout(const std::string& proto) {
+    DjiLayout l;
+    if (proto == "dvtm_oq101.proto") {
+        l.verified = true;
+    } else if (proto == "dvtm_AVATA360.proto") {
+        l.clip_focal = 0; l.clip_rate = 8; l.clip_fps = 9;
+        l.cam_accel = 0;
+        l.cam_iso = 3; l.cam_shutter = 4; l.cam_ct = 6;
+        l.gps = 4; l.gps_status = 0;
+        l.coord_has_unit = false;
+        l.rel_alt = 5;
+        l.verified = true;
+    }
+    return l;
+}
+
 // A PbField points into the buffer it was parsed from, so a sub-message's
 // field list has to outlive any pointer taken into it.
-void dji_clip(const std::vector<PbField>& clip, DjiClip& c) {
+void dji_clip(const std::vector<PbField>& clip, DjiLayout& layout, DjiClip& c) {
     const auto hdr = pb_sub(pb_find(clip, 1));
     c.proto = pb_string(pb_find(hdr, 1));
     c.serial = pb_string(pb_find(hdr, 5));
     c.firmware = pb_string(pb_find(hdr, 6));
     c.product = pb_string(pb_find(hdr, 10));
+    layout = dji_layout(c.proto);
     const auto readout = pb_sub(pb_find(clip, 4));
     if (const PbField* f = pb_find(readout, 1)) c.readout = (double)f->varint * 1e-9;
-    const auto focal = pb_sub(pb_find(clip, 8));
+    // pb_each never yields field 0, so a layout's 0 finds nothing.
+    const auto focal = pb_sub(pb_find(clip, layout.clip_focal));
     if (const PbField* f = pb_find(focal, 1)) c.focal = f->f32();
-    const auto rate = pb_sub(pb_find(clip, 10));
+    const auto rate = pb_sub(pb_find(clip, layout.clip_rate));
     if (const PbField* f = pb_find(rate, 1)) c.imu_rate = (double)f->varint;
-    const auto fps = pb_sub(pb_find(clip, 11));
+    const auto fps = pb_sub(pb_find(clip, layout.clip_fps));
     if (const PbField* f = pb_find(fps, 1)) c.sensor_fps = f->f32();
 }
 
 bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& error) {
     std::vector<uint8_t> buf;
     DjiClip clip;
+    DjiLayout layout;
     bool have_clip = false, any = false, first = true;
     double t0 = 0;
     size_t attitude_frames = 0;
@@ -907,7 +941,7 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
         if (top.empty()) continue;
         if (!have_clip) {
             if (const PbField* c = pb_find(top, 1)) {
-                dji_clip(pb_sub(c), clip);
+                dji_clip(pb_sub(c), layout, clip);
                 have_clip = !clip.proto.empty();
             }
         }
@@ -921,7 +955,24 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
         const double t = t_abs - t0;
 
         const auto cam = pb_sub(pb_find(frame, 2));
-        if (const PbField* acc = pb_find(cam, 10)) {
+        if (layout.cam_iso || layout.cam_shutter || layout.cam_ct) {
+            TelemetryExposure e;
+            e.t = t;
+            const auto iso = pb_sub(pb_find(cam, layout.cam_iso));
+            if (const PbField* f = pb_find(iso, 1); f && f->wire == 5) e.iso = f->f32();
+            // Two varints [n, d] in one bytes field: n/d seconds.
+            const auto shutter = pb_sub(pb_find(cam, layout.cam_shutter));
+            if (const PbField* f = pb_find(shutter, 1); f && f->wire == 2) {
+                const uint8_t *p = f->data, *end = f->data + f->len;
+                uint64_t n = 0, d = 0;
+                if (pb_varint(p, end, n) && pb_varint(p, end, d) && p == end && n && d)
+                    e.shutter = (double)n / (double)d;
+            }
+            const auto ct = pb_sub(pb_find(cam, layout.cam_ct));
+            if (const PbField* f = pb_find(ct, 1); f && f->wire == 0) e.color_temp = (double)f->varint;
+            if (e.iso >= 0 || e.shutter >= 0 || e.color_temp >= 0) out.exposure.push_back(e);
+        }
+        if (const PbField* acc = pb_find(cam, layout.cam_accel)) {
             const auto a = pb_sub(acc);
             const PbField *x = pb_find(a, 2), *y = pb_find(a, 3), *z = pb_find(a, 4);
             if (x && y && z) {
@@ -959,20 +1010,25 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
         }
 
         const auto gimbal = pb_sub(pb_find(frame, 4));
-        if (const PbField* gb = pb_find(gimbal, 2)) {
+        if (const PbField* gb = pb_find(gimbal, layout.gps)) {
             const auto g = pb_sub(gb);
             const auto coord = pb_sub(pb_find(g, 1));
             const PbField *lat = pb_find(coord, 2), *lon = pb_find(coord, 3);
             if (lat && lon) {
                 const PbField* unit = pb_find(coord, 1);
-                const bool rad = !unit || unit->varint == 0;
+                const bool rad = layout.coord_has_unit && (!unit || unit->varint == 0);
                 TelemetryGps gp;
                 gp.t = t;
                 gp.lat = lat->f64() * (rad ? 180 / kPi : 1.0);
                 gp.lon = lon->f64() * (rad ? 180 / kPi : 1.0);
                 if (const PbField* alt = pb_find(g, 2)) { gp.alt = (double)(int32_t)alt->varint * 1e-3; gp.has_alt = true; }
-                const PbField* st = pb_find(g, 3);
+                const PbField* st = pb_find(g, layout.gps_status);
                 gp.fix = !st || st->varint != 1;
+                const auto rel = pb_sub(pb_find(gimbal, layout.rel_alt));
+                if (const PbField* r = pb_find(rel, 1); r && r->wire == 5) {
+                    gp.rel_alt = r->f32() * 1e-3;
+                    gp.has_rel_alt = true;
+                }
                 out.gps.push_back(gp);
                 any = true;
             }
@@ -984,15 +1040,42 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
     out.serial = clip.serial;
     out.firmware = clip.firmware;
     if (clip.readout > 0) out.frame_readout = clip.readout;
-    out.notes.push_back("dvtm proto " + clip.proto + (clip.proto == "dvtm_oq101.proto" ? "" : " (layout not verified on a sample)"));
+    out.notes.push_back("dvtm proto " + clip.proto + (layout.verified ? "" : " (layout not verified on a sample)"));
     if (clip.imu_rate > 0) {
         char s[96];
         std::snprintf(s, sizeof s, "IMU fusion rate %.0f Hz, sensor %.3f fps, focal %.1f px", clip.imu_rate, clip.sensor_fps, clip.focal);
         out.notes.push_back(s);
     }
-    out.notes.push_back("accel is one reading per frame in g, converted; no raw gyro is written");
+    if (layout.cam_accel) out.notes.push_back("accel is one reading per frame in g, converted; no raw gyro is written");
+    else out.notes.push_back("no accelerometer and no raw gyro are written");
     if (attitude_frames) out.notes.push_back("orientation is IMU_attitude_after_fusion: sense not documented, see the check");
     return true;
+}
+
+// Only the first samples are read: a clip header is in sample 0 on every
+// djmd file seen, and an .OSV runs to thousands of samples.
+VideoColor color_of(const Source& src) {
+    Movie mv;
+    bool is_mp4 = false;
+    std::string error;
+    if (!read_movie(src, mv, is_mp4, error)) return {};
+    std::vector<uint8_t> buf;
+    VideoColor out;
+    for (const Track& tk : mv.tracks) {
+        if (tk.sample_type != fourcc("djmd")) continue;
+        for (size_t i = 0; i < tk.samples.size() && i < 8; i++) {
+            const Sample& sm = tk.samples[i];
+            if (sm.size < 2 || sm.size > (16u << 20) || !src.readVec(sm.offset, sm.size, buf))
+                continue;
+            const VideoColor c = djmd_color(buf.data(), buf.size());
+            if (c.mode != VideoColorMode::NotRecorded) return c;
+        }
+        // DJI metadata whose header could not be read says nothing about the
+        // profile, which is not the same as saying there is none.
+        out.mode = VideoColorMode::Unknown;
+        out.issue = VideoColorIssue::NoClipHeader;
+    }
+    return out;
 }
 
 // ================
@@ -1335,6 +1418,61 @@ VideoProjection video_projection(const std::string& path) {
     return mv.projection;
 }
 
+VideoColor djmd_color(const uint8_t* sample, size_t n) {
+    VideoColor out;
+    const auto top = pb_fields(sample, n);
+    const auto hdr = pb_sub(pb_find(pb_sub(pb_find(top, 1)), 1));
+    out.proto = pb_string(pb_find(hdr, 1));
+    if (out.proto.empty()) return out;
+    out.mode = VideoColorMode::Unknown;
+    // The Avata 360 keeps fov_type at the Osmo's 2.4, empty on its samples,
+    // which the Osmo reading would take as Normal.
+    const bool osmo = out.proto == "dvtm_oq101.proto";
+    const bool avata = out.proto == "dvtm_AVATA360.proto";
+    if (!osmo && !avata) {
+        out.issue = VideoColorIssue::UnknownLayout;
+        return out;
+    }
+    const auto stream = pb_sub(pb_find(top, 2));
+    const auto avata_meta = pb_sub(pb_find(stream, 2));
+    const PbField* wrapper = pb_find(osmo ? stream : avata_meta, 4);
+    if (!wrapper) {
+        out.issue = VideoColorIssue::NoColorField;
+        return out;
+    }
+    // Only an empty wrapper is proto3's unwritten 0; any other shape is a
+    // layout this reader was not written against, never Normal.
+    out.issue = VideoColorIssue::MalformedColorField;
+    if (wrapper->wire != 2) return out;
+    const auto color = pb_sub(wrapper);
+    const PbField* v = pb_find(color, 1);
+    if (wrapper->len > 0 && (!v || v->wire != 0)) return out;
+    out.issue = VideoColorIssue::None;
+    out.code = v ? (int)v->varint : 0;
+    // Avata 360 samples have shown only 19 (D-Log M) and an empty wrapper (Normal).
+    if (avata && v && out.code != 19) {
+        out.issue = VideoColorIssue::UnverifiedColorCode;
+        return out;
+    }
+    out.mode = out.code == 19 ? VideoColorMode::DlogM
+             : out.code == 0  ? VideoColorMode::Normal
+                              : VideoColorMode::OtherLog;
+    return out;
+}
+
+VideoColor video_color(const std::string& path) {
+    FileSource src;
+    if (!src.open(path)) return {};
+    return color_of(src);
+}
+
+VideoColor video_color(const uint8_t* data, size_t size) {
+    MemorySource src;
+    src.p = data;
+    src.n = size;
+    return color_of(src);
+}
+
 bool telemetry_read(const uint8_t* data, size_t size, Telemetry& out, std::string& error) {
     MemorySource src;
     src.p = data;
@@ -1598,10 +1736,27 @@ std::string telemetry_report(const Telemetry& t, const TelemetryCheck& c) {
           << fmt(", spread %.1f m, path %.1f m", c.gps_spread_m, c.gps_path_m);
         if (c.gps_outliers) o << ", " << c.gps_outliers << " outliers dropped";
         if (c.gps_speed_max > 0) o << fmt(", speed max %.1f m/s", c.gps_speed_max);
+        double rlo = INFINITY, rhi = -INFINITY;
+        for (const TelemetryGps& g : t.gps)
+            if (g.has_rel_alt) { rlo = std::min(rlo, g.rel_alt); rhi = std::max(rhi, g.rel_alt); }
+        if (rlo <= rhi) o << fmt(", rel alt %.1f..%.1f m", rlo, rhi);
         const TelemetryGps& g = t.gps.front();
         o << fmt("\n               first fix %.6f, %.6f", g.lat, g.lon);
         if (g.has_alt) o << fmt(", alt %.1f m", g.alt);
         if (g.unix_time > 0) o << fmt(", unix %.3f", g.unix_time);
+        o << "\n";
+    }
+    if (!t.exposure.empty()) {
+        double lo[3] = {INFINITY, INFINITY, INFINITY}, hi[3] = {-INFINITY, -INFINITY, -INFINITY};
+        for (const TelemetryExposure& e : t.exposure) {
+            const double v[3] = {e.iso, e.shutter, e.color_temp};
+            for (int k = 0; k < 3; k++)
+                if (v[k] >= 0) { lo[k] = std::min(lo[k], v[k]); hi[k] = std::max(hi[k], v[k]); }
+        }
+        o << "exposure     : " << t.exposure.size() << " frames";
+        if (lo[0] <= hi[0]) o << fmt(", ISO %.0f..%.0f", lo[0], hi[0]);
+        if (lo[1] <= hi[1] && lo[1] > 0) o << fmt(", shutter 1/%.0f..1/%.0f s", 1 / hi[1], 1 / lo[1]);
+        if (lo[2] <= hi[2]) o << fmt(", ct %.0f..%.0f K", lo[2], hi[2]);
         o << "\n";
     }
     if (t.magnet.size()) o << "magnetometer : " << t.magnet.size() << " samples\n";
