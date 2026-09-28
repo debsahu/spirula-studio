@@ -1,7 +1,8 @@
 #pragma once
 // The IMU and GPS a video file carries alongside its pictures, recognised by
 // content rather than by extension: a GoPro `gpmd` track (GPMF), the Insta360
-// trailer after the MP4, a DJI `djmd` track (protobuf), or a CAMM track.
+// trailer after the MP4, a DJI `djmd` track (protobuf: Osmo 360 and Avata
+// 360, field numbers per proto), or a CAMM track.
 //
 // map/SensorGauge.h consumes it through core/SensorTimeline.h;
 // `sfm_telemetry_test FILE` prints what a file carries. Only the sample

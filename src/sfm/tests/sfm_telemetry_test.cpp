@@ -4,9 +4,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
+#include "core/Env.h"
 #include "sfm/core/Telemetry.h"
 #include "sfm/tests/TestMain.h"
 
@@ -466,6 +468,85 @@ static void test_dji_unknown_proto() {
     check(has_note(tm, "(layout not verified on a sample)", false), "wm169: layout flagged unverified");
 }
 
+// ================
+// Real Avata 360 clips, when SS_TEST_AVATA_* name them
+// ================
+
+static bool same_bits(double a, double b) { return std::memcmp(&a, &b, sizeof a) == 0; }
+
+static bool read_file(const char* path, Telemetry& tm, const std::string& tag) {
+    std::string err;
+    const bool ok = telemetry_read(path, tm, err);
+    check(ok, tag + "read (" + err + ")");
+    return ok;
+}
+
+// Expected values are from the flight's SRT (FrameCnt 1 = djmd packet 0).
+static void test_avata_flight() {
+    const char* path = spirula::env("TEST_AVATA_OSV");
+    if (!path) { std::printf("SKIP avata real clip (SS_TEST_AVATA_OSV unset)\n"); return; }
+    Telemetry tm;
+    if (!read_file(path, tm, "avata flight: ")) return;
+    const TelemetryCheck c = telemetry_check(tm);
+    check(tm.gps.size() == 8354, "avata flight: 8354 GPS fixes");
+    if (!tm.gps.empty()) {
+        const TelemetryGps& g = tm.gps[0];
+        check(close_to(g.lat, 42.217445, 1e-5) && close_to(g.lon, -83.671562, 1e-5), "avata flight: first fix");
+        check(close_to(g.alt, 325.291, 0.002) && close_to(g.rel_alt, 36.700, 0.001), "avata flight: altitudes");
+    }
+    check(!tm.exposure.empty() && tm.exposure[0].iso == 800 && tm.exposure[0].color_temp == 6217 &&
+              std::fabs(std::log(5000 * tm.exposure[0].shutter)) <= std::log(1.19),
+          "avata flight: first exposure ISO 800, 1/5000, 6217 K");
+    check(c.orientation.rate_hz >= 3950 && c.orientation.rate_hz <= 4050, "avata flight: attitude at 4 kHz");
+    check(c.gps_usable && c.gps_distinct >= 1000 && c.gps_spread_m >= 55 && c.gps_spread_m <= 70,
+          "avata flight: GPS usable");
+    check(!has_note(tm, "not verified", false), "avata flight: layout verified");
+    check(telemetry_report(tm, c).find("GPS usable") != std::string::npos, "avata flight: verdict GPS usable");
+}
+
+// A hover, with its .LRF proxy as the oracle: the same metadata at 30 fps,
+// paired to the OSV by exact frame time (both anchor on one timestamp).
+static void test_avata_hover() {
+    const char* osv = spirula::env("TEST_AVATA_OSV_HOVER");
+    const char* lrf = spirula::env("TEST_AVATA_LRF_HOVER");
+    if (!osv || !lrf) {
+        std::printf("SKIP avata hover (SS_TEST_AVATA_OSV_HOVER or SS_TEST_AVATA_LRF_HOVER unset)\n");
+        return;
+    }
+    Telemetry tm, px;
+    if (!read_file(osv, tm, "avata hover: ") || !read_file(lrf, px, "avata hover lrf: ")) return;
+    const TelemetryCheck c = telemetry_check(tm);
+    check(tm.gps.size() == 634 && tm.exposure.size() == 634, "avata hover: 634 fixes and exposures");
+    check(c.gps_distinct >= 100 && c.gps_spread_m < 1, "avata hover: GPS present, standing still");
+    if (!tm.gps.empty() && !tm.exposure.empty())
+        check(close_to(tm.gps[0].rel_alt, 2.600, 0.001) && close_to(tm.gps[0].alt, 237.503, 0.001) &&
+                  tm.exposure[0].iso == 400,
+              "avata hover: rel alt 2.6 m, alt 237.503 m, ISO 400");
+    // A hover has no GPS spread: not usable is the right answer, not a reader defect.
+    check(!c.gps_usable, "avata hover: GPS not usable");
+
+    std::map<double, size_t> gps_at, exp_at;
+    for (size_t i = 0; i < tm.gps.size(); i++) gps_at[tm.gps[i].t] = i;
+    for (size_t i = 0; i < tm.exposure.size(); i++) exp_at[tm.exposure[i].t] = i;
+    size_t pairs = 0, differ = 0;
+    for (size_t j = 0; j < px.gps.size() && j < px.exposure.size(); j++) {
+        const auto g = gps_at.find(px.gps[j].t);
+        const auto e = exp_at.find(px.exposure[j].t);
+        if (g == gps_at.end() || e == exp_at.end()) continue;
+        pairs++;
+        const TelemetryGps &a = tm.gps[g->second], &b = px.gps[j];
+        const TelemetryExposure &x = tm.exposure[e->second], &y = px.exposure[j];
+        if (!a.has_rel_alt || !b.has_rel_alt || x.iso < 0 || x.shutter < 0 || x.color_temp < 0 ||
+            !same_bits(a.lat, b.lat) || !same_bits(a.lon, b.lon) || !same_bits(a.alt, b.alt) ||
+            !same_bits(a.rel_alt, b.rel_alt) || !same_bits(x.iso, y.iso) || !same_bits(x.shutter, y.shutter) ||
+            !same_bits(x.color_temp, y.color_temp))
+            differ++;
+    }
+    check(px.gps.size() == 317 && pairs == 317, "avata hover: 317 LRF frames pair by exact time, got " +
+                                                    std::to_string(pairs));
+    check(pairs > 0 && differ == 0, "avata hover: paired frames bit-identical, " + std::to_string(differ) + " differ");
+}
+
 // Sample 0 of a djmd track: clip header (proto name) and StreamMeta, whose
 // field 4 wraps color_mode. `color` < 0 writes an empty wrapper, as proto3
 // does for 0; `stream4` false leaves field 4 out.
@@ -724,6 +805,8 @@ static int cmdTelemetryTest(int argc, char** argv) {
     test_dji_avata();
     test_dji_osmo_ignores_avata_fields();
     test_dji_unknown_proto();
+    test_avata_flight();
+    test_avata_hover();
     test_dji_color();
     test_checks();
     test_rejects();
