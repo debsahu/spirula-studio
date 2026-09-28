@@ -351,11 +351,12 @@ static void testTelemetryPriors() {
     }
     const PosePriors rp = rogue.factors(imgs);
     const SensorFactorStats rs = rogue.lastFactors();
-    int single = 0, inl_n = 0;
+    int single = 0, inl_n = 0, bad_sigma = 0;
     double inl_r2 = 0;
     for (const PriorCentre& f : rp.centres) {
         if (f.n != 1) continue;
         single++;
+        bad_sigma += std::fabs(f.sigma.x - std::max(rs.gps_rms, 1.0)) > 1e-9;
         if (moved[f.img[0]]) continue;
         const Vec3 d = mul(f.A[0], cameraCenter(camPose(f.img[0]))) - f.b;
         inl_r2 += d.x * d.x + d.y * d.y;
@@ -377,6 +378,8 @@ static void testTelemetryPriors() {
     check(n_whole >= 10 && n_whole <= 0.15 * n_pos, "rogue: some frames moved whole, a minority");
     check(rs.gps_ok && single == n_pos && rs.gps == n_pos, "rogue: every positioned frame keeps its factor");
     check(rs.gps_out >= n_whole, "rogue: the moved frames are beyond the gate");
+    // Above the 1 m floor (0.2 of the 5 m radius) the sigma is the fit's RMS.
+    check(rs.gps_rms > 1.2 && bad_sigma == 0, "rogue: level sigma is the fit's RMS");
     check(inl_n > 0 && inl_rms < 4.0, "rogue: the unmoved factors' residual at the truth");
     check(rp.gps.ok && rp.gps.flat && whole_ok == n_whole, "rogue: the check reads the 30 m, four radii off");
 }

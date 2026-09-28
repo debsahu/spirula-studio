@@ -84,10 +84,11 @@ struct SensorFactorStats {
     int gps_out = 0;   // factors stated beyond the fit's inlier radius
 };
 
-// The level sigma of a GPS centre factor: the fit's inlier RMS inflated for the
-// receiver's correlated error (D74: residuals under-state it ~4x).
+// The level sigma of a GPS centre factor: the fit's inlier RMS, floored at 0.2
+// of its radius. Not inflated for correlated error (D74 is about the fit's own
+// uncertainties); at 2x it could not pull the Hickory Woods fold back.
 inline double gpsLevelSigma(const MetricFit& fit) {
-    return std::max(2.0 * fit.rms, 0.6 * fit.max_error);
+    return std::max(fit.rms, 0.2 * fit.max_error);
 }
 
 // A similarity fitted on the inliers, then a centre factor for EVERY positioned
