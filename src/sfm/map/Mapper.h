@@ -535,6 +535,7 @@ public:
         ensureSetup();
         resetModel();
         adopt(m);
+        fitGpsFrame();
         model_count_.clear();
         for (const Reconstruction* o : others)
             if (o != &m) claimImages(*o);
@@ -739,6 +740,7 @@ public:
         ensureSetup();
         resetModel();
         adopt(m);
+        fitGpsFrame();
         model_count_.clear();
         for (const Reconstruction* o : others)
             if (o != &m) claimImages(*o);
@@ -932,6 +934,7 @@ public:
         ensureSetup();
         resetModel();
         adopt(m);
+        fitGpsFrame();
         // As in continueFrom: this is not a sub-model being built beside the
         // others, so the claim bookkeeping (and the overlap break it drives)
         // must not stop the re-registration loop below.
@@ -1649,6 +1652,12 @@ public:
         return out;
     }
 
+    // An adopted model registers before any solve of its own sets gps_frame_, so
+    // it is checked through its own fit: a source serves several models at once.
+    void fitGpsFrame() {
+        gps_frame_ = priors_ ? priors_->factors(posedImages(rec_)).gps : GpsFrame{};
+    }
+
     // The factors a solve over `rec` takes, in rec's own gauge.
     PosePriors priorFactors(const Reconstruction& rec) {
         if (!priors_) return PosePriors{};
@@ -2223,6 +2232,7 @@ private:
             if (!registered) break;  // nothing in the ranking can be registered
             const bool due = rec_.numRegistered() >= next_ba;
             if (due || ba_requested_) {
+                // Under stop_at_ba the requested BA is the caller's joint solve.
                 if (ba_requested_) {
                     if (!due) prior_stats_.gps_ba++;
                     ba_requested_ = false;

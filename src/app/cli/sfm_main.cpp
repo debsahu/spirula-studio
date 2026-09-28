@@ -913,7 +913,7 @@ static int cmdMap(int argc, char** argv) {
         cfg.sensor_map && !priors ? makeExifGpsPriors(cfg, cfg.image_dir, db, opt.verbose)
                                   : nullptr;
     Mapper mapper(db, feats, opt, cs.ids, &rigs, &seqs,
-                  priors ? (PriorSource*)priors.get() : exif_priors.get());
+                  priors ? static_cast<PriorSource*>(priors.get()) : exif_priors.get());
     std::vector<Reconstruction> models;
     AssembleStats ast;
     if (cfg.resume.empty()) {
