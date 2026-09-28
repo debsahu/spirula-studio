@@ -519,8 +519,7 @@ void testQuaternionStep() {
             am[i] -= h;
             gaa[i] = (C(angleAxisToRotation({ap[0], ap[1], ap[2]})) -
                       C(angleAxisToRotation({am[0], am[1], am[2]}))) / (2 * h);
-            Vec3 e{0, 0, 0};
-            (&e.x)[i] = h;
+            const Vec3 e{i == 0 ? h : 0.0, i == 1 ? h : 0.0, i == 2 ? h : 0.0};
             gl[i] = (C(mul(angleAxisToRotation(e), R)) - C(mul(angleAxisToRotation(e * -1.0), R))) /
                     (2 * h);
         }
