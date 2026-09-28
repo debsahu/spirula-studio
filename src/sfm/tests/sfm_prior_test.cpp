@@ -599,6 +599,21 @@ void testGradientNorm() {
                                             want.intrinsics, 1e-12);
     report("gradient norm: points in metres", std::fabs(got.points - want.points) / want.points,
            1e-12);
+    // Only an extrinsic's columns nonzero, since above a frame may hold every maximum.
+    const BAProblem::Member* m0 = nullptr;
+    for (const BAProblem::Member& m : base.members)
+        if (!m0 && m.n_free == 6) m0 = &m;
+    if (!m0) return;
+    std::vector<double> only(fd.col.size(), 0.0);
+    only[m0->ext_col + 1] = 0.3;
+    only[m0->ext_col + 4] = 5.0;
+    const double g6[6] = {0, 0.3, 0, 0, 5.0, 0};
+    const GradientNormParts e = gradientNormParts(base, base.poses.data(), base.exts.data(),
+                                                  only.data(), 0.0, kMetresPerUnit);
+    const double rot = quaternionStepMax(&base.exts[m0->ext_offset], g6);
+    report("gradient norm: an extrinsic's own block counts",
+           rot > 0 ? std::fabs(e.rotation - rot) + std::fabs(e.translation - 5.0 / kMetresPerUnit)
+                   : 1.0, 1e-12);
 }
 
 // A tolerance above the first point: the solve stops there, before any step,
