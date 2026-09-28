@@ -96,7 +96,7 @@ struct Out {
 // A receiver's fix-to-fix jitter lengthens its path: 0.2 m on 1 m steps reads ~4 % long.
 static double g_jitter = 0.2;
 
-static Out run(const Scene& sc, MapperOptions opt, double k, double band) {
+static Out run(const Scene& sc, MapperOptions opt, double k, double band, bool cpu = false) {
     const int from = kCams - 8;
     std::mt19937 rng(23);
     std::normal_distribution<double> jit(0.0, g_jitter);
@@ -109,6 +109,7 @@ static Out run(const Scene& sc, MapperOptions opt, double k, double band) {
     }
     ExifGpsPriors gps(fixes, SensorPriorOptions{});
     opt.gps_scale_band = band;
+    if (cpu) opt.ba_real = "cpu";
     Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &gps);
     std::vector<Reconstruction> models = m.run();
     Out r;
@@ -148,7 +149,8 @@ static int body(int argc, char** argv) {
     const Scene sc = makeScene();
     const Out same = run(sc, opt, 1.0, 0.03), small = run(sc, opt, 1.01, 0.03);
     const Out big = run(sc, opt, 1.3, 0.03), off = run(sc, opt, 1.3, 0);
-    const Out off_same = run(sc, opt, 1.0, 0);
+    // On the host solver: a device BA is not bit-reproducible run to run (1070 Ti, measured).
+    const Out same_cpu = run(sc, opt, 1.0, 0.03, true), off_cpu = run(sc, opt, 1.0, 0, true);
     std::printf("requests: true scale %u, 1%% %u, 30%% %u (gps_ba %u, %u registered), band 0 %u\n",
                 same.scale_ba, small.scale_ba, big.scale_ba, big.gps_ba, big.registered,
                 off.scale_ba);
@@ -161,7 +163,7 @@ static int body(int argc, char** argv) {
     check(big.scale_ba <= (big.registered - (uint32_t)opt.gps_scale_window) / 10,
           "scale: at most one request per ten registrations once the window is full");
     check(off.scale_ba == 0, "scale: a band of 0 asks for nothing");
-    check(samePoses(same.model, off_same.model),
+    check(same_cpu.scale_ba == 0 && samePoses(same_cpu.model, off_cpu.model),
           "scale: a check that never fires leaves the model bit-identical");
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;
