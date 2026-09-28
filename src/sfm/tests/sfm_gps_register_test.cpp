@@ -283,6 +283,72 @@ static void testAssembly(const Scene& sc, const Reconstruction& full, MapperOpti
     }
 }
 
+// Each camera between a Cauchy(7.815) centre 10 m along x and a quadratic one where
+// it stands, 20 times over: every step clears rtol, and it settles after 500 or more
+// iterations. `n` 3 states the same factor as an inertial triple.
+class PullGps : public PriorSource {
+public:
+    explicit PullGps(int n) : n_(n) {}
+    bool has(uint32_t) const override { return true; }
+    bool relativeRotation(uint32_t, uint32_t, Mat3&, double&) const override { return false; }
+    std::vector<uint32_t> neighbours(uint32_t) const override { return {}; }
+    PosePriors factors(const std::vector<PosedImage>& imgs) override {
+        PosePriors p;
+        p.huber = 1e9;
+        for (const PosedImage& im : imgs) {
+            PriorCentre c;
+            c.n = n_;
+            for (int k = 0; k < 3; k++) c.img[k] = im.image;
+            for (int k = 1; k < 3; k++) c.A[k] = Mat3{};
+            for (int r = 0; r < 20; r++) {
+                c.b = cameraCenter(im.pose) + Vec3{10.0, 0.0, 0.0};
+                c.cauchy = 7.815;
+                p.centres.push_back(c);
+                c.b = cameraCenter(im.pose);
+                c.cauchy = 0;
+                p.centres.push_back(c);
+            }
+        }
+        return p;
+    }
+
+private:
+    int n_;
+};
+
+// LM iterations per solve of a finishing refinement, and how many solves it ran.
+static double finalIters(const Scene& sc, const Reconstruction& model, MapperOptions opt, int n,
+                         long& solves) {
+    PullGps g(n);
+    Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &g);
+    const long b0 = g_map_prof.n_ba, i0 = g_map_prof.n_ba_iters;
+    m.refine(model);
+    solves = g_map_prof.n_ba - b0;
+    return solves ? (double)(g_map_prof.n_ba_iters - i0) / solves : 0;
+}
+
+// COLMAP's global BA allows 50 LM iterations; the mapper's own cap is 25.
+static void testFinalCap(const Scene& sc, const Reconstruction& full, MapperOptions opt) {
+    // Off the seed's identity rotation, whose angle-axis Jacobian the solver drops.
+    Sim3 turn;
+    turn.R = angleAxisToRotation({0.2, -0.3, 0.1});
+    Reconstruction model = full;
+    for (auto& kv : model.images) kv.second.pose = transformPose(turn, kv.second.pose);
+    for (auto& kv : model.points3D) kv.second.xyz = transformPoint(turn, kv.second.xyz);
+    long s1 = 0, s3 = 0, sa = 0;
+    const double abs = finalIters(sc, model, opt, 1, s1);
+    const double tri = finalIters(sc, model, opt, 3, s3);
+    MapperOptions atom = opt;
+    atom.ba_final_tight = false;
+    atom.ba_growth_rtol = 0;
+    const double loose = finalIters(sc, model, atom, 1, sa);
+    std::printf("final cap: absolute centres %.1f its x %ld, inertial triples %.1f x %ld, "
+                "not a final pass %.1f x %ld\n", abs, s1, tri, s3, loose, sa);
+    check(s1 > 0 && abs == 50, "final cap: a finishing solve on GPS centres runs 50 iterations");
+    check(s3 > 0 && tri == 25, "final cap: a finishing solve on inertial triples keeps 25");
+    check(sa > 0 && loose == 25, "final cap: a solve that is not a final pass keeps 25");
+}
+
 static int body(int argc, char** argv) {
     MapperOptions opt;
     opt.verbose = false;
@@ -366,6 +432,7 @@ static int body(int argc, char** argv) {
     check(r5.registered == (uint32_t)M, "refuse: the drifting run registers");
 
     testAssembly(sc, full, opt);
+    testFinalCap(sc, full, opt);
 
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;

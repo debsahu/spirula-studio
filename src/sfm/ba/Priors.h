@@ -42,6 +42,7 @@ struct PriorCentre {
     Vec3 b;
     Vec3 sigma{1, 1, 1};
     double cauchy = 0;  // > 0: Ceres' CauchyLoss(a), a in sigmas, not the Huber knee
+    bool absolute() const { return n == 1; }
 };
 
 // The metric frame a source's absolute centre factors were stated in, for
@@ -66,6 +67,10 @@ struct PosePriors {
     std::vector<PriorUp> ups;
     std::vector<PriorCentre> centres;
     bool empty() const { return rotations.empty() && ups.empty() && centres.empty(); }
+    bool hasAbsoluteCentres() const {
+        return std::any_of(centres.begin(), centres.end(),
+                           [](const PriorCentre& c) { return c.absolute(); });
+    }
     size_t size() const { return rotations.size() + ups.size() + centres.size(); }
 };
 
@@ -122,7 +127,7 @@ public:
             for (int k = 0; k < c.n; k++) f.addFrame(frameOf(c.img[k]));
             note(f);
             fact_.push_back(f);
-            abs_ = abs_ || c.n == 1;
+            abs_ = abs_ || c.absolute();
         }
         nfact_ = fact_.size();
         // CSR in (row, col) order: std::map iterates that way.
