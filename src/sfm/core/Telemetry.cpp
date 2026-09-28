@@ -955,6 +955,23 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
         const double t = t_abs - t0;
 
         const auto cam = pb_sub(pb_find(frame, 2));
+        if (layout.cam_iso || layout.cam_shutter || layout.cam_ct) {
+            TelemetryExposure e;
+            e.t = t;
+            const auto iso = pb_sub(pb_find(cam, layout.cam_iso));
+            if (const PbField* f = pb_find(iso, 1); f && f->wire == 5) e.iso = f->f32();
+            // Two varints [n, d] in one bytes field: n/d seconds.
+            const auto shutter = pb_sub(pb_find(cam, layout.cam_shutter));
+            if (const PbField* f = pb_find(shutter, 1); f && f->wire == 2) {
+                const uint8_t *p = f->data, *end = f->data + f->len;
+                uint64_t n = 0, d = 0;
+                if (pb_varint(p, end, n) && pb_varint(p, end, d) && p == end && n && d)
+                    e.shutter = (double)n / (double)d;
+            }
+            const auto ct = pb_sub(pb_find(cam, layout.cam_ct));
+            if (const PbField* f = pb_find(ct, 1); f && f->wire == 0) e.color_temp = (double)f->varint;
+            if (e.iso >= 0 || e.shutter >= 0 || e.color_temp >= 0) out.exposure.push_back(e);
+        }
         if (const PbField* acc = pb_find(cam, layout.cam_accel)) {
             const auto a = pb_sub(acc);
             const PbField *x = pb_find(a, 2), *y = pb_find(a, 3), *z = pb_find(a, 4);
@@ -1719,10 +1736,27 @@ std::string telemetry_report(const Telemetry& t, const TelemetryCheck& c) {
           << fmt(", spread %.1f m, path %.1f m", c.gps_spread_m, c.gps_path_m);
         if (c.gps_outliers) o << ", " << c.gps_outliers << " outliers dropped";
         if (c.gps_speed_max > 0) o << fmt(", speed max %.1f m/s", c.gps_speed_max);
+        double rlo = INFINITY, rhi = -INFINITY;
+        for (const TelemetryGps& g : t.gps)
+            if (g.has_rel_alt) { rlo = std::min(rlo, g.rel_alt); rhi = std::max(rhi, g.rel_alt); }
+        if (rlo <= rhi) o << fmt(", rel alt %.1f..%.1f m", rlo, rhi);
         const TelemetryGps& g = t.gps.front();
         o << fmt("\n               first fix %.6f, %.6f", g.lat, g.lon);
         if (g.has_alt) o << fmt(", alt %.1f m", g.alt);
         if (g.unix_time > 0) o << fmt(", unix %.3f", g.unix_time);
+        o << "\n";
+    }
+    if (!t.exposure.empty()) {
+        double lo[3] = {INFINITY, INFINITY, INFINITY}, hi[3] = {-INFINITY, -INFINITY, -INFINITY};
+        for (const TelemetryExposure& e : t.exposure) {
+            const double v[3] = {e.iso, e.shutter, e.color_temp};
+            for (int k = 0; k < 3; k++)
+                if (v[k] >= 0) { lo[k] = std::min(lo[k], v[k]); hi[k] = std::max(hi[k], v[k]); }
+        }
+        o << "exposure     : " << t.exposure.size() << " frames";
+        if (lo[0] <= hi[0]) o << fmt(", ISO %.0f..%.0f", lo[0], hi[0]);
+        if (lo[1] <= hi[1] && lo[1] > 0) o << fmt(", shutter 1/%.0f..1/%.0f s", 1 / hi[1], 1 / lo[1]);
+        if (lo[2] <= hi[2]) o << fmt(", ct %.0f..%.0f K", lo[2], hi[2]);
         o << "\n";
     }
     if (t.magnet.size()) o << "magnetometer : " << t.magnet.size() << " samples\n";

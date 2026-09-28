@@ -48,6 +48,13 @@ struct TelemetryGps {
     bool has_rel_alt = false;
 };
 
+struct TelemetryExposure {
+    double t = 0;
+    double iso = -1, shutter = -1, fnum = -1, color_temp = -1;  // < 0 unknown; shutter in s, colour in K
+    double ev = 0;
+    bool has_ev = false;
+};
+
 enum class TelemetryCarrier { None, Gpmf, Insta360, DjiDvtm, Camm };
 const char* telemetry_carrier_name(TelemetryCarrier c);
 
@@ -72,6 +79,7 @@ struct Telemetry {
     // takes (X, Z, Y) of the ORIN frame: measured, see the note it carries.
     std::string orientation_axes = "XYZ";
     std::vector<TelemetryGps> gps;
+    std::vector<TelemetryExposure> exposure;  // not sensor data: empty() ignores it
     std::vector<std::string> notes;
 
     bool empty() const {

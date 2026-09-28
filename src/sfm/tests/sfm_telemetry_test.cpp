@@ -358,6 +358,7 @@ static void test_dji() {
         check(close_to(tm.orientation[3].t, 0.033366 - 1.0 / 30 / 3, 1e-6), "dji: second frame");
     }
     check(tm.gps.empty(), "dji: no gps");
+    check(tm.exposure.empty(), "dji: no exposure on the Osmo");
 }
 
 // An Avata 360 frame, numbered as the real ones read. 3.2.10 is Osmo-shaped
@@ -423,6 +424,19 @@ static void test_dji_avata() {
     check(!has_note(tm, "not verified", false), "avata: layout verified");
     const TelemetryCheck c = telemetry_check(tm);
     check(c.gps.count == 2 && c.gps_fix_fraction == 1, "avata: 3.4.4.4 is not a fix status");
+    check(tm.exposure.size() == 2, "avata: one exposure per frame");
+    if (tm.exposure.size() == 2) {
+        const TelemetryExposure& e = tm.exposure[1];
+        check(close_to(e.t, 0.0167, 1e-9), "avata: exposure on the frame time");
+        check(e.iso == 800, "avata: ISO at 3.2.3.1, f32");
+        check(close_to(e.shutter, 2e-4, 1e-12), "avata: shutter at 3.2.4.1 is n/d seconds");
+        check(e.color_temp == 6217, "avata: colour temperature at 3.2.6.1, varint K");
+        check(e.fnum == -1 && !e.has_ev, "avata: fnum and EV not located, left unknown");
+    }
+    const std::string report = telemetry_report(tm, c);
+    check(report.find("exposure     : 2 frames, ISO 800..800, shutter 1/5000..1/5000 s, ct 6217..6217 K\n") !=
+                  std::string::npos && report.find(", rel alt 36.7..36.7 m\n") != std::string::npos,
+          "avata: report shows exposure and rel alt");
 }
 
 // An Osmo frame carrying the Avata's numbers must not be read at them.
@@ -435,6 +449,10 @@ static void test_dji_osmo_ignores_avata_fields() {
     const Telemetry tm = read_samples({dji_sample(true, 19260701001ull, -1.0f), dji_sample(false, 19260734367ull, -1.0f),
                                        decoy}, "osmo decoy: ");
     check(tm.gps.empty(), "osmo decoy: Avata 3.4.4 and 3.4.5 not read on the Osmo");
+    check(tm.exposure.empty(), "osmo decoy: Avata 3.2.3, 3.2.4, 3.2.6 not read on the Osmo");
+    const std::string report = telemetry_report(tm, telemetry_check(tm));
+    check(report.find("exposure") == std::string::npos && report.find("rel alt") == std::string::npos,
+          "osmo decoy: report has no exposure or rel alt line");
     check(has_note(tm, "IMU fusion rate 1000 Hz, sensor 30.000 fps, focal 1061.5 px", true) &&
               has_note(tm, "dvtm proto dvtm_oq101.proto", true),
           "osmo decoy: Osmo clip fields unchanged");
@@ -444,7 +462,7 @@ static void test_dji_osmo_ignores_avata_fields() {
 static void test_dji_unknown_proto() {
     const Telemetry tm = read_samples({avata_sample("dvtm_wm169.proto", true, 200830583ull),
                                        avata_sample("dvtm_wm169.proto", false, 200847283ull)}, "wm169: ");
-    check(tm.gps.empty(), "wm169: no Avata GPS on an unknown proto");
+    check(tm.gps.empty() && tm.exposure.empty(), "wm169: no Avata GPS or exposure on an unknown proto");
     check(has_note(tm, "(layout not verified on a sample)", false), "wm169: layout flagged unverified");
 }
 
@@ -664,8 +682,15 @@ static void print_head(const Telemetry& tm, int n) {
     }
     for (int i = 0; i < n && i < (int)tm.gps.size(); i++) {
         const TelemetryGps& g = tm.gps[i];
-        std::printf("  gps[%d] t=%.3f unix=%.3f fix=%d  %.7f %.7f alt=%.2f speed=%.2f track=%.1f dop=%.2f\n",
+        std::printf("  gps[%d] t=%.3f unix=%.3f fix=%d  %.7f %.7f alt=%.3f speed=%.2f track=%.1f dop=%.2f",
                     i, g.t, g.unix_time, (int)g.fix, g.lat, g.lon, g.alt, g.speed, g.track, g.dop);
+        if (g.has_rel_alt) std::printf(" rel_alt=%.3f", g.rel_alt);
+        std::printf("\n");
+    }
+    for (int i = 0; i < n && i < (int)tm.exposure.size(); i++) {
+        const TelemetryExposure& e = tm.exposure[i];
+        std::printf("  exposure[%d] t=%.6f iso=%.1f shutter=%.9g ct=%.0f fnum=%.2f ev=%s\n", i, e.t, e.iso,
+                    e.shutter, e.color_temp, e.fnum, e.has_ev ? std::to_string(e.ev).c_str() : "-");
     }
 }
 
