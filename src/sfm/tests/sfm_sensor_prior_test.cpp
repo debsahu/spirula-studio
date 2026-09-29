@@ -513,6 +513,89 @@ static void testGpsOnlySource() {
           "GPS: a fit is logged");
     check(linesWith(line.lines, "EXIF") + linesWith(bent.lines, "EXIF") == 0,
           "GPS: the telemetry line is not labelled EXIF");
+
+    // --metric-gps horizontal and no IMU up: level about the cameras' mean up.
+    const GpsOnlyRun level = gpsOnlyRun(false, true);
+    int vertical = 0, farCount = 0;
+    const GpsOnlyScene s = gpsOnlyScene(false);
+    for (const PriorCentre& f : level.pf.centres) {
+        vertical += f.sigma.z != 0.0;
+        Vec3 d = mul(f.A[0], cameraCenter(s.imgs[f.img[0]].pose)) - f.b;
+        d.z = 0;
+        farCount += d.norm() > 0.5;
+    }
+    std::printf("GPS only, horizontal: ok=%d reason=%d, %zu centres, %d vertical, %d level "
+                "residual over 0.5 m\n", level.st.gps_ok, (int)level.st.gps_reason,
+                level.pf.centres.size(), vertical, farCount);
+    check(level.st.gps_ok && level.pf.centres.size() == 59 && level.pf.gps.flat && vertical == 0,
+          "GPS horizontal: a straight track with no IMU up gets level factors");
+    check(farCount == 0, "GPS horizontal: the level factors hold at the true poses");
+}
+
+// With an IMU up the telemetry fit is level whatever gps_flat says: the mean up
+// of the cameras is the fallback, never a substitute.
+static void testFlatKeepsImuUp() {
+    Scenario sc;
+    const Mat3 R_ci = angleAxisToRotation(Vec3{0.3, -1.2, 0.7});
+    const Telemetry t = synthesize(sc, R_ci);
+    SensorTimeline tl;
+    std::string err;
+    tl.init(t, telemetry_check(t), err);
+    Sim3 M;
+    M.scale = 0.37;
+    M.R = angleAxisToRotation(Vec3{1.1, 0.4, -0.9});
+    M.t = {2.0, -1.0, 0.5};
+    Reconstruction rec = synthesizeModel(sc, M, 2.0);
+    std::vector<std::string> names;
+    std::vector<uint32_t> cams;
+    std::vector<PosedImage> imgs;
+    uint32_t k = 0;
+    // The first 20 s only: over a whole turn a lens's pitch averages out of the mean up.
+    for (const auto& kv : rec.images) {
+        if (k == 40) break;
+        names.push_back(kv.second.name);
+        cams.push_back(1);
+        imgs.push_back({k++, 1, kv.second.pose});
+    }
+    // Every lens pitched 20 deg on its IMU, so the cameras' mean up is 20 deg off
+    // the IMU's while the centres stay put: a fit about the wrong one would show.
+    const Mat3 tilt = angleAxisToRotation(Vec3{0.35, 0, 0});
+    Vec3 cam_up{0, 0, 0};
+    for (PosedImage& p : imgs) {
+        const Vec3 c = cameraCenter(p.pose);
+        p.pose.R = mul(tilt, p.pose.R);
+        p.pose.t = mul(p.pose.R, c) * -1.0;
+        cam_up = cam_up + mul(transpose(p.pose.R), Vec3{0, -1, 0});
+    }
+    SensorCapture cap;
+    cap.fps = 24;
+    cap.timeline = &tl;
+    std::vector<PairRotationObs> obs;
+    for (uint32_t q = 0; q + 1 < imgs.size(); q++)
+        obs.push_back({q, q + 1, mul(imgs[q + 1].pose.R, transpose(imgs[q].pose.R))});
+    auto run = [&](bool flat, SensorFactorStats& st) {
+        SensorPriorOptions po;
+        po.gps_flat = flat;
+        TelemetryPriors src({cap}, names, cams, po);
+        src.calibrateFromPairs(obs);
+        const PosePriors pf = src.factors(imgs);
+        st = src.lastFactors();
+        std::vector<PriorCentre> out;
+        for (const PriorCentre& f : pf.centres)
+            if (f.n == 1) out.push_back(f);
+        return out;
+    };
+    SensorFactorStats s0, s1;
+    const std::vector<PriorCentre> a = run(false, s0), b = run(true, s1);
+    const Vec3 imu_up = mul(transpose(M.R), Vec3{0, 0, 1});
+    check(angleDeg(cam_up, imu_up) > 5.0, "fixture: the cameras' mean up is not the IMU's");
+    double worst = 0;
+    for (size_t q = 0; q < a.size() && q < b.size(); q++)
+        worst = std::max(worst, (a[q].b - b[q].b).norm());
+    std::printf("IMU up, gps_flat off / on: up %d / %d, %zu / %zu centres, worst target moved "
+                "%.3g m\n", s0.up_ok, s1.up_ok, a.size(), b.size(), worst);
+    check(s0.up_ok && !a.empty(), "fixture: the walk has an IMU up and GPS factors");
+    check(a.size() == b.size() && worst < 1e-9, "GPS horizontal: an IMU up is kept over the cameras'");
 }
 
 // The GPS shares the IMU's clock: an image's fix is read at the fitted clock,
@@ -745,6 +828,7 @@ int cmdSensorPriorTest(int, char**) {
     testTelemetryPriors();
     testAttitudeWithoutAccel();
     testGpsOnlySource();
+    testFlatKeepsImuUp();
     testGpsClock();
     std::printf("%s\n", fails ? "FAIL" : "PASS");
     return fails ? 1 : 0;

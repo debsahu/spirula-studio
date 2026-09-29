@@ -45,8 +45,8 @@ struct SensorPriorOptions {
     int calib_min_frames = 20;   // posed frames a group needs for the gravity refit
     double gps_max_error = 5.0;  // metres, the fit's inlier radius
     double gps_max_error_frac = 0.03;
-    // A source with no IMU fits its GPS level-only about the cameras' mean up
-    // (--metric-gps horizontal, D75); a telemetry source has its own up.
+    // A source with no IMU up fits its GPS level-only about the cameras' mean up
+    // (--metric-gps horizontal, D75); a telemetry source's IMU up comes first.
     bool gps_flat = false;
     bool trusted_position = false;
     bool verbose = false;
@@ -214,6 +214,7 @@ public:
             for (uint32_t k = 0; k < o.size(); k++) rank_[o[k]] = k;
     }
 
+    const SensorPriorOptions& options() const { return opt_; }
     const std::vector<SensorGroupState>& groups() const { return groups_; }
     const std::vector<TimeOffsetFit>& timeOffsets() const { return offset_; }
     const SensorFactorStats& lastFactors() const { return stats_; }
@@ -422,7 +423,9 @@ private:
         stats_.rotations = (int)out.rotations.size();
         stats_.ups = (int)out.ups.size();
         if (opt_.scale && up.ok) scaleFactors(frames, by_group, up.up, out);
-        if (opt_.gps) gpsFactors(frames, up.ok ? &up.up : nullptr, out);
+        const Vec3* gps_up = up.ok ? &up.up : nullptr;
+        if (!gps_up && opt_.gps_flat && mean_up.norm() > 0) gps_up = &mean_up;
+        if (opt_.gps) gpsFactors(frames, gps_up, out);
         return out;
     }
 
