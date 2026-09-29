@@ -10,10 +10,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <random>
 #include <string>
 #include <vector>
 
+#include "sfm/core/Log.h"
 #include "sfm/core/PriorSource.h"
 #include "sfm/core/SensorTimeline.h"
 #include "sfm/geometry/KnownRotation.h"
@@ -396,10 +398,209 @@ static void testTelemetryPriors() {
     check(rp.gps.ok && rp.gps.flat && whole_ok == n_whole, "rogue: the check reads the 30 m, four radii off");
 }
 
+// ---- a GPS-only source: why a fit is refused, and the level-only rule --------
+
+// A GPS log with no IMU at all, 60 s at 10 Hz: a straight line east with a
+// 0.1 m sway, or the same bent north halfway (`bend`).
+static Vec3 gpsTrack(double t, bool bend) {
+    const double e = bend ? std::min(t, 30.0) * 1.5 : 1.5 * t;
+    const double n = bend ? std::max(t - 30.0, 0.0) * 1.5 : 0.0;
+    return {e, n + 0.1 * std::sin(0.7 * t), 2.0 + 0.05 * std::sin(0.3 * t)};
+}
+
+static Telemetry gpsOnly(bool bend) {
+    Telemetry t;
+    t.carrier = TelemetryCarrier::DjiDvtm;
+    t.camera = "synthetic";
+    t.video_fps = 24;
+    t.video_duration = 60;
+    const double lat0 = 43.66, lon0 = -79.39, Re = 6378137.0;
+    for (double ti = 0; ti <= 60.0 + 1e-9; ti += 0.1) {
+        const Vec3 p = gpsTrack(ti, bend);
+        TelemetryGps g;
+        g.t = ti;
+        g.fix = true;
+        g.lat = lat0 + p.y / Re * 180 / M_PI;
+        g.lon = lon0 + p.x / (Re * std::cos(lat0 * M_PI / 180)) * 180 / M_PI;
+        g.alt = 100 + p.z;
+        g.has_alt = true;
+        g.dop = 1.0;
+        t.gps.push_back(g);
+    }
+    return t;
+}
+
+// One image a second along the track, level cameras looking east, in a random gauge.
+struct GpsOnlyScene {
+    std::vector<std::string> names;
+    std::vector<uint32_t> cams;
+    std::vector<PosedImage> imgs;
+};
+
+static GpsOnlyScene gpsOnlyScene(bool bend) {
+    GpsOnlyScene s;
+    Sim3 M;
+    M.scale = 0.21;
+    M.R = angleAxisToRotation(Vec3{0.7, -0.3, 1.2});
+    M.t = {1.0, 3.0, -2.0};
+    const Sim3 Minv = invertSim3(M);
+    // Camera x right (south), y down, z forward (east).
+    const Mat3 R_wc = {0, 0, 1, -1, 0, 0, 0, -1, 0};
+    for (int k = 0; k < 59; k++) {
+        const double t = 0.5 + k;
+        Pose world;
+        world.R = transpose(R_wc);
+        world.t = mul(world.R, gpsTrack(t, bend)) * -1.0;
+        char nm[32];
+        std::snprintf(nm, sizeof nm, "cam0/%05d.jpg", (int)std::lround(t * 24));
+        s.names.push_back(nm);
+        s.cams.push_back(1);
+        s.imgs.push_back({(uint32_t)k, 1, transformPose(Minv, world)});
+    }
+    return s;
+}
+
+struct GpsOnlyRun {
+    SensorFactorStats st;
+    PosePriors pf;
+    std::vector<std::string> lines;
+};
+
+static GpsOnlyRun gpsOnlyRun(bool bend, bool flat) {
+    GpsOnlyRun r;
+    const Telemetry t = gpsOnly(bend);
+    SensorTimeline tl;
+    std::string err;
+    if (!tl.init(t, telemetry_check(t), err)) return r;
+    const GpsOnlyScene s = gpsOnlyScene(bend);
+    SensorCapture cap;
+    cap.fps = 24;
+    cap.timeline = &tl;
+    SensorPriorOptions po;
+    po.verbose = true;
+    po.gps_flat = flat;
+    TelemetryPriors src({cap}, s.names, s.cams, po);
+    slog::set_sink([&](slog::Tag, slog::Level, const std::string& line) { r.lines.push_back(line); });
+    r.pf = src.factors(s.imgs);
+    slog::set_sink({});
+    r.st = src.lastFactors();
+    return r;
+}
+
+static int linesWith(const std::vector<std::string>& lines, const std::string& a,
+                     const std::string& b = "") {
+    int n = 0;
+    for (const std::string& l : lines)
+        n += l.find(a) != std::string::npos && (b.empty() || l.find(b) != std::string::npos);
+    return n;
+}
+
+static void testGpsOnlySource() {
+    const GpsOnlyRun line = gpsOnlyRun(false, false), bent = gpsOnlyRun(true, false);
+    std::printf("GPS only, no IMU: straight ok=%d reason=%d perp %.4f, %zu centres | bent ok=%d "
+                "reason=%d perp %.3f, %zu centres\n", line.st.gps_ok, (int)line.st.gps_reason,
+                line.st.gps_perp_frac, line.pf.centres.size(), bent.st.gps_ok,
+                (int)bent.st.gps_reason, bent.st.gps_perp_frac, bent.pf.centres.size());
+    for (const std::string& l : line.lines) std::printf("  %s", l.c_str());
+    check(bent.st.gps_ok && bent.st.gps_reason == MetricFail::None && bent.pf.centres.size() == 59,
+          "fixture: the bent track fits in full");
+    check(!line.st.gps_ok && line.pf.centres.empty() && line.st.gps_reason == MetricFail::Collinear &&
+              line.st.gps_perp_frac > 0 && line.st.gps_perp_frac < kMetricMinPerpFraction,
+          "GPS: a straight track with no up is refused as collinear, and says so");
+    check(linesWith(line.lines, "[prior] GPS over 59 posed image(s): no fit (collinear") == 1,
+          "GPS: a refused fit is logged with its reason");
+    check(linesWith(bent.lines, "[prior] GPS over 59 posed image(s): fit") == 1,
+          "GPS: a fit is logged");
+    check(linesWith(line.lines, "EXIF") + linesWith(bent.lines, "EXIF") == 0,
+          "GPS: the telemetry line is not labelled EXIF");
+}
+
+// The GPS shares the IMU's clock: an image's fix is read at the fitted clock,
+// as its rotation is. The telemetry here runs 120 ms ahead of the video.
+static void testGpsClock() {
+    Scenario sc;
+    sc.clock_offset = 0.12;
+    const Mat3 R_ci = angleAxisToRotation(Vec3{0.3, -1.2, 0.7});
+    const Telemetry base = synthesize(sc, R_ci);
+    const double lat0 = 43.66, lon0 = -79.39, Re = 6378137.0;
+    auto withGps = [&](double shift) {
+        Telemetry t = base;
+        t.gps.clear();
+        for (double ti = 0; ti <= sc.duration; ti += 0.1) {
+            Mat3 R;
+            Vec3 p;
+            poseAt(sc, ti, R, p);
+            TelemetryGps g;
+            g.t = ti + shift;
+            g.fix = true;
+            g.lat = lat0 + p.y / Re * 180 / M_PI;
+            g.lon = lon0 + p.x / (Re * std::cos(lat0 * M_PI / 180)) * 180 / M_PI;
+            g.alt = 100 + p.z;
+            g.has_alt = true;
+            g.dop = 1.0;
+            t.gps.push_back(g);
+        }
+        return t;
+    };
+    const Telemetry on_imu = withGps(sc.clock_offset), on_video = withGps(0.0);
+    SensorTimeline ta, tb;
+    std::string err;
+    ta.init(on_imu, telemetry_check(on_imu), err);
+    tb.init(on_video, telemetry_check(on_video), err);
+    Sim3 M;
+    Reconstruction rec = synthesizeModel(sc, M, 2.0);
+    std::vector<std::string> names;
+    std::vector<uint32_t> cams;
+    std::vector<Pose> poses;
+    std::vector<double> times;
+    for (const auto& kv : rec.images) {
+        names.push_back(kv.second.name);
+        cams.push_back(1);
+        poses.push_back(kv.second.pose);
+        times.push_back(std::stoi(kv.second.name.substr(5, 5)) / 24.0);
+    }
+    SensorCapture ca, cb;
+    ca.fps = cb.fps = 24;
+    ca.timeline = &ta;
+    cb.timeline = &tb;
+    TelemetryPriors a({ca}, names, cams, SensorPriorOptions{});
+    TelemetryPriors b({cb}, names, cams, SensorPriorOptions{});
+    std::vector<PairRotationObs> obs;
+    for (uint32_t k = 0; k + 1 < poses.size(); k++)
+        obs.push_back({k, k + 1, mul(poses[k + 1].R, transpose(poses[k].R))});
+    a.calibrateFromPairs(obs);
+    double worst = 0;
+    std::vector<double> motion;
+    int n = 0;
+    for (uint32_t k = 0; k < names.size(); k++) {
+        Vec3 pa, pb;
+        if (!a.position(k, pa) || !b.position(k, pb)) continue;
+        worst = std::max(worst, (pa - pb).norm());
+        Mat3 R;
+        Vec3 p0, p1;
+        poseAt(sc, times[k], R, p0);
+        poseAt(sc, times[k] - sc.clock_offset, R, p1);
+        motion.push_back((p0 - p1).norm());
+        n++;
+    }
+    std::sort(motion.begin(), motion.end());
+    const double median_motion = motion.empty() ? 0 : motion[motion.size() / 2];
+    const TimeOffsetFit& off = a.timeOffsets()[0];
+    std::printf("GPS clock: offset %.1f ms (found %d), %d frames, worst %.3f m off the video-clock "
+                "fix; the walk moves %.3f m in the offset at the median frame\n",
+                1000 * off.offset, off.found, n, worst, median_motion);
+    check(off.found && std::fabs(off.offset - sc.clock_offset) < 0.006,
+          "fixture: the clock offset is recovered");
+    check(n > 100 && median_motion > 0.15, "fixture: the offset moves a frame over 0.15 m");
+    check(n > 100 && worst < 0.03, "GPS: a fix is read at the fitted clock");
+}
+
 int cmdSensorPriorTest(int, char**) {
     testKnownRotationTwoView();
     testKnownRotationPnP();
     testTelemetryPriors();
+    testGpsOnlySource();
+    testGpsClock();
     std::printf("%s\n", fails ? "FAIL" : "PASS");
     return fails ? 1 : 0;
 }
