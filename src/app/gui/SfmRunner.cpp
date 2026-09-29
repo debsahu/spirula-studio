@@ -64,7 +64,7 @@ const char* kPairs[] = {"auto", "exhaustive", "sequential", "prefilter"};
 const char* kMapper[] = {"flat", "bottom-up"};
 const char* kFeatures[] = {"sift", "aliked-n16rot", "aliked-n32", "loma-b128",
                            "loma-b"};
-const char* kMetricGps[] = {"none", "horizontal", "full"};
+const char* kMetricGps[] = {"none", "horizontal", "full", "auto"};
 const char* kSensorGauge[] = {"none", "up", "auto"};
 const char* kExifAttitude[] = {"none", "up", "auto"};
 
@@ -753,10 +753,8 @@ std::vector<std::string> SfmRunner::recon_args(const SfmJob& job,
         argv.push_back("--max-image-size");
         argv.push_back(std::to_string(job.max_image_size));
     }
-    if (job.metric_gps > 0) {
-        argv.push_back("--metric-gps");
-        argv.push_back(pick(kMetricGps, job.metric_gps));
-    }
+    argv.push_back("--metric-gps");
+    argv.push_back(pick(kMetricGps, job.metric_gps, 3));
     if (job.sensor_gauge != 2) {
         argv.push_back("--sensor-gauge");
         argv.push_back(pick(kSensorGauge, job.sensor_gauge, 2));

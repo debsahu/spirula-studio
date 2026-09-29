@@ -239,7 +239,7 @@ void sanitize_dataset_settings(DatasetSettings& s) {
     clamp_to(j.mapper, 0, 1);
     clamp_to(j.features, 0, 2);
     clamp_to(j.matcher, 0, 1);
-    clamp_to(j.metric_gps, 0, 2);
+    clamp_to(j.metric_gps, 0, 3);
     clamp_to(j.sensor_gauge, 0, 2);
     clamp_to(j.exif_attitude, 0, 2);
     clamp_to(j.max_features, 0, 1000000);

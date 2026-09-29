@@ -8555,6 +8555,21 @@ SS_MSG(sfm_metric_gps_full,
     RU("С высотой"),
     TR("Yükseklikle"));
 
+SS_MSG(sfm_metric_gps_auto,
+    EN("Automatic"),
+    JA("自動"),
+    ZH_HANS("自动"),
+    ZH_HANT("自動"),
+    KO("자동"),
+    DE("Automatisch"),
+    FR("Automatique"),
+    ES("Automático"),
+    PT("Automático"),
+    IT("Automatico"),
+    NL("Automatisch"),
+    RU("Автоматически"),
+    TR("Otomatik"));
+
 SS_MSG(section_sensors,
     EN("Sensors"),       JA("センサー"),      ZH_HANS("传感器"),    ZH_HANT("感測器"),
     KO("센서"),           DE("Sensoren"),     FR("Capteurs"),      ES("Sensores"),
@@ -8955,33 +8970,42 @@ SS_MSG(sfm_metric_gps_help,
        "model by degrees. Either way the capture must be tens of metres across. "
        "Photographs carrying no position are passed over, and a model that "
        "cannot be fitted is written unscaled and says so; a video's own sensors "
-       "are the setting above."),
+       "are the setting above."
+       " Automatic, the default, decides per capture: with altitude for a DJI drone's own "
+       "GPS or photos whose GPS carries an altitude, latitude and longitude for a phone, an "
+       "action camera or fixes without an altitude, and off where nothing carries GPS."),
     JA("写真の EXIF にある GPS に合わせて、寸法と向きを決めたメートル単位の"
        "モデルを書き出します。緯度と経度だけを使うのが安全です。位置から寸法と"
        "方位だけを取り、どちらが上かはカメラ自身に任せます。高度も使うと傾きまで"
        "GPS で決めますが、スマートフォンの高度は誤差が大きく、市街地ではモデル"
        "全体が数度傾くことがあります。いずれの場合も撮影範囲は数十メートル必要です。"
        "位置を持たない写真は対象外となり、当てはめられないモデルは寸法なしで"
-       "書き出してその旨を伝えます。動画自身のセンサーは上の設定です。"),
+       "書き出してその旨を伝えます。動画自身のセンサーは上の設定です。"
+       "自動 (既定) は撮影ごとに決めます。DJI の機体自身の GPS や高度付きの写真なら高度も使い、スマートフォン、アクションカメラ、高度のない位置なら緯度と経度だけ、"
+       "GPS がなければ使いません。"),
     ZH_HANS("按照片 EXIF 中的 GPS 确定尺度和朝向，以米为单位写出模型。只用经纬度"
             "更稳妥：只从定位取尺度和方位角，哪边朝上仍交给相机自身判断。连高度"
             "一起用则连倾斜也由 GPS 决定，而手机测得的高度误差很大——在城市里可能"
             "让整个模型倾斜几度。两种方式都要求采集范围有几十米。不带定位的照片会"
             "被略过；拟合不成功时按未定尺度写出并给出说明。视频自身的传感器由上面"
-            "的选项管。"),
+            "的选项管。"
+            "自动 (默认) 按每次采集决定：DJI 设备自身的 GPS 或带高度的照片连高度一起用，手机、运动相机或没有高度的定位只用经纬度，没有 GPS 则不使用。"),
     ZH_HANT("按照片 EXIF 中的 GPS 確定尺度和朝向，以公尺為單位寫出模型。只用經緯度"
             "更穩妥：只從定位取尺度和方位角，哪邊朝上仍交給相機自身判斷。連高度"
             "一起用則連傾斜也由 GPS 決定，而手機測得的高度誤差很大——在城市裡可能"
             "讓整個模型傾斜幾度。兩種方式都要求拍攝範圍有數十公尺。不帶定位的照片會"
             "被略過；擬合不成功時按未定尺度寫出並給出說明。影片自身的感測器由上面"
-            "的選項管。"),
+            "的選項管。"
+            "自動 (預設) 按每次拍攝決定：DJI 裝置自身的 GPS 或帶高度的照片連高度一起用，手機、運動相機或沒有高度的定位只用經緯度，沒有 GPS 則不使用。"),
     KO("사진 EXIF 의 GPS 에 맞춰 크기와 방향을 정한 미터 단위 모델을 씁니다. "
        "위도와 경도만 쓰는 쪽이 안전합니다. 위치에서 크기와 방위만 가져오고, "
        "어느 쪽이 위인지는 카메라 자신에게 맡깁니다. 고도까지 쓰면 기울기도 GPS 로 "
        "정하는데, 휴대전화의 고도는 오차가 커서 도심에서는 모델 전체가 몇 도 기울 "
        "수 있습니다. 어느 쪽이든 촬영 범위가 수십 미터는 되어야 합니다. 위치가 없는 "
        "사진은 건너뛰고, 맞추지 못한 모델은 크기 없이 쓰며 그 사실을 알립니다. "
-       "동영상 자체의 센서는 위의 설정입니다."),
+       "동영상 자체의 센서는 위의 설정입니다."
+       " 자동 (기본값) 은 촬영마다 정합니다. DJI 기체 자체의 GPS 나 고도가 있는 사진은 고도까지, 휴대전화나 액션캠, 고도 없는 위치는 위도와 "
+       "경도만 쓰고, GPS 가 없으면 쓰지 않습니다."),
     DE("Das Modell in Metern schreiben, in Größe und Richtung an das GPS in den "
        "EXIF-Daten der Fotos angepasst. Breite und Länge allein ist die sichere "
        "Wahl: sie nehmen Maßstab und Himmelsrichtung aus den Positionen und "
@@ -8990,7 +9014,10 @@ SS_MSG(sfm_metric_gps_help,
        "das das ganze Modell um Grade kippen. In beiden Fällen muss die Aufnahme "
        "zehner Meter groß sein. Fotos ohne Position werden übergangen; ein "
        "Modell, das nicht passt, wird unskaliert geschrieben und sagt das. Die "
-       "Sensoren eines Videos sind die Einstellung darüber."),
+       "Sensoren eines Videos sind die Einstellung darüber."
+       " Automatisch, die Vorgabe, entscheidet je Aufnahme: mit Höhe für das eigene GPS "
+       "einer DJI-Drohne oder Fotos, deren GPS eine Höhe trägt, Breite und Länge für ein "
+       "Telefon, eine Actionkamera oder Positionen ohne Höhe, und aus, wo nichts GPS trägt."),
     FR("Écrire le modèle en mètres, dimensionné et orienté d'après le GPS des "
        "EXIF des photos. La latitude et la longitude seules sont le choix sûr : "
        "elles prennent l'échelle et le cap dans les positions et laissent le "
@@ -8999,7 +9026,11 @@ SS_MSG(sfm_metric_gps_help,
        "le modèle de plusieurs degrés. Dans les deux cas la prise doit faire des "
        "dizaines de mètres. Les photos sans position sont ignorées ; un modèle "
        "qui ne s'ajuste pas est écrit sans échelle et le signale. Les capteurs "
-       "d'une vidéo sont le réglage au-dessus."),
+       "d'une vidéo sont le réglage au-dessus."
+       " Automatique, le défaut, décide par prise : avec l'altitude pour le GPS propre d'un "
+       "drone DJI ou des photos dont le GPS porte une altitude, latitude et longitude pour "
+       "un téléphone, une caméra d'action ou des points sans altitude, et désactivé quand "
+       "rien ne porte de GPS."),
     ES("Escribir el modelo en metros, con el tamaño y el giro que da el GPS de "
        "los EXIF de las fotos. Solo latitud y longitud es la opción segura: toma "
        "la escala y el rumbo de las posiciones y deja el arriba a las propias "
@@ -9007,7 +9038,11 @@ SS_MSG(sfm_metric_gps_help,
        "la mide mal: en ciudad puede inclinar el modelo entero varios grados. En "
        "ambos casos la toma debe medir decenas de metros. Las fotos sin posición "
        "se pasan por alto; un modelo que no se puede ajustar se escribe sin "
-       "escalar y lo dice. Los sensores de un vídeo son el ajuste de arriba."),
+       "escalar y lo dice. Los sensores de un vídeo son el ajuste de arriba."
+       " Automático, el valor por defecto, decide en cada toma: con la altitud para el GPS "
+       "propio de un dron DJI o fotos cuyo GPS trae altitud, latitud y longitud para un "
+       "teléfono, una cámara de acción o posiciones sin altitud, y desactivado cuando nada "
+       "trae GPS."),
     PT("Escrever o modelo em metros, dimensionado e virado conforme o GPS dos "
        "EXIF das fotos. Só latitude e longitude é a escolha segura: tira a "
        "escala e o rumo das posições e deixa o para cima às próprias câmeras. "
@@ -9015,7 +9050,11 @@ SS_MSG(sfm_metric_gps_help,
        "na cidade pode inclinar o modelo inteiro em graus. Em qualquer dos casos "
        "a captura tem de ter dezenas de metros. As fotos sem posição são "
        "ignoradas; um modelo que não se ajusta é escrito sem escala e avisa "
-       "disso. Os sensores de um vídeo são a opção acima."),
+       "disso. Os sensores de um vídeo são a opção acima."
+       " Automático, o padrão, decide em cada captura: com a altitude para o GPS próprio de "
+       "um drone DJI ou fotos cujo GPS traz altitude, latitude e longitude para um "
+       "telemóvel, uma câmara de ação ou posições sem altitude, e desligado quando nada "
+       "traz GPS."),
     IT("Scrivere il modello in metri, dimensionato e ruotato in base al GPS "
        "negli EXIF delle foto. Solo latitudine e longitudine è la scelta sicura: "
        "prende scala e direzione dalle posizioni e lascia l'alto alle camere "
@@ -9024,7 +9063,10 @@ SS_MSG(sfm_metric_gps_help,
        "entrambi i casi la ripresa deve misurare decine di metri. Le foto senza "
        "posizione vengono ignorate; un modello che non si stima viene scritto "
        "senza scala e lo segnala. I sensori di un video sono l'impostazione "
-       "qui sopra."),
+       "qui sopra."
+       " Automatico, il predefinito, decide per ogni ripresa: con la quota per il GPS di un "
+       "drone DJI o per foto il cui GPS porta la quota, latitudine e longitudine per un "
+       "telefono, una action cam o punti senza quota, e disattivato quando nulla porta GPS."),
     NL("Het model in meters schrijven, op maat en gedraaid volgens de GPS in de "
        "EXIF van de foto's. Alleen breedte en lengte is de veilige keuze: die "
        "halen de schaal en de kompasrichting uit de posities en laten het boven "
@@ -9033,7 +9075,11 @@ SS_MSG(sfm_metric_gps_help,
        "graden doen kantelen. In beide gevallen moet de opname tientallen meters "
        "groot zijn. Foto's zonder positie worden overgeslagen; een model dat "
        "niet past wordt ongeschaald geschreven en meldt dat. De sensoren van een "
-       "video zijn de instelling hierboven."),
+       "video zijn de instelling hierboven."
+       " Automatisch, de standaard, beslist per opname: met hoogte voor de eigen gps van "
+       "een DJI-drone of foto's waarvan de gps een hoogte draagt, breedte en lengte voor "
+       "een telefoon, een actiecamera of posities zonder hoogte, en uit waar niets gps "
+       "draagt."),
     RU("Записать модель в метрах, с размером и поворотом по GPS из EXIF снимков. "
        "Только широта и долгота — безопасный выбор: масштаб и направление берутся "
        "из координат, а где верх, решают сами камеры. С высотой по GPS задаётся и "
@@ -9041,7 +9087,10 @@ SS_MSG(sfm_metric_gps_help,
        "модель на градусы. В обоих случаях съёмка должна быть десятки метров. "
        "Снимки без координат пропускаются; модель, которую подобрать не удалось, "
        "пишется без масштаба и сообщает об этом. Датчики самого видео — "
-       "настройка выше."),
+       "настройка выше."
+       " Автоматически (по умолчанию) — решение для каждой съёмки: с высотой для "
+       "собственного GPS дрона DJI или снимков, чей GPS несёт высоту, широта и долгота для "
+       "телефона, экшн-камеры или отсчётов без высоты, и выключено, если GPS нигде нет."),
     TR("Modeli, fotoğrafların EXIF'indeki GPS'e göre ölçeklenmiş ve döndürülmüş "
        "olarak metre biriminde yaz. Yalnızca enlem ve boylam güvenli seçimdir: "
        "ölçeği ve pusula yönünü konumlardan alır, yukarının neresi olduğunu "
@@ -9049,7 +9098,10 @@ SS_MSG(sfm_metric_gps_help,
        "yükseklik ölçümü kötüdür ve şehirde tüm modeli derecelerce yatırabilir. "
        "Her iki durumda da çekim onlarca metre olmalı. Konumu olmayan "
        "fotoğraflar atlanır; oturtulamayan model ölçeksiz yazılır ve bunu "
-       "bildirir. Videonun kendi sensörleri yukarıdaki ayardır."));
+       "bildirir. Videonun kendi sensörleri yukarıdaki ayardır."
+       " Varsayılan Otomatik, her çekim için karar verir: bir DJI dronun kendi GPS'i ya da "
+       "GPS'i yükseklik taşıyan fotoğraflar için yükseklikle, telefon, aksiyon kamerası ya "
+       "da yüksekliksiz konumlar için enlem ve boylamla, hiçbir şey GPS taşımıyorsa kapalı."));
 
 SS_MSG(rig_none,
     EN("No rig"), JA("リグなし"), ZH_HANS("无装置"), ZH_HANT("無裝置"), KO("리그 없음"),

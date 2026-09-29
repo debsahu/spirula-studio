@@ -6136,7 +6136,7 @@ void GuiApp::draw_sfm_advanced() {
     ImGui::SetNextItemWidth(px(260.0f));
     ui::Combo(dmsg::sfm_metric_gps, &_sfm_job.metric_gps,
               {&dmsg::sfm_metric_gps_off, &dmsg::sfm_metric_gps_horizontal,
-               &dmsg::sfm_metric_gps_full});
+               &dmsg::sfm_metric_gps_full, &dmsg::sfm_metric_gps_auto});
     ui::help_on_hover(dmsg::sfm_metric_gps_help);
 
     ImGui::SetNextItemWidth(px(260.0f));
