@@ -9,15 +9,20 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <random>
 #include <string>
 #include <vector>
 
+#include "sfm/core/Log.h"
 #include "sfm/core/Model.h"
 #include "sfm/core/PriorSource.h"
+#include "sfm/core/Rig.h"
 #include "sfm/map/Assemble.h"
 #include "sfm/map/Mapper.h"
+#include "sfm/map/MetricGauge.h"
+#include "sfm/tests/SyntheticRig.h"
 #include "sfm/tests/TestMain.h"
 
 using namespace sfm;
@@ -91,27 +96,29 @@ static Scene makeScene(int M) {
 }
 
 // Metres off the fix for each image's FIRST check, in check order; a retry and
-// anything past the script read 1 m. No factors, so solves are unconstrained.
-// `events` logs 'P' per check and 'F' per factors() call (a BA round, or an adoption).
+// anything past the script read 1 m, `always` pins an image's. No factors, so solves
+// are unconstrained. `events` logs 'P' per check and 'F' per factors() call.
 class ScriptedGps : public PriorSource {
 public:
     explicit ScriptedGps(std::vector<double> script) : script_(std::move(script)) {}
-    bool has(uint32_t) const override { return true; }
+    bool has(uint32_t img) const override { return fix.empty() || fix[img]; }
     bool relativeRotation(uint32_t, uint32_t, Mat3&, double&) const override { return false; }
     std::vector<uint32_t> neighbours(uint32_t) const override { return {}; }
     PosePriors factors(const std::vector<PosedImage>& imgs) override {
         events += 'F';
         PosePriors p;
-        p.gps.ok = imgs.size() >= 2;
+        p.gps.ok = frame_ok && imgs.size() >= 2;
         p.gps.gate = 5.0;
         p.gps.t = {(double)imgs.size(), 0.0, 0.0};  // which fit a check was made through
         return p;
     }
     bool positionError(uint32_t img, const Pose&, const GpsFrame& f, double& m) const override {
-        if (!f.ok) return false;
+        if (!f.ok || !has(img)) return false;
         fits.push_back(f.t.x);
         const int c = calls[img]++;
-        if (c == 0 && next < script_.size()) {
+        if (always.count(img)) {
+            m = always.at(img);
+        } else if (c == 0 && next < script_.size()) {
             at[next] = events.size();
             image_at[next] = img;
             m = script_[next++];
@@ -127,6 +134,9 @@ public:
         return it != at.end() && it->second + 1 < events.size() && events[it->second + 1] == 'F';
     }
 
+    std::vector<char> fix;
+    std::map<uint32_t, double> always;
+    bool frame_ok = true;
     mutable std::string events;
     mutable std::vector<double> fits;              // per check: images in the fit it used
     mutable std::map<uint32_t, int> calls;
@@ -382,6 +392,252 @@ static void testFinalCap(const Scene& sc, const Reconstruction& full, MapperOpti
     check(scaled == 50, "gradient stop: lengths are measured in the GPS frame's metres");
 }
 
+// ---- the rig's registrations (Mapper::registerFrame) ------------------------
+
+// Each image's true centre, `k` metres per scene unit, for the images `fix` names;
+// the frame a similarity fitted to the posed ones, as a real source's is. No
+// factors, so solves stay unconstrained. The check reads the pose it is handed.
+class TruthGps : public PriorSource {
+public:
+    TruthGps(const synth_rig::RigScene& sc, double k, std::vector<char> fix)
+        : k_(k), fix_(std::move(fix)) {
+        for (const Pose& p : sc.gt) centre_.push_back(cameraCenter(p));
+    }
+    bool has(uint32_t img) const override { return img < fix_.size() && fix_[img]; }
+    bool relativeRotation(uint32_t, uint32_t, Mat3&, double&) const override { return false; }
+    std::vector<uint32_t> neighbours(uint32_t) const override { return {}; }
+    bool position(uint32_t img, Vec3& p) const override {
+        if (!has(img)) return false;
+        p = centre_[img] * k_;
+        return true;
+    }
+    PosePriors factors(const std::vector<PosedImage>& imgs) override {
+        events += 'F';
+        std::vector<Vec3> src, dst;
+        for (const PosedImage& im : imgs) {
+            Vec3 x;
+            if (!position(im.image, x)) continue;
+            src.push_back(cameraCenter(im.pose));
+            dst.push_back(x);
+        }
+        PosePriors p;
+        Sim3 T;
+        if (src.size() < 3 || !estimateSim3(src, dst, T)) return p;
+        p.gps.ok = true;
+        for (int k = 0; k < 9; k++) p.gps.A[k] = T.R[k] * T.scale;
+        p.gps.t = T.t;
+        p.gps.gate = 5.0;
+        return p;
+    }
+    bool positionError(uint32_t img, const Pose& pose, const GpsFrame& f,
+                       double& m) const override {
+        if (!PriorSource::positionError(img, pose, f, m)) return false;
+        calls[img]++;
+        worst = std::max(worst, m);
+        events += 'P';
+        return true;
+    }
+
+    mutable std::string events;
+    mutable std::map<uint32_t, int> calls;
+    mutable double worst = 0;
+
+private:
+    double k_;
+    std::vector<char> fix_;
+    std::vector<Vec3> centre_;
+};
+
+static void setEnv(const char* k, const char* v) {
+#ifdef _WIN32
+    _putenv_s(k, v ? v : "");
+#else
+    if (v) setenv(k, v, 1);
+    else unsetenv(k);
+#endif
+}
+
+// The frames registerFrame placed whole, read off SS_SFM_RIG_DUMP: the candidate
+// each was tried through, and whether the source had been asked for a fit by then.
+struct RigRun {
+    Mapper::PriorStats st;
+    Reconstruction model;
+    size_t models = 0;
+    std::vector<uint32_t> placed;
+    std::vector<char> fitted;
+    std::vector<uint32_t> triggers;   // images a GPS trigger fired on, in order
+};
+
+static RigRun runRig(const synth_rig::RigScene& sc, const RigTable& rigs, MapperOptions opt,
+                     PriorSource& gps, const std::string& events) {
+    RigRun r;
+    std::map<std::string, uint32_t> id;
+    for (uint32_t i = 0; i < sc.names.size(); i++) id[sc.names[i]] = i;
+    setEnv("SS_SFM_RIG_DUMP", "1");
+    slog::set_sink([&](slog::Tag, slog::Level lv, const std::string& line) {
+        static const std::string key = "[rig] frame of ", fired = "[prior] GPS: ";
+        if (lv == slog::Level::Diag && line.compare(0, fired.size(), fired) == 0 &&
+            line.find("bundle adjusting now") != std::string::npos) {
+            auto it = id.find(line.substr(fired.size(), line.find(" is ") - fired.size()));
+            if (it != id.end()) r.triggers.push_back(it->second);
+            return;
+        }
+        if (lv != slog::Level::Diag || line.compare(0, key.size(), key) != 0) return;
+        if (line.find("-> placed together") == std::string::npos) return;
+        auto it = id.find(line.substr(key.size(), line.find(':') - key.size()));
+        if (it == id.end()) return;
+        r.placed.push_back(it->second);
+        r.fitted.push_back(events.find('F') != std::string::npos);
+    });
+    Mapper m(sc.db, sc.feats, opt, sc.cam_ids, &rigs, nullptr, &gps);
+    std::vector<Reconstruction> models = m.run();
+    slog::set_sink({});
+    setEnv("SS_SFM_RIG_DUMP", nullptr);
+    r.st = m.priorStats();
+    r.models = models.size();
+    if (!models.empty()) r.model = models.front();
+    return r;
+}
+
+static bool registered(const Reconstruction& rec, uint32_t img) {
+    auto it = rec.images.find(img);
+    return it != rec.images.end() && it->second.registered;
+}
+
+// Frames placed whole after a fit, and how many of them one check covered exactly.
+template <class Calls>
+static void checkedOnce(const RigRun& r, uint32_t M, const Calls& calls, size_t& frames,
+                        size_t& once) {
+    frames = once = 0;
+    auto n = [&](uint32_t i) { return calls.count(i) ? calls.at(i) : 0; };
+    for (size_t k = 0; k < r.placed.size(); k++) {
+        if (!r.fitted[k]) continue;
+        const uint32_t f = r.placed[k] % M;
+        frames++;
+        once += n(f) + n(M + f) == 1;
+    }
+}
+
+static void testRig(MapperOptions opt) {
+    // Frames 0-7, every fourth after and the three with a blind cam1 are whole, so the
+    // rig calibrates early; the rest are weak, and wait for the rig to place them.
+    std::vector<char> weak(40, 0);
+    for (int f = 8; f < 37; f++) weak[f] = f % 4 != 0;
+    const synth_rig::RigScene sc = synth_rig::makeRigScene(40, 37, weak);
+    const uint32_t M = (uint32_t)sc.M, n = 2 * M;
+    const RigTable rigs = buildRigTable(sc.names, {RigDef{"rig", {{"cam0"}, {"cam1"}}}});
+
+    ScriptedGps base(script(n, {}));
+    const RigRun r0 = runRig(sc, rigs, opt, base, base.events);
+    size_t frames = 0, once = 0;
+    checkedOnce(r0, M, base.calls, frames, once);
+    const size_t checks = (size_t)std::count(base.events.begin(), base.events.end(), 'P');
+    std::printf("rig in gate: %u/%u registered, %zu model(s), %zu frame(s) placed whole after a "
+                "fit, %zu checked once | checked %u, %zu checks\n", r0.model.numRegistered(), n,
+                r0.models, frames, once, r0.st.gps_checked, checks);
+    check(r0.model.numRegistered() == n && r0.models == 1, "rig fixture: every image registers");
+    check(frames >= 20, "rig fixture: the rig places frames after the GPS fit");
+    check(once == frames, "rig: every frame the rig places is checked, once");
+    check(r0.st.gps_checked == checks && checks > 0, "rig: gps_checked counts every check");
+
+    // A frame four radii off, every time it is checked: it never comes in, and
+    // nothing of it is committed before the check refuses it.
+    {
+        size_t pick = 0;
+        for (size_t k = 0, seen = 0; k < r0.placed.size(); k++)
+            if (r0.fitted[k] && seen++ == frames / 2) pick = k;
+        const uint32_t f = r0.placed.empty() ? 0 : r0.placed[pick] % M;
+        ScriptedGps farGps(script(n, {}));
+        farGps.always = {{f, 25.0}, {M + f, 25.0}};
+        const RigRun r = runRig(sc, rigs, opt, farGps, farGps.events);
+        std::printf("rig, frame %u at 25 m: %u/%u registered, frame in: %d %d | refused %u, gyro "
+                    "refused %u\n", f, r.model.numRegistered(), n, (int)registered(r.model, f),
+                    (int)registered(r.model, M + f), r.st.gps_refused, r.st.refused);
+        check(!registered(r.model, f) && !registered(r.model, M + f),
+              "rig: a refused frame leaves no image registered");
+        check(r.st.gps_refused >= 1 && r.st.refused == 0,
+              "rig: the refusal is counted as the GPS's, not the gyro's");
+        check(r.model.numRegistered() == n - 2, "rig: every other frame registers");
+    }
+
+    // Trigger runs start at script entry j, past ten registrations, on a stretch of
+    // frames the rig placed whole; the trigger's own line names where it fired.
+    std::vector<char> whole(M, 0);
+    for (size_t q = 0; q < r0.placed.size(); q++)
+        if (r0.fitted[q]) whole[r0.placed[q] % M] = 1;
+    auto rigStretch = [&](size_t lo, size_t hi) {
+        for (size_t q = lo; q <= hi; q++)
+            if (!base.image_at.count(q) || !whole[base.image_at.at(q) % M]) return false;
+        return true;
+    };
+    size_t j = 12;
+    while (j + 14 < checks && !rigStretch(j - 4, j + 14)) j++;
+    std::printf("rig trigger runs start at script entry %zu of %zu\n", j, checks);
+    check(j + 14 < checks && rigStretch(j - 4, j + 14),
+          "rig fixture: a stretch of whole-frame registrations for the trigger runs");
+    MapperOptions talk = opt;
+    talk.verbose = true;
+    auto fired = [&](const RigRun& r, const ScriptedGps& g) {
+        std::vector<long> at;
+        for (uint32_t img : r.triggers)
+            for (const auto& kv : g.image_at)
+                if (kv.second == img) at.push_back((long)kv.first);
+        return at;
+    };
+
+    ScriptedGps three(script(n, {{j - 2, 6.0}, {j - 1, 6.0}, {j, 6.0}}));
+    const RigRun r1 = runRig(sc, rigs, talk, three, three.events);
+    const std::vector<long> t1 = fired(r1, three);
+    std::printf("rig, three at 6 m: ba %u out %u, triggers at %s\n", r1.st.gps_ba, r1.st.gps_out,
+                t1.empty() ? "-" : std::to_string(t1[0]).c_str());
+    check(t1.size() == 1 && t1[0] == (long)j && r1.st.gps_out == 3,
+          "rig: three frames in a row beyond the radius trigger a BA");
+
+    ScriptedGps alt(script(n, {{j - 4, 6.0}, {j - 2, 6.0}, {j, 6.0}}));
+    const RigRun r2 = runRig(sc, rigs, talk, alt, alt.events);
+    std::printf("rig, 6,1,6,1,6: ba %u out %u, %zu trigger(s)\n", r2.st.gps_ba, r2.st.gps_out,
+                r2.triggers.size());
+    check(r2.triggers.empty() && r2.st.gps_out == 3, "rig: an in-radius frame breaks the run");
+
+    // Every check from j-2 on beyond the radius: after the triggered BA the run starts
+    // over, and the next trigger waits for ten registrations -- frames, not images.
+    std::map<size_t, double> drift_at;
+    for (size_t q = j - 2; q <= j + 14; q++) drift_at[q] = 6.0;
+    ScriptedGps drift(script(n, drift_at));
+    const RigRun r3 = runRig(sc, rigs, talk, drift, drift.events);
+    const std::vector<long> t3 = fired(r3, drift);
+    std::printf("rig, drifting from %zu: triggers at", j);
+    for (long t : t3) std::printf(" %ld", t);
+    std::printf("\n");
+    check(t3.size() >= 2 && t3[0] == (long)j && t3[1] - t3[0] == 11,
+          "rig: the trigger's rate limit counts frames, not images");
+
+    // Which pose is checked: the lenses 12 m apart against a 5 m gate, with the
+    // fixes on one lens only, so every frame is checked through that lens.
+    const double k_m = 12.0 / sc.ext.t.norm();
+    check(sc.ext.t.norm() * k_m >= 2 * 5.0, "fixture: the lenses sit two gates apart");
+    size_t no_fix_candidates = 0;
+    for (const uint32_t lens : {0u, 1u}) {
+        std::vector<char> fix(n, 0);
+        for (uint32_t f = 0; f < M; f++) fix[lens * M + f] = 1;
+        TruthGps truth(sc, k_m, fix);
+        const RigRun r = runRig(sc, rigs, opt, truth, truth.events);
+        size_t fr = 0, on = 0;
+        checkedOnce(r, M, truth.calls, fr, on);
+        for (size_t q = 0; q < r.placed.size(); q++)
+            no_fix_candidates += r.fitted[q] && !fix[r.placed[q]];
+        std::printf("rig, fixes on cam%u only: %u/%u registered, worst %.2f m | checked %u, out "
+                    "%u, refused %u | %zu frame(s) placed whole, %zu checked once\n", lens,
+                    r.model.numRegistered(), n, truth.worst, r.st.gps_checked, r.st.gps_out,
+                    r.st.gps_refused, fr, on);
+        check(fr >= 20 && on == fr,
+              "rig: a frame is checked once, through the lens that has a position");
+        check(r.st.gps_checked >= fr && r.st.gps_out == 0 && r.st.gps_refused == 0,
+              "rig: each lens is checked at its own camera pose");
+    }
+    check(no_fix_candidates > 0, "fixture: some frame's candidate lens has no position");
+}
+
 static int body(int argc, char** argv) {
     MapperOptions opt;
     opt.verbose = false;
@@ -406,6 +662,16 @@ static int body(int argc, char** argv) {
     check(base.at.size() >= 30, "in gate: the registrations are checked");
     check(r0.st.gps_ba == 0 && r0.st.gps_refused == 0 && r0.st.gps_out == 0,
           "in gate: no trigger, no refusal");
+    const size_t checks0 = (size_t)std::count(base.events.begin(), base.events.end(), 'P');
+    std::printf("checked %u of %zu checks\n", r0.st.gps_checked, checks0);
+    check(r0.st.gps_checked == checks0, "gps_checked: one per check made");
+
+    ScriptedGps unfitted(script(n, {}));
+    unfitted.frame_ok = false;
+    const Run ru = runWith(sc, opt, unfitted);
+    std::printf("no GPS frame: %u/%d registered, checked %u\n", ru.registered, M,
+                ru.st.gps_checked);
+    check(ru.registered == (uint32_t)M && ru.st.gps_checked == 0, "no frame: nothing is checked");
 
     // The run must end on a registration the plain schedule does not solve
     // after, or an ordinary BA would stand in for the triggered one.
@@ -466,6 +732,7 @@ static int body(int argc, char** argv) {
 
     testAssembly(sc, full, opt);
     testFinalCap(sc, full, opt);
+    testRig(opt);
 
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;
