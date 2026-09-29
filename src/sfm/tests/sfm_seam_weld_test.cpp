@@ -270,7 +270,7 @@ static PairSet across(const Scene& s, int min_matches, int gap = 1 << 30) {
 
 static void offsetSeamDetector(const Scene& sc, const Reconstruction& seam,
                                const MapperOptions& opt) {
-    const PairSet all = across(sc, opt.seam_min_matches), near = across(sc, opt.seam_min_matches, 3);
+    const PairSet all = across(sc, opt.seam_min_matches), within3 = across(sc, opt.seam_min_matches, 3);
     const uint32_t J = (uint32_t)sc.join();
     Mapper m(sc.db, sc.feats, opt);
     size_t strong = 0;
@@ -278,8 +278,8 @@ static void offsetSeamDetector(const Scene& sc, const Reconstruction& seam,
     const auto open = m.openSeams(seam, &strong, &judged);
     std::printf("offset seam, no order: %zu open of %zu strong (%zu candidates), %zu pairs "
                 "cross the join, %zu of them 3 apart or fewer\n", open.size(), strong,
-                judged.size(), all.size(), near.size());
-    check(all.size() >= 40 && near.size() == 6, "fixture: the join has strong pairs across it");
+                judged.size(), all.size(), within3.size());
+    check(all.size() >= 40 && within3.size() == 6, "fixture: the join has strong pairs across it");
     check(pairsOf(open) == all, "no order: exactly the pairs across the join");
     const Mapper::SeamPair* link = find(judged, J - 1, J);
     check(link && link->nbr_common == 0, "the join link shares no neighbour");
@@ -308,7 +308,7 @@ static void offsetSeamDetector(const Scene& sc, const Reconstruction& seam,
     Mapper mo(sc.db, sc.feats, ord);
     const auto open_ord = mo.openSeams(seam);
     std::printf("offset seam, file order: %zu open\n", open_ord.size());
-    check(pairsOf(open_ord) == near, "file order: exactly the pairs across the join 3 apart or fewer");
+    check(pairsOf(open_ord) == within3, "file order: exactly the pairs across the join 3 apart or fewer");
 }
 
 static void loopDetector(const MapperOptions& opt) {
@@ -344,7 +344,7 @@ static void turnSeamDetector(const MapperOptions& opt) {
     };
     const Scene sc = makeScene(spec);
     const Reconstruction seam = makeModel(sc, Seam::Turn);
-    const PairSet near = across(sc, opt.seam_min_matches, 3);
+    const PairSet within3 = across(sc, opt.seam_min_matches, 3);
 
     std::vector<double> rot;
     for (int c = 0; c + 1 < spec.cams; c++)
@@ -375,16 +375,16 @@ static void turnSeamDetector(const MapperOptions& opt) {
     const auto open_ord = mo.openSeams(seam, nullptr, &jo);
     link = find(jo, (uint32_t)J - 1, (uint32_t)J);
     std::printf("turn seam, file order: %zu open of %zu 3 apart or fewer; join link gap %d, "
-                "kink ratio %.1f\n", open_ord.size(), near.size(), link ? link->gap : -1,
+                "kink ratio %.1f\n", open_ord.size(), within3.size(), link ? link->gap : -1,
                 link ? link->kink_ratio : -1.0);
-    check(near.size() == 6, "fixture: six strong pairs cross the join 3 apart or fewer");
-    check(pairsOf(open_ord) == near, "file order: the turn is open across the join");
+    check(within3.size() == 6, "fixture: six strong pairs cross the join 3 apart or fewer");
+    check(pairsOf(open_ord) == within3, "file order: the turn is open across the join");
 
     std::vector<std::string> names;
     for (const ImageEntry& im : sc.db.images) names.push_back(im.name);
     const SequenceTable seqs = buildSequenceTable(names, {SequenceDef{{""}}});
     Mapper ms(sc.db, sc.feats, opt, {}, nullptr, &seqs);
-    check(pairsOf(ms.openSeams(seam)) == near, "declared sequence: the turn is open across the join");
+    check(pairsOf(ms.openSeams(seam)) == within3, "declared sequence: the turn is open across the join");
 }
 
 static int body(int argc, char** argv) {
