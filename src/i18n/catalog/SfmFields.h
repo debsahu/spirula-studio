@@ -2109,32 +2109,32 @@ SS_MSG(seam_weld_help,
        "doğrulanmış çift kaynaştırılır ve yeniden ayarlanır; atlamak için 0"));
 
 SS_MSG(gps_scale_band_help,
-    EN("Bundle-adjust early when the last 20 registrations' path, against the whole model's, "
-       "is off the GPS's by more than this fraction; 0 to skip"),
-    JA("直近 20 枚の登録の経路長が、モデル全体と比べて GPS の経路長とこの割合以上ずれたら、"
-       "早めにバンドル調整します。0 で省略"),
-    ZH_HANS("最近 20 次注册的路径长度相对于整个模型、与 GPS 的差异超过此比例时，提前进行光束"
-            "法平差；0 表示跳过"),
-    ZH_HANT("最近 20 次註冊的路徑長度相對於整個模型、與 GPS 的差異超過此比例時，提前進行光束"
-            "法平差；0 表示略過"),
-    KO("최근 20개 등록의 경로 길이가 모델 전체에 비해 GPS와 이 비율 이상 어긋나면 번들 조정을 "
-       "앞당깁니다. 0이면 건너뜁니다"),
-    DE("Früher ausgleichen, wenn der Weg der letzten 20 Registrierungen, am ganzen Modell "
-       "gemessen, um mehr als diesen Anteil vom GPS abweicht; 0 überspringt"),
-    FR("Ajuster plus tôt quand le trajet des 20 derniers recalages, rapporté au modèle entier, "
-       "s'écarte de celui du GPS de plus de cette fraction ; 0 pour sauter"),
-    ES("Ajustar antes cuando el recorrido de los últimos 20 registros, frente al del modelo "
-       "entero, se aparta del GPS en más de esta fracción; 0 para saltarlo"),
-    PT("Ajustar mais cedo quando o percurso dos últimos 20 registros, frente ao do modelo "
-       "inteiro, se afasta do GPS em mais desta fração; 0 para pular"),
-    IT("Ottimizzare prima quando il percorso delle ultime 20 registrazioni, rispetto al modello "
-       "intero, si scosta da quello del GPS di più di questa frazione; 0 per saltare"),
-    NL("Eerder vereffenen wanneer het pad van de laatste 20 registraties, tegen dat van het hele "
-       "model, meer dan deze fractie van het GPS-pad afwijkt; 0 om over te slaan"),
-    RU("Уточнять раньше, когда путь последних 20 регистраций относительно всей модели "
-       "расходится с путём GPS больше чем на эту долю; 0 -- пропустить"),
-    TR("Son 20 kaydın yolu, tüm modelinkine göre GPS'inkinden bu orandan fazla saparsa demet "
-       "ayarını öne al; atlamak için 0"));
+    EN("Check the growing chain's scale against the GPS over 60-150 m of track and rescale a "
+       "block that drifted before bundle adjusting it; 0 to skip"),
+    JA("成長中の区間の縮尺を 60〜150 m の軌跡で GPS と照合し、ずれたブロックを縮尺補正して"
+       "からバンドル調整します。0 で省略"),
+    ZH_HANS("在 60–150 米轨迹上将正在增长的链段尺度与 GPS 对照，对漂移的区块先做尺度校正再进行"
+            "光束法平差；0 表示跳过"),
+    ZH_HANT("在 60–150 公尺軌跡上將正在增長的鏈段尺度與 GPS 對照，對漂移的區塊先做尺度校正再進行"
+            "光束法平差；0 表示略過"),
+    KO("성장 중인 구간의 축척을 60~150 m 궤적에서 GPS와 대조하고, 어긋난 블록은 축척을 바로잡은 "
+       "뒤 번들 조정합니다. 0이면 건너뜁니다"),
+    DE("Den Maßstab der wachsenden Kette über 60-150 m Strecke mit dem GPS vergleichen und einen "
+       "abgedrifteten Block vor dem Ausgleich neu skalieren; 0 überspringt"),
+    FR("Comparer l'échelle de la chaîne en croissance au GPS sur 60 à 150 m de trajet et remettre "
+       "à l'échelle un bloc qui a dérivé avant de l'ajuster ; 0 pour sauter"),
+    ES("Comparar la escala de la cadena en crecimiento con el GPS sobre 60-150 m de recorrido y "
+       "reescalar un bloque que derivó antes de ajustarlo; 0 para saltarlo"),
+    PT("Comparar a escala da cadeia em crescimento com o GPS em 60-150 m de percurso e "
+       "reescalar um bloco que derivou antes de ajustá-lo; 0 para pular"),
+    IT("Confrontare la scala della catena in crescita con il GPS su 60-150 m di percorso e "
+       "riscalare un blocco che è derivato prima di ottimizzarlo; 0 per saltare"),
+    NL("De schaal van de groeiende keten over 60-150 m spoor met het GPS vergelijken en een "
+       "verlopen blok herschalen voordat het wordt vereffend; 0 om over te slaan"),
+    RU("Сверять масштаб растущей цепочки с GPS на 60-150 м пути и перемасштабировать "
+       "уплывший блок перед уточнением; 0 -- пропустить"),
+    TR("Büyüyen zincirin ölçeğini 60-150 m iz boyunca GPS ile karşılaştır ve kaymış bir bloğu "
+       "ayarlamadan önce yeniden ölçekle; atlamak için 0"));
 
 SS_MSG(rank_by_visibility_help,
     EN("Rank the next image by how its visible structure spreads over the frame, "
