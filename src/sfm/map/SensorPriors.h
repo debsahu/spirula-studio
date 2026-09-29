@@ -83,7 +83,38 @@ struct SensorFactorStats {
     bool gps_ok = false;
     double gps_rms = 0;
     int gps_out = 0;   // factors stated beyond the fit's inlier radius
+    MetricFail gps_reason = MetricFail::Pairs;   // None on a fit
+    double gps_perp_frac = 0;
 };
+
+inline const char* metricFailName(MetricFail r) {
+    switch (r) {
+        case MetricFail::None: return "none";
+        case MetricFail::Pairs: return "pairs";
+        case MetricFail::Spread: return "spread";
+        case MetricFail::Inliers: return "inliers";
+        case MetricFail::Collinear: return "collinear";
+    }
+    return "?";
+}
+
+// One diag line per GPS fit, refused ones included: a straight seed stretch
+// otherwise leaves every BA silent about why it held no GPS factor.
+inline void logGpsFit(const char* label, int posed, const MetricFit& fit, int factors, int beyond,
+                      double sigma) {
+    if (fit.ok)
+        slog::diag(slog::Tag::Map,
+                   "[prior] %s over %d posed image(s): fit, %d inlier(s) within %.2f m, RMS %.3f "
+                   "m, scale %.4f -> %d centre factor(s), %d beyond the radius, sigma %.2f m\n",
+                   label, posed, fit.inliers, fit.max_error, fit.rms, fit.T.scale, factors,
+                   beyond, sigma);
+    else
+        slog::diag(slog::Tag::Map,
+                   "[prior] %s over %d posed image(s): no fit (%s, perp %.3f against %.2f, spread "
+                   "%.1f m, %d inlier(s) within %.2f m), 0 centre factor(s)\n",
+                   label, posed, metricFailName(fit.reason), fit.perp_frac,
+                   kMetricMinPerpFraction, fit.spread, fit.inliers, fit.max_error);
+}
 
 // The level sigma of a GPS centre factor: the fit's inlier RMS inflated for the
 // receiver's correlated error (D74: residuals under-state it ~4x).
@@ -319,7 +350,7 @@ private:
         const SensorTimeline& tl = *caps_[(size_t)cap_[img]].timeline;
         if (!tl.hasGps()) return false;
         TelemetryGps g;
-        if (!tl.gpsAt(t_[img], g)) return false;
+        if (!tl.gpsAt(time(img), g)) return false;
         ensureEnuOrigin();
         p = enuFromGeodetic({{g.lat, g.lon, g.has_alt ? g.alt : 0.0}}, enu_origin_)[0];
         return true;
@@ -604,14 +635,21 @@ private:
             ref.targets.push_back(p);
             ref.image_ids.push_back(f.image_id);
         }
+        const int posed = (int)ref.centres.size();
         const size_t before = out.centres.size();
         const MetricFit fit = gpsCentreFactors(std::move(ref), up_w, opt_.gps_max_error,
                                                opt_.gps_max_error_frac, out, opt_.trusted_position);
-        if (!fit.ok) return;
-        stats_.gps_ok = true;
-        stats_.gps_rms = fit.rms;
-        stats_.gps_out = fit.n - fit.inliers;
-        stats_.gps = (int)(out.centres.size() - before);
+        stats_.gps_reason = fit.reason;
+        stats_.gps_perp_frac = fit.perp_frac;
+        if (fit.ok) {
+            stats_.gps_ok = true;
+            stats_.gps_rms = fit.rms;
+            stats_.gps_out = fit.n - fit.inliers;
+            stats_.gps = (int)(out.centres.size() - before);
+        }
+        if (opt_.verbose && posed >= 5)
+            logGpsFit("GPS", posed, fit, stats_.gps, stats_.gps_out,
+                      fit.ok ? out.gps.sigma_h : 0.0);
     }
 
     std::vector<SensorCapture> caps_;
@@ -692,13 +730,11 @@ public:
         st.gps_rms = fit.rms;
         st.gps_out = fit.ok ? fit.n - fit.inliers : 0;
         st.gps = (int)out.centres.size();
+        st.gps_reason = fit.reason;
+        st.gps_perp_frac = fit.perp_frac;
         if (opt_.verbose && st.frames >= 5)
-            slog::diag(slog::Tag::Map,
-                       "[prior] EXIF GPS over %d posed image(s): %s, %d inlier(s) within %.2f m, "
-                       "RMS %.3f m, scale %.4f -> %d centre factor(s), %d beyond the radius, "
-                       "sigma %.2f m\n",
-                       st.frames, fit.ok ? "fit" : "no fit", fit.inliers, fit.max_error, fit.rms,
-                       fit.T.scale, st.gps, st.gps_out, fit.ok ? out.gps.sigma_h : 0.0);
+            logGpsFit("EXIF GPS", st.frames, fit, st.gps, st.gps_out,
+                      fit.ok ? out.gps.sigma_h : 0.0);
         std::lock_guard<std::mutex> lk(mu_);
         stats_ = st;
         return out;
