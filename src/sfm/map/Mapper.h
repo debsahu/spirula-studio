@@ -401,6 +401,7 @@ public:
         uint32_t vouched = 0;     // audits the neighbours' rotation settled
         uint32_t seeds = 0;       // seed pairs posed with the gyro's rotation
         size_t rotations = 0, ups = 0, centres = 0;   // factors in the last solve
+        uint32_t gps_checked = 0;  // registrations measured against the GPS fit
         uint32_t gps_refused = 0;  // registrations refused as far off the GPS
         uint32_t gps_out = 0;      // registrations beyond the GPS fit's radius
         uint32_t gps_ba = 0;       // global BAs a run of those asked for
@@ -1856,10 +1857,12 @@ public:
     // A PnP pose against the GPS, through the last solve's fit: four radii off
     // right after an in-radius registration is a wrong-place PnP and refused;
     // three in a row beyond the radius is drift, and asks for a global BA now.
-    bool gpsCheck(uint32_t img, const Pose& pose) {
+    bool gpsCheck(uint32_t img, const Pose& pose, bool* measured = nullptr) {
         double d;
         if (!priors_ || !gps_frame_.ok || !priors_->positionError(img, pose, gps_frame_, d))
             return true;
+        prior_stats_.gps_checked++;
+        if (measured) *measured = true;
         const double gate = gps_frame_.gate;
         prior_stats_.gps_gate = gate;
         if (d > kGpsRefuseGates * gate && gps_out_run_ == 0) {
@@ -2236,9 +2239,11 @@ private:
                           (long long)prior_stats_.centres});
             if (priors_ && opt_.verbose)
                 slog::diag(slog::Tag::Map,
-                           "[prior] GPS check: %u registrations refused beyond %.0f m, %u bundle "
-                           "adjustments triggered by %u registrations beyond %.0f m\n",
-                           prior_stats_.gps_refused, kGpsRefuseGates * prior_stats_.gps_gate,
+                           "[prior] GPS check: %u registrations checked, %u registrations "
+                           "refused beyond %.0f m, %u bundle adjustments triggered by %u "
+                           "registrations beyond %.0f m\n",
+                           prior_stats_.gps_checked, prior_stats_.gps_refused,
+                           kGpsRefuseGates * prior_stats_.gps_gate,
                            prior_stats_.gps_ba, prior_stats_.gps_out, prior_stats_.gps_gate);
             if (covered.size() < db_.images.size())
                 slog::diag(slog::Tag::Map,
@@ -4274,6 +4279,13 @@ private:
                        ok ? "placed together" : "REFUSED");
         }
         if (!ok) return false;
+        // One check per frame, as the rate limit counts frames: the candidate's
+        // lens, else the first lens with a position, each at its own camera pose.
+        bool measured = false;
+        if (!gpsCheck(img, c.camFromWorld(sl.member, best), &measured)) return false;
+        for (const Member& e : ms)
+            if (!measured && e.img != img && !gpsCheck(e.img, c.camFromWorld(e.m, best), &measured))
+                return false;
         for (Member& e : ms) {
             if (e.X.empty() && !opt_.rig_complete_blind) continue;
             focal_known_.insert(rec_.images[e.img].camera_id);
