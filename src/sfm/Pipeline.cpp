@@ -364,6 +364,7 @@ static SensorPriorOptions sensorPriorOptions(const SfmConfig& cfg) {
     po.gps_max_error = cfg.metric_gps != "none" && cfg.metric_max_error > 0 ? cfg.metric_max_error : 5.0;
     po.gps_max_error_frac = cfg.metric_max_error_frac;
     po.trusted_position = cfg.metric_gps == "full";
+    po.gps_flat = cfg.metric_gps == "horizontal";
     po.verbose = !cfg.quiet;
     return po;
 }
@@ -1012,9 +1013,7 @@ std::unique_ptr<ExifGpsPriors> makeExifGpsPriors(const SfmConfig& cfg, const std
     if (verbose)
         L::out(Tag::Match, M::metric_gps_read,
                {(long long)with, (long long)db.images.size(), (long long)no_alt});
-    SensorPriorOptions po = sensorPriorOptions(cfg);
-    po.gps_flat = cfg.metric_gps == "horizontal";
-    return std::make_unique<ExifGpsPriors>(fixes, po);
+    return std::make_unique<ExifGpsPriors>(fixes, sensorPriorOptions(cfg));
 }
 
 // The unregistered list as a data file, when SS_UNREG_LOG names one: per
