@@ -951,8 +951,7 @@ public:
                                dp);
             }
             if (rots.empty()) return -1;
-            std::nth_element(rots.begin(), rots.begin() + rots.size() / 2, rots.end());
-            const double med = rots[rots.size() / 2];
+            const double med = medianOf(rots);
             const double rel = rotationAngleDeg(
                 mul(m.images.at(b).pose.R, transpose(m.images.at(a).pose.R)));
             const double g = (double)std::max<int64_t>(1, std::llabs(pos[a] - pos[b]));
@@ -960,6 +959,16 @@ public:
             return rel / (g * med);
         }
     };
+
+    // The mean of the middle two for an even count: a seam flank holds as few as 14 duplicated
+    // points, where the upper middle alone read Hickory's offsets up to 13 % low.
+    static double medianOf(std::vector<double> v) {
+        if (v.empty()) return 0;
+        const size_t h = v.size() / 2;
+        std::nth_element(v.begin(), v.begin() + h, v.end());
+        if (v.size() % 2) return v[h];
+        return 0.5 * (v[h] + *std::max_element(v.begin(), v.begin() + h));
+    }
 
     SeamOrder seamOrder(const Reconstruction& m) const {
         SeamOrder o;
@@ -1055,8 +1064,7 @@ public:
             depth.push_back((ix->second.xyz - ca).norm());
         }
         if (depth.size() < 5) return -1;
-        std::nth_element(depth.begin(), depth.begin() + depth.size() / 2, depth.end());
-        const double med = depth[depth.size() / 2];
+        const double med = medianOf(depth);
         return med > 0 ? (sum * (1.0 / (double)depth.size())).norm() / med : -1;
     }
 

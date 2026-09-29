@@ -406,6 +406,8 @@ static int body(int argc, char** argv) {
     const Reconstruction healthy = makeModel(sc, Seam::None);
     const Reconstruction seam = makeModel(sc, Seam::Offset);
 
+    check(Mapper::medianOf({10, 1, 3, 2}) == 2.5 && Mapper::medianOf({5, 1, 3}) == 3,
+          "the offset's and the kink's median average the middle two of an even count");
     offsetSeamDetector(sc, seam, opt);
     loopDetector(opt);
     turnSeamDetector(opt);
