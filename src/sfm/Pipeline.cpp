@@ -218,6 +218,7 @@ SensorCaptures loadSensorCaptures(const SfmConfig& cfg, bool verbose) {
         lc->cap.time_offset = in.time_offset;
         lc->cap.readout = t.frame_readout;
         lc->cap.timeline = &lc->timeline;
+        lc->carrier = t.carrier;
         L::out(Tag::Orient, M::sensor_file,
                {in.path, t.camera.empty() ? "?" : t.camera, L::num(c.gyro.rate_hz, 0),
                 L::num(c.accel.rate_hz, 0), L::num(c.orientation.rate_hz, 0),
@@ -361,12 +362,100 @@ std::vector<Camera> perImageCameras(const CameraSetup& cs, size_t num_images) {
 static SensorPriorOptions sensorPriorOptions(const SfmConfig& cfg) {
     SensorPriorOptions po;
     po.max_dt = cfg.sensor_max_dt;
-    po.gps_max_error = cfg.metric_gps != "none" && cfg.metric_max_error > 0 ? cfg.metric_max_error : 5.0;
+    po.gps_max_error = cfg.metricGps() && cfg.metric_max_error > 0 ? cfg.metric_max_error : 5.0;
     po.gps_max_error_frac = cfg.metric_max_error_frac;
     po.trusted_position = cfg.metric_gps == "full";
     po.gps_flat = cfg.metric_gps == "horizontal";
     po.verbose = !cfg.quiet;
     return po;
+}
+
+bool isPhoneMake(const std::string& make) {
+    std::string m;
+    for (char c : make) m += (char)std::tolower((unsigned char)c);
+    while (!m.empty() && (m.back() == ' ' || m.back() == '\0')) m.pop_back();
+    static const char* const phones[] = {"apple",  "google", "samsung", "huawei", "honor",
+                                         "xiaomi", "oneplus", "oppo",   "vivo",   "motorola",
+                                         "realme", "nothing"};
+    for (const char* p : phones)
+        if (m == p) return true;
+    return false;
+}
+
+MetricGpsChoice resolveMetricGps(const MetricGpsEvidence& e) {
+    if (e.positions_file) return {"none", MetricGpsWhy::Positions};
+    if (e.telemetry_gps > 0)
+        return e.telemetry_dji == e.telemetry_gps
+                   ? MetricGpsChoice{"full", MetricGpsWhy::DjiTelemetry}
+                   : MetricGpsChoice{"horizontal", MetricGpsWhy::OtherTelemetry};
+    // Three fixes is the least a similarity fits; fewer is no GPS worth a mode.
+    if (e.exif_fixes >= 3) {
+        if (2 * e.exif_phone > e.exif_fixes) return {"horizontal", MetricGpsWhy::ExifPhone};
+        if (10 * e.exif_no_alt > e.exif_fixes) return {"horizontal", MetricGpsWhy::ExifNoAltitude};
+        return {"full", MetricGpsWhy::ExifAltitude};
+    }
+    return {"none", MetricGpsWhy::NoGps};
+}
+
+MetricGpsEvidence metricGpsEvidence(const SfmConfig& cfg, const SensorCaptures& sensors,
+                                    const std::string& imagedir) {
+    MetricGpsEvidence e;
+    e.positions_file = !cfg.metric_positions.empty();
+    for (const auto& lc : sensors.loaded) {
+        if (!lc->timeline.hasGps()) continue;
+        e.telemetry_gps++;
+        e.telemetry_dji += lc->carrier == TelemetryCarrier::DjiDvtm;
+    }
+    if (imagedir.empty() || e.positions_file || e.telemetry_gps) return e;
+    std::error_code walk, ec;
+    for (auto it = fs::recursive_directory_iterator(
+             imagedir, fs::directory_options::follow_directory_symlink, walk);
+         !walk && it != fs::recursive_directory_iterator(); it.increment(walk)) {
+        if (!it->is_regular_file(ec) || isSidecar(it->path()) ||
+            !isImageExt(it->path().extension().string()))
+            continue;
+        const ExifData x = readExif(it->path().string());
+        if (!x.has_gps) continue;
+        e.exif_fixes++;
+        e.exif_no_alt += !x.has_alt;
+        if (isPhoneMake(x.make)) {
+            e.exif_phone++;
+            e.phone_make = x.make;
+        }
+    }
+    return e;
+}
+
+MetricGpsChoice applyMetricGpsAuto(SfmConfig& cfg, const SensorCaptures& sensors,
+                                   const std::string& imagedir) {
+    if (cfg.metric_gps != "auto") return {cfg.metric_gps, MetricGpsWhy::Explicit};
+    const MetricGpsEvidence e = metricGpsEvidence(cfg, sensors, imagedir);
+    const MetricGpsChoice c = resolveMetricGps(e);
+    cfg.metric_gps = c.mode;
+    switch (c.why) {
+        case MetricGpsWhy::Positions: L::out(Tag::Run, M::metric_gps_auto_positions); break;
+        case MetricGpsWhy::DjiTelemetry:
+            L::out(Tag::Run, M::metric_gps_auto_dji, {(long long)e.telemetry_gps});
+            break;
+        case MetricGpsWhy::OtherTelemetry:
+            L::out(Tag::Run, M::metric_gps_auto_telemetry,
+                   {(long long)(e.telemetry_gps - e.telemetry_dji), (long long)e.telemetry_gps});
+            break;
+        case MetricGpsWhy::ExifAltitude:
+            L::out(Tag::Run, M::metric_gps_auto_exif_alt, {(long long)e.exif_fixes});
+            break;
+        case MetricGpsWhy::ExifNoAltitude:
+            L::out(Tag::Run, M::metric_gps_auto_exif_noalt,
+                   {(long long)e.exif_no_alt, (long long)e.exif_fixes});
+            break;
+        case MetricGpsWhy::ExifPhone:
+            L::out(Tag::Run, M::metric_gps_auto_exif_phone,
+                   {(long long)e.exif_phone, (long long)e.exif_fixes, e.phone_make});
+            break;
+        case MetricGpsWhy::NoGps:
+        case MetricGpsWhy::Explicit: L::out(Tag::Run, M::metric_gps_auto_none); break;
+    }
+    return c;
 }
 
 std::unique_ptr<TelemetryPriors> makeSensorPriors(const SfmConfig& cfg,
@@ -487,7 +576,7 @@ void calibrateSensorPriorsFromDatabase(TelemetryPriors& priors, const MatchesDat
 bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
               const std::string& imagedir, bool verbose,
               std::vector<ModelGauge>& gauge, const SensorCaptures* sensors) {
-    const bool gps = cfg.metric_gps != "none";
+    const bool gps = cfg.metricGps();
     const bool flat = cfg.metric_gps == "horizontal";
     const bool file = !cfg.metric_positions.empty();
     // A portrait capture's up is 90 degrees off its images'; `apply` already
@@ -2190,6 +2279,7 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
     calib.setup = cfg.camera;
     calib.image_dir = _imagedir;
     const SensorCaptures sensors = loadSensorCaptures(cfg, verbose);
+    applyMetricGpsAuto(cfg, sensors, _imagedir);
     calib.sensors = &sensors;
     // What this stage's output depends on: its own settings, the extraction
     // that produced its input, and the feature files themselves -- the pair

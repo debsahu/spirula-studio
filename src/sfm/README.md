@@ -493,8 +493,14 @@ fitted from the camera centres with LO-RANSAC over the same `estimateSim3` that
 model merging uses, and `--metric-max-error` is its inlier radius in metres (0
 picks 5 for GPS, 0.5 for a positions file).
 
-`--metric-gps` takes `none` (the CLI default; the GUI asks for `horizontal`),
-`horizontal` or `full`, and the difference is the altitude.
+`--metric-gps` takes `none`, `horizontal`, `full` or `auto` (the default, in the
+CLI and the GUI), and the difference is the altitude. `auto` picks per capture,
+from what the code can tell apart, and says which in one line: `full` for a DJI
+telemetry track (an Avata or Osmo `.OSV`, whose altitude is barometric) or for
+EXIF fixes that carry an altitude; `horizontal` for any other telemetry GPS (a
+GoPro, an Insta360, a phone's CAMM track), for EXIF a phone maker wrote, or where
+more than a tenth of the fixes lack an altitude; `none` with no GPS at all, or
+beside `--metric-positions` (`applyMetricGpsAuto`, `sfm/Pipeline.cpp`).
 `full` fits all seven parameters, so the reference's
 vertical sets the model's tilt; `horizontal` fits only scale, heading and place,
 against latitude and longitude, and leaves which way is up to the recorded

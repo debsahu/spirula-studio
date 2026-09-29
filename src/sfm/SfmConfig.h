@@ -164,9 +164,10 @@ struct SfmConfig {
     // Instead: fix the gauge from an outside measurement in metres, so the
     // model is written metric (map/MetricGauge.h, D74).
     std::string metric_positions;       // one `image_name X Y Z` per line
-    // Each image's own EXIF GPS: "none", "horizontal" (latitude and longitude,
-    // tilt left to the cameras) or "full" (altitude as well).
-    std::string metric_gps = "none";
+    // The GPS a capture carries: "none", "horizontal" (latitude and longitude,
+    // tilt left to the cameras), "full" (altitude as well), or "auto", which
+    // resolves per capture before anything reads it (applyMetricGpsAuto).
+    std::string metric_gps = "auto";
     double metric_max_error = 0;        // metres; 0 resolves per source
     // The camera attitude each image records (map/AttitudeGauge.h): "auto"
     // takes up and north, "up" the tilt alone, "none" ignores it.
@@ -281,6 +282,8 @@ struct SfmConfig {
     // additionally switches to pair selection above 100 images, which it can
     // only decide once extraction has counted them -- see cmdAuto.
     PairMode pairMode() const;
+    // Whether the GPS sets the written metric frame; an unresolved "auto" does not.
+    bool metricGps() const { return metric_gps == "horizontal" || metric_gps == "full"; }
 };
 
 // ---------------------------------------------------------------------------
@@ -447,7 +450,7 @@ struct SfmConfig {
     F(metric_positions, "metric-positions", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced,        \
       "mapper", 0, 0, "", metric_positions)                                                        \
     F(metric_gps, "metric-gps", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced, "mapper", 0, 0,    \
-      "none|horizontal|full", metric_gps)                                                          \
+      "auto|none|horizontal|full", metric_gps)                                                          \
     F(exif_attitude, "exif-attitude", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced, "mapper", 0, \
       0, "auto|up|none", exif_attitude)                                                            \
     F(metric_max_error, "metric-max-error", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced,        \
