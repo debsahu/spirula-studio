@@ -213,21 +213,6 @@ SS_MSG(masks_combined_in_place,
     RU("Маски в {0} заменяются их сочетанием с маской кадра"),
     TR("{0} içindeki maskeler, kare maskesiyle birleştirilmiş hâlleriyle değiştirilir"));
 
-SS_MSG(stage_masks_python,
-    EN("Generating masks (external Python)"),
-    JA("マスクを作成しています（外部のPython）"),
-    ZH_HANS("正在生成蒙版（外部 Python）"),
-    ZH_HANT("正在產生遮罩（外部 Python）"),
-    KO("마스크를 만드는 중(외부 Python)"),
-    DE("Masken werden erzeugt (externes Python)"),
-    FR("Génération des masques (Python externe)"),
-    ES("Generando las máscaras (Python externo)"),
-    PT("Gerando as máscaras (Python externo)"),
-    IT("Generazione delle maschere (Python esterno)"),
-    NL("Maskers maken (extern Python)"),
-    RU("Создание масок (внешний Python)"),
-    TR("Maskeler oluşturuluyor (harici Python)"));
-
 SS_MSG(stage_finding_features,
     EN("Finding features"),
     JA("特徴点を探しています"),
@@ -1785,6 +1770,45 @@ SS_MSG(train_finished,
     RU("Обучение завершено. Шагов: {0}   Время: {1}"),
     TR("Eğitim tamamlandı. Adım: {0}   Süre: {1}"));
 
+SS_MSG(vram_forecast_warn,
+    EN("Warning: training may run out of GPU memory. Projected peak: {0} ± {1} GiB   "
+       "free for training: {2} GiB   chance of running out: {3}%. Lower --cap-max, "
+       "or close other programs using the GPU."),
+    JA("警告: 学習中に GPU メモリが不足する可能性があります。予測ピーク: {0} ± {1} GiB   "
+       "学習に使える量: {2} GiB   不足する確率: {3}%。--cap-max を下げるか、GPU を"
+       "使っている他のプログラムを閉じてください。"),
+    ZH_HANS("警告：训练可能会耗尽显存。预计峰值：{0} ± {1} GiB   可供训练：{2} GiB   "
+            "耗尽的概率：{3}%。请调低 --cap-max，或关闭其他占用 GPU 的程序。"),
+    ZH_HANT("警告：訓練可能會耗盡顯示記憶體。預計峰值：{0} ± {1} GiB   可供訓練：{2} GiB   "
+            "耗盡的機率：{3}%。請調低 --cap-max，或關閉其他佔用 GPU 的程式。"),
+    KO("경고: 학습 중 GPU 메모리가 부족할 수 있습니다. 예상 최대치: {0} ± {1} GiB   "
+       "학습에 쓸 수 있는 양: {2} GiB   부족할 확률: {3}%. --cap-max를 낮추거나 GPU를 "
+       "쓰는 다른 프로그램을 닫으세요."),
+    DE("Warnung: Dem Training kann der Grafikspeicher ausgehen. Erwartete Spitze: "
+       "{0} ± {1} GiB   für das Training frei: {2} GiB   Wahrscheinlichkeit: {3} %. "
+       "Senken Sie --cap-max oder schließen Sie andere Programme, die die GPU nutzen."),
+    FR("Avertissement : l'entraînement risque de manquer de mémoire GPU. Pic prévu : "
+       "{0} ± {1} Gio   disponible pour l'entraînement : {2} Gio   probabilité : {3} %. "
+       "Réduisez --cap-max ou fermez les autres programmes qui utilisent le GPU."),
+    ES("Aviso: el entrenamiento puede quedarse sin memoria de GPU. Pico previsto: "
+       "{0} ± {1} GiB   libre para entrenar: {2} GiB   probabilidad: {3} %. Reduzca "
+       "--cap-max o cierre otros programas que usen la GPU."),
+    PT("Aviso: o treinamento pode ficar sem memória de GPU. Pico previsto: {0} ± {1} GiB   "
+       "livre para o treinamento: {2} GiB   probabilidade: {3}%. Reduza --cap-max ou "
+       "feche outros programas que usam a GPU."),
+    IT("Attenzione: l'addestramento potrebbe esaurire la memoria GPU. Picco previsto: "
+       "{0} ± {1} GiB   libera per l'addestramento: {2} GiB   probabilità: {3}%. Riduci "
+       "--cap-max o chiudi gli altri programmi che usano la GPU."),
+    NL("Waarschuwing: de training kan zonder GPU-geheugen komen te zitten. Verwachte piek: "
+       "{0} ± {1} GiB   vrij voor training: {2} GiB   kans: {3}%. Verlaag --cap-max of "
+       "sluit andere programma's die de GPU gebruiken."),
+    RU("Предупреждение: обучению может не хватить видеопамяти. Ожидаемый пик: "
+       "{0} ± {1} ГиБ   доступно для обучения: {2} ГиБ   вероятность нехватки: {3} %. "
+       "Уменьшите --cap-max или закройте другие программы, использующие GPU."),
+    TR("Uyarı: eğitimin GPU belleği yetmeyebilir. Beklenen tepe: {0} ± {1} GiB   "
+       "eğitim için boş: {2} GiB   yetmeme olasılığı: %{3}. --cap-max değerini düşürün "
+       "ya da GPU kullanan diğer programları kapatın."));
+
 SS_MSG(partition_applied,
     EN("Partition part {0}: cameras {1} (core {2}, ring {3}), seed points {4}"),
     JA("分割パート {0}: カメラ {1}（コア {2}、リング {3}）、初期点 {4}"),
@@ -1829,6 +1853,21 @@ SS_MSG(region_applied,
     NL("Interessegebied: programmaknopen {0}; splats erbuiten loten met gewicht {1}"),
     RU("Область интереса: узлов программы {0}; сплаты снаружи участвуют в выборке с весом {1}"),
     TR("İlgi bölgesi: program düğümü {0}; dışarıdaki splatlar {1} ağırlığıyla çekilir"));
+
+SS_MSG(region_masks,
+    EN("Region of interest: {0} images masked to what they show of it; {1}% of pixels left out"),
+    JA("関心領域: {0} 枚の画像を領域が写る部分に絞りました。画素の {1}% を除外"),
+    ZH_HANS("感兴趣区域：{0} 张图像只保留拍到区域的部分；排除了 {1}% 的像素"),
+    ZH_HANT("感興趣區域：{0} 張影像只保留拍到區域的部分；排除了 {1}% 的像素"),
+    KO("관심 영역: 이미지 {0}장을 영역이 보이는 부분으로 제한했습니다. 픽셀의 {1}%를 제외"),
+    DE("Interessenbereich: {0} Bilder auf das maskiert, was sie davon zeigen; {1}% der Pixel ausgelassen"),
+    FR("Région d'intérêt : {0} images masquées à ce qu'elles en montrent ; {1} % des pixels écartés"),
+    ES("Región de interés: {0} imágenes enmascaradas a lo que muestran de ella; {1}% de píxeles fuera"),
+    PT("Região de interesse: {0} imagens mascaradas ao que mostram dela; {1}% dos píxeis de fora"),
+    IT("Regione di interesse: {0} immagini mascherate su ciò che ne mostrano; {1}% dei pixel esclusi"),
+    NL("Interessegebied: {0} beelden gemaskeerd tot wat ze ervan tonen; {1}% van de pixels weggelaten"),
+    RU("Область интереса: {0} изображений ограничены тем, что они из неё показывают; исключено {1}% пикселей"),
+    TR("İlgi bölgesi: {0} görüntü bölgeden gösterdikleriyle maskelendi; piksellerin %{1}'i dışarıda"));
 
 SS_MSG(err_partition_part,
     EN("--partition needs --partition-part between 0 and {0}"),
@@ -3723,6 +3762,56 @@ SS_MSG(err_ffmpeg_split_failed,
     RU("ffmpeg не смог разделить дорожки (см. журнал)."),
     TR("ffmpeg izleri ayıramadı (günlüğe bakın)."));
 
+SS_MSG(err_ffmpeg_not_found,
+    EN("ffmpeg was not found ('{0}'). Install it, or pass --ffmpeg with its path."),
+    JA("ffmpeg が見つかりません（'{0}'）。インストールするか、--ffmpeg でパスを指定してください。"),
+    ZH_HANS("找不到 ffmpeg（'{0}'）。请安装它，或用 --ffmpeg 指定其路径。"),
+    ZH_HANT("找不到 ffmpeg（'{0}'）。請安裝它，或用 --ffmpeg 指定其路徑。"),
+    KO("ffmpeg 을 찾지 못했습니다('{0}'). 설치하거나 --ffmpeg 로 경로를 지정하세요."),
+    DE("ffmpeg wurde nicht gefunden ('{0}'). Installieren Sie es oder geben Sie "
+       "seinen Pfad mit --ffmpeg an."),
+    FR("ffmpeg est introuvable ('{0}'). Installez-le, ou indiquez son chemin avec "
+       "--ffmpeg."),
+    ES("No se encontró ffmpeg ('{0}'). Instálalo o indica su ruta con --ffmpeg."),
+    PT("O ffmpeg não foi encontrado ('{0}'). Instale-o ou indique o caminho com "
+       "--ffmpeg."),
+    IT("ffmpeg non trovato ('{0}'). Lo installi o ne indichi il percorso con --ffmpeg."),
+    NL("ffmpeg is niet gevonden ('{0}'). Installeer het of geef het pad op met "
+       "--ffmpeg."),
+    RU("ffmpeg не найден ('{0}'). Установите его или укажите путь через --ffmpeg."),
+    TR("ffmpeg bulunamadı ('{0}'). Kurun ya da yolunu --ffmpeg ile verin."));
+
+SS_MSG(err_no_video_decoder,
+    EN("Frames cannot be decoded in-process here ({0}), and ffmpeg was not found "
+       "('{1}'). Install ffmpeg, or pass --ffmpeg with its path."),
+    JA("ここではプロセス内でフレームをデコードできず（{0}）、ffmpeg も見つかりません"
+       "（'{1}'）。ffmpeg をインストールするか、--ffmpeg でパスを指定してください。"),
+    ZH_HANS("此处无法在进程内解码帧（{0}），也找不到 ffmpeg（'{1}'）。请安装 ffmpeg，"
+            "或用 --ffmpeg 指定其路径。"),
+    ZH_HANT("此處無法在行程內解碼影格（{0}），也找不到 ffmpeg（'{1}'）。請安裝 ffmpeg，"
+            "或用 --ffmpeg 指定其路徑。"),
+    KO("여기서는 프레임을 프로세스 안에서 디코딩할 수 없고({0}), ffmpeg 도 찾지 "
+       "못했습니다('{1}'). ffmpeg 을 설치하거나 --ffmpeg 로 경로를 지정하세요."),
+    DE("Einzelbilder lassen sich hier nicht im Prozess dekodieren ({0}), und ffmpeg "
+       "wurde nicht gefunden ('{1}'). Installieren Sie ffmpeg oder geben Sie seinen "
+       "Pfad mit --ffmpeg an."),
+    FR("Les images ne peuvent pas être décodées dans le processus ici ({0}), et "
+       "ffmpeg est introuvable ('{1}'). Installez ffmpeg, ou indiquez son chemin "
+       "avec --ffmpeg."),
+    ES("Aquí no se pueden decodificar los fotogramas dentro del proceso ({0}) y no "
+       "se encontró ffmpeg ('{1}'). Instala ffmpeg o indica su ruta con --ffmpeg."),
+    PT("Aqui os quadros não podem ser decodificados no processo ({0}) e o ffmpeg não "
+       "foi encontrado ('{1}'). Instale o ffmpeg ou indique o caminho com --ffmpeg."),
+    IT("Qui i fotogrammi non si possono decodificare nel processo ({0}) e ffmpeg non "
+       "è stato trovato ('{1}'). Installi ffmpeg o ne indichi il percorso con "
+       "--ffmpeg."),
+    NL("Beelden kunnen hier niet in het proces worden gedecodeerd ({0}) en ffmpeg is "
+       "niet gevonden ('{1}'). Installeer ffmpeg of geef het pad op met --ffmpeg."),
+    RU("Здесь кадры нельзя декодировать внутри процесса ({0}), и ffmpeg не найден "
+       "('{1}'). Установите ffmpeg или укажите путь через --ffmpeg."),
+    TR("Kareler burada süreç içinde çözülemiyor ({0}) ve ffmpeg bulunamadı ('{1}'). "
+       "ffmpeg'i kurun ya da yolunu --ffmpeg ile verin."));
+
 SS_MSG(err_ffmpeg_extract_failed,
     EN("ffmpeg could not extract the frames (see the log)."),
     JA("ffmpeg がフレームを取り出せませんでした（ログを参照）。"),
@@ -3858,44 +3947,6 @@ SS_MSG(err_copy_failed,
     RU("Не удалось поместить {0} в {1} ({2})."),
     TR("{0}, {1} içine konulamadı ({2})."));
 
-SS_MSG(err_clicks_need_builtin,
-    EN("Clicked objects need the built-in segmentation; the external Python "
-       "masker only understands text prompts. Turn off \"external masking\", or "
-       "describe the object in words."),
-    JA("クリックで選んだ対象には内蔵のセグメンテーションが必要です。外部の Python "
-       "マスカーはテキストのプロンプトしか解釈できません。「外部マスク」をオフに"
-       "するか、対象を言葉で説明してください。"),
-    ZH_HANS("点击选中的目标需要内置分割；外部的 Python 遮罩器只认文本提示。"
-            "请关闭“外部遮罩”，或用文字描述目标。"),
-    ZH_HANT("點選選中的目標需要內建分割；外部的 Python 遮罩器只認文字提示。"
-            "請關閉「外部遮罩」，或用文字描述目標。"),
-    KO("클릭으로 고른 대상에는 내장 분할이 필요합니다. 외부 Python 마스커는 텍스트 "
-       "프롬프트만 이해합니다. \"외부 마스킹\"을 끄거나 대상을 말로 설명하세요."),
-    DE("Angeklickte Objekte brauchen die eingebaute Segmentierung; der externe "
-       "Python-Masker versteht nur Textprompts. Schalten Sie \"externe "
-       "Maskierung\" ab, oder beschreiben Sie das Objekt in Worten."),
-    FR("Les objets cliqués ont besoin de la segmentation intégrée ; le masqueur "
-       "Python externe ne comprend que des consignes textuelles. Désactivez le "
-       "« masquage externe », ou décrivez l'objet avec des mots."),
-    ES("Los objetos señalados con clic necesitan la segmentación integrada; el "
-       "enmascarador externo de Python solo entiende indicaciones de texto. "
-       "Desactiva el «enmascarado externo», o describe el objeto con palabras."),
-    PT("Objetos clicados precisam da segmentação embutida; o mascarador externo "
-       "em Python só entende comandos de texto. Desligue a \"máscara externa\", "
-       "ou descreva o objeto em palavras."),
-    IT("Gli oggetti cliccati richiedono la segmentazione integrata; il "
-       "mascheratore Python esterno capisce solo prompt testuali. Disattivi la "
-       "\"mascheratura esterna\", oppure descriva l'oggetto a parole."),
-    NL("Aangeklikte objecten hebben de ingebouwde segmentatie nodig; de externe "
-       "Python-masker begrijpt alleen tekstprompts. Zet \"extern maskeren\" uit, "
-       "of beschrijf het object in woorden."),
-    RU("Объекты, выбранные щелчком, требуют встроенной сегментации; внешний "
-       "маскировщик на Python понимает только текстовые запросы. Отключите "
-       "«внешнее маскирование» или опишите объект словами."),
-    TR("Tıklanan nesneler yerleşik bölütlemeyi gerektirir; harici Python "
-       "maskeleyici yalnızca metin istemlerini anlar. \"Harici maskeleme\"yi "
-       "kapatın ya da nesneyi sözle anlatın."));
-
 SS_MSG(err_no_images_to_mask,
     EN("There are no images to mask."),
     JA("マスクする画像がありません。"),
@@ -3925,76 +3976,6 @@ SS_MSG(err_masking_failed_on,
     NL("Het maskeren van {0} is mislukt: {1}"),
     RU("Не удалось замаскировать {0}: {1}"),
     TR("{0} maskelenemedi: {1}"));
-
-SS_MSG(err_python_missing,
-    EN("Python was not found ('{0}'). External masking needs Python with the "
-       "lang-segment-anything package. Set the Python path under Tool "
-       "locations, or use the built-in segmentation."),
-    JA("Python が見つかりません（'{0}'）。外部マスクには lang-segment-anything "
-       "パッケージを入れた Python が必要です。「ツールの場所」で Python のパスを"
-       "設定するか、内蔵のセグメンテーションを使ってください。"),
-    ZH_HANS("找不到 Python（'{0}'）。外部遮罩需要装有 lang-segment-anything 包的 "
-            "Python。请在“工具位置”中设置 Python 路径，或改用内置分割。"),
-    ZH_HANT("找不到 Python（'{0}'）。外部遮罩需要裝有 lang-segment-anything 套件的 "
-            "Python。請在「工具位置」中設定 Python 路徑，或改用內建分割。"),
-    KO("Python 을 찾지 못했습니다('{0}'). 외부 마스킹에는 lang-segment-anything "
-       "패키지가 있는 Python 이 필요합니다. \"도구 위치\"에서 Python 경로를 "
-       "지정하거나 내장 분할을 쓰세요."),
-    DE("Python wurde nicht gefunden ('{0}'). Externe Maskierung braucht Python "
-       "mit dem Paket lang-segment-anything. Tragen Sie den Python-Pfad unter "
-       "Werkzeugpfade ein, oder nutzen Sie die eingebaute Segmentierung."),
-    FR("Python est introuvable ('{0}'). Le masquage externe a besoin de Python "
-       "avec le paquet lang-segment-anything. Indiquez le chemin de Python sous "
-       "Emplacements des outils, ou utilisez la segmentation intégrée."),
-    ES("No se encontró Python ('{0}'). El enmascarado externo necesita Python "
-       "con el paquete lang-segment-anything. Indica la ruta de Python en "
-       "Ubicaciones de herramientas, o usa la segmentación integrada."),
-    PT("O Python não foi encontrado ('{0}'). A máscara externa precisa de Python "
-       "com o pacote lang-segment-anything. Informe o caminho do Python em "
-       "Locais das ferramentas, ou use a segmentação embutida."),
-    IT("Python non è stato trovato ('{0}'). La mascheratura esterna richiede "
-       "Python con il pacchetto lang-segment-anything. Indichi il percorso di "
-       "Python in Posizioni degli strumenti, oppure usi la segmentazione "
-       "integrata."),
-    NL("Python is niet gevonden ('{0}'). Extern maskeren heeft Python met het "
-       "pakket lang-segment-anything nodig. Geef het Python-pad op onder "
-       "Gereedschapslocaties, of gebruik de ingebouwde segmentatie."),
-    RU("Python не найден ('{0}'). Внешнему маскированию нужен Python с пакетом "
-       "lang-segment-anything. Укажите путь к Python в «Расположении "
-       "инструментов» или используйте встроенную сегментацию."),
-    TR("Python bulunamadı ('{0}'). Harici maskeleme, lang-segment-anything "
-       "paketinin kurulu olduğu bir Python ister. Python yolunu Araç konumları "
-       "altında belirtin ya da yerleşik bölütlemeyi kullanın."));
-
-SS_MSG(err_cannot_write,
-    EN("Cannot write {0}."),
-    JA("{0} を書き出せません。"),
-    ZH_HANS("无法写入 {0}。"),
-    ZH_HANT("無法寫入 {0}。"),
-    KO("{0} 을(를) 쓸 수 없습니다."),
-    DE("{0} kann nicht geschrieben werden."),
-    FR("Impossible d'écrire {0}."),
-    ES("No se puede escribir {0}."),
-    PT("Não é possível escrever {0}."),
-    IT("Non è possibile scrivere {0}."),
-    NL("{0} kan niet geschreven worden."),
-    RU("Не удаётся записать {0}."),
-    TR("{0} yazılamıyor."));
-
-SS_MSG(err_mask_generation_failed,
-    EN("Mask generation failed."),
-    JA("マスクの生成に失敗しました。"),
-    ZH_HANS("生成掩码失败。"),
-    ZH_HANT("產生遮罩失敗。"),
-    KO("마스크 생성에 실패했습니다."),
-    DE("Die Maskenerzeugung ist fehlgeschlagen."),
-    FR("La génération des masques a échoué."),
-    ES("Falló la generación de máscaras."),
-    PT("A geração de máscaras falhou."),
-    IT("La generazione delle maschere non è riuscita."),
-    NL("Het maken van de maskers is mislukt."),
-    RU("Не удалось создать маски."),
-    TR("Maske üretimi başarısız oldu."));
 
 SS_MSG(err_mask_model_not_downloaded,
     EN("The masking model has not been downloaded yet. Get it under the masking "
@@ -4060,101 +4041,6 @@ SS_MSG(err_geometry_model_not_downloaded,
        "нормалей -- загрузка нужна только один раз -- и попробуйте снова."),
     TR("Geometri modeli henüz indirilmedi. Derinlik ve normal seçeneklerinden "
        "getirin -- bir kez indirilir -- ve yeniden deneyin."));
-
-SS_MSG(err_mask_missing_packages,
-    EN("Mask generation failed: the Python packages are missing. Install "
-       "lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, which needs CUDA PyTorch)."),
-    JA("マスクの生成に失敗しました。Python パッケージが足りません。"
-       "lang-segment-anything を入れてください（pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything。CUDA 版 PyTorch が必要です）。"),
-    ZH_HANS("生成掩码失败：缺少 Python 包。请安装 lang-segment-anything"
-            "（pip install git+https://github.com/luca-medeiros/lang-segment-anything，"
-            "需要 CUDA 版 PyTorch）。"),
-    ZH_HANT("產生遮罩失敗：缺少 Python 套件。請安裝 lang-segment-anything"
-            "（pip install git+https://github.com/luca-medeiros/lang-segment-anything，"
-            "需要 CUDA 版 PyTorch）。"),
-    KO("마스크 생성에 실패했습니다: Python 패키지가 없습니다. "
-       "lang-segment-anything 을 설치하세요(pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, CUDA PyTorch 필요)."),
-    DE("Die Maskenerzeugung ist fehlgeschlagen: die Python-Pakete fehlen. "
-       "Installieren Sie lang-segment-anything (pip install git+https://"
-       "github.com/luca-medeiros/lang-segment-anything, braucht CUDA-PyTorch)."),
-    FR("La génération des masques a échoué : les paquets Python manquent. "
-       "Installez lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, qui a besoin de PyTorch CUDA)."),
-    ES("Falló la generación de máscaras: faltan los paquetes de Python. Instala "
-       "lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, que necesita PyTorch con CUDA)."),
-    PT("A geração de máscaras falhou: faltam os pacotes de Python. Instale o "
-       "lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, que precisa de PyTorch com CUDA)."),
-    IT("La generazione delle maschere non è riuscita: mancano i pacchetti "
-       "Python. Installi lang-segment-anything (pip install git+https://"
-       "github.com/luca-medeiros/lang-segment-anything, richiede PyTorch CUDA)."),
-    NL("Het maken van de maskers is mislukt: de Python-pakketten ontbreken. "
-       "Installeer lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, met CUDA-PyTorch)."),
-    RU("Не удалось создать маски: отсутствуют пакеты Python. Установите "
-       "lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, нужен PyTorch с CUDA)."),
-    TR("Maske üretimi başarısız oldu: Python paketleri eksik. "
-       "lang-segment-anything kurun (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, CUDA'lı PyTorch ister)."));
-
-SS_MSG(err_mask_missing_packages_sam3,
-    EN("Mask generation failed: the Python packages are missing. Install "
-       "lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, which needs CUDA PyTorch), or for "
-       "SAM 3: https://github.com/facebookresearch/sam3"),
-    JA("マスクの生成に失敗しました。Python パッケージが足りません。"
-       "lang-segment-anything を入れてください（pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything。CUDA 版 PyTorch が必要です）。"
-       "SAM 3 の場合は https://github.com/facebookresearch/sam3 を参照。"),
-    ZH_HANS("生成掩码失败：缺少 Python 包。请安装 lang-segment-anything"
-            "（pip install git+https://github.com/luca-medeiros/lang-segment-anything，"
-            "需要 CUDA 版 PyTorch）；若用 SAM 3，见 "
-            "https://github.com/facebookresearch/sam3"),
-    ZH_HANT("產生遮罩失敗：缺少 Python 套件。請安裝 lang-segment-anything"
-            "（pip install git+https://github.com/luca-medeiros/lang-segment-anything，"
-            "需要 CUDA 版 PyTorch）；若用 SAM 3，見 "
-            "https://github.com/facebookresearch/sam3"),
-    KO("마스크 생성에 실패했습니다: Python 패키지가 없습니다. "
-       "lang-segment-anything 을 설치하세요(pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, CUDA PyTorch 필요). SAM 3 은 "
-       "https://github.com/facebookresearch/sam3 을 보세요."),
-    DE("Die Maskenerzeugung ist fehlgeschlagen: die Python-Pakete fehlen. "
-       "Installieren Sie lang-segment-anything (pip install git+https://"
-       "github.com/luca-medeiros/lang-segment-anything, braucht CUDA-PyTorch), "
-       "oder für SAM 3: https://github.com/facebookresearch/sam3"),
-    FR("La génération des masques a échoué : les paquets Python manquent. "
-       "Installez lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, qui a besoin de PyTorch CUDA), ou "
-       "pour SAM 3 : https://github.com/facebookresearch/sam3"),
-    ES("Falló la generación de máscaras: faltan los paquetes de Python. Instala "
-       "lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, que necesita PyTorch con CUDA), o "
-       "para SAM 3: https://github.com/facebookresearch/sam3"),
-    PT("A geração de máscaras falhou: faltam os pacotes de Python. Instale o "
-       "lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, que precisa de PyTorch com CUDA), "
-       "ou para o SAM 3: https://github.com/facebookresearch/sam3"),
-    IT("La generazione delle maschere non è riuscita: mancano i pacchetti "
-       "Python. Installi lang-segment-anything (pip install git+https://"
-       "github.com/luca-medeiros/lang-segment-anything, richiede PyTorch CUDA), "
-       "oppure per SAM 3: https://github.com/facebookresearch/sam3"),
-    NL("Het maken van de maskers is mislukt: de Python-pakketten ontbreken. "
-       "Installeer lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, met CUDA-PyTorch), of voor SAM 3: "
-       "https://github.com/facebookresearch/sam3"),
-    RU("Не удалось создать маски: отсутствуют пакеты Python. Установите "
-       "lang-segment-anything (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, нужен PyTorch с CUDA), либо для "
-       "SAM 3: https://github.com/facebookresearch/sam3"),
-    TR("Maske üretimi başarısız oldu: Python paketleri eksik. "
-       "lang-segment-anything kurun (pip install git+https://github.com/"
-       "luca-medeiros/lang-segment-anything, CUDA'lı PyTorch ister) ya da SAM 3 "
-       "için: https://github.com/facebookresearch/sam3"));
 
 SS_MSG(err_no_builtin_segmentation,
     EN("This build has no built-in segmentation (-DSS_BUILD_SAM=OFF)."),
@@ -4524,36 +4410,6 @@ SS_MSG(err_geometry_failed,
        "завершена, и на ней можно обучать как есть."),
     TR("derinlik ve normal kestirimi başarısız oldu (günlüğe bakın). Yeniden "
        "kurmanın kendisi tamamlandı ve olduğu gibi eğitilebilir."));
-
-SS_MSG(err_subject_needs_builtin,
-    EN("BiRefNet runs only in the built-in masker; the external Python masker cannot "
-       "load it. Turn off \"external masking\", or pick a SAM model."),
-    JA("BiRefNet は内蔵のマスカーでしか動きません。外部の Python マスカーでは読み込め"
-       "ません。「外部マスク」をオフにするか、SAM のモデルを選んでください。"),
-    ZH_HANS("BiRefNet 只能在内置的蒙版程序中运行，外部 Python 蒙版程序无法加载它。"
-            "请关闭“外部蒙版”，或选择一个 SAM 模型。"),
-    ZH_HANT("BiRefNet 只能在內建的遮罩程式中執行，外部 Python 遮罩程式無法載入它。"
-            "請關閉「外部遮罩」，或選擇一個 SAM 模型。"),
-    KO("BiRefNet 은 내장 마스커에서만 돌아갑니다. 외부 Python 마스커는 이것을 불러오지 "
-       "못합니다. [외부 마스크]를 끄거나 SAM 모델을 고르세요."),
-    DE("BiRefNet läuft nur im eingebauten Maskierer; der externe Python-Maskierer kann "
-       "es nicht laden. „Externe Maskierung“ ausschalten oder ein SAM-Modell wählen."),
-    FR("BiRefNet ne fonctionne que dans le masqueur intégré ; le masqueur Python externe "
-       "ne sait pas le charger. Désactivez « masquage externe » ou choisissez un modèle "
-       "SAM."),
-    ES("BiRefNet solo funciona en el enmascarador integrado; el enmascarador externo de "
-       "Python no puede cargarlo. Desactive «enmascarado externo» o elija un modelo SAM."),
-    PT("O BiRefNet só roda no mascarador integrado; o mascarador Python externo não "
-       "consegue carregá-lo. Desative “mascaramento externo” ou escolha um modelo SAM."),
-    IT("BiRefNet funziona solo nel mascheratore integrato; quello Python esterno non "
-       "riesce a caricarlo. Disattivate «mascheratura esterna» o scegliete un modello "
-       "SAM."),
-    NL("BiRefNet draait alleen in de ingebouwde maskeerder; de externe Python-maskeerder "
-       "kan het niet laden. Zet \"externe maskering\" uit of kies een SAM-model."),
-    RU("BiRefNet работает только во встроенном маскировщике; внешний на Python не может "
-       "его загрузить. Отключите «внешнее маскирование» или выберите модель SAM."),
-    TR("BiRefNet yalnızca yerleşik maskeleyicide çalışır; dış Python maskeleyici onu "
-       "yükleyemez. \"Dış maskeleme\"yi kapatın ya da bir SAM modeli seçin."));
 
 }  // namespace log
 }  // namespace msg

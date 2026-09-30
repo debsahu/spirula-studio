@@ -113,7 +113,7 @@ uint label_field_nearest(float3 p, float3 n, bool has_n, float4* bvh, float4* se
 [CudaDeviceExport]
 bool region_contains(float3 p, float3 n, bool has_n, float4* program, uint num_prog,
                      float4* bvh, float4* seeds, uint num_field_nodes) {
-    bool stack[32];
+    bool stack[32] = {};
     uint sp = 0;
     for (uint i = 0; i < num_prog; i++) {
         float4 h = program[i * kRegionNodeStride];

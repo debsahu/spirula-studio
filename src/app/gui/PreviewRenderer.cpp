@@ -2,6 +2,8 @@
 
 #include "app/gui/PreviewRenderer.h"
 
+#include "app/webviewer/RegionOverlay.h"
+
 #include "app/gui/GlLoader.h"
 #include "app/TrainerCore.h"
 #include "data/CameraMath.h"
@@ -137,7 +139,9 @@ out vec3 v_world;
 out float v_kill;
 out float v_fxa;
 out float v_fxr;
+out float v_dash;
 void main() {
+    v_dash = a_aux.x;
     vec3 p = a_pos + u_scale * a_aux;
     float fxs = 1.0;
     v_fxa = 1.0;
@@ -185,8 +189,11 @@ in vec3 v_world;
 in float v_kill;
 in float v_fxa;
 in float v_fxr;
+in float v_dash;
 uniform vec2 u_vp;
 uniform vec2 u_zrange;
+uniform float u_alpha;      // lines and triangles: 1 opaque
+uniform float u_dash;       // > 0: lines dashed with this period of v_dash
 uniform int u_points;       // drawing the cloud: 0 square, 1 circle, 2 gaussian, 3 sphere
 uniform float u_pradius;
 out vec4 frag;
@@ -223,7 +230,8 @@ void main() {
     vec2 px = (0.5 * ndc + 0.5) * u_vp;
     if (clipped ||
         length(px - gl_FragCoord.xy) > 0.05 * min(u_vp.x, u_vp.y)) discard;
-    frag = vec4(clip_colour(v_col.rgb, v_world), 1.0);
+    if (u_dash > 0.0 && fract(v_dash / u_dash) > 0.55) discard;
+    frag = vec4(clip_colour(v_col.rgb, v_world), u_alpha);
 }
 )";
 
@@ -432,6 +440,8 @@ bool PreviewRenderer::ensure_program() {
     _u_scale = glx::GetUniformLocation(_prog, "u_scale");
     _u_dscale = glx::GetUniformLocation(_prog, "u_dscale");
     _u_color = glx::GetUniformLocation(_prog, "u_color");
+    _u_alpha = glx::GetUniformLocation(_prog, "u_alpha");
+    _u_dash = glx::GetUniformLocation(_prog, "u_dash");
     _u_model = glx::GetUniformLocation(_prog, "u_model");
     _u_s = glx::GetUniformLocation(_prog, "u_s");
     _u_zrange = glx::GetUniformLocation(_prog, "u_zrange");
@@ -951,6 +961,14 @@ bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& pos
     };
     make_vao(_vao_pts, _vbo_pts, pts.data(), pts.size() * sizeof(V),
              sizeof(V), false);
+    _pts_stride = stride;
+    _pts_rgb.resize(pts.size() * 3);
+    for (size_t i = 0; i < pts.size(); i++) {
+        _pts_rgb[i * 3] = pts[i].ax;
+        _pts_rgb[i * 3 + 1] = pts[i].ay;
+        _pts_rgb[i * 3 + 2] = pts[i].az;
+    }
+    _pts_tinted = false;
     make_vao(_vao_cam, _vbo_cam, cams.data(), cams.size() * sizeof(VL),
              sizeof(VL), true);
 
@@ -1081,6 +1099,8 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
     glx::Uniform1i(_u_points, 0);
     glx::Uniform1f(_u_psize, 1.0f);
     glx::Uniform1f(_u_pradius, 0.0f);
+    glx::Uniform1f(_u_alpha, 1.0f);
+    glx::Uniform1f(_u_dash, 0.0f);
 
     // Grid + axes (aux = vertex color; depth-tested like everything else;
     // a_delta in position units -> u_dscale = 1).
@@ -1148,6 +1168,8 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
         }
     }
 
+    if (_ov_visible && _ov) draw_overlay(view);
+
     glx::BindVertexArray(0);
     glx::UseProgram(0);
     glDisable(GL_DEPTH_TEST);
@@ -1173,7 +1195,160 @@ void PreviewRenderer::destroy_mesh_gl() {
     _mesh_mode = 0;
 }
 
+void PreviewRenderer::set_overlay(std::shared_ptr<const spirula::RegionOverlay> ov, bool visible) {
+    _ov = std::move(ov);
+    _ov_visible = visible;
+}
+
+void PreviewRenderer::dim_points_outside(std::shared_ptr<const std::vector<uint8_t>> flags, bool on) {
+    on = on && flags;
+    if (!_vbo_pts || _pts_rgb.empty() || (!on && !_pts_tinted) ||
+        (on && _pts_tinted && flags == _tint_flags))
+        return;
+    static const std::vector<uint8_t> none;
+    const std::vector<uint8_t>& inside = flags ? *flags : none;
+    std::vector<V> pts(_pts_rgb.size() / 3);
+    for (size_t i = 0; i < pts.size(); i++) {
+        V& v = pts[i];
+        v.px = _pick_xyz[i * 3];
+        v.py = _pick_xyz[i * 3 + 1];
+        v.pz = _pick_xyz[i * 3 + 2];
+        float c[3] = {_pts_rgb[i * 3], _pts_rgb[i * 3 + 1], _pts_rgb[i * 3 + 2]};
+        const size_t src = i * (size_t)_pts_stride;
+        if (on && src < inside.size() && !inside[src]) {
+            const float g = 0.3f * (0.299f * c[0] + 0.587f * c[1] + 0.114f * c[2]);
+            for (float& x : c) x = 0.15f * x + 0.85f * g;
+        }
+        v.ax = c[0];
+        v.ay = c[1];
+        v.az = c[2];
+    }
+    glx::BindBuffer(GL_ARRAY_BUFFER, (GLuint)_vbo_pts);
+    glx::BufferData(GL_ARRAY_BUFFER, (glx::glSizeiptr)(pts.size() * sizeof(V)), pts.data(), GL_STATIC_DRAW);
+    glx::BindBuffer(GL_ARRAY_BUFFER, 0);
+    _pts_tinted = on;
+    _tint_flags = on ? flags : nullptr;
+}
+
+void PreviewRenderer::destroy_overlay_gl() {
+    GLuint b[2] = {(GLuint)_vbo_ov, (GLuint)_vbo_ovl};
+    GLuint a[2] = {(GLuint)_vao_ov, (GLuint)_vao_ovl};
+    if (_vbo_ov) glx::DeleteBuffers(2, b);
+    if (_vao_ov) glx::DeleteVertexArrays(2, a);
+    _vbo_ov = _vbo_ovl = _vao_ov = _vao_ovl = 0;
+    _ov_uploaded.reset();
+    _ov_local.reset();
+}
+
+// Into the normalized frame the preview draws in, like the points.
+void PreviewRenderer::upload_overlay() {
+    destroy_overlay_gl();
+    _ov_local = std::make_shared<spirula::RegionOverlay>(*_ov);
+    std::vector<VL> tris;
+    _ov_first.clear();
+    _ov_dash.clear();
+    for (spirula::RegionOverlay::Layer& l : _ov_local->layers) {
+        for (size_t v = 0; v < l.xyz.size(); v += 3) {
+            const float p[3] = {l.xyz[v], l.xyz[v + 1], l.xyz[v + 2]};
+            for (int r = 0; r < 3; r++)
+                l.xyz[v + r] = _t2n[r * 4] * p[0] + _t2n[r * 4 + 1] * p[1] + _t2n[r * 4 + 2] * p[2] + _t2n[r * 4 + 3];
+        }
+        _ov_first.push_back((int64_t)tris.size());
+        for (uint32_t i : l.tri) {
+            VL v{};
+            v.px = l.xyz[i * 3];
+            v.py = l.xyz[i * 3 + 1];
+            v.pz = l.xyz[i * 3 + 2];
+            tris.push_back(v);
+        }
+        double len = 0;
+        for (size_t e = 0; e < l.edge.size(); e += 2) {
+            const float* a = &l.xyz[l.edge[e] * 3];
+            const float* b = &l.xyz[l.edge[e + 1] * 3];
+            len += std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) +
+                             (a[2] - b[2]) * (a[2] - b[2]));
+        }
+        _ov_dash.push_back(l.edge.empty() ? 0.0f : (float)(1.5 * len / (double)(l.edge.size() / 2)));
+    }
+    _ov_first.push_back((int64_t)tris.size());
+    for (int pass = 0; pass < 2; pass++) {
+        GLuint va = 0, vb = 0;
+        glx::GenVertexArrays(1, &va);
+        glx::GenBuffers(1, &vb);
+        glx::BindVertexArray(va);
+        glx::BindBuffer(GL_ARRAY_BUFFER, vb);
+        if (pass == 0)
+            glx::BufferData(GL_ARRAY_BUFFER, (glx::glSizeiptr)(tris.size() * sizeof(VL)), tris.data(),
+                            GL_STATIC_DRAW);
+        for (int k = 0; k < 3; k++) {
+            glx::EnableVertexAttribArray(k);
+            glx::VertexAttribPointer(k, 3, GL_FLOAT, GL_FALSE, sizeof(VL), (void*)(3 * k * sizeof(float)));
+        }
+        (pass == 0 ? _vao_ov : _vao_ovl) = va;
+        (pass == 0 ? _vbo_ov : _vbo_ovl) = vb;
+    }
+    glx::BindVertexArray(0);
+    _ov_uploaded = _ov;
+}
+
+// A translucent fill that writes no depth, then the silhouette dashed; the
+// outline follows the eye, so it is rebuilt every frame.
+void PreviewRenderer::draw_overlay(const float view[16]) {
+    if (_ov != _ov_uploaded) upload_overlay();
+    if (!_ov_local || !_vao_ov) return;
+    float eye[3];
+    for (int c = 0; c < 3; c++)
+        eye[c] = -(view[0 * 4 + c] * view[3] + view[1 * 4 + c] * view[7] + view[2 * 4 + c] * view[11]);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glx::Uniform1f(_u_scale, 0.0f);
+    glx::Uniform1f(_u_dscale, 0.0f);
+    const std::vector<spirula::RegionOverlay::Layer>& layers = _ov_local->layers;
+    const float fill = layers.size() > 1 ? 0.12f : 0.2f;
+    glx::BindVertexArray(_vao_ov);
+    for (size_t k = 0; k < layers.size(); k++) {
+        glx::Uniform4f(_u_color, layers[k].rgb[0], layers[k].rgb[1], layers[k].rgb[2], 1.0f);
+        glx::Uniform1f(_u_alpha, fill);
+        glDrawArrays(GL_TRIANGLES, (GLint)_ov_first[k], (GLsizei)(_ov_first[k + 1] - _ov_first[k]));
+    }
+    std::vector<VL> lines;
+    std::vector<int64_t> first;
+    std::vector<float> seg;
+    for (const spirula::RegionOverlay::Layer& l : layers) {
+        first.push_back((int64_t)lines.size());
+        spirula::region_outline(l, eye, seg);
+        for (size_t i = 0; i + 6 <= seg.size(); i += 6) {
+            const float* a = &seg[i];
+            const float* b = &seg[i + 3];
+            const float len = std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) +
+                                        (a[2] - b[2]) * (a[2] - b[2]));
+            VL va{}, vb{};
+            va.px = a[0]; va.py = a[1]; va.pz = a[2];
+            vb.px = b[0]; vb.py = b[1]; vb.pz = b[2];
+            vb.ax = len;
+            lines.push_back(va);
+            lines.push_back(vb);
+        }
+    }
+    first.push_back((int64_t)lines.size());
+    glx::BindVertexArray(_vao_ovl);
+    glx::BindBuffer(GL_ARRAY_BUFFER, (GLuint)_vbo_ovl);
+    glx::BufferData(GL_ARRAY_BUFFER, (glx::glSizeiptr)(lines.size() * sizeof(VL)), lines.data(), GL_STREAM_DRAW);
+    for (size_t k = 0; k < layers.size(); k++) {
+        glx::Uniform4f(_u_color, layers[k].rgb[0], layers[k].rgb[1], layers[k].rgb[2], 1.0f);
+        glx::Uniform1f(_u_alpha, 0.95f);
+        glx::Uniform1f(_u_dash, _ov_dash[k]);
+        glDrawArrays(GL_LINES, (GLint)first[k], (GLsizei)(first[k + 1] - first[k]));
+    }
+    glx::Uniform1f(_u_alpha, 1.0f);
+    glx::Uniform1f(_u_dash, 0.0f);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+}
+
 void PreviewRenderer::destroy_gl() {
+    destroy_overlay_gl();
     destroy_mesh_gl();
     if (_vbo_pts) { GLuint b[2] = {(GLuint)_vbo_pts, (GLuint)_vbo_cam}; glx::DeleteBuffers(2, b); }
     if (_vao_pts) { GLuint a[2] = {(GLuint)_vao_pts, (GLuint)_vao_cam}; glx::DeleteVertexArrays(2, a); }

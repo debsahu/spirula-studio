@@ -1,6 +1,9 @@
 // TrainerCore.cpp -- see TrainerCore.h.
 
 #include "app/TrainerCore.h"
+#include "backend/api/BackendRuntime.h"
+#include "core/Env.h"
+#include "core/Tensor.h"
 #include "data/SceneTransform.h"
 #include "app/EvalMetrics.h"
 #include "checkpoint/Adapt.h"
@@ -823,6 +826,12 @@ void TrainerSession::apply_partition_config(ParsedDataset& d) {
     const ScenePartition p = read_partition(cfg.partition);
     if (cfg.partition_part < 0 || cfg.partition_part >= p.num_parts)
         throw std::runtime_error(lfmt(lmsg::err_partition_part, {p.num_parts}));
+    if (&d == &ds && (int64_t)p.point_label.size() == d.points.num()) {
+        roi_cloud = d.points.xyz;
+        roi_cloud_inside.resize(p.point_label.size());
+        for (size_t i = 0; i < p.point_label.size(); i++)
+            roi_cloud_inside[i] = p.point_label[i] == cfg.partition_part;
+    }
     PartitionApplied a;
     apply_partition(d, p, cfg.partition_part, a);
     log(lfmt(lmsg::partition_applied,
@@ -849,6 +858,10 @@ void TrainerSession::setup_region() {
     RegionProgram prog;
     std::string err;
     if (!compile_region(*roi, prog, err)) throw std::runtime_error(err);
+    // The region is in the dataset's frame, the splats in the training frame.
+    const double rs = cfg.relative_scale.value_or(1.0f);
+    const double shift[3] = {-rs * ds.center[0], -rs * ds.center[1], -rs * ds.center[2]};
+    prog.apply_similarity(rs, shift);
     // The training cameras, indexed, orient each splat's normal on the device.
     std::vector<int32_t> idx((size_t)ds.num_cameras);
     std::vector<float> centers((size_t)ds.num_cameras * 3);
@@ -864,7 +877,7 @@ void TrainerSession::setup_region() {
     };
     engine_set_region(tv(prog.nodes), tv(prog.field ? prog.field->nodes : none),
                       tv(prog.field ? prog.field->seeds : none), tv(cams.nodes), tv(cams.seeds),
-                      cfg.roi_outside_weight);
+                      cfg.roi_outside_weight, cfg.roi_outside_opacity_decay);
     log(lfmt(lmsg::region_applied, {prog.num_nodes(), cfg.roi_outside_weight}));
 }
 
@@ -1165,6 +1178,31 @@ void TrainerSession::setup_engine() {
     // Binning granularity for the splat-tile intersection (0 = automatic).
     engine_set_bin_tile_size(cfg.bin_tile_size);
     setup_region();
+    // Pixels showing only what lies outside the region train nothing the
+    // merge keeps, and pull splats in front of the camera to explain them.
+    if (roi && cfg.roi_mask_pixels) {
+        // The partition's own labels over its whole cloud when there is one;
+        // otherwise the region asked about the part's seed points.
+        const double rs = cfg.relative_scale.value_or(1.0f);
+        std::vector<double> xyz = roi_cloud.empty() ? ds.points.xyz : roi_cloud;
+        std::vector<uint8_t> inside = roi_cloud_inside;
+        if (roi_cloud.empty()) {
+            std::vector<double> world(xyz.size());
+            for (size_t k = 0; k < world.size(); k++) world[k] = xyz[k] / rs + ds.center[k % 3];
+            inside.resize(xyz.size() / 3);
+            roi->contains_many(world.data(), (int64_t)inside.size(), inside.data());
+        } else {
+            for (double& v : xyz) v *= rs;
+        }
+        if (!has_mask) ds.mask_filenames.clear();
+        double share = 0;
+        ds.mask_filenames = write_region_masks(ds, xyz.data(), (int64_t)inside.size(), inside.data(),
+                                               (out_dir / "roi_masks").string(), cfg.flip_mask, &share);
+        has_mask = true;
+        char pct[16];
+        std::snprintf(pct, sizeof pct, "%.0f", 100.0 * share);
+        log(lfmt(lmsg::region_masks, {(long long)ds.num_cameras, pct}));
+    }
 
     // Background blending.
     if (cfg.background_mode == "noise")
@@ -1219,6 +1257,7 @@ void TrainerSession::setup_engine() {
     // Batch-size policy.
     double n_batch = std::max((double)num_train / std::max(cfg.max_batch_per_epoch, 1), 1.0);
     int train_bs = std::max(1, (int)(n_batch + 0.5));
+    _batches_per_epoch = (int)std::max<int64_t>(1, (num_train + train_bs - 1) / train_bs);
     int val_bs = 1;
     if (num_val > 0)
         val_bs = std::max(1, (int)std::ceil(n_batch * (double)num_val / (double)num_train));
@@ -1362,7 +1401,7 @@ void TrainerSession::restore_checkpoint() {
     // which setup_engine() resolved into `st`.
     ckpt::TargetLayout target;
     target.max_num_splats = engine_get_max_num_splats();
-    target.num_sh         = (cfg.sh_degree + 1) * (cfg.sh_degree + 1);
+    target.num_sh         = engine_get_num_sh();
     target.num_images     = (int)post.n_post;
     auto lhw = [](const std::array<int, 3>& xyw) {
         return std::array<int, 3>{xyw[2], xyw[1], xyw[0]};   // (X,Y,W)->(L,H,W)
@@ -1487,10 +1526,45 @@ double TrainerSession::avg_step_latency() const {
 }
 
 double TrainerSession::eta_seconds() const {
-    const double avg = avg_step_latency();
     const int step = cur_step.load();
-    if (avg < 0.0 || step <= 0) return -1.0;
-    return std::max(0, cfg.num_iterations - step) * avg;
+    if (step <= 0) return -1.0;
+    return _forecast.eta(step, _live_splats.load()).seconds;
+}
+
+void TrainerSession::observe_memory(int step, int64_t splats_ran) {
+    MemorySample m;
+    m.step = step;
+    m.splats_ran = splats_ran;
+    m.splats_next = _live_splats.load();
+    const DevicePool::CategoryBytes pool = DevicePool::global().category_bytes();
+    for (int c = 0; c < (int)VramCategory::Count; ++c) {
+        m.pool_used[c] = pool.used[c];
+        m.pool_cap[c] = pool.cap[c];
+    }
+    m.scratch = engine_get_scratch_bytes();
+    const backend::MemoryUsage mu = backend::memory_usage();
+    m.has_process = mu.has_process;
+    m.has_used = mu.has_used;
+    m.has_total = mu.has_total;
+    m.process_bytes = mu.process_bytes;
+    m.used_bytes = mu.used_bytes;
+    m.total_bytes = mu.total_bytes;
+    _forecast.add_memory(m);
+
+    // Once per level, so a run that stays at risk says it once.
+    const VramForecast v = _forecast.vram(false);
+    if (!v.valid || (int)v.risk <= (int)_warned_risk) return;
+    _warned_risk = v.risk;
+    auto gib = [](double b) {
+        char s[32];
+        std::snprintf(s, sizeof s, "%.2f", b / (1024.0 * 1024.0 * 1024.0));
+        return std::string(s);
+    };
+    char pct[16];
+    std::snprintf(pct, sizeof pct, "%.0f", v.p_oom * 100.0);
+    log(lfmt(lmsg::vram_forecast_warn,
+             {gib(v.peak_mean), gib(v.peak_sigma),
+              gib(0.99 * v.total_bytes - v.others_bytes), std::string(pct)}));
 }
 
 void TrainerSession::train(const TrainerCallbacks& cb) {
@@ -1499,6 +1573,20 @@ void TrainerSession::train(const TrainerCallbacks& cb) {
         _start_time = std::chrono::steady_clock::now();
         _end_time = _pause_start = {};
         _paused_s = 0.0;
+    }
+
+    {
+        ForecastSetup fs;
+        fs.schedule = SplatSchedule(build_step_config(cfg, st, start_step).densify,
+                                    cfg.num_iterations, engine_get_max_num_splats());
+        fs.start_step = start_step;
+        fs.steps_per_save = cfg.steps_per_save;
+        fs.distinct_batches = _batches_per_epoch;
+        fs.sh_degree = cfg.sh_degree;
+        fs.sh_degree_every = cfg.sh_degree_warmup_every;
+        _forecast.reset(fs);
+        _live_splats = engine_get_cur_num_splats();
+        _warned_risk = OomRisk::Low;
     }
 
     int step = start_step;
@@ -1521,15 +1609,27 @@ void TrainerSession::train(const TrainerCallbacks& cb) {
 
         std::map<std::string, float> losses;
         std::string data_error;
+        double save_s = 0.0, splat_gpu_s = -1.0;
+        int64_t splats_ran = 0;
+        // One step in ten: on Vulkan each bracket is a queue submission.
+        const bool timed = step % 10 == 0;
         {
             std::lock_guard<std::mutex> lk(engine_mutex);
-            if (step > 0 && cfg.steps_per_save > 0 && step % cfg.steps_per_save == 0)
+            if (step > 0 && cfg.steps_per_save > 0 && step % cfg.steps_per_save == 0) {
+                const auto t0 = std::chrono::steady_clock::now();
                 save_checkpoint(step);
+                save_s = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - t0).count();
+            }
+            splats_ran = engine_get_cur_num_splats();
+            if (timed) engine_step_timing_arm();
             try {
                 losses = train_step(step);
             } catch (const DataDecodeError& e) {
                 data_error = e.what();
             }
+            if (timed) splat_gpu_s = engine_step_timing_read();
+            _live_splats = engine_get_cur_num_splats();
         }
         // Asking outside the lock: the front end may sit on this for minutes
         // while the user puts the dataset back, and the viewport still wants
@@ -1554,6 +1654,24 @@ void TrainerSession::train(const TrainerCallbacks& cb) {
             std::lock_guard<std::mutex> lk(_progress_mutex);
             _step_latencies.push_back(latency);
             if (_step_latencies.size() > 100) _step_latencies.pop_front();
+        }
+        _forecast.add_step(step, latency - save_s, splats_ran, splat_gpu_s);
+        if (save_s > 0.0) _forecast.add_save(save_s, splats_ran);
+        observe_memory(step, splats_ran);
+        // SS_FORECAST_LOG=1: the forecast's state every 100 steps, English,
+        // for checking it against how the run actually ends.
+        static const bool forecast_log = spirula::env("FORECAST_LOG") != nullptr;
+        if (forecast_log && (step + 1) % 100 == 0) {
+            const EtaForecast e = _forecast.eta(step + 1, _live_splats.load());
+            const VramForecast v = _forecast.vram(false);
+            const double gib = 1024.0 * 1024.0 * 1024.0;
+            std::fprintf(stderr,
+                "[forecast] step %d  eta %.1f +- %.1f s  ours %.3f GiB  peak %.3f +- %.3f GiB"
+                "  others %.3f  total %.3f  p_oom %.3f%s\n",
+                step + 1, e.seconds, e.sigma,
+                v.ours_bytes / gib,
+                v.peak_mean / gib, v.peak_sigma / gib, v.others_bytes / gib,
+                v.total_bytes / gib, v.p_oom, v.provisional ? "  provisional" : "");
         }
 
         if (cb.on_step) {
@@ -1598,21 +1716,31 @@ std::string TrainerSession::progress_json() {
     double elapsed = elapsed_seconds();
     double avg = avg_step_latency();
     double eta = eta_seconds();
+    const VramForecast v = _forecast.vram(false);
+    static const char* const kRisk[] = {"unknown", "low", "medium", "high"};
+    char tail[160];
+    if (v.valid)
+        std::snprintf(tail, sizeof tail,
+            ", \"vram_peak_bytes\": %.0f, \"vram_peak_sigma\": %.0f, "
+            "\"oom_probability\": %.4f, \"oom_risk\": \"%s\"}",
+            v.peak_mean, v.peak_sigma, v.p_oom, kRisk[(int)v.risk]);
+    else
+        std::snprintf(tail, sizeof tail, ", \"oom_risk\": \"unknown\"}");
     char buf[256];
     if (eta >= 0.0) {
         std::snprintf(buf, sizeof buf,
             "{\"step\": %d, \"total_steps\": %d, \"elapsed_time\": %.3f, "
-            "\"eta\": %.3f, \"latency_ms\": %.3f, \"paused\": %s}",
+            "\"eta\": %.3f, \"latency_ms\": %.3f, \"paused\": %s",
             step, cfg.num_iterations, elapsed, eta, avg * 1000.0,
             paused.load() ? "true" : "false");
     } else {
         std::snprintf(buf, sizeof buf,
             "{\"step\": %d, \"total_steps\": %d, \"elapsed_time\": %.3f, "
-            "\"eta\": null, \"latency_ms\": null, \"paused\": %s}",
+            "\"eta\": null, \"latency_ms\": null, \"paused\": %s",
             step, cfg.num_iterations, elapsed,
             paused.load() ? "true" : "false");
     }
-    return buf;
+    return std::string(buf) + tail;
 }
 
 ViewerRenderConfig TrainerSession::make_viewer_config() const {

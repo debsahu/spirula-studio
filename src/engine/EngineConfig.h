@@ -9,7 +9,9 @@
 #include "kernels/loss/PerPixelLoss.cuh"   // LossWeightIndex
 #include "kernels/pixelwise/PixelWise.cuh"      // PPISPRegLossIndex
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
 
 
 // Bundles the scalars engine_compute_loss_backward takes, for the call path
@@ -239,6 +241,17 @@ struct DensifyConfig {
     float las_split_opacity_k_final     = 0.6f;
     int   las_split_opacity_k_warmup    = 4500;
 };
+
+// The schedule engine_densify_step grows the model on; the trainer's ETA and
+// VRAM forecasts replay it.
+inline bool densify_grows_at(const DensifyConfig& c, int step, int max_steps) {
+    return c.refine_every > 0 && step > c.refine_start_iter &&
+           step % c.refine_every == 0 &&
+           step < std::max(c.refine_stop_iter, max_steps - c.refine_stop_num_iter);
+}
+inline int64_t densify_target(const DensifyConfig& c, int64_t cur, int64_t cap) {
+    return std::max(cur, std::min(cap, (int64_t)(c.growth_factor * (float)cur)));
+}
 
 
 // Per-type Adam LR + TV regularization weight. lr <= 0 disables the channel

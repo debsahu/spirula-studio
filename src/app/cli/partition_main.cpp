@@ -12,6 +12,7 @@
 #include "i18n/Locale.h"
 #include "i18n/catalog/Partition.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -49,6 +50,7 @@ void usage() {
     std::fprintf(stderr, "\n%s\n", P::head_split.get());
     help_row("--parts <n>", P::opt_parts);
     help_row("--max-images <n>", P::opt_max_images);
+    help_row("--method graph|viewgraph", P::opt_method);
     help_row("--ring <fraction>", P::opt_ring);
     help_row("--ring-min-points <n>", P::opt_ring_min);
     help_row("--max-seeds <n>", P::opt_max_seeds);
@@ -84,6 +86,10 @@ int run_split(int argc, char** argv) {
         else if (a == "--ring") opt.ring_fraction = (float)std::atof(next());
         else if (a == "--ring-min-points") opt.ring_min_points = std::atoi(next());
         else if (a == "--max-seeds") opt.max_seeds = std::atoi(next());
+        else if (a == "--method") {
+            const char* v = next();
+            if (!spirula::partition_method_from_name(v, opt.method)) return bad_value(v, "--method");
+        }
         else if (a == "--source") {
             const char* v = next();
             if (!spirula::covisibility_source_from_name(v, opt.source)) return bad_value(v, "--source");
@@ -125,7 +131,8 @@ int run_split(int argc, char** argv) {
     for (int k = 0; k < part.num_parts; k++) {
         std::printf("%s\n", format(P::log_part, {k, (long long)part.core_count(k),
                                                  (long long)part.ring[(size_t)k].size(),
-                                                 (long long)part.part_points[(size_t)k].size()})
+                                                 (long long)part.part_points[(size_t)k].size(),
+                                                 (long long)std::lround(100.0 * part.view_share[(size_t)k])})
                                 .c_str());
         if (part.core_pieces[(size_t)k] > 1)
             std::printf("%s\n", format(P::log_part_pieces, {k, part.core_pieces[(size_t)k]}).c_str());

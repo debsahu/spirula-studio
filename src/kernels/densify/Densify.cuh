@@ -318,3 +318,11 @@ void densify_scale_score_tensor(
     DeviceVector<float> weight,   // [N]
     DeviceVector<float2> score    // [N, 2]; lane 0 is multiplied in place
 );
+
+
+void region_decay_opacity_tensor(
+    int64_t num_splats,
+    DeviceVector<float> weight,      // [N]; below 1 is outside the region
+    DeviceVector<float> opacities,   // [N] logits, scaled in place outside
+    float factor                     // in (0, 1]
+);

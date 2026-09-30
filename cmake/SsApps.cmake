@@ -29,7 +29,7 @@
 function(ss_configure_app target)
     target_include_directories(${target} PRIVATE
         ${SS_SRC}
-        ${CMAKE_BINARY_DIR}      # app_generated/{viewer_html,mask_py}.h
+        ${CMAKE_BINARY_DIR}      # app_generated/*.h
         ${CUDAToolkit_INCLUDE_DIRS}
     )
     target_link_libraries(${target} PRIVATE ${SS_APP_LIBS})
@@ -67,6 +67,7 @@ list(APPEND SS_TOOL_SOURCES
      ${SS_SRC}/app/FrameMaskSvg.cpp
      ${SS_SRC}/app/FrameLook.cpp
      ${SS_SRC}/app/FrameMotion.cpp
+     ${SS_SRC}/app/FrameSharpness.cpp
      ${SS_SRC}/app/Pano360.cpp
      ${SS_SRC}/app/AppPaths.cpp
      ${SS_SRC}/app/CrashLog.cpp)
@@ -111,13 +112,19 @@ endif()
 
 if(SS_BUILD_SAM)
     # ---- segmentation / frame extraction ----
-    list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/sam_main.cpp)
+    # Frame extraction decodes with ffmpeg when the in-process decoder is not
+    # built or the device has no video queue (app/FrameDecode.h).
+    list(APPEND SS_TOOL_SOURCES
+         ${SS_SRC}/app/cli/sam_main.cpp
+         ${SS_SRC}/app/cli/sam_extract.cpp
+         ${SS_SRC}/app/FrameExtract.cpp
+         ${SS_SRC}/app/FrameDecodeFfmpeg.cpp
+         ${SS_SRC}/app/FfmpegVideo.cpp
+         ${SS_SRC}/app/gui/Subprocess.cpp)
     list(APPEND SS_TOOL_DEFS SS_TOOL_SAM=1)
     list(APPEND SS_TOOL_LIBS ss_sam)
     if(SS_ENABLE_PATENTED)
-        list(APPEND SS_TOOL_SOURCES
-             ${SS_SRC}/app/cli/sam_extract.cpp
-             ${SS_SRC}/app/FrameExtract.cpp)
+        list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/FrameDecodeVulkan.cpp)
         list(APPEND SS_TOOL_LIBS ss_video)
         # ---- video encoding: what the GUI's render mode pipes frames into ----
         list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/encode_main.cpp)
@@ -191,14 +198,6 @@ if(SS_BUILD_GUI)
     target_link_libraries(imgui_glfw PUBLIC glfw)
     set_property(TARGET imgui_glfw PROPERTY CXX_STANDARD 17)
 
-    # Embed reference/scripts/mask.py (AI masking helper, run via external
-    # Python) so the exe is self-contained. Same mechanism as the
-    # viewer.html embed.
-    ss_embed_file(
-        ${SS_ROOT}/reference/scripts/mask.py
-        ${CMAKE_BINARY_DIR}/app_generated/mask_py.h
-        MaskPy)
-
     # ---- fonts (src/app/gui/Fonts.h, docs/i18n.md) ----
     #
     # The Latin/Cyrillic face IS embedded: at 59 KB it costs nothing, and
@@ -213,8 +212,9 @@ if(SS_BUILD_GUI)
         UiFont)
     ss_cjk_faces()
 
-    # The window icon X11 wants handed to it (GuiMain.cpp). Windows gets its
-    # from app.rc below and macOS from the bundle, so this is the small one.
+    # The window icon X11 wants handed to it (GuiMain.cpp) and the one the
+    # desktop entry points at (DesktopEntry.cpp). Windows gets its from app.rc
+    # below and macOS from the bundle, so this is the small one.
     ss_embed_file(
         ${SS_ROOT}/assets/icon_128.png
         ${CMAKE_BINARY_DIR}/app_generated/app_icon.h
@@ -229,7 +229,7 @@ if(SS_BUILD_GUI)
     file(GLOB SS_GUI_SOURCES CONFIGURE_DEPENDS
         ${SS_SRC}/app/gui/*.cpp ${SS_SRC}/app/gui/edit/*.cpp
         ${SS_SRC}/app/gui/render/*.cpp ${SS_SRC}/app/gui/mask/*.cpp)
-    list(APPEND SS_TOOL_SOURCES ${SS_GUI_SOURCES})
+    list(APPEND SS_TOOL_SOURCES ${SS_GUI_SOURCES} ${SS_SRC}/app/FfmpegVideo.cpp)
     list(APPEND SS_TOOL_DEFS SS_TOOL_GUI=1)
     list(APPEND SS_TOOL_LIBS imgui_glfw OpenGL::GL)
 
@@ -249,15 +249,13 @@ if(SS_BUILD_GUI)
         list(APPEND SS_TOOL_LIBS "-framework AppKit")
     endif()
 
-    # In-process segmentation (interactive preview + dataset masking) and, when
-    # patented modules are enabled, in-process video decoding. Both are
-    # optional: DatasetPrep falls back to python + reference/scripts/mask.py
-    # and to ffmpeg, and the GUI hides what this build cannot do rather than
-    # failing at run time.
+    # In-process segmentation and, with SS_ENABLE_PATENTED, video decoding.
+    # Without them the GUI masks only fixed areas of the frame and decodes with
+    # ffmpeg, and says so rather than failing at run time.
     if(SS_BUILD_SAM)
         list(APPEND SS_TOOL_DEFS SS_BUILD_SAM=1)
         if(SS_ENABLE_PATENTED)
-            list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/FrameExtract.cpp)
+            list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/FrameDecodeVulkan.cpp)
         endif()
     endif()
 endif()
@@ -265,7 +263,8 @@ endif()
 # ---------------------------------------------------------------------------
 # spirula -- the executable
 # ---------------------------------------------------------------------------
-# FrameExtract is claimed by both the segmentation tool and the GUI.
+# The frame extraction and ffmpeg files are claimed by both the segmentation
+# tool and the GUI.
 list(REMOVE_DUPLICATES SS_TOOL_SOURCES)
 list(REMOVE_DUPLICATES SS_TOOL_LIBS)
 
@@ -327,11 +326,13 @@ if(SS_SEPARATE_TOOLS)
         set(_sam_src ${SS_SRC}/app/cli/sam_main.cpp ${SS_SRC}/app/FrameMask.cpp
                      ${SS_SRC}/app/FrameMaskSvg.cpp
                      ${SS_SRC}/app/FrameLook.cpp ${SS_SRC}/app/FrameMotion.cpp
-                     ${SS_SRC}/app/Pano360.cpp)
+                     ${SS_SRC}/app/FrameSharpness.cpp ${SS_SRC}/app/Pano360.cpp
+                     ${SS_SRC}/app/cli/sam_extract.cpp ${SS_SRC}/app/FrameExtract.cpp
+                     ${SS_SRC}/app/FrameDecodeFfmpeg.cpp ${SS_SRC}/app/FfmpegVideo.cpp
+                     ${SS_SRC}/app/gui/Subprocess.cpp)
         set(_sam_lib ss_sam)
         if(SS_ENABLE_PATENTED)
-            list(APPEND _sam_src ${SS_SRC}/app/cli/sam_extract.cpp
-                                 ${SS_SRC}/app/FrameExtract.cpp)
+            list(APPEND _sam_src ${SS_SRC}/app/FrameDecodeVulkan.cpp)
             list(APPEND _sam_lib ss_video)
         endif()
         ss_tool_exe(spirula-sam "${_sam_src}" "SS_TOOL_SAM=1" "${_sam_lib}")
@@ -478,6 +479,7 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/FrameLook.cpp
         ${SS_SRC}/app/gui/mask/Livewire.cpp
         ${SS_SRC}/app/gui/mask/PathTool.cpp
+        ${SS_SRC}/app/gui/mask/PenTool.cpp
         ${SS_SRC}/app/gui/Picture.cpp
         ${SS_SRC}/app/gui/mask/MaskSlideshow.cpp)
     ss_configure_app(mask_doc_test)
@@ -488,6 +490,8 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/tests/dataset_prep_test.cpp
         ${SS_SRC}/app/gui/DatasetPrep.cpp
         ${SS_SRC}/app/gui/FrameSelect.cpp
+        ${SS_SRC}/app/FrameSharpness.cpp
+        ${SS_SRC}/app/FfmpegVideo.cpp
         ${SS_SRC}/app/gui/PrepProgress.cpp
         ${SS_SRC}/app/gui/ReconStamp.cpp
         ${SS_SRC}/app/gui/Subprocess.cpp
@@ -504,6 +508,8 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/tests/frame_bits_test.cpp
         ${SS_SRC}/app/gui/DatasetPrep.cpp
         ${SS_SRC}/app/gui/FrameSelect.cpp
+        ${SS_SRC}/app/FrameSharpness.cpp
+        ${SS_SRC}/app/FfmpegVideo.cpp
         ${SS_SRC}/app/gui/PrepProgress.cpp
         ${SS_SRC}/app/gui/ReconStamp.cpp
         ${SS_SRC}/app/gui/Subprocess.cpp

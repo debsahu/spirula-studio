@@ -23,6 +23,15 @@ struct ScaleScoreParams {
 };
 static_assert(sizeof(ScaleScoreParams) == 2 * 8 + 4 * 4, "params layout must match the slang struct");
 
+// Mirrors DecayOpacityParams.
+struct DecayOpacityParams {
+    uint64_t weight, opac;
+    uint32_t num_splats, wgs_per_row;
+    float factor;
+    uint32_t _pad0;
+};
+static_assert(sizeof(DecayOpacityParams) == 2 * 8 + 4 * 4, "params layout must match the slang struct");
+
 }  // namespace
 
 void region_weight_tensor(int64_t num_splats, DeviceVector<float3> means, DeviceVector<float4> quats,
@@ -62,4 +71,15 @@ void densify_scale_score_tensor(int64_t num_splats, DeviceVector<float> weight,
     p.num_splats = (uint32_t)num_splats;
     vkk::dispatch_flat("region.densify_scale_score", {}, num_splats, 256, &p, sizeof(p),
                        &p.wgs_per_row);
+}
+
+void region_decay_opacity_tensor(int64_t num_splats, DeviceVector<float> weight,
+                                 DeviceVector<float> opacities, float factor) {
+    if (num_splats <= 0 || weight.data_ptr() == nullptr || !(factor < 1.0f)) return;
+    DecayOpacityParams p{};
+    p.weight = (uint64_t)weight.data_ptr();
+    p.opac = (uint64_t)opacities.data_ptr();
+    p.num_splats = (uint32_t)num_splats;
+    p.factor = factor;
+    vkk::dispatch_flat("region.decay_opacity", {}, num_splats, 256, &p, sizeof(p), &p.wgs_per_row);
 }

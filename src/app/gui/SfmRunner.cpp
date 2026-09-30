@@ -301,11 +301,8 @@ void SfmRunner::take_masking(PrepJob& prep) {
     prep.mask_model_path = _live.prep.mask_model_path;
     prep.mask_detector_path = _live.prep.mask_detector_path;
     prep.mask_detector_threshold = _live.prep.mask_detector_threshold;
-    prep.mask_model_name = _live.prep.mask_model_name;
-    prep.force_external_masking = _live.prep.force_external_masking;
     prep.image_gamut = _live.prep.image_gamut;
     prep.image_is_linear = _live.prep.image_is_linear;
-    prep.python_exe = _live.prep.python_exe;
 }
 
 void SfmRunner::cancel() { _cancel = true; }
@@ -904,8 +901,8 @@ void SfmRunner::run(SfmJob job) {
             for (size_t k = 0; k < now.args.size(); k++) {
                 settings.push_back(now.args[k]);
                 if (now.args[k] != "--manifest" || k + 1 >= now.args.size()) continue;
-                // Dotted and prefixed, like .spirula_mask.py: the workspace
-                // is the user's, and a plain manifest.yaml there could be theirs.
+                // Dotted and prefixed: the workspace is the user's, and a
+                // plain manifest.yaml there could be theirs.
                 const fs::path mf = ws / ".spirula_manifest.yaml";
                 std::ofstream(mf, std::ios::binary | std::ios::trunc) << now.args[++k];
                 settings.push_back(mf.string());

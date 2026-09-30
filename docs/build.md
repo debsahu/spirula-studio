@@ -92,14 +92,15 @@ the H.264 / H.265 encoder — is the one part of it carrying third-party patent
 exposure (H.264/H.265 via MPEG LA and Access Advance, AV1 via the claims
 asserted against AOMedia). With it off, that directory is neither compiled nor
 linked, and everything that wanted it falls back to an external **ffmpeg**:
-`spirula sam extract` and `spirula sam video` say so and exit, the GUI
-extracts frames with ffmpeg and tells the user why, and the render mode
+`spirula sam extract` and the GUI extract frames with ffmpeg (the GUI tells
+the user why), `spirula sam video` says so and exits, and the render mode
 encodes its videos with ffmpeg (or writes frames when there is none).
 
 Turning it on buys in-process GPU decoding and encoding: roughly 15× faster
 frame extraction (a 127-second 1080p30 clip in ten seconds rather than
-minutes), `spirula sam extract`'s masking riding along on the same device
-pass, `spirula encode` for the render mode's videos, and no ffmpeg to install.
+minutes), `spirula encode` for the render mode's videos, and no ffmpeg to
+install. A device without a video queue -- MoltenVK on every Mac -- decodes
+with ffmpeg even then.
 Nothing else in the build changes.
 
 If you distribute binaries, decide for your jurisdiction and your users before
@@ -243,7 +244,8 @@ suppress).
 Only macOS has a packaging step, because only macOS has a form the binary is
 not already in. A Linux or Windows build is one file that runs where it lands;
 a Mac wants an `.app`, or the Dock shows a Terminal icon and Finder has no way
-to launch it.
+to launch it. The Linux dock's equivalent is a desktop entry, which the GUI
+writes for itself when it starts (`src/app/gui/DesktopEntry.h`).
 
 ```bash
 cmake --build build --target macos_app   # build/Spirula Studio.app
@@ -329,9 +331,9 @@ Notarization needs a paid Apple Developer account, so it is not wired into the
 build.
 
 One behaviour is bundle-specific: a Finder launch inherits launchd's PATH
-(`/usr/bin:/bin:/usr/sbin:/sbin`), which has no Homebrew in it, so COLMAP,
-ffmpeg and python3 would be missing from an app that finds them fine when
-started from a shell. `gui::add_desktop_search_paths()`
+(`/usr/bin:/bin:/usr/sbin:/sbin`), which has no Homebrew in it, so COLMAP and
+ffmpeg would be missing from an app that finds them fine when started from a
+shell. `gui::add_desktop_search_paths()`
 (`src/app/AppPaths.h`) appends the package managers' directories at
 startup, after any PATH the process actually inherited.
 

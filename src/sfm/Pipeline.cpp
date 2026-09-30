@@ -44,6 +44,7 @@
 #include "sfm/core/Manifest.h"
 #include "sfm/core/Mask.h"
 #include "sfm/core/Matches.h"
+#include "sfm/core/SerialWorker.h"
 #include "sfm/feature/Matcher.h"
 #include "sfm/feature/PairSelection.h"
 #include "sfm/feature/Pairing.h"
@@ -1452,75 +1453,96 @@ int extractDirectory(const std::string& imagedir, const fs::path& outdir,
     std::unique_ptr<IFeatureExtractor> ext =
         createFeatureExtractor(cfg.features, opt, cfg.aliked, cfg.loma);
     if (opt.verbose) L::err(Tag::Extract, M::extract_frontend, {ext->name()});
+    // Everything after extract() reads only the image and its features, so it
+    // runs on its own thread while the device works on the next image.
+    auto postProcess = [&](size_t k, GrayImage& img, FeatureSet& f) {
+        if (img.exif_mirror_dropped && !stats.warned_exif_mirror) {
+            stats.warned_exif_mirror = true;
+            L::warn(Tag::Extract, M::extract_exif_mirror_dropped,
+                    {fs::path(paths[k]).filename().string()});
+        }
+        sampleFeatureColors(f, img);
+        uint32_t dropped = 0;
+        if (!lopt.mask_paths.empty() && !lopt.mask_paths[k].empty()) {
+            if (img.mask.empty()) {
+                stats.mask_unreadable++;
+                L::warn(Tag::Extract, M::extract_mask_undecodable,
+                        {lopt.mask_paths[k],
+                         fs::path(paths[k]).filename().string()});
+            } else {
+                // img's own size, not the probed one: `apply` turned both.
+                checkMaskShape(lopt.mask_paths[k], img.mask,
+                               {img.orig_width, img.orig_height});
+                const uint32_t before = f.count();
+                dropped = applyMask(f, img.mask);
+                stats.masked_out += dropped;
+                // An inverted mask, or one whose keep value is 0, masks
+                // an image away entirely -- invisible until the model is
+                // short of images. Warn once; the run continues.
+                if (before && dropped == before && !stats.warned_empty) {
+                    stats.warned_empty = true;
+                    L::warn(Tag::Extract, M::extract_mask_empty,
+                            {lopt.mask_paths[k],
+                             fs::path(paths[k]).filename().string()});
+                }
+            }
+        }
+        // Back to the source file's coordinates (D46), so cameras.bin
+        // describes the user's images and not the working copy. Everything
+        // reading a keypoint against the decoded image has already run.
+        finishFeatures(f, img);
+        fs::create_directories(outs[k].parent_path());
+        writeFeatures(outs[k].string(), f);
+        stats.features += f.count();
+        stats.features_new += f.count();
+        stats.images++;
+        Event ev;
+        ev.kind = Event::Kind::ImageExtracted;
+        ev.stage = Stage::Extract;
+        ev.done = stats.images;
+        ev.total = (int64_t)n_all;
+        ev.name = fs::path(paths[k]).filename().string();
+        ev.width = img.orig_width;
+        ev.height = img.orig_height;
+        ev.features = f.count();
+        ev.masked = dropped;
+        events::emit(ev);
+        // The picture the reel draws, from the copy already in hand.
+        if (progress::enabled()) {
+            fs::path stem = relativeTo(paths[k], imagedir);
+            stem.replace_extension();
+            progress::thumbnail(stem.generic_string(), img.rgb.data(),
+                                img.width, img.height);
+        }
+    };
+    SerialWorker post;  // after postProcess: joined before it goes away
+    auto extractOne = [&](size_t k, GrayImage& img, const GrayImage* next) {
+        FeatureSet f = ext->extractAhead(img, next);
+        std::vector<float>().swap(img.data);  // the worker needs color, not luma
+        post.submit([&postProcess, k, img = std::move(img), f = std::move(f)]() mutable {
+            postProcess(k, img, f);
+        });
+    };
+    // One image is held back, so the extractor knows the next one and can
+    // queue its device work before finishing this one on the host.
+    std::optional<std::pair<size_t, GrayImage>> held;
     loadImagesInOrder(
         paths, plan, lopt,
         [&](size_t k, GrayImage& img) {
             cancel::check();
-            if (img.exif_mirror_dropped && !stats.warned_exif_mirror) {
-                stats.warned_exif_mirror = true;
-                L::warn(Tag::Extract, M::extract_exif_mirror_dropped,
-                        {fs::path(paths[k]).filename().string()});
-            }
-            FeatureSet f = ext->extract(img);
-            sampleFeatureColors(f, img);
-            uint32_t dropped = 0;
-            if (!lopt.mask_paths.empty() && !lopt.mask_paths[k].empty()) {
-                if (img.mask.empty()) {
-                    stats.mask_unreadable++;
-                    L::warn(Tag::Extract, M::extract_mask_undecodable,
-                            {lopt.mask_paths[k],
-                             fs::path(paths[k]).filename().string()});
-                } else {
-                    // img's own size, not the probed one: `apply` turned both.
-                    checkMaskShape(lopt.mask_paths[k], img.mask,
-                                   {img.orig_width, img.orig_height});
-                    const uint32_t before = f.count();
-                    dropped = applyMask(f, img.mask);
-                    stats.masked_out += dropped;
-                    // An inverted mask, or one whose keep value is 0, masks
-                    // an image away entirely -- invisible until the model is
-                    // short of images. Warn once; the run continues.
-                    if (before && dropped == before && !stats.warned_empty) {
-                        stats.warned_empty = true;
-                        L::warn(Tag::Extract, M::extract_mask_empty,
-                                {lopt.mask_paths[k],
-                                 fs::path(paths[k]).filename().string()});
-                    }
-                }
-            }
-            // Back to the source file's coordinates (D46), so cameras.bin
-            // describes the user's images and not the working copy. Everything
-            // reading a keypoint against the decoded image has already run.
-            finishFeatures(f, img);
-            fs::create_directories(outs[k].parent_path());
-            writeFeatures(outs[k].string(), f);
-            stats.features += f.count();
-            stats.features_new += f.count();
-            stats.images++;
-            Event ev;
-            ev.kind = Event::Kind::ImageExtracted;
-            ev.stage = Stage::Extract;
-            ev.done = stats.images;
-            ev.total = (int64_t)n_all;
-            ev.name = fs::path(paths[k]).filename().string();
-            ev.width = img.orig_width;
-            ev.height = img.orig_height;
-            ev.features = f.count();
-            ev.masked = dropped;
-            events::emit(ev);
-            // The picture the reel draws, from the copy already in hand.
-            if (progress::enabled()) {
-                fs::path stem = relativeTo(paths[k], imagedir);
-                stem.replace_extension();
-                progress::thumbnail(stem.generic_string(), img.rgb.data(),
-                                    img.width, img.height);
-            }
+            if (held) extractOne(held->first, held->second, &img);
+            held.emplace(k, std::move(img));
         },
         [&](size_t k, const std::string& err) {
             L::fail(Tag::Extract, M::extract_failed_file,
                     {fs::path(paths[k]).filename().string(), err});
             stats.failed++;
         });
+    if (held) {
+        cancel::check();
+        extractOne(held->first, held->second, nullptr);
+    }
+    post.finish();
     events::stage_end(Stage::Extract);
     return 0;
 }

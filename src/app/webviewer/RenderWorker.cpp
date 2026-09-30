@@ -7,6 +7,7 @@
 #include "core/Camera.h"    // camera_model_from_name
 #include "app/DepthColor.h"  // error_scale -- shared with the error pane
 #include "data/FrustumSize.h"
+#include "app/webviewer/RegionOverlay.h"
 
 #include <algorithm>
 #include <atomic>
@@ -82,6 +83,7 @@ struct RenderWorker::Impl {
     PendingReq pending;
     ViewResult result;
     std::vector<float> raw_rgb, raw_ts;   // the worker thread's own
+    std::shared_ptr<const spirula::RegionOverlay> overlay;   // under mu
     uint64_t next_id = 1;
 
     // Device scratch (worker thread only).
@@ -542,6 +544,19 @@ struct RenderWorker::Impl {
                                  backend::MemcpyKind::DeviceToHost);
             if (backend::last_error())
                 throw std::runtime_error("viewer: blit D2H failed");
+            std::shared_ptr<const spirula::RegionOverlay> ov;
+            if (q.show_roi && q.model == "PINHOLE") {
+                std::lock_guard<std::mutex> lk(mu);
+                ov = overlay;
+            }
+            if (ov) {
+                std::vector<float> scene((size_t)npx);
+                for (int64_t i = 0; i < npx; i++) {
+                    const float a = alpha3[(size_t)i * 3];
+                    scene[(size_t)i] = a > 0.1f ? depth[(size_t)i] / std::min(a / 0.5f, 1.0f) : 0.0f;
+                }
+                spirula::draw_region_overlay(*ov, out_host.data(), W, H, scene.data(), c2w, q.fx, q.fy, q.cx, q.cy);
+            }
         }
         return out_host;
     }
@@ -585,6 +600,11 @@ bool RenderWorker::take_result(uint64_t id, ViewResult& out, double timeout_s) {
 }
 
 const ViewerRenderConfig& RenderWorker::config() const { return _impl->cfg; }
+
+void RenderWorker::set_region_overlay(std::shared_ptr<const spirula::RegionOverlay> ov) {
+    std::lock_guard<std::mutex> lk(_impl->mu);
+    _impl->overlay = std::move(ov);
+}
 
 std::vector<std::string> RenderWorker::buffer_keys() const {
     std::vector<std::string> keys = {"rgb"};

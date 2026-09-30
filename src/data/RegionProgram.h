@@ -24,6 +24,9 @@ struct RegionProgram {
     // Appends one node; the leaf types fill the slots the shader reads.
     void push(int type, const double* center_or_normal = nullptr, double radius_or_offset = 0,
               const double* half = nullptr, const double* rotation = nullptr, int label = 0);
+    // Moves the program to the frame p' = scale * p + shift (scale > 0): the
+    // trainer's, from the dataset's the region was drawn in.
+    void apply_similarity(double scale, const double shift[3]);
 };
 
 // False with `error` set when the region has a part no program can hold (a

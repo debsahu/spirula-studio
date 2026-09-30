@@ -69,7 +69,7 @@ add_compile_definitions(SS_SOURCE_ROOT="${SS_ROOT}")
 
 # The version the apps report with --version. Declared here and nowhere else;
 # it used to be read out of pyproject.toml, back when there was a package.
-set(SS_VERSION "2026.9.24")
+set(SS_VERSION "2026.9.30")
 
 # The commit goes in it too, so a crash report names an exact tree without
 # anyone having to bump a string by hand. Read at configure time, which is
@@ -176,13 +176,9 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# GPU inference (src/nn/) and segmentation (src/sam/)
-#
-# The native replacement for the reference/scripts/mask.py subprocess: SAM 2
-# / SAM 3 on the same Vulkan + Slang stack as the SfM module, over a
-# reusable inference layer. Same rule as SfM -- Vulkan-only, on by default
-# only for the Vulkan build, opt-in for CUDA if the Vulkan SDK is present.
-# See cmake/SsNn.cmake and src/nn/README.md.
+# GPU inference (src/nn/) and SAM segmentation (src/sam/). Vulkan-only like
+# SfM: on by default for the Vulkan build, opt-in for CUDA with the Vulkan SDK.
+# Without it the GUI has no model-based masking. See cmake/SsNn.cmake.
 # ---------------------------------------------------------------------------
 if(SS_BACKEND STREQUAL "vulkan")
     option(SS_BUILD_SAM "Build the inference layer + SAM segmentation" ON)

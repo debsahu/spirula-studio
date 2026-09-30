@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <deque>
 #include <fstream>
+#include <future>
 #include <map>
 #include <atomic>
 #include <string>
@@ -811,11 +812,22 @@ private:
     std::atomic<bool> _merge_busy{false};
     std::string _merge_result, _merge_error;
     bool launch_batch_merge(BatchTask& task, const BatchRow& row);
+    // A merge that ends the queue opens in the viewer once the queue is over.
+    std::string _open_after_batch;
+    // The training session's region of interest as overlays for the trainer
+    // view, built off the GUI thread; keyed by the region it was built from.
+    struct RoiOverlays {
+        std::shared_ptr<const spirula::RegionOverlay> engine, preview;
+        std::shared_ptr<const std::vector<uint8_t>> points_inside;
+    };
+    const void* _roi_key = nullptr;
+    std::future<RoiOverlays> _roi_job;
+    void update_roi_overlay();
     void draw_batch_row_merge(BatchRow& row, int index);
     // Every task of the row ran and finished well.
     bool batch_row_done(int index) const;
     // "Clear list" and "Clear done rows" both ask first.
-    enum class BatchConfirm { None, ClearList, ClearDone };
+    enum class BatchConfirm { None, ClearList, ClearDone, ClearUnchecked };
     BatchConfirm _batch_confirm = BatchConfirm::None;
     bool _batch_confirm_shown = false;
     void draw_batch_confirm_modal();
@@ -895,11 +907,6 @@ private:
     std::map<std::string, std::string> _dialog_dirs;
     std::string _colmap_exe = "colmap";
     std::string _ffmpeg_exe = "ffmpeg";
-#ifdef _WIN32
-    std::string _python_exe = "python";
-#else
-    std::string _python_exe = "python3";
-#endif
 
     // Log console. `_log_dropped` counts the lines trimmed off the front since
     // the panel was last drawn: every one of them moves the remaining text up

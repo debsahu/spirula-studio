@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <memory>
 
 namespace spirula {
 
@@ -26,6 +27,38 @@ void RegionProgram::push(int type, const double* c, double r, const double* half
     for (int row = 0; row < 3; row++)
         for (int k = 0; k < 3; k++) node[12 + row * 4 + k] = (float)R[row * 3 + k];
     nodes.insert(nodes.end(), node, node + 4 * kNodeStride);
+}
+
+void RegionProgram::apply_similarity(double scale, const double shift[3]) {
+    for (int i = 0; i < num_nodes(); i++) {
+        float* h = &nodes[(size_t)i * 4 * kNodeStride];
+        const int type = (int)h[0];
+        if (type == 0 || type == 1) {
+            for (int k = 0; k < 3; k++) h[4 + k] = (float)(scale * h[4 + k] + shift[k]);
+            if (type == 0)
+                for (int k = 0; k < 3; k++) h[8 + k] = (float)(scale * h[8 + k]);
+            else
+                h[7] = (float)(scale * h[7]);
+        } else if (type == 2) {
+            h[7] = (float)(scale * h[7] - (h[4] * shift[0] + h[5] * shift[1] + h[6] * shift[2]));
+        }
+    }
+    if (field) {
+        auto moved = std::make_shared<LabelField>(*field);
+        for (int64_t i = 0; i < moved->num_seeds(); i++)
+            for (int k = 0; k < 3; k++) {
+                float& v = moved->seeds[(size_t)i * 4 + k];
+                v = (float)(scale * v + shift[k]);
+            }
+        for (int64_t i = 0; i < moved->num_nodes(); i++)
+            for (int k = 0; k < 3; k++) {
+                float& lo = moved->nodes[(size_t)i * 8 + k];
+                float& hi = moved->nodes[(size_t)i * 8 + 4 + k];
+                lo = (float)(scale * lo + shift[k]);
+                hi = (float)(scale * hi + shift[k]);
+            }
+        field = moved;
+    }
 }
 
 bool compile_region(const Region& r, RegionProgram& out, std::string& error) {

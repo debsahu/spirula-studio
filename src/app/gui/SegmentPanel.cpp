@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <set>
 
 #ifdef SS_BUILD_SAM
 #include "nn/io/Image.h"
@@ -89,6 +90,9 @@ void SegmentPanel::open(const PreviewSource& src, const MaskModelFiles& model) {
     _history.clear();
     _saved_msg.clear();
     _path.cancel();
+    _pen.cancel();
+    _pt_part = PenPart::None;
+    _pt_anchor = -1;
     _path.set_livewire(nullptr);
     _livewire.reset();
     _livewire_key.clear();
@@ -98,6 +102,7 @@ void SegmentPanel::open(const PreviewSource& src, const MaskModelFiles& model) {
         _frames.clear();
         _all_files.clear();
         _folders.clear();
+        _cameras.clear();
         _frames_pending.clear();
         _all_files_pending.clear();
         _folders_pending.clear();
@@ -157,6 +162,8 @@ void SegmentPanel::close() {
     _draw = DrawTool::Select;
     _tool.cancel();
     _path.cancel();
+    _pen.cancel();
+    _pt_part = PenPart::None;
     _path.set_livewire(nullptr);
     _livewire.reset();
     _livewire_key.clear();
@@ -165,6 +172,7 @@ void SegmentPanel::close() {
         _frames.clear();
         _all_files.clear();
         _folders.clear();
+        _cameras.clear();
         _frames_pending.clear();
         _all_files_pending.clear();
         _folders_pending.clear();
@@ -207,14 +215,10 @@ void SegmentPanel::destroy_gl() {
 // ---------------------------------------------------------------------------
 
 app::FrameMask SegmentPanel::resolved(const app::FrameStencil& s) const {
-    app::FrameMask fm = s.mask;
-    if (s.detect_border && _border.found) {
-        app::MaskShape e = _border.shape;
-        const float k = 1.0f - std::clamp(s.shrink, -0.5f, 0.5f);
-        e.rx *= k;
-        e.ry *= k;
-        // First: it is what the drawn shapes are applied to, in order.
-        fm.shapes.insert(fm.shapes.begin(), e);
+    const app::CameraStencil& cs = s.for_camera(shown_camera());
+    app::FrameMask fm = cs.mask;
+    if (cs.detect_border && _border.found) {
+        fm.shapes.insert(fm.shapes.begin(), app::shrink_border(_border.shape, cs.shrink));
     }
     return fm;
 }
@@ -225,13 +229,64 @@ std::string SegmentPanel::camera_of(const std::string& file) const {
         .parent_path().generic_string();
 }
 
+std::string SegmentPanel::file_camera(const std::string& file) const {
+    const std::string sub = camera_of(file);
+    if (_src.is_video || _src.look.packed_lenses < 2 || _folder_idx < 0 ||
+        _folder_idx >= (int)_folders.size())
+        return sub;
+    const std::string& lens = _folders[(size_t)_folder_idx];
+    return sub.empty() ? lens : lens + "/" + sub;
+}
+
 std::string SegmentPanel::shown_camera() const {
     if (_src.is_video)
         return _folder_idx >= 0 && _folder_idx < (int)_folders.size()
                    ? _folders[(size_t)_folder_idx]
                    : std::string();
     return _frames.empty() ? std::string()
-                           : camera_of(_frames[(size_t)_frame_idx].path);
+                           : file_camera(_frames[(size_t)_frame_idx].path);
+}
+
+std::vector<std::string> SegmentPanel::camera_names() const {
+    std::set<std::string> out;
+    if (_src.is_video) {
+        out.insert(_folders.begin(), _folders.end());
+    } else {
+        for (const std::string& f : _all_files) {
+            const std::string sub = camera_of(f);
+            if (_src.look.packed_lenses < 2) out.insert(sub);
+            else
+                for (const std::string& lens : _folders)
+                    out.insert(sub.empty() ? lens : lens + "/" + sub);
+        }
+    }
+    return {out.begin(), out.end()};
+}
+
+app::CameraStencil& SegmentPanel::scope(app::FrameStencil& s) {
+    if (!s.per_camera()) return s;
+    const std::string cam = shown_camera();
+    auto it = s.cameras.find(cam);
+    if (it == s.cameras.end())
+        it = s.cameras.emplace(cam, static_cast<const app::CameraStencil&>(s)).first;
+    return it->second;
+}
+
+// On: every camera starts as a copy of the input's, so nothing changes until
+// one is drawn on. Off: the shown camera's becomes the input's.
+void SegmentPanel::set_per_camera(app::FrameStencil& s, bool on) {
+    if (on) {
+        for (const std::string& cam : _cameras)
+            s.cameras.emplace(cam, static_cast<const app::CameraStencil&>(s));
+    } else if (s.per_camera()) {
+        const app::CameraStencil shown = s.for_camera(shown_camera());
+        s.cameras.clear();
+        static_cast<app::CameraStencil&>(s) = shown;
+    }
+    _shape_sel = -1;
+    _drag_handle = -1;
+    _pt_part = PenPart::None;
+    _stencil_key.clear();
 }
 
 void SegmentPanel::start_detect() {
@@ -246,7 +301,7 @@ void SegmentPanel::start_detect() {
     _border_camera = shown_camera();
     std::vector<std::string> files;
     for (const std::string& f : _all_files)
-        if (camera_of(f) == _border_camera) files.push_back(f);
+        if (file_camera(f) == _border_camera) files.push_back(f);
     // The shrink is applied when the shape is used, so the slider costs no
     // second fit.
     app::BorderDetectOptions o;
@@ -663,10 +718,11 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
         _frames.empty() ? PreviewFrame{} : _frames[(size_t)_frame_idx];
     const bool hovered = ImGui::IsItemHovered();
     const ImGuiIO& io = ImGui::GetIO();
-    std::vector<app::MaskShape>& shapes = stencil.mask.shapes;
+    std::vector<app::MaskShape>& shapes = scope(stencil).mask.shapes;
+    if (_shape_sel >= (int)shapes.size()) _shape_sel = -1;
 
     // The edge map belongs to one frame; a frame change drops it, and the
-    // armed pen tool asks for this frame's.
+    // armed livewire path asks for this frame's.
     const std::string frame_key = shown_frame_key();
     if (_livewire && _livewire_key != frame_key) {
         _livewire.reset();
@@ -675,23 +731,41 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
         _path.cancel();
     }
     const bool path_mode = _draw == DrawTool::Path;
+    const bool pen_mode = _draw == DrawTool::Pen;
     if (path_mode && !_livewire && !_livewiring.load()) start_livewire();
 
-    // Select: the selected shape owns the mouse over its handles and body, and
-    // every other click prompts the model. An unselected shape (the fisheye
-    // circle, usually) never eats a click.
+    // The selected shape owns the mouse over its handles and body (Points: a pen
+    // shape's anchors and handles too); under Select every other click prompts
+    // the model, so an unselected shape (the fisheye circle, usually) eats none.
     const ImVec2 mouse = ImGui::GetMousePos();
     const float mu = (mouse.x - origin.x) / size.x;
     const float mv = (mouse.y - origin.y) / size.y;
+    app::MaskShape* sel = _shape_sel >= 0 ? &shapes[(size_t)_shape_sel] : nullptr;
+    bool pen_sel = sel && sel->kind == app::MaskShape::Kind::Bezier;
+    // Whatever changed the list under a point drag (undo, the list) ended it.
+    if (!pen_sel || _pt_anchor >= (int)(sel->pts.size() / 6)) {
+        _pt_part = PenPart::None;
+        _pt_pull = false;
+        _pt_anchor = -1;
+    }
+    const bool selecting = _draw == DrawTool::Select || _draw == DrawTool::Points;
+    // Ctrl is the vector editors' "direct selection for now" under the pen.
+    const bool points_now =
+        pen_sel && (_draw == DrawTool::Points ||
+                    (pen_mode && !_pen.in_progress() && (io.KeyCtrl || _pt_part != PenPart::None)));
     bool on_shape = false;
-    if (_draw == DrawTool::Select && _shape_sel >= 0 && _shape_sel < (int)shapes.size()) {
-        app::MaskShape& s = shapes[(size_t)_shape_sel];
+    auto grab = [&](int handle) {
+        _drag_handle = handle;
+        _drag_before = stencil;
+        _drag_before_key = app::format_mask_shapes(shapes);
+    };
+    if (points_now) on_shape = edit_points(stencil, *sel, mu, mv, size.x, size.y, hovered, edited);
+    else if (pen_mode && pen_sel && !_pen.in_progress())
+        on_shape = pen_on_shape(stencil, *sel, mu, mv, size.x, size.y, hovered, edited);
+    if (selecting && sel && _pt_part == PenPart::None) {
+        app::MaskShape& s = *sel;
         float hu[3], hv[3];
         const int n = stencil_handles(s, hu, hv);
-        auto grab = [&](int handle) {
-            _drag_handle = handle;
-            _drag_before = shapes;
-        };
         for (int i = 0; i < n; i++) {
             const ImVec2 p = to_screen(hu[i], hv[i]);
             // `near` is a macro in the Windows headers; do not name it that.
@@ -702,7 +776,7 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
             dl->AddCircle(p, 6.0f, IM_COL32(30, 30, 30, 220), 0, 1.5f);
             if (hit && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) grab(i);
         }
-        if (hovered && stencil_contains(s, mu, mv)) {
+        if (hovered && !on_shape && stencil_contains(s, mu, mv)) {
             on_shape = true;
             if (_drag_handle == -1 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 grab(kDragBody);
@@ -710,24 +784,41 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
                 _drag_from_v = mv;
             }
         }
-        if (_drag_handle != -1) {
-            if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                if (_drag_handle == kDragBody) {
-                    stencil_move(s, mu - _drag_from_u, mv - _drag_from_v);
-                    _drag_from_u = mu;
-                    _drag_from_v = mv;
-                } else {
-                    stencil_move_handle(s, _drag_handle, mu, mv);
-                }
+    }
+    // Points picks what it clicks, the topmost shape first, and lets go on
+    // empty picture; the press that picks also starts moving it.
+    if (_draw == DrawTool::Points && hovered && !on_shape && _drag_handle == -1 &&
+        _pt_part == PenPart::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        _shape_sel = -1;
+        _pt_anchor = -1;
+        for (int k = (int)shapes.size() - 1; k >= 0; k--)
+            if (stencil_contains(shapes[(size_t)k], mu, mv)) {
+                _shape_sel = k;
+                grab(kDragBody);
+                _drag_from_u = mu;
+                _drag_from_v = mv;
                 on_shape = true;
+                break;
+            }
+    }
+    if (_drag_handle != -1 && _shape_sel >= 0) {
+        app::MaskShape& s = shapes[(size_t)_shape_sel];
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            if (_drag_handle == kDragBody) {
+                stencil_move(s, mu - _drag_from_u, mv - _drag_from_v);
+                _drag_from_u = mu;
+                _drag_from_v = mv;
             } else {
-                _drag_handle = -1;
-                // A click that moved nothing is not a step to undo.
-                if (app::format_mask_shapes(_drag_before) != app::format_mask_shapes(shapes)) {
-                    _history.push(_drag_before);
-                    _shapes_edited = true;
-                    edited = true;      // rerun once, on release
-                }
+                stencil_move_handle(s, _drag_handle, mu, mv);
+            }
+            on_shape = true;
+        } else {
+            _drag_handle = -1;
+            // A click that moved nothing is not a step to undo.
+            if (_drag_before_key != app::format_mask_shapes(shapes)) {
+                _history.push(_drag_before);
+                _shapes_edited = true;
+                edited = true;      // rerun once, on release
             }
         }
     }
@@ -758,9 +849,9 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
     const bool enter = focused && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
                                    ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
 
-    bool tool_consumed = false;
-    if (path_mode) {
-        mask::PathSpace sp;
+    // Canvas pixels <-> frame pixels, for the two tools that keep frame pixels.
+    mask::PathSpace sp;
+    {
         const float tw = (float)_tex_w, th = (float)_tex_h;
         sp.to_frame = [size, tw, th](float x, float y, float& fx, float& fy) {
             fx = x / size.x * tw;
@@ -770,6 +861,9 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
             x = fx / tw * size.x;
             y = fy / th * size.y;
         };
+    }
+    bool tool_consumed = false;
+    if (path_mode) {
         _path.set_space(sp);
         _path.note_modifiers(io.KeyShift, io.KeyCtrl);
         std::vector<float> poly;
@@ -784,6 +878,22 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
                 add_shape(n);
         }
         mask::draw_path_overlay(dl, origin, _path);
+    } else if (pen_mode) {
+        _pen.set_space(sp);
+        _pen.note_modifiers(io.KeyShift, io.KeyCtrl);
+        _pen.note_space(ImGui::IsKeyDown(ImGuiKey_Space));
+        std::vector<float> anchors;
+        bool closed = _pen.update(in, anchors, tool_consumed);
+        if (enter && !closed) closed = _pen.commit_pending(anchors);
+        app::MaskShape n;
+        if (closed && stencil_shape_from_pen(anchors, size.x, size.y,
+                                             stroke_removes(_pen.mode_ctrl()), n)) {
+            add_shape(n);
+            // Kept picked, as a vector editor keeps the path it just drew.
+            _shape_sel = (int)shapes.size() - 1;
+            _pt_anchor = -1;
+        }
+        mask::draw_pen_overlay(dl, origin, _pen);
     } else if (_draw == DrawTool::Shape || _draw == DrawTool::Eraser) {
         _tool.set_brush_radius(_brush_pct * 0.01f * std::min(size.x, size.y));
         ShapeStroke st;
@@ -795,20 +905,43 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
         _tool.draw_overlay(dl, origin);
     }
 
+    // Undo replaces the stencil, and `shapes` with it: it runs after drawing.
+    // A new shape may have moved the list, so the pick is looked up again.
+    int undo_request = 0;   // 1 undo, 2 redo
+    sel = _shape_sel >= 0 && _shape_sel < (int)shapes.size() ? &shapes[(size_t)_shape_sel] : nullptr;
+    pen_sel = sel && sel->kind == app::MaskShape::Kind::Bezier;
     if (focused) {
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-            if (_path.in_progress()) _path.cancel();
+            if (_pen.in_progress()) _pen.cancel();
+            else if (_path.in_progress()) _path.cancel();
             else if (_tool.in_progress()) _tool.cancel();
+            else if ((pen_mode || _draw == DrawTool::Points) && _shape_sel >= 0) _shape_sel = -1;
             else _draw = DrawTool::Select;
         }
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
             // A half-drawn polygon or path gives back its last point first.
-            if (!io.KeyShift && path_mode && _path.in_progress()) _path.pop_anchor();
+            if (!io.KeyShift && pen_mode && _pen.in_progress()) _pen.pop_anchor();
+            else if (!io.KeyShift && path_mode && _path.in_progress()) _path.pop_anchor();
             else if (!io.KeyShift && _tool.in_progress() && _tool.id() == ToolId::Polygon)
                 _tool.pop_point();
-            else undo_shapes(stencil, io.KeyShift, edited);
+            else undo_request = io.KeyShift ? 2 : 1;
         }
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) undo_shapes(stencil, true, edited);
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) undo_request = 2;
+        const bool erase_key = ImGui::IsKeyPressed(ImGuiKey_Backspace, false) ||
+                               ImGui::IsKeyPressed(ImGuiKey_Delete, false);
+        if (erase_key && pen_mode && _pen.in_progress()) {
+            _pen.pop_anchor();
+        } else if (erase_key && _draw == DrawTool::Points && pen_sel && _pt_anchor >= 0 &&
+                   _pt_part == PenPart::None) {
+            const app::FrameStencil before = stencil;
+            if (pen_delete(*sel, _pt_anchor)) {
+                _history.push(before);
+                _stencil_key.clear();
+                _shapes_edited = true;
+                edited = true;
+                _pt_anchor = -1;
+            }
+        }
     }
 
     // Clicks land in source-image pixels, which is what the model wants. Only
@@ -835,6 +968,7 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
         ui::SetTooltip(dmsg::click_tooltip, {settings.current_object + 1});
 
     // Outlines: the exact boundary, over an overlay that is only 512 px wide.
+    std::vector<float> fed;
     for (size_t i = 0; i < shapes.size(); i++) {
         const app::MaskShape& s = shapes[i];
         const ImU32 col = (int)i == _shape_sel ? IM_COL32(255, 255, 255, 235)
@@ -860,6 +994,20 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
             case app::MaskShape::Kind::Rect:
                 dl->AddRect(to_screen(s.cx, s.cy), to_screen(s.rx, s.ry), col, 0.0f, 0, thick);
                 break;
+            case app::MaskShape::Kind::Bezier: {
+                fed = s.pts;
+                for (size_t k = 0; k + 1 < fed.size(); k += 2) {
+                    fed[k] *= size.x;
+                    fed[k + 1] *= size.y;
+                }
+                const size_t n = fed.size() / 6;
+                mask::draw_bezier(dl, origin, fed.data(), n, /*closed=*/true, col, thick);
+                // Its points wherever they can be edited: Points, and the pen.
+                if ((int)i == _shape_sel && (_draw == DrawTool::Points || pen_mode))
+                    mask::draw_bezier_points(dl, origin, fed.data(), n, _pt_anchor,
+                                             /*handles=*/_draw == DrawTool::Points || io.KeyCtrl);
+                break;
+            }
         }
     }
 
@@ -881,6 +1029,119 @@ void SegmentPanel::draw_image(MaskSettings& settings, app::FrameStencil& stencil
                         IM_COL32(255, 255, 255, 255), 1.5f);
         }
     }
+    if (undo_request) undo_shapes(stencil, undo_request == 2, edited);
+}
+
+// Anchors and handles of the selected pen shape, all in normalized
+// coordinates; Shift's 45 degrees are taken in canvas pixels.
+bool SegmentPanel::edit_points(app::FrameStencil& stencil, app::MaskShape& s, float mu,
+                               float mv, float cw, float ch, bool hovered, bool& edited) {
+    const ImGuiIO& io = ImGui::GetIO();
+    if (_pt_part == PenPart::None) {
+        const PenHit h = pen_hit(s, mu, mv, cw, ch, 6.0f, /*handles=*/true);
+        if (!hovered || h.part == PenPart::None || h.part == PenPart::Segment) return false;
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            const float* a = &s.pts[6 * (size_t)h.index];
+            const int j = h.part == PenPart::In ? 0 : h.part == PenPart::Out ? 4 : 2;
+            _pt_part = h.part;
+            _pt_anchor = h.index;
+            _pt_from[0] = a[j];
+            _pt_from[1] = a[j + 1];
+            _pt_press[0] = mu;
+            _pt_press[1] = mv;
+            _pt_moved = false;
+            _pt_pull = false;
+            _drag_before = stencil;
+            _drag_before_key = app::format_mask_shapes(scope(stencil).mask.shapes);
+        }
+        return true;
+    }
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        const float* a = &s.pts[6 * (size_t)_pt_anchor];
+        float x = (_pt_from[0] + mu - _pt_press[0]) * cw;
+        float y = (_pt_from[1] + mv - _pt_press[1]) * ch;
+        _pt_moved = _pt_moved || std::hypot((mu - _pt_press[0]) * cw,
+                                            (mv - _pt_press[1]) * ch) >= mask::kPenDragStart;
+        if (io.KeyShift) {
+            const bool handle = _pt_part != PenPart::Anchor;
+            mask::snap_45((handle ? a[2] : _pt_from[0]) * cw, (handle ? a[3] : _pt_from[1]) * ch,
+                          x, y);
+        }
+        if (_pt_pull) {
+            // A corner pulled open: symmetric handles, as dragging a new anchor.
+            if (_pt_moved) {
+                float* w = &s.pts[6 * (size_t)_pt_anchor];
+                w[4] = x / cw;
+                w[5] = y / ch;
+                w[0] = 2.0f * w[2] - w[4];
+                w[1] = 2.0f * w[3] - w[5];
+            }
+        } else if (_pt_moved) {
+            pen_move_point(s, _pt_anchor, _pt_part, x / cw, y / ch, cw, ch, io.KeyAlt);
+        }
+        return true;
+    }
+    if (_pt_pull && !_pt_moved) pen_make_corner(s, _pt_anchor);
+    _pt_part = PenPart::None;
+    _pt_pull = false;
+    if (_drag_before_key != app::format_mask_shapes(scope(stencil).mask.shapes)) {
+        _history.push(_drag_before);
+        _stencil_key.clear();
+        _shapes_edited = true;
+        edited = true;
+    }
+    return true;
+}
+
+// The pen over the picked pen shape, as vector editors have it: on its
+// outline it adds an anchor, on an anchor it deletes it, and with Alt it
+// turns an anchor into a corner, or pulls new handles out of it.
+bool SegmentPanel::pen_on_shape(app::FrameStencil& stencil, app::MaskShape& s, float mu,
+                                float mv, float cw, float ch, bool hovered, bool& edited) {
+    const ImGuiIO& io = ImGui::GetIO();
+    if (!hovered) return false;
+    const PenHit h = pen_hit(s, mu, mv, cw, ch, 6.0f, /*handles=*/false);
+    if (h.part == PenPart::None) return false;
+    const bool alt = io.KeyAlt && h.part == PenPart::Anchor;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 at(ImGui::GetMousePos().x + 10.0f, ImGui::GetMousePos().y + 10.0f);
+    const ImU32 badge = IM_COL32(255, 255, 255, 230);
+    dl->AddLine(ImVec2(at.x - 4.0f, at.y), ImVec2(at.x + 4.0f, at.y), badge, 1.5f);
+    if (h.part == PenPart::Segment)
+        dl->AddLine(ImVec2(at.x, at.y - 4.0f), ImVec2(at.x, at.y + 4.0f), badge, 1.5f);
+    if (alt) {
+        dl->AddLine(ImVec2(at.x - 4.0f, at.y + 3.0f), ImVec2(at.x, at.y - 3.0f), badge, 1.5f);
+        dl->AddLine(ImVec2(at.x, at.y - 3.0f), ImVec2(at.x + 4.0f, at.y + 3.0f), badge, 1.5f);
+    }
+    if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left)) return true;
+    if (alt) {
+        // Settled on release by edit_points: a click makes a corner, a drag
+        // pulls symmetric handles.
+        const float* a = &s.pts[6 * (size_t)h.index];
+        _pt_part = PenPart::Out;
+        _pt_anchor = h.index;
+        _pt_from[0] = a[2];
+        _pt_from[1] = a[3];
+        _pt_press[0] = mu;
+        _pt_press[1] = mv;
+        _pt_moved = false;
+        _pt_pull = true;
+        _drag_before = stencil;
+        _drag_before_key = app::format_mask_shapes(scope(stencil).mask.shapes);
+        return true;
+    }
+    const app::FrameStencil before = stencil;
+    const bool changed = h.part == PenPart::Segment
+                             ? (_pt_anchor = pen_insert(s, h.index, h.t)) >= 0
+                             : pen_delete(s, h.index);
+    if (h.part == PenPart::Anchor) _pt_anchor = -1;
+    if (changed) {
+        _history.push(before);
+        _stencil_key.clear();
+        _shapes_edited = true;
+        edited = true;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -892,17 +1153,18 @@ bool SegmentPanel::stroke_removes(bool ctrl) const {
 }
 
 void SegmentPanel::change_shapes(app::FrameStencil& stencil, bool& edited) {
-    _history.push(stencil.mask.shapes);
+    _history.push(stencil);
     _stencil_key.clear();
     _shapes_edited = true;
     edited = true;
 }
 
 void SegmentPanel::undo_shapes(app::FrameStencil& stencil, bool redo, bool& edited) {
-    if (!(redo ? _history.redo(stencil.mask.shapes) : _history.undo(stencil.mask.shapes)))
-        return;
+    if (!(redo ? _history.redo(stencil) : _history.undo(stencil))) return;
     _shape_sel = -1;
     _drag_handle = -1;
+    _pt_part = PenPart::None;
+    _pt_anchor = -1;
     _stencil_key.clear();
     _shapes_edited = true;
     edited = true;
@@ -916,18 +1178,33 @@ void SegmentPanel::draw_tools(app::FrameStencil& stencil, bool& edited) {
         if (_draw != t || _tool.id() != id) {
             _tool.cancel();
             _path.cancel();
+            _pen.cancel();
         }
         _draw = t;
         if (t == DrawTool::Shape || t == DrawTool::Eraser) _tool.set_id(id);
-        _shape_sel = -1;
+        // The pick carries over between the tools that edit it.
+        if (t != DrawTool::Select && t != DrawTool::Points && t != DrawTool::Pen)
+            _shape_sel = -1;
         _drag_handle = -1;
+        _pt_part = PenPart::None;
     };
     if (ui::KeyButton(dmsg::stencil_tool_select, w, "V", _draw == DrawTool::Select))
         pick(DrawTool::Select, ToolId::Navigate);
     ui::help_on_hover(dmsg::stencil_tool_select_help);
+    ImGui::SameLine();
+    if (ui::KeyButton(dmsg::stencil_tool_points, w, "A", _draw == DrawTool::Points))
+        pick(DrawTool::Points, ToolId::Navigate);
+    ui::help_on_hover(dmsg::stencil_tool_points_help);
+    // The pen takes the polygon's place and its P: clicked, it draws one.
     for (int i = (int)ToolId::Box; i <= (int)ToolId::Brush; i++) {
         const ToolRow& row = tool_table()[i];
         ImGui::SameLine();
+        if (row.id == ToolId::Polygon) {
+            if (ui::KeyButton(mmsg::tool_pen, w, "P", _draw == DrawTool::Pen))
+                pick(DrawTool::Pen, ToolId::Navigate);
+            ui::help_on_hover(dmsg::stencil_tool_pen_help);
+            continue;
+        }
         if (ui::KeyButton(tool_label(row.id), w, row.key,
                           _draw == DrawTool::Shape && _tool.id() == row.id))
             pick(DrawTool::Shape, row.id);
@@ -966,6 +1243,10 @@ void SegmentPanel::draw_tools(app::FrameStencil& stencil, bool& edited) {
                            ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
         ui::help_on_hover(dmsg::stencil_brush_size_help);
     }
+    if (_draw == DrawTool::Pen && _pen.in_progress()) {
+        ImGui::SameLine();
+        ui::TextDisabled(mmsg::pen_anchors, {_pen.anchor_count()});
+    }
     if (_draw == DrawTool::Path) {
         ImGui::SameLine();
         ui::TextDisabled(dmsg::stencil_path_anchors, {_path.anchor_count()});
@@ -981,11 +1262,15 @@ void SegmentPanel::draw_tools(app::FrameStencil& stencil, bool& edited) {
     // The keys, while nothing is being typed and no stroke is half drawn.
     const ImGuiIO& io = ImGui::GetIO();
     if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || io.WantTextInput ||
-        io.KeyCtrl || _tool.in_progress() || _path.in_progress())
+        io.KeyCtrl || _tool.in_progress() || _path.in_progress() || _pen.in_progress() ||
+        _pt_part != PenPart::None)
         return;
     if (ImGui::IsKeyPressed(ImGuiKey_V, false)) pick(DrawTool::Select, ToolId::Navigate);
+    if (ImGui::IsKeyPressed(ImGuiKey_A, false)) pick(DrawTool::Points, ToolId::Navigate);
+    if (ImGui::IsKeyPressed(ImGuiKey_P, false)) pick(DrawTool::Pen, ToolId::Navigate);
     for (int i = (int)ToolId::Box; i <= (int)ToolId::Brush; i++) {
         const ToolRow& row = tool_table()[i];
+        if (row.id == ToolId::Polygon) continue;
         if (ImGui::IsKeyPressed((ImGuiKey)row.imgui_key, false)) pick(DrawTool::Shape, row.id);
     }
     if (ImGui::IsKeyPressed(ImGuiKey_X, false)) pick(DrawTool::Eraser, ToolId::Brush);
@@ -996,17 +1281,37 @@ void SegmentPanel::draw_tools(app::FrameStencil& stencil, bool& edited) {
         _brush_pct = std::min(25.0f, _brush_pct * 1.25f);
 }
 
+// One list goes where the tools draw; a per-camera set goes on the cameras it
+// names, with separate areas turned on, and refuses an input that has none.
 void SegmentPanel::load_file(app::FrameStencil& s, const std::string& path) {
-    std::vector<app::MaskShape> shapes;
+    app::MaskSet set;
     std::string err;
-    if (!load_stencil_preset(path, shapes, err)) {
+    if (!load_stencil_preset(path, set, err)) {
         _saved_msg = spirula::i18n::format(dmsg::stencil_load_failed, {err});
         _saved_msg_err = true;
         return;
     }
+    if (set.per_camera() && !_cameras.empty()) {
+        std::string names;
+        bool any = false;
+        for (const auto& [camera, shapes] : set.cameras) {
+            names += (names.empty() ? "" : ", ") + camera;
+            any = any || std::find(_cameras.begin(), _cameras.end(), camera) != _cameras.end();
+        }
+        if (!any) {
+            _saved_msg = spirula::i18n::format(dmsg::stencil_set_no_camera, {names});
+            _saved_msg_err = true;
+            return;
+        }
+    }
     bool edited = false;
     change_shapes(s, edited);
-    s.mask.shapes = std::move(shapes);
+    if (set.per_camera()) {
+        if (!s.per_camera() && _cameras.size() > 1) set_per_camera(s, true);
+        app::apply_mask_set(s, set);
+    } else {
+        scope(s).mask.shapes = std::move(set.shapes);
+    }
     _shape_sel = -1;
     _drag_handle = -1;
     _saved_msg.clear();
@@ -1022,19 +1327,25 @@ void SegmentPanel::draw_saved_areas(app::FrameStencil& s) {
     if (ImGui::BeginPopup("##stencilload")) {
         ui::SeparatorText(dmsg::stencil_saved_areas);
         for (const StencilPreset& p : _saved)
-            if (ui::SelectableRaw(p.name, false)) load_file(s, p.path);
+            if (ui::SelectableRaw(stencil_preset_label(p) + "##" + p.path, false))
+                load_file(s, p.path);
         // Kept by earlier runs into this output folder, saved or not.
         if (!_in_dataset.empty()) {
             ui::SeparatorText(dmsg::stencil_in_dataset);
             for (const StencilPreset& p : _in_dataset)
-                if (ui::SelectableRaw(p.name + "##ds" + p.path, false)) load_file(s, p.path);
+                if (ui::SelectableRaw(stencil_preset_label(p) + "##ds" + p.path, false))
+                    load_file(s, p.path);
         }
         ImGui::Separator();
         if (ui::Selectable(dmsg::stencil_other_file)) _browse_requested = true;
         ImGui::EndPopup();
     }
+    // With separate areas on, the set is the whole input's: a file per camera
+    // when the cameras differ.
+    const app::MaskSet to_save =
+        s.per_camera() ? app::mask_set_of(s) : app::MaskSet{scope(s).mask.shapes, {}};
     ImGui::SameLine();
-    ImGui::BeginDisabled(s.mask.shapes.empty());
+    ImGui::BeginDisabled(to_save.empty());
     if (ui::SmallButton(dmsg::stencil_save)) ImGui::OpenPopup("##stencilsave");
     ImGui::EndDisabled();
     ui::help_on_hover_disabled(dmsg::stencil_save_help);
@@ -1047,7 +1358,7 @@ void SegmentPanel::draw_saved_areas(app::FrameStencil& s) {
         ImGui::BeginDisabled(_save_name.empty());
         if ((ui::Button(mmsg::save) || enter) && !_save_name.empty()) {
             std::string path, err;
-            if (save_stencil_preset(_save_name, s.mask.shapes, path, err)) {
+            if (save_stencil_preset(_save_name, to_save, path, err)) {
                 _saved_msg = spirula::i18n::format(dmsg::stencil_saved_as, {path});
                 _saved_msg_err = false;
             } else {
@@ -1074,13 +1385,34 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
     ui::Text(dmsg::stencil_section);
     ui::help_on_hover(dmsg::stencil_section_help);
 
-    bool detect = s.detect_border;
+    // What is edited below: the input's, or the shown camera's own.
+    app::CameraStencil* cs = &scope(s);
+    const bool several = _cameras.size() > 1;
+    if (several || s.per_camera()) {
+        bool per = s.per_camera();
+        if (ui::Checkbox(dmsg::stencil_per_camera, &per)) {
+            // Undoable, but no drawn shape changes: a named set stays named.
+            _history.push(s);
+            edited = true;
+            set_per_camera(s, per);
+            cs = &scope(s);
+        }
+        ui::help_on_hover(dmsg::stencil_per_camera_help);
+        if (s.per_camera()) {
+            const std::string cam = shown_camera();
+            ui::TextDisabled(dmsg::stencil_per_camera_editing, {cam.empty() ? std::string("/") : cam});
+        }
+    }
+
+    bool detect = cs->detect_border;
     if (ui::Checkbox(dmsg::stencil_border, &detect)) {
-        s.detect_border = detect;
+        _history.push(s);
+        _stencil_key.clear();
         edited = true;
+        cs->detect_border = detect;
     }
     ui::help_on_hover(dmsg::stencil_border_help);
-    if (s.detect_border) {
+    if (cs->detect_border) {
         // Lazily, here rather than off the checkbox: the option is on already
         // when the panel opens on an input that was set up before.
         if (!_listing.load() && !_detect_asked) start_detect();
@@ -1090,13 +1422,17 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
                  shown_camera() != _border_camera)
             start_detect();
         ImGui::Indent();
-        float pct = s.shrink * 100.0f;
+        // One undo step per drag, taken from the stencil as the drag found it.
+        const app::FrameStencil before = s;
+        float pct = cs->shrink * 100.0f;
         ImGui::SetNextItemWidth(-1);
-        if (ui::SliderFloatRaw("##shrink", &pct, -10.0f, 12.0f, "%.1f%%")) {
-            s.shrink = pct / 100.0f;
+        if (ui::SliderFloatRaw("##shrink", &pct, -10.0f, 30.0f, "%.1f%%",
+                               ImGuiSliderFlags_AlwaysClamp)) {
+            cs->shrink = pct / 100.0f;
             _stencil_key.clear();
             edited = true;
         }
+        if (ImGui::IsItemActivated()) _history.push(before);
         ui::help_on_hover(dmsg::stencil_shrink_help);
         if (_detecting.load())
             ui::TextDisabled(dmsg::stencil_looking);
@@ -1106,6 +1442,25 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
         if (!_detecting.load() && !_listing.load() &&
             ui::SmallButton(dmsg::stencil_look_again))
             start_detect();
+        if (!_busy.load() && !_detecting.load() && !_listing.load() &&
+            _border.found && shown_camera() == _border_camera) {
+            if (ui::SmallButton(dmsg::stencil_edit_border)) {
+                // The ellipse fits one lens: on a many-camera input it is that
+                // camera's, and the others keep their own fits.
+                change_shapes(s, edited);
+                if (several && !s.per_camera()) set_per_camera(s, true);
+                cs = &scope(s);
+                if (app::edit_detected_border(*cs, _border)) {
+                    _shape_sel = 0;
+                    _drag_handle = -1;
+                    _draw = DrawTool::Select;
+                    _tool.cancel();
+                    _path.cancel();
+                    _pen.cancel();
+                }
+            }
+            ui::help_on_hover(dmsg::stencil_edit_border_help);
+        }
         ImGui::Unindent();
     }
 
@@ -1114,13 +1469,15 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
     ui::help_on_hover(dmsg::stencil_shapes_help);
     draw_saved_areas(s);
 
-    for (size_t i = 0; i < s.mask.shapes.size(); i++) {
-        app::MaskShape& sh = s.mask.shapes[i];
+    std::vector<app::MaskShape>& shapes = scope(s).mask.shapes;
+    for (size_t i = 0; i < shapes.size(); i++) {
+        app::MaskShape& sh = shapes[i];
         ImGui::PushID((int)i);
         const spirula::i18n::Msg& kind_label =
             sh.kind == app::MaskShape::Kind::Rect      ? dmsg::stencil_shape_box
             : sh.kind == app::MaskShape::Kind::Path    ? dmsg::stencil_shape_path
             : sh.kind == app::MaskShape::Kind::Stroke  ? dmsg::stencil_shape_stroke
+            : sh.kind == app::MaskShape::Kind::Bezier  ? dmsg::stencil_shape_curve
                                                        : dmsg::stencil_shape_circle;
         const std::string label = spirula::i18n::format(kind_label, {(int)i + 1});
         // Toggling, not a plain radio: the selected shape swallows clicks on
@@ -1129,30 +1486,40 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
         if (ui::RadioButtonRaw(label.c_str(), sel)) {
             _shape_sel = sel ? -1 : (int)i;
             _drag_handle = -1;
+            _pt_part = PenPart::None;
+            _pt_anchor = -1;
             // Moving it is the Select tool's; picking it is asking for that.
-            _draw = DrawTool::Select;
+            // The pen and Points edit it where they are.
+            if (_draw != DrawTool::Points && _draw != DrawTool::Pen) _draw = DrawTool::Select;
             _tool.cancel();
             _path.cancel();
+            _pen.cancel();
         }
         ImGui::SameLine();
         if (ui::SmallButton(sh.remove ? dmsg::stencil_removes_inside
                                       : dmsg::stencil_keeps_inside)) {
             change_shapes(s, edited);
-            s.mask.shapes[i].remove = !s.mask.shapes[i].remove;
+            shapes[i].remove = !shapes[i].remove;
         }
         ui::help_on_hover(dmsg::stencil_flip_help);
         ImGui::SameLine();
         if (ui::SmallButton(dmsg::remove)) {
             change_shapes(s, edited);
-            s.mask.shapes.erase(s.mask.shapes.begin() + (long)i);
+            shapes.erase(shapes.begin() + (long)i);
             _shape_sel = -1;
             _drag_handle = -1;
+            _pt_part = PenPart::None;
             ImGui::PopID();
             break;
         }
         ImGui::PopID();
     }
-    if (_shape_sel >= 0) ui::TextDisabled(dmsg::stencil_drag_hint);
+    if (_shape_sel >= 0 && _shape_sel < (int)shapes.size()) {
+        const bool pen_shape = shapes[(size_t)_shape_sel].kind == app::MaskShape::Kind::Bezier;
+        if (pen_shape && _draw == DrawTool::Points) ui::TextDisabledWrapped(dmsg::stencil_points_hint);
+        else if (pen_shape) ui::TextDisabledWrapped(dmsg::stencil_drag_hint_pen);
+        else ui::TextDisabledWrapped(dmsg::stencil_drag_hint);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1175,6 +1542,7 @@ void SegmentPanel::draw(MaskSettings& settings, app::FrameStencil& stencil) {
             _all_files = std::move(_all_files_pending);
             _folders = std::move(_folders_pending);
             _frames_ready = false;
+            _cameras = camera_names();
         }
     }
     upload_preview();
@@ -1226,7 +1594,7 @@ void SegmentPanel::draw(MaskSettings& settings, app::FrameStencil& stencil) {
 #ifndef SS_BUILD_SAM
     // No segmentation in this build, so the half of the panel that prompts a
     // model would be a row of dead controls. The shapes below need none.
-    ui::TextWrappedRaw(backends().masking_note);
+    ui::TextWrapped(dmsg::mask_objects_need_segmentation);
     ui::help_on_hover_raw(backends().masking_reason.c_str());
 #else
     // Polarity first, and the two fields below it are labelled by it: the same

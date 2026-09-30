@@ -127,6 +127,8 @@ inline int train_tier_rank(const char* tier) {
     X(int, partition_part, -1, "dataset", "advanced", "")                    \
     X(std::string, roi_region, "", "dataset", "advanced", "none")            \
     X(float, roi_outside_weight, 1e-4f, "dataset", "advanced", "")           \
+    X(float, roi_outside_opacity_decay, 1.0f, "dataset", "advanced", "")     \
+    X(bool, roi_mask_pixels, true, "dataset", "advanced", "")                \
     X(float, train_resolution_divisor, 0.0f, "dataset", "basic", "")         \
     X(std::string, downscale_rounding_mode, "floor", "dataset", "advanced", "floor|ceil|round") \
     X(std::string, eval_mode, "all", "dataset", "advanced", "fraction|filename|interval|all") \

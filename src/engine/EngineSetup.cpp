@@ -29,6 +29,7 @@ void set_data_3dgs(
 
     engine().cur_num_splats = num_splats;
     engine().max_num_splats = max_num_splats;
+    DevicePool::global().set_splat_counts(engine().cur_num_splats, engine().max_num_splats);
 
     auto sh_shape = std::get<2>(features_sh);
     engine().num_sh = (sh_shape.size() >= 2) ? (int)sh_shape[1] : 0;
@@ -49,7 +50,8 @@ void set_data_3dgs(
 
 void engine_set_region(TorchTensorView program, TorchTensorView field_bvh,
                        TorchTensorView field_seeds, TorchTensorView camera_bvh,
-                       TorchTensorView camera_seeds, float outside_weight) {
+                       TorchTensorView camera_seeds, float outside_weight,
+                       float outside_opacity_decay) {
     auto& r = engine().region;
     r = EngineState::Region{};
     if (std::get<0>(program) == 0) return;
@@ -66,6 +68,7 @@ void engine_set_region(TorchTensorView program, TorchTensorView field_bvh,
     r.camera_bvh = _hv_to_dv<float4>(PoolSlot::EngRegionCameraBvh, as_float4(camera_bvh));
     r.camera_seeds = _hv_to_dv<float4>(PoolSlot::EngRegionCameraSeeds, as_float4(camera_seeds));
     r.outside = outside_weight;
+    r.opacity_decay = outside_opacity_decay;
 }
 
 void set_camera_params(

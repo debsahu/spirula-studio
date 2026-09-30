@@ -51,8 +51,8 @@ tools/guictl.py             drive the GUI from a script -- list the widgets on
                               screen, click them, read the framebuffer back.
                               tools/gui_mcp.py is the same surface as an MCP
                               server; docs/notes/gui-automation.md
-reference/scripts/          dataset preprocessing CLI tools (Python, standalone;
-                              mask.py is embedded into the GUI binary)
+reference/scripts/          dataset preprocessing CLI tools (Python, standalone,
+                              run by hand; nothing in the build uses them)
 reference/python/           hand-run tools on NO code path: eval_lpips.py,
                               benchmark.py, camera_utils.py (the unported
                               orientation_method / center_method reference,
@@ -88,7 +88,8 @@ src/
 │   │                         Region.h / LabelField.h / RegionProgram.h (regions
 │   │                         of space with an inside test on host and device,
 │   │                         and the labelled seed field that gives every point
-│   │                         one owner), ScenePartition.h (split a scene into
+│   │                         one owner), RegionMesh.h (a region's boundary as
+│   │                         triangles, for drawing), ScenePartition.h (split a scene into
 │   │                         parts that train separately -- READ
 │   │                         docs/notes/scene-partition.md)
 │   └── parsers/              COLMAP / Nerfstudio / Metashape readers
@@ -144,7 +145,8 @@ src/
 │   │                         sfm_main.cpp (sfm), sam_main.cpp (sam),
 │   │                         geometry_main.cpp (depth + normals)
 │   ├── FrameExtract.{h,cpp}  video -> sharp frames (`spirula sam extract` also
-│   │                         masks them in the same pass; the GUI masks after)
+│   │                         masks them in the same pass; the GUI masks after),
+│   │                         decoded by Vulkan Video or ffmpeg (FrameDecode.h)
 │   ├── Pano360.{h,cpp}     a 360 camera's own frame layout (the GoPro MAX
 │   │                         .360 EAC packing) and the views a dataset wants
 │   │                         out of it -- one implementation, both decode paths
@@ -173,6 +175,8 @@ src/
 │                             seeding -> step loop -> eval. Both the CLI and
 │                             the GUI drive this; it lives in the engine
 │                             library (cmake/sources.txt), not the app targets.
+│                             TrainForecast.{h,cpp} beside it is the run's ETA
+│                             and VRAM forecast -- docs/notes/train-forecast.md
 ├── config/                 TrainConfig.h — the training config's single source
 │                             of truth: one X-macro row per flag, hand-written.
 │                             TrainConfigJson.h is the one flat-JSON encoding
@@ -582,7 +586,10 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   `SS_POOL_ALIAS_POISON=1` fills the arena at every phase switch so a read
   that outlives its phase becomes NaNs a parity test catches, and
   `SS_POOL_ALIAS=0` turns the whole thing off. Read
-  `docs/notes/vram-splat-x-img.md` before adding a row.
+  `docs/notes/vram-splat-x-img.md` before adding a row. A buffer whose
+  length follows the LIVE splat count goes in `POOL_LIVE_SPLAT_TABLE`, so it
+  is sized for `cap_max` once: the trainer's VRAM forecast assumes only
+  `splat x img` grows during a run.
 - **`SS_PROFILE=1`** enables the per-stage backend timing breakdown
   (H2D / D2H / D2D / memset / device / host), header-only, both backends, plus
   a per-category VRAM breakdown after any run that trained. What the biggest

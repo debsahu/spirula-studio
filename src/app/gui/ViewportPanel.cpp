@@ -547,6 +547,7 @@ void ViewportPanel::build_request(ViewRequest& q, int W, int H) const {
     q.key = _buffer_keys.empty() ? "rgb" : _buffer_keys[_buffer_idx];
     q.show_cams = _show_cams;
     q.show_grid = _show_grid && !external_grid();
+    q.show_roi = _show_roi && _roi_engine != nullptr;
     q.grid_dist = nav_dist() / _m2s_scale;
     model_point(_cam.target, q.grid_target);
     q.cam_size_scale = _frustum_scale;
@@ -786,9 +787,20 @@ void ViewportPanel::attach_preview_mesh(const meshing::MeshData& mesh,
     _mode = Mode::Preview;
 }
 
+void ViewportPanel::set_region_overlay(std::shared_ptr<const spirula::RegionOverlay> engine,
+                                       std::shared_ptr<const spirula::RegionOverlay> preview,
+                                       std::shared_ptr<const std::vector<uint8_t>> points_inside) {
+    _roi_engine = std::move(engine);
+    _roi_preview = std::move(preview);
+    _roi_points_inside = std::move(points_inside);
+    if (_mode == Mode::Engine) _worker.set_region_overlay(_roi_engine);
+    _dirty = true;
+}
+
 void ViewportPanel::attach(spirula::TrainerSession& session) {
     detach();
     _worker.start(session.make_viewer_config(), session.make_viewer_hooks());
+    _worker.set_region_overlay(_roi_engine);
     _buffer_keys = _worker.buffer_keys();
     _buffer_idx = std::min<int>(_buffer_idx, (int)_buffer_keys.size() - 1);
     _has_cameras = session.ds.num_cameras > 0;
@@ -1000,12 +1012,15 @@ void ViewportPanel::handle_input(float /*item_h*/) {
         // active the camera keeps only what nothing competes for.
         const bool letters = !(_interactor && _interactor->blocks_fly_keys());
         NavCamera::Keys k;
-        k.w = letters && ImGui::IsKeyDown(ImGuiKey_W);
-        k.a = letters && ImGui::IsKeyDown(ImGuiKey_A);
-        k.s = letters && ImGui::IsKeyDown(ImGuiKey_S);
-        k.d = letters && ImGui::IsKeyDown(ImGuiKey_D);
-        k.e = letters && ImGui::IsKeyDown(ImGuiKey_E);
-        k.q = letters && ImGui::IsKeyDown(ImGuiKey_Q);
+        auto fly = [&](char c) {
+            return letters && ImGui::IsKeyDown((ImGuiKey)fly_key(c));
+        };
+        k.w = fly('w');
+        k.a = fly('a');
+        k.s = fly('s');
+        k.d = fly('d');
+        k.e = fly('e');
+        k.q = fly('q');
         // The claim is what the Shortcut() calls are for: an unclaimed arrow is
         // ALSO read by imgui's nav, which walks the focus along the toolbar.
         // IsKeyDown still reads it -- ownership only filters the owner-aware.
@@ -1389,6 +1404,11 @@ void ViewportPanel::draw_controls(bool engine) {
     place(check_w(msg::viewport_grid));
     if (ui::Checkbox(msg::viewport_grid, &_show_grid)) _dirty = true;
     ui::help_on_hover(msg::viewport_cameras_help);
+    if (_mode == Mode::Engine ? _roi_engine != nullptr : (_roi_preview || _roi_points_inside)) {
+        place(check_w(msg::viewport_region));
+        if (ui::Checkbox(msg::viewport_region, &_show_roi)) _dirty = true;
+        ui::help_on_hover(msg::viewport_region_help);
+    }
     // Only where there is a guess to switch off. Turntable and first-person
     // orbit about the navigated frame's +Z, so this is what they turn about.
     if (!_align_identity) {
@@ -1665,6 +1685,8 @@ void ViewportPanel::draw_preview(const ImVec2& avail) {
     compute_intrinsics(W, H, fx, fy);
     float target[3];
     model_point(_cam.target, target);
+    _preview.set_overlay(_roi_preview, _show_roi);
+    _preview.dim_points_outside(_roi_points_inside, _show_roi);
     unsigned tex = _preview.render(W, H, view,
                                    (PreviewProjection)_cam_model,
                                    fx / (0.5f * W), fy / (0.5f * H),

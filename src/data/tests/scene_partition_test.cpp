@@ -9,7 +9,9 @@
 #include "data/RegionProgram.h"
 #include "data/ScenePartition.h"
 #include "data/SceneTransform.h"
+#include "external/stb_image.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -37,7 +39,10 @@ struct Corridor {
     spirula::SparseStats tracks;
 };
 
-Corridor make_corridor(int n_cam, int pts_per_cam, unsigned seed) {
+// `reach`: how far along x a camera sees; `keep`: the chance it tracks a
+// point it sees, which makes per-point observer counts noisy.
+Corridor make_corridor(int n_cam, int pts_per_cam, unsigned seed, double reach = 2.5,
+                       double keep = 1.0) {
     Corridor c;
     ParsedDataset& d = c.ds;
     d.num_cameras = n_cam;
@@ -66,7 +71,8 @@ Corridor make_corridor(int n_cam, int pts_per_cam, unsigned seed) {
             d.points.xyz.insert(d.points.xyz.end(), {x, y, z});
             d.points.rgb.insert(d.points.rgb.end(), {128, 128, 128});
             for (int k = 0; k < n_cam; k++)
-                if (std::fabs(k - x) <= 2.5) c.tracks.track_image.push_back(k);
+                if (std::fabs(k - x) <= reach && (keep >= 1.0 || 0.5 * (u(rng) + 1.0) < keep))
+                    c.tracks.track_image.push_back(k);
             c.tracks.track_beg.push_back((int64_t)c.tracks.track_image.size());
             c.tracks.error.push_back(0.5f);
         }
@@ -163,6 +169,65 @@ int main() {
         }
         check(has_own && has_borrowed && s0.size() < (size_t)ds.points.num(),
               "part 0 seeds from its own points and its ring's, not the whole cloud");
+    }
+
+    // ---- a surface both parts see: owners must not interleave ----
+    {
+        Corridor room = make_corridor(40, 60, 11, 30.0, 0.1);
+        const Covisibility rc = build_covisibility(room.ds, &room.tracks, PartitionOptions{});
+        PartitionOptions ro;
+        ro.method = PartitionMethod::ViewGraph;
+        ro.parts = 2;
+        const ScenePartition rp = partition_scene(room.ds, rc, ro);
+        // Interleaving is what blurs a merge: the share of each point's ten
+        // nearest points owned by another part.
+        const int64_t n = room.ds.points.num();
+        const double* X = room.ds.points.xyz.data();
+        double foreign = 0;
+        for (int64_t i = 0; i < n; i++) {
+            std::vector<std::pair<double, int64_t>> d;
+            for (int64_t j = 0; j < n; j++) {
+                if (j == i) continue;
+                double e = 0;
+                for (int r = 0; r < 3; r++) e += (X[i * 3 + r] - X[j * 3 + r]) * (X[i * 3 + r] - X[j * 3 + r]);
+                d.push_back({e, j});
+            }
+            std::partial_sort(d.begin(), d.begin() + 10, d.end());
+            for (int k = 0; k < 10; k++)
+                foreign += rp.point_label[(size_t)d[(size_t)k].second] != rp.point_label[(size_t)i];
+        }
+        foreign /= 10.0 * (double)n;
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%.3f", foreign);
+        check(rp.num_parts == 2 && foreign < 0.03,
+              std::string("every camera sees the floor: owners do not interleave (") + buf +
+                  " of neighbours foreign)");
+    }
+
+    // ---- region masks: a camera over the inside keeps its pixels ----
+    {
+        Corridor c = make_corridor(40, 60, 5);
+        const int64_t n = c.ds.points.num();
+        std::vector<uint8_t> inside((size_t)n);
+        for (int64_t i = 0; i < n; i++) inside[(size_t)i] = c.ds.points.xyz[(size_t)i * 3] < 20.0;
+        const fs::path dir = fs::temp_directory_path() / "spirula_region_masks_test";
+        const std::vector<std::string> files =
+            write_region_masks(c.ds, c.ds.points.xyz.data(), n, inside.data(), dir.string(), false);
+        auto kept = [&](int cam) {
+            int w = 0, h = 0, ch = 0;
+            stbi_uc* img = stbi_load(files[(size_t)cam].c_str(), &w, &h, &ch, 1);
+            if (!img) return -1.0;
+            double k = 0;
+            for (int i = 0; i < w * h; i++) k += img[i] != 0;
+            stbi_image_free(img);
+            return k / (w * h);
+        };
+        check(files.size() == 40 && kept(5) > 0.99, "region masks: a camera over the inside keeps everything");
+        // Pixels no point falls near stay kept: here the strip's two sides.
+        check(kept(35) < 0.35, "region masks: one over the outside keeps little but what nothing covers");
+        check(kept(20) > 0.3 && kept(20) < 0.9, "region masks: one over the boundary keeps its inside half and a margin");
+        std::error_code ec;
+        fs::remove_all(dir, ec);
     }
 
     // ---- max-images mode and the other sources ----

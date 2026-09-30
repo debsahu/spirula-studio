@@ -32,8 +32,8 @@ way in; that tree is now read-only and this is upstream.
 
 - **Vulkan only**, like `src/sfm/`. There is no CUDA path here and there will
   not be one; the module is built by default only for `SS_BACKEND=vulkan`
-  (`SS_BUILD_SAM`), and a CUDA build keeps the `reference/scripts/mask.py`
-  subprocess.
+  (`SS_BUILD_SAM`). A build without it has no model-based masking; the
+  fixed-area stencil (`src/app/FrameMask.h`) needs no model and still works.
 - **Nothing model-agnostic belongs here.** Tensors, ops, the Vulkan runtime and
   host image I/O are `src/nn/`'s. If you find yourself adding a general kernel
   under `sam/`, it belongs one directory down — that separation is what lets a
@@ -130,9 +130,8 @@ user sees in the preview is what gets written.
   at all. Both reach the same union, margin and polarity as SAM 3's matches.
 
 The text half matches `reference/scripts/mask.py`, defaults included, so a dataset masked
-either way is the same dataset. Clicks have no counterpart there —
-lang-segment-anything takes words and nothing else — and the GUI says so rather
-than dropping them.
+either way is the same dataset. Clicks have no counterpart there:
+lang-segment-anything takes words and nothing else.
 
 ### What is not a prompt
 

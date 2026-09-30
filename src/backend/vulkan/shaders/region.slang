@@ -61,3 +61,22 @@ void densify_scale_score(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     if (idx >= p.num_splats) return;
     p.score[idx].x *= p.weight[idx];
 }
+
+struct DecayOpacityParams {  // 32 bytes: pushed directly
+    float* weight;
+    float* opac;
+    uint num_splats, wgs_per_row;
+    float factor;
+    uint _pad0;
+};
+
+// Opacity is a logit: sigmoid(o) * factor, back to a logit.
+[shader("compute")]
+[numthreads(256, 1, 1)]
+void decay_opacity(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
+                   uniform DecayOpacityParams p) {
+    uint idx = (wg.y * p.wgs_per_row + wg.x) * 256 + tid;
+    if (idx >= p.num_splats || p.weight[idx] >= 1.0) return;
+    float q = p.factor / (1.0 + exp(-p.opac[idx]));
+    p.opac[idx] = log(q / (1.0 - q));
+}

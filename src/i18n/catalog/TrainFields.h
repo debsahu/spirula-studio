@@ -3202,6 +3202,109 @@ SS_MSG(roi_outside_weight,
     ES("Peso de sorteo fuera de la región"), PT("Peso de sorteio fora da região"),
     IT("Peso di estrazione fuori dalla regione"), NL("Lotgewicht buiten het gebied"),
     RU("Вес выборки вне области"), TR("Bölge dışı çekiliş ağırlığı"));
+SS_MSG(roi_mask_pixels,
+    EN("Train only on what shows the region"), JA("領域が写る部分だけで学習"),
+    ZH_HANS("只用拍到区域的像素训练"), ZH_HANT("只用拍到區域的像素訓練"),
+    KO("영역이 보이는 픽셀로만 학습"), DE("Nur auf Pixeln des Bereichs trainieren"),
+    FR("N'entraîner que sur ce qui montre la région"), ES("Entrenar solo con lo que muestra la región"),
+    PT("Treinar só com o que mostra a região"), IT("Addestrare solo su ciò che mostra la regione"),
+    NL("Alleen trainen op wat het gebied toont"), RU("Обучать только на пикселях области"),
+    TR("Yalnızca bölgeyi gösteren piksellerle eğit"));
+SS_MSG(roi_mask_pixels_help,
+    EN("With a region of interest, each image is masked to the pixels whose "
+       "nearest seed point is inside it, plus a margin, before training. Pixels "
+       "showing only the outside would otherwise be explained by splats grown "
+       "in front of the camera, which the merge keeps."),
+    JA("関心領域があるとき、学習前に各画像を、最も近い初期点が領域内にある画素と"
+       "その周りだけに絞ります。外側しか写らない画素は、そうしないとカメラの手前に"
+       "育つスプラットで説明され、マージで残ってしまいます。"),
+    ZH_HANS("有感兴趣区域时，训练前把每张图像限制为最近种子点在区域内的像素及其边缘。"
+            "否则只拍到外部的像素会被相机前方长出的泼溅来解释，而合并时会保留它们。"),
+    ZH_HANT("有感興趣區域時，訓練前把每張影像限制為最近種子點在區域內的像素及其邊緣。"
+            "否則只拍到外部的像素會被相機前方長出的潑濺來解釋，而合併時會保留它們。"),
+    KO("관심 영역이 있으면 학습 전에 각 이미지를 가장 가까운 시드 점이 영역 안에 있는 "
+       "픽셀과 그 주변으로 제한합니다. 그러지 않으면 바깥만 보이는 픽셀을 카메라 앞에 "
+       "자란 스플랫이 설명하게 되고, 병합이 그것을 남깁니다."),
+    DE("Mit einem Interessenbereich wird jedes Bild vor dem Training auf die "
+       "Pixel maskiert, deren nächster Startpunkt darin liegt, plus einen Rand. "
+       "Sonst erklären vor der Kamera gewachsene Splats die Pixel, die nur das "
+       "Außen zeigen, und das Zusammenführen behält sie."),
+    FR("Avec une région d'intérêt, chaque image est masquée avant l'entraînement "
+       "aux pixels dont le point d'amorce le plus proche est dedans, plus une "
+       "marge. Sinon, des splats poussés devant la caméra expliquent les pixels "
+       "qui ne montrent que l'extérieur, et la fusion les garde."),
+    ES("Con una región de interés, cada imagen se enmascara antes de entrenar a "
+       "los píxeles cuyo punto semilla más cercano está dentro, más un margen. Si "
+       "no, splats crecidos delante de la cámara explican los píxeles que solo "
+       "muestran el exterior, y la fusión los conserva."),
+    PT("Com uma região de interesse, cada imagem é mascarada antes do treino aos "
+       "píxeis cujo ponto semente mais próximo está dentro, mais uma margem. Caso "
+       "contrário, splats crescidos à frente da câmara explicam os píxeis que só "
+       "mostram o exterior, e a fusão mantém-nos."),
+    IT("Con una regione di interesse, prima dell'addestramento ogni immagine è "
+       "mascherata ai pixel il cui punto seme più vicino è dentro, più un "
+       "margine. Altrimenti splat cresciuti davanti alla fotocamera spiegano i "
+       "pixel che mostrano solo l'esterno, e l'unione li tiene."),
+    NL("Met een interessegebied wordt elk beeld vóór het trainen gemaskeerd tot "
+       "de pixels waarvan het dichtstbijzijnde zaadpunt erbinnen ligt, plus een "
+       "marge. Anders verklaren splats vóór de camera de pixels die alleen de "
+       "buitenkant tonen, en het samenvoegen houdt ze."),
+    RU("При области интереса каждое изображение перед обучением ограничивается "
+       "пикселями, ближайшая начальная точка которых внутри, плюс поле. Иначе "
+       "пиксели, показывающие только внешнее, объясняются сплатами перед камерой, "
+       "и слияние их сохраняет."),
+    TR("İlgi bölgesi varken her görüntü eğitimden önce en yakın tohum noktası "
+       "içeride olan piksellere ve bir kenar payına maskelenir. Yoksa yalnızca "
+       "dışarıyı gösteren pikselleri kameranın önünde büyüyen splat'ler açıklar "
+       "ve birleştirme onları tutar."));
+SS_MSG(roi_outside_opacity_decay,
+    EN("Opacity kept outside the region"), JA("領域外で残す不透明度"),
+    ZH_HANS("区域外保留的不透明度"), ZH_HANT("區域外保留的不透明度"), KO("영역 밖에 남기는 불투명도"),
+    DE("Deckkraft, die außerhalb bleibt"), FR("Opacité conservée hors région"),
+    ES("Opacidad conservada fuera de la región"), PT("Opacidade mantida fora da região"),
+    IT("Opacità mantenuta fuori dalla regione"), NL("Dekking die buiten het gebied blijft"),
+    RU("Сохраняемая непрозрачность вне области"), TR("Bölge dışında kalan opaklık"));
+SS_MSG(roi_outside_opacity_decay_help,
+    EN("At every densification step, splats outside the region of interest keep "
+       "this share of their opacity. The ones the images still need win it back; "
+       "the rest fade until they are relocated inside. 1 turns it off."),
+    JA("密度化のたびに、関心領域の外のスプラットは不透明度のこの割合だけを残します。"
+       "画像がまだ必要とするものは取り戻し、残りは薄れて領域内へ再配置されます。"
+       "1 で無効。"),
+    ZH_HANS("每次致密化时，感兴趣区域外的泼溅只保留这一比例的不透明度。图像仍需要的会"
+            "恢复，其余逐渐变淡，直到被重定位到区域内。取 1 关闭。"),
+    ZH_HANT("每次緻密化時，感興趣區域外的潑濺只保留這一比例的不透明度。影像仍需要的會"
+            "恢復，其餘逐漸變淡，直到被重定位到區域內。取 1 關閉。"),
+    KO("밀집화할 때마다 관심 영역 밖의 스플랫은 불투명도의 이 비율만 남깁니다. 이미지가 "
+       "여전히 필요로 하는 것은 되찾고, 나머지는 흐려져 영역 안으로 재배치됩니다. "
+       "1이면 끕니다."),
+    DE("Bei jedem Verdichtungsschritt behalten Splats außerhalb des "
+       "Interessenbereichs diesen Anteil ihrer Deckkraft. Was die Bilder noch "
+       "brauchen, holt ihn zurück; der Rest verblasst, bis er nach innen verlagert "
+       "wird. 1 schaltet es ab."),
+    FR("À chaque densification, les splats hors de la région d'intérêt gardent "
+       "cette part de leur opacité. Ceux dont les images ont encore besoin la "
+       "regagnent ; les autres s'effacent jusqu'à être relocalisés à l'intérieur. "
+       "1 désactive."),
+    ES("En cada densificación, los splats fuera de la región de interés conservan "
+       "esta parte de su opacidad. Los que las imágenes aún necesitan la "
+       "recuperan; el resto se desvanece hasta reubicarse dentro. 1 lo desactiva."),
+    PT("Em cada densificação, os splats fora da região de interesse mantêm esta "
+       "parte da sua opacidade. Os que as imagens ainda precisam recuperam-na; os "
+       "restantes desvanecem até serem realocados para dentro. 1 desliga."),
+    IT("A ogni densificazione, gli splat fuori dalla regione di interesse "
+       "mantengono questa quota della loro opacità. Quelli che servono ancora alle "
+       "immagini la recuperano; gli altri svaniscono finché non vengono "
+       "ricollocati dentro. 1 la disattiva."),
+    NL("Bij elke verdichting houden splats buiten het interessegebied dit deel van "
+       "hun dekking. Wat de beelden nog nodig hebben, wint het terug; de rest "
+       "vervaagt tot het naar binnen verplaatst wordt. 1 zet het uit."),
+    RU("На каждом шаге уплотнения сплаты вне области интереса сохраняют эту долю "
+       "непрозрачности. Нужные изображениям восстанавливают её, остальные тускнеют, "
+       "пока их не переместят внутрь. 1 отключает."),
+    TR("Her yoğunlaştırma adımında ilgi bölgesi dışındaki splat'ler opaklıklarının "
+       "bu payını korur. Görüntülerin hâlâ ihtiyaç duyduğu geri kazanır; kalanlar "
+       "içeri taşınana dek solar. 1 kapatır."));
 SS_MSG(roi_outside_weight_help,
     EN("What a splat outside the region of interest counts for when "
        "densification picks where to relocate or add splats, relative to 1 "

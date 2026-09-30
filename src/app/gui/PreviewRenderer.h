@@ -21,9 +21,10 @@
 #include "mesh/MeshExport.h"   // meshing::MeshData
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
-namespace spirula { class TrainerSession; }
+namespace spirula { class TrainerSession; struct RegionOverlay; }
 
 namespace gui {
 
@@ -113,6 +114,13 @@ public:
                     float ortho_back = 0.0f,
                     const PreviewStyle* style = nullptr);
 
+    // A region's boundary drawn over the cloud (app/webviewer/RegionOverlay.h),
+    // in the frame the built points are in; null for none. Survives a rebuild.
+    void set_overlay(std::shared_ptr<const spirula::RegionOverlay> ov, bool visible);
+    // Greys the points whose flag (one per point of the parsed cloud) is 0;
+    // `on` false puts the colours back. Uploads only on a change.
+    void dim_points_outside(std::shared_ptr<const std::vector<uint8_t>> flags, bool on);
+
     // Base frustum size (camhost::frustum_display_size, normalized frame).
     float base_camera_size() const { return _base_cam_size; }
     int64_t num_points() const { return _num_points; }
@@ -176,6 +184,10 @@ private:
     // Host copy of the displayed (stride-sampled, normalized-frame) points
     // for double-click picking. CPU RAM only.
     std::vector<float> _pick_xyz;
+    std::vector<float> _pts_rgb;   // the displayed points' own colours
+    int64_t _pts_stride = 1;
+    bool _pts_tinted = false;
+    std::shared_ptr<const std::vector<uint8_t>> _tint_flags;
     // Frustum verts, in draw order: the selected cameras' lines, then the
     // rest's borders and anchors, then the rest's dimmed interior gridlines.
     int64_t _num_cam_verts = 0;
@@ -185,6 +197,17 @@ private:
     struct CamGroup { int64_t first, count; float rgb[3]; };
     std::vector<CamGroup> _cam_groups;
     float _base_cam_size = 0.1f;
+
+    std::shared_ptr<const spirula::RegionOverlay> _ov, _ov_uploaded;
+    std::shared_ptr<spirula::RegionOverlay> _ov_local;   // in the normalized frame
+    bool _ov_visible = false;
+    unsigned _vao_ov = 0, _vbo_ov = 0, _vao_ovl = 0, _vbo_ovl = 0;
+    std::vector<int64_t> _ov_first;   // per layer, into the triangle buffer
+    std::vector<float> _ov_dash;      // per layer, dash period
+    int _u_alpha = -1, _u_dash = -1;
+    void upload_overlay();
+    void draw_overlay(const float view[16]);
+    void destroy_overlay_gl();
 
     unsigned _fbo = 0, _color_tex = 0, _depth_rb = 0;
     int _fbo_w = 0, _fbo_h = 0;

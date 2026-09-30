@@ -59,6 +59,15 @@ __global__ void scale_score_kernel(int64_t num_splats, const float* __restrict__
     score[idx].x *= weight[idx];
 }
 
+// Opacity is a logit: sigmoid(o) * factor, back to a logit.
+__global__ void decay_opacity_kernel(int64_t num_splats, const float* __restrict__ weight,
+                                     float* __restrict__ opac, float factor) {
+    int64_t idx = blockIdx.x * (int64_t)blockDim.x + threadIdx.x;
+    if (idx >= num_splats || weight[idx] >= 1.0f) return;
+    const float q = factor / (1.0f + expf(-opac[idx]));
+    opac[idx] = logf(q / (1.0f - q));
+}
+
 }  // namespace
 
 /*[AutoHeaderGeneratorExport]*/
@@ -100,5 +109,18 @@ void densify_scale_score_tensor(
     if (num_splats <= 0 || weight.data_ptr() == nullptr || score.data_ptr() == nullptr) return;
     scale_score_kernel<<<_LAUNCH_ARGS_1D(num_splats, 256)>>>(num_splats, weight.data_ptr(),
                                                              score.data_ptr());
+    CHECK_DEVICE_ERROR(cudaGetLastError());
+}
+
+/*[AutoHeaderGeneratorExport]*/
+void region_decay_opacity_tensor(
+    int64_t num_splats,
+    DeviceVector<float> weight,      // [N]; below 1 is outside the region
+    DeviceVector<float> opacities,   // [N] logits, scaled in place outside
+    float factor                     // in (0, 1]
+) {
+    if (num_splats <= 0 || weight.data_ptr() == nullptr || !(factor < 1.0f)) return;
+    decay_opacity_kernel<<<_LAUNCH_ARGS_1D(num_splats, 256)>>>(num_splats, weight.data_ptr(),
+                                                               opacities.data_ptr(), factor);
     CHECK_DEVICE_ERROR(cudaGetLastError());
 }

@@ -4,11 +4,13 @@
 
 #include "data/LabelField.h"
 #include "data/Region.h"
+#include "data/RegionMesh.h"
 #include "data/RegionProgram.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <random>
 #include <string>
 #include <vector>
@@ -303,10 +305,78 @@ int main() {
                 disagree += program_contains(prog, p) != u.contains(p);
             }
             check(disagree == 0, "program mirror agrees with the region objects");
+            RegionProgram moved = prog;
+            const double sc = 2.5, sh[3] = {10, -3, 0.5};
+            moved.apply_similarity(sc, sh);
+            disagree = 0;
+            for (int i = 0; i < 2000; i++) {
+                const double p[3] = {uu(rng), uu(rng), uu(rng)};
+                const double q[3] = {sc * p[0] + sh[0], sc * p[1] + sh[1], sc * p[2] + sh[2]};
+                disagree += program_contains(moved, q) != program_contains(prog, p);
+            }
+            check(disagree == 0 && moved.field != prog.field, "a moved program answers as the original did");
+            HalfSpaceRegion hs;
+            hs.normal[0] = 0.6; hs.normal[2] = 0.8; hs.offset = -0.7;
+            RegionProgram hp;
+            compile_region(hs, hp, perr);
+            RegionProgram hm = hp;
+            hm.apply_similarity(sc, sh);
+            disagree = 0;
+            for (int i = 0; i < 2000; i++) {
+                const double p[3] = {uu(rng), uu(rng), uu(rng)};
+                const double q[3] = {sc * p[0] + sh[0], sc * p[1] + sh[1], sc * p[2] + sh[2]};
+                disagree += program_contains(hm, q) != hs.contains(p);
+            }
+            check(disagree == 0, "a moved half-space answers as the original did");
             const double c[3] = {0, 0, 0};
             auto cube = unit_cube(0.5, c);
             check(!compile_region(*cube, prog, perr) && !perr.empty(), "a mesh has no device form");
         }
+    }
+
+    // ---- boundary mesh ----
+    {
+        SphereRegion sph;
+        sph.center[0] = 0.3;
+        sph.radius = 1.0;
+        Aabb box;
+        for (int a = 0; a < 3; a++) { box.lo[a] = -2; box.hi[a] = 2; }
+        const RegionMesh m = region_boundary_mesh(sph, box, 48);
+        double vol = 0, worst = 0;
+        std::map<std::pair<uint32_t, uint32_t>, int> edges;
+        for (size_t t = 0; t < m.tri.size(); t += 3) {
+            const float* a = &m.xyz[m.tri[t] * 3];
+            const float* b = &m.xyz[m.tri[t + 1] * 3];
+            const float* c = &m.xyz[m.tri[t + 2] * 3];
+            vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) +
+                    a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0;
+            for (int e = 0; e < 3; e++) edges[{m.tri[t + e], m.tri[t + (e + 1) % 3]}]++;
+        }
+        for (size_t v = 0; v < m.xyz.size(); v += 3) {
+            const double r = std::sqrt((m.xyz[v] - 0.3) * (m.xyz[v] - 0.3) + m.xyz[v + 1] * m.xyz[v + 1] +
+                                       m.xyz[v + 2] * m.xyz[v + 2]);
+            worst = std::max(worst, std::fabs(r - 1.0));
+        }
+        bool closed = true;
+        for (const auto& [e, n] : edges) closed = closed && n == 1 && edges.count({e.second, e.first});
+        check(!m.empty() && closed, "sphere boundary: closed, every edge once each way");
+        check(std::fabs(vol / (4.0 / 3.0 * M_PI) - 1.0) < 0.03, "sphere boundary: wound outward, volume within 3%");
+        check(worst < 4.0 / 48, "sphere boundary: vertices within a cell of the surface");
+
+        HalfSpaceRegion hs;
+        const RegionMesh plane = region_boundary_mesh(hs, box, 16);
+        bool flat = !plane.empty();
+        for (size_t v = 2; v < plane.xyz.size(); v += 3) flat = flat && std::fabs(plane.xyz[v]) < 0.25 / 64;
+        check(flat, "unbounded half-space: only the plane, open at the box");
+
+        const float seeds[6] = {-1, 0, 0, 1, 0, 0};
+        const int32_t labels[2] = {0, 1};
+        const LabelField two = LabelField::build(seeds, labels, nullptr, 2);
+        const std::vector<RegionMesh> parts = label_boundary_meshes(two, box, 16);
+        bool mid = parts.size() == 2 && !parts[0].empty() && !parts[1].empty();
+        for (const RegionMesh& pm : parts)
+            for (size_t v = 0; v < pm.xyz.size(); v += 3) mid = mid && std::fabs(pm.xyz[v]) < 0.25 / 64;
+        check(mid, "label meshes: each part's boundary is the bisecting plane");
     }
 
     if (g_failures == 0) std::printf("region_test: OK\n");
