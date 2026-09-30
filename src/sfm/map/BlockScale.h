@@ -1,7 +1,9 @@
 #pragma once
 // The block scale statistic: whether the stretch of chain growth is extending has left the
-// GPS's scale, and the similarity that returns it. Pure functions over one frame per capture
-// position in capture order; Mapper::gpsScaleCheck gathers the frames and applies the result.
+// GPS's scale. Detection only -- Mapper::gpsScaleCheck/gpsScaleEnd gather the frames, read
+// this, and ask for a bundle adjustment; they do not rescale anything themselves (the
+// requested BA alone sets the block's scale, whatever came before it -- see gpsScaleCheck).
+// Pure functions over one frame per capture position in capture order.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -28,8 +30,11 @@ constexpr double kSigma[kLengths] = {0.008, 0.006, 0.0045};
 // growth, lower: Hickory's milder modes finish their west chain at 0.956-0.958 over 60 m.
 constexpr double kTauRun[kLengths] = {0.05, 0.04, 0.03};
 constexpr double kTauEnd[kLengths] = {0.04, 0.03, 0.025};
-constexpr size_t kBlockMinPairs = 6;  // fewer, and the firing window's ratio sets the factor
 constexpr size_t kEndChecks = 20;
+// A model-space jump this big between capture-adjacent frames is an unwelded seam, not chain
+// drift (rigcheck's own "0 model jumps" bar). gpsScaleEnd excludes any window crossing one, so
+// a seam step cannot outbid a real reading (Hickory L3: seam window 1.046 vs west chain 0.958).
+constexpr double kSeamJump = 1.5;
 
 struct Frame {
     uint32_t img = 0;
@@ -197,101 +202,33 @@ inline Pick pickEnd(const std::vector<Reading>& stored, size_t& which) {
     return best;
 }
 
-// The frames walking from frames[k] on `side` registered since the last BA; the first that
-// was not is the pivot. A CUSUM change-point only caps it: alone it overshot Hickory's
-// junction by 25 frames, as the woods' per-pair ratios swing 0.85-1.02 with the GPS.
-struct Block {
-    bool ok = false;
-    size_t newest = 0, pivot = 0, bound = 0;  // bound: the block frame next to the pivot
-    int side = 0;
-    size_t frames = 0, pairs = 0;
-    bool capped = false;
-    double ratio = 0;  // block chord ratio over the whole model's (0 = too few pairs)
-    double s = 1;      // factor about the pivot
-};
-
-inline Block block(const std::vector<Frame>& f, size_t k, int side, double x, double all,
-                   uint32_t last_ba) {
-    Block b;
-    b.newest = k;
-    b.side = side;
-    const int dir = side ? +1 : -1;
-    size_t lo, hi;
-    runOf(f, k, lo, hi);
-    long pivot = -1;
-    for (long i = (long)k; i >= (long)lo && i <= (long)hi; i += dir)
-        if (f[i].stamp <= last_ba) {
-            pivot = i;
-            break;
-        }
-    if (pivot < 0 || pivot == (long)k || all <= 0) return b;
-    const std::vector<Pair> p = nodePairs(f, k, dir, lo, hi);
-    auto dist = [&](size_t i) { return std::llabs(f[i].pos - f[k].pos); };
-    double S = 0, ext = 0;
-    long cap = -1;
-    for (const Pair& q : p) {
-        const double m = (f[q.b].c - f[q.a].c).norm(), g = (f[q.b].g - f[q.a].g).norm();
-        if (m <= 0 || g <= 0) continue;
-        S += std::log(m / g) - std::log(all);
-        if ((x < 0 ? S < ext : S > ext)) {
-            ext = S;
-            cap = (long)q.b;
-        }
-    }
-    if (cap >= 0 && dist((size_t)cap) < dist((size_t)pivot)) {
-        pivot = cap;
-        b.capped = true;
-    }
-    b.pivot = (size_t)pivot;
-    b.bound = (size_t)(pivot - dir);
-    b.frames = (size_t)std::labs(pivot - (long)k);
-    if (b.frames == 0) return b;
-    std::vector<Pair> own;
-    for (const Pair& q : p)
-        if (dist(q.b) <= dist(b.pivot)) own.push_back(q);
-    b.pairs = own.size();
-    double m, g;
-    chordSums(f, own, own.size(), m, g);
-    if (b.pairs >= kBlockMinPairs && m > 0 && g > 0) {
-        b.ratio = m / g / all;
-        b.s = 1.0 / b.ratio;
-    } else {
-        b.s = std::exp(-x);
-    }
-    b.ok = true;
-    return b;
+// True if any capture-adjacent registered step within [lo, hi] jumps more than `threshold` in
+// model space: two fronts meeting at a not-yet-welded seam, not chain drift.
+inline bool hasJump(const std::vector<Frame>& f, size_t lo, size_t hi, double threshold) {
+    for (size_t i = lo + 1; i <= hi && i < f.size(); i++)
+        if (f[i].seq == f[i - 1].seq && (f[i].c - f[i - 1].c).norm() > threshold) return true;
+    return false;
 }
 
-// The block's cameras (every registered image `key` places between the newest frame and the
-// one next to the pivot) and the points only they observe, by b.s about the pivot's centre.
-// A block-only point reprojects as before; the junction's shared points carry the change.
-template <class KeyFn>
-inline size_t rescale(Reconstruction& rec, const std::vector<Frame>& f, const Block& b,
-                      KeyFn key) {
-    const int64_t seq = f[b.newest].seq;
-    const int64_t lo = std::min(f[b.newest].pos, f[b.bound].pos);
-    const int64_t hi = std::max(f[b.newest].pos, f[b.bound].pos);
-    const Vec3 c = cameraCenter(rec.images.at(f[b.pivot].img).pose);
-    std::unordered_set<uint32_t> moved;
-    for (auto& kv : rec.images) {
-        if (!kv.second.registered) continue;
-        const auto k = key(kv.first);
-        if (k.first != seq || k.second < lo || k.second > hi) continue;
-        moved.insert(kv.first);
-        Pose& ps = kv.second.pose;
-        const Vec3 t = mul(ps.R, c + (cameraCenter(ps) - c) * b.s);
-        ps.t = {-t.x, -t.y, -t.z};
+// `r`, with every (side, length) whose node-pair window crosses a jump over `threshold` between
+// frames[k] and the window's far boundary cleared: gpsScaleEnd's pool of stored readings must
+// not choose an unwelded seam bridge as though it were ordinary drift.
+inline Reading maskSeamJumps(const std::vector<Frame>& f, size_t k, Reading r, double threshold) {
+    size_t lo, hi;
+    runOf(f, k, lo, hi);
+    for (int side = 0; side < 2; side++) {
+        const int dir = side ? +1 : -1;
+        const std::vector<Pair> p = nodePairs(f, k, dir, lo, hi);
+        for (int l = 0; l < kLengths; l++) {
+            if (!r.have[side][l]) continue;
+            const size_t n = (size_t)std::lround(kLength[l] / kNode);
+            if (n > p.size() || n == 0) continue;
+            const size_t boundary = p[n - 1].b;
+            const size_t a = std::min(k, boundary), b = std::max(k, boundary);
+            if (hasJump(f, a, b, threshold)) r.have[side][l] = false;
+        }
     }
-    for (auto& kv : rec.points3D) {
-        bool own = !kv.second.track.empty();
-        for (const TrackElement& e : kv.second.track)
-            if (!moved.count(e.image_id)) {
-                own = false;
-                break;
-            }
-        if (own) kv.second.xyz = c + (kv.second.xyz - c) * b.s;
-    }
-    return moved.size();
+    return r;
 }
 
 }  // namespace bss

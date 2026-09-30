@@ -415,15 +415,12 @@ public:
         uint32_t gps_out = 0;      // registrations beyond the GPS fit's radius
         uint32_t gps_ba = 0;       // global BAs a run of those asked for
         uint32_t gps_scale_ba = 0; // ... of which the block scale check asked for
-        uint32_t gps_scale_end = 0; // block rescales the end-of-growth test made
+        uint32_t gps_scale_end = 0; // ... of which the end-of-growth test asked for
         struct ScaleRequest {
-            uint32_t check = 0, img = 0, pivot = 0, bound = 0;  // bound: block end at the pivot
-            bool end = false, rescaled = false, capped = false;
+            uint32_t check = 0, img = 0;
+            bool end = false;
             int side = 0, l = 0;
-            size_t frames = 0, pairs = 0;
-            double s = 1, ratio = 0;
-            double x[3] = {NAN, NAN, NAN};      // the firing side, before the rescale
-            double after[3] = {NAN, NAN, NAN};  // ... right after it
+            double x[3] = {NAN, NAN, NAN};      // the firing side, at the request
             double post[3] = {NAN, NAN, NAN};   // ... after the bundle adjustment that follows
         };
         std::vector<ScaleRequest> scale_requests;
@@ -1123,7 +1120,13 @@ public:
         rebuildScores();
         st.reproj_before = meanReprojPx();
         fuseSeams(st);
+        // One round rarely closes a large kink (Hickory WH1 2.95->1.19 deg, WH2 3.20->0.78 deg,
+        // both over the 0.3 deg bar) before the ordinary stopping test exits it. A forced
+        // second round, without retriangulation (44a78445 dropped that deliberately), pulls it.
+        final_.min_rounds = 2;
+        final_.no_retri = true;
         globalRefine(true);
+        final_ = FinalRelease{};
         st.rounds = refine_rounds_;
         st.reproj_after = meanReprojPx();
         Reconstruction r = snapshotModel();
@@ -2113,9 +2116,9 @@ public:
         return true;
     }
 
-    // The scale half of gpsCheck. A block registered since the last BA is rescaled about the
-    // frame it grew from before the BA: a BA alone leaves it (Hickory, 3.4 % short after ten
-    // requested BAs), as its points would have to move with it as a body.
+    // The scale half of gpsCheck: whether growth has left the GPS's scale, over 60-150 m of
+    // walked track. Detection only -- a no-op rescale and an inverted one both recover to the
+    // live arm's tail (nulls b/d), so the requested BA is what sets the block's scale.
     void gpsScaleCheck(uint32_t img) {
         if (opt_.gps_scale_band <= 0 || !priors_ || !gps_frame_.ok) return;
         bss_checks_++;
@@ -2130,20 +2133,24 @@ public:
         if (ba_requested_ || gps_regs_since_ba_ < 10) return;
         const bss::Pick p = bss::pickOver(r, bss::kTauRun);
         if (!p.ok) return;
-        bssRescale(f, k, p, r, false);
+        bssRequest(f[k].img, p, r, false);
         prior_stats_.gps_scale_ba++;
         ba_requested_ = true;
     }
 
     // After growth, once: the strongest of the last checks since the last BA, against lower
-    // thresholds. The rescale it makes is refined by the caller's final solve.
+    // thresholds, with any seam-crossing window masked first -- it reads like a scale error and
+    // would otherwise win the pick (Hickory L3 chose erp_01299's seam step, 1.046, over 0.958).
     void gpsScaleEnd() {
         if (opt_.gps_scale_band <= 0 || !priors_ || !gps_frame_.ok) return;
+        const std::vector<bss::Frame> f = bssFrames();
         std::vector<bss::Reading> rs;
         std::vector<uint32_t> imgs;
         for (const BssStored& st : bss_stored_)
             if (st.check > bss_last_ba_) {
-                rs.push_back(st.r);
+                const size_t sk = bssIndex(f, st.img);
+                if (sk == f.size()) continue;
+                rs.push_back(bss::maskSeamJumps(f, sk, st.r, bss::kSeamJump));
                 imgs.push_back(st.img);
             }
         if (rs.empty()) return;
@@ -2155,13 +2162,11 @@ public:
                        "over %.0f m (%s side), threshold %.3f%s\n",
                        rs.size(), db_.images[imgs[w]].name.c_str(), std::exp(p.x),
                        bss::kLength[p.l], p.side ? "later" : "earlier", bss::kTauEnd[p.l],
-                       p.ok ? "; rescaling" : "");
+                       p.ok ? "; bundle adjusting" : "");
         if (!p.ok) return;
-        const std::vector<bss::Frame> f = bssFrames();
         const size_t k = bssIndex(f, imgs[w]);
         if (k == f.size()) return;
-        if (bss_all_ <= 0) bss_all_ = bss::globalRatio(f);
-        bssRescale(f, k, p, rs[w], true);
+        bssRequest(f[k].img, p, rs[w], true);
         prior_stats_.gps_scale_end++;
     }
 
@@ -2236,56 +2241,29 @@ public:
         for (int l = 0; l < bss::kLengths; l++) x[l] = r.have[side][l] ? r.x[side][l] : NAN;
     }
 
-    // Rescale the block the reading `p` at frames[k] fires on, and record the request.
-    void bssRescale(const std::vector<bss::Frame>& f, size_t k, const bss::Pick& p,
-                    const bss::Reading& r, bool end) {
-        const bss::Block b = bss::block(f, k, p.side, p.x, bss_all_, bss_last_ba_);
+    // Record a scale-detection request for `img` and ask the caller for a BA: no rescale, see
+    // gpsScaleCheck.
+    void bssRequest(uint32_t img, const bss::Pick& p, const bss::Reading& r, bool end) {
         PriorStats::ScaleRequest q;
         q.check = bss_checks_;
-        q.img = f[k].img;
+        q.img = img;
         q.end = end;
         q.side = p.side;
         q.l = p.l;
         bssSide(r, p.side, q.x);
-        if (b.ok) {
-            q.rescaled = true;
-            q.capped = b.capped;
-            q.pivot = f[b.pivot].img;
-            q.bound = f[b.bound].img;
-            q.frames = b.frames;
-            q.pairs = b.pairs;
-            q.s = b.s;
-            q.ratio = b.ratio;
-            bss::rescale(rec_, f, b, [this](uint32_t i) { return bssKey(i); });
-            bss_all_ = -1;
-            const std::vector<bss::Frame> g = bssFrames();
-            const size_t k2 = bssIndex(g, q.img);
-            if (k2 < g.size()) bssSide(bss::read(g, k2, bss::globalRatio(g)), p.side, q.after);
-        }
         if (opt_.verbose) {
             const auto nm = [&](uint32_t i) { return db_.images[i].name.c_str(); };
-            if (q.rescaled)
-                slog::diag(slog::Tag::Map,
-                           "[prior] GPS scale%s: %s reads %.3f/%.3f/%.3f over 60/100/150 m (%s "
-                           "side); block %s..%s, %zu frame(s), %zu pair(s)%s, ratio %.4f, pivot "
-                           "%s, factor %.4f; after it %.3f/%.3f/%.3f; bundle adjusting\n",
-                           end ? " after growth" : "", nm(q.img), std::exp(q.x[0]),
-                           std::exp(q.x[1]), std::exp(q.x[2]), p.side ? "later" : "earlier",
-                           nm(q.img), nm(q.bound), q.frames, q.pairs, q.capped ? ", capped" : "",
-                           q.ratio, nm(q.pivot), q.s, std::exp(q.after[0]), std::exp(q.after[1]),
-                           std::exp(q.after[2]));
-            else
-                slog::diag(slog::Tag::Map,
-                           "[prior] GPS scale%s: %s reads %.3f/%.3f/%.3f over 60/100/150 m (%s "
-                           "side); no solved frame bounds the block, bundle adjusting only\n",
-                           end ? " after growth" : "", nm(q.img), std::exp(q.x[0]),
-                           std::exp(q.x[1]), std::exp(q.x[2]), p.side ? "later" : "earlier");
+            slog::diag(slog::Tag::Map,
+                       "[prior] GPS scale%s: %s reads %.3f/%.3f/%.3f over 60/100/150 m (%s "
+                       "side); bundle adjusting\n",
+                       end ? " after growth" : "", nm(q.img), std::exp(q.x[0]),
+                       std::exp(q.x[1]), std::exp(q.x[2]), p.side ? "later" : "earlier");
         }
         bss_pending_ = (long)prior_stats_.scale_requests.size();
         prior_stats_.scale_requests.push_back(q);
     }
 
-    // Every BA: what registered before it is solved; a pending request reads its block again.
+    // Every BA: what registered before it is solved; a pending request reads its window again.
     void bssAfterBa() {
         if (bss_stamp_.empty()) return;
         bssStamp();
@@ -2302,10 +2280,9 @@ public:
         if (opt_.verbose)
             slog::diag(slog::Tag::Map,
                        "[prior] GPS scale: after the bundle adjustment %s reads %.3f/%.3f/%.3f "
-                       "(before the rescale %.3f/%.3f/%.3f, factor %.4f)\n",
+                       "(at the request %.3f/%.3f/%.3f)\n",
                        db_.images[q.img].name.c_str(), std::exp(q.post[0]), std::exp(q.post[1]),
-                       std::exp(q.post[2]), std::exp(q.x[0]), std::exp(q.x[1]),
-                       std::exp(q.x[2]), q.s);
+                       std::exp(q.post[2]), std::exp(q.x[0]), std::exp(q.x[1]), std::exp(q.x[2]));
     }
 
     // SS_SFM_SCALE_DUMP=1: check, image, registered, last BA's check, the six ratios
@@ -5137,7 +5114,7 @@ private:
             // Retriangulate + CompleteTracks. Without it refinement can only
             // ever LOSE observations, and on sparse match graphs the model
             // starves right after bootstrap (D36).
-            if (i > 0 && opt_.retri_scale > 0) {
+            if (i > 0 && opt_.retri_scale > 0 && !final_.no_retri) {
                 ProfTimer pt(g_map_prof.retri);
                 completeAndRetriangulate();
             }
@@ -5219,7 +5196,9 @@ private:
                          {cost_s, (long long)removedObs, (long long)removedPts,
                           (long long)rec_.points3D.size()});
             }
-            if (!before || (double)removedObs / (double)before <= opt_.ba_refine_change) break;
+            const bool converged = !before || (double)removedObs / (double)before <=
+                                                   opt_.ba_refine_change;
+            if (converged && refine_rounds_ >= std::max(1, final_.min_rounds)) break;
         }
         int dropped;
         {
@@ -5720,6 +5699,11 @@ private:
         bool extra = false;        // the distortion coefficients (D72)
         bool no_sanitize = false;  // per-image intrinsics: no group to clamp to (D73)
         bool no_rig = false;       // every image on its own pose (releaseRigs)
+        // weldSeams: min_rounds keeps globalRefine's own cap from exiting before round 2 has
+        // run (a fuse-only round rarely converges by itself, leaving a large kink half-pulled).
+        // no_retri keeps that round from reintroducing the retriangulation the weld dropped.
+        int min_rounds = 0;
+        bool no_retri = false;
     };
     FinalRelease final_;
     std::map<uint32_t, Camera> default_cams_;  // pristine per-group defaults

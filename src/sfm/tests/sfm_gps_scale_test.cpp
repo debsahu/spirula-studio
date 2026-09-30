@@ -166,12 +166,9 @@ static void print(const char* what, const Out& o) {
     std::printf("%s: %u registered, %u in-run request(s), %u after growth\n", what, o.registered,
                 o.in_run, o.end);
     for (const auto& q : o.req)
-        std::printf("  %s img %u pivot %u bound %u frames %zu pairs %zu s %.4f | 60/100/150 "
-                    "%.4f %.4f %.4f -> %.4f %.4f %.4f -> BA %.4f %.4f %.4f\n",
-                    q.end ? "end" : "run", q.img, q.pivot, q.bound, q.frames, q.pairs, q.s,
-                    std::exp(q.x[0]), std::exp(q.x[1]), std::exp(q.x[2]), std::exp(q.after[0]),
-                    std::exp(q.after[1]), std::exp(q.after[2]), std::exp(q.post[0]),
-                    std::exp(q.post[1]), std::exp(q.post[2]));
+        std::printf("  %s img %u side %d | 60/100/150 %.4f %.4f %.4f -> BA %.4f %.4f %.4f\n",
+                    q.end ? "end" : "run", q.img, q.side, std::exp(q.x[0]), std::exp(q.x[1]),
+                    std::exp(q.x[2]), std::exp(q.post[0]), std::exp(q.post[1]), std::exp(q.post[2]));
 }
 
 static int body(int argc, char** argv) {
@@ -200,19 +197,19 @@ static int body(int argc, char** argv) {
     sparse.ba_growth_ratio = 1.5;
     const Out big = run(sc, sparse, k_big, kWalk - 80, 1.0);
     print("stretched", big);
-    check(big.in_run >= 1, "scale: a stretched GPS tail asks for a rescale during growth");
-    bool rescaled = !big.req.empty() && !big.req[0].end && big.req[0].rescaled;
-    check(rescaled && big.req[0].s > 1.03 && big.req[0].frames >= 15,
-          "scale: the first request stretches the block toward the GPS");
-    check(rescaled && std::fabs(big.req[0].after[0]) < 0.5 * std::fabs(big.req[0].x[0]),
-          "scale: after the rescale the block reads nearer the GPS");
+    check(big.in_run >= 1, "scale: a stretched GPS tail asks for a BA during growth");
+    check(!big.req.empty() && !big.req[0].end && !std::isnan(big.req[0].x[0]),
+          "scale: the first request reads the 60 m window");
+    check(!big.req.empty() && !big.req[0].end &&
+              std::fabs(big.req[0].post[0]) < 0.7 * std::fabs(big.req[0].x[0]),
+          "scale: after the requested BA alone (no rescale) the reading is much nearer the GPS");
     check(big.in_run <= 1 + big.registered / 10,
           "scale: at most one request per ten registrations");
 
     using Req = Mapper::PriorStats::ScaleRequest;
     const Req last = big.req.empty() ? Req{} : big.req.back();
-    check(big.end == 1 && last.end && last.rescaled && last.x[0] < -bss::kTauEnd[0],
-          "scale: the tail growth leaves short is rescaled once more, after growth");
+    check(big.end == 1 && last.end && last.x[0] < -bss::kTauEnd[0],
+          "scale: the tail growth leaves short asks for a BA once more, after growth");
 
     const Out off = run(sc, sparse, k_big, kWalk - 80, 0);
     check(off.in_run == 0 && off.end == 0 && off.req.empty(), "scale: a band of 0 asks for nothing");

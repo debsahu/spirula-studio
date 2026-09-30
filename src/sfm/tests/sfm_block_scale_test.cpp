@@ -289,45 +289,6 @@ static void testFitScale() {
     check(r.fires == 0 && r.worst < 0.01, "fit scale: a fit 5 % off scale reads true");
 }
 
-// The block: frames since the last BA, bounded by the first solved one; the CUSUM caps it.
-static void testBlock() {
-    // A solved stretch whose last 20 m the GPS bows 3 m out, then a 6 % short block.
-    Track t;
-    t.walk(200, 1.3);
-    for (int i = 185; i < 200; i++) t.off[i] = {0, 3 * std::sin(M_PI * (i - 184) / 16.0), 0};
-    t.walk(100, 1.3);
-    for (int i = 200; i < 300; i++) t.scale[i] = 0.94;
-    const auto f = frames(t, 200);
-    const double all = bss::globalRatio(f);
-    const bss::Reading r = bss::read(f, 299, all);
-    const bss::Pick p = bss::pickOver(r, bss::kTauRun);
-    const bss::Block b = bss::block(f, 299, p.side, p.x, all, 0);
-    if (verbose)
-        std::printf("  block: fire %d x %.4f pivot %zu bound %zu pairs %zu capped %d s %.4f\n",
-                    p.ok, p.x, b.pivot, b.bound, b.pairs, b.capped, b.s);
-    check(p.ok && p.side == 0, "block: a 6 % short block fires on its own side");
-    check(b.ok && f[b.pivot].img == 199 && f[b.bound].img == 200 && !b.capped,
-          "block: the pivot is the last solved frame");
-    check(std::fabs(b.s * 0.94 / all - 1.0) < 0.01, "block: the factor undoes the block's ratio");
-    auto every = f;
-    for (auto& fr : every) fr.stamp = fr.img ? 1 : 0;
-    const bss::Block c = bss::block(every, 299, p.side, p.x, all, 0);
-    if (verbose) std::printf("    CUSUM alone: pivot %zu\n", c.pivot);
-    check(c.ok && c.capped && f[c.pivot].img < 195, "block fixture: the CUSUM alone overshoots");
-
-    // 100 frames since the last BA, of which only the last 40 are short: the CUSUM caps.
-    Track u;
-    u.walk(360, 1.3);
-    for (int i = 320; i < 360; i++) u.scale[i] = 0.85;
-    const auto g = frames(u, 260);
-    const double all2 = bss::globalRatio(g);
-    const bss::Pick q = bss::pickOver(bss::read(g, 359, all2), bss::kTauRun);
-    const bss::Block d = bss::block(g, 359, q.side, q.x, all2, 0);
-    if (verbose) std::printf("  cap: pivot %zu capped %d s %.4f\n", d.pivot, d.capped, d.s);
-    check(q.ok && d.ok && d.capped && g[d.pivot].img >= 310 && g[d.pivot].img <= 325,
-          "block: a change-point closer than the last BA caps the block");
-}
-
 // After growth: the strongest stored reading, not the newest frame's window.
 static void testEnd() {
     std::vector<bss::Reading> st(20);
@@ -340,55 +301,38 @@ static void testEnd() {
     check(p.ok && p.x < 0 && w < 17, "end: the strongest stored reading, not the newest");
 }
 
-// Cameras 0-7 one metre apart looking +z; 5-7 registered since the last BA.
-static void testRescale() {
-    Reconstruction rec;
-    std::vector<bss::Frame> f(8);
-    for (uint32_t i = 0; i < 8; i++) {
-        Image im;
-        im.id = i;
-        im.registered = true;
-        im.pose = {mat3Identity(), {-(double)i, 0, 0}};
-        rec.images[i] = im;
-        f[i].img = i;
-        f[i].pos = i;
-        f[i].c = {(double)i, 0, 0};
-        f[i].stamp = i >= 5 ? i : 0;
-    }
-    auto point = [&](uint64_t id, Vec3 x, std::vector<uint32_t> obs) {
-        Point3D p;
-        p.xyz = x;
-        for (uint32_t o : obs) p.track.push_back({o, 0});
-        rec.points3D[id] = p;
-    };
-    point(1, {6.5, 1, 10}, {5, 6, 7});
-    point(2, {4.5, -1, 9}, {4, 5});
-    point(3, {1, 0, 8}, {1, 2});
-    bss::Block b;
-    b.ok = true;
-    b.newest = 7;
-    b.pivot = 4;
-    b.bound = 5;
-    b.s = 1.1;
-    auto proj = [&](uint32_t cam, uint64_t pt) {
-        const Pose& ps = rec.images.at(cam).pose;
-        const Vec3 x = mul(ps.R, rec.points3D.at(pt).xyz) + ps.t;
-        return Vec3{x.x / x.z, x.y / x.z, 1};
-    };
-    const Vec3 before = proj(6, 1), shared = rec.points3D[2].xyz, out = rec.points3D[3].xyz;
-    const size_t moved = bss::rescale(rec, f, b, [](uint32_t i) {
-        return std::pair<int64_t, int64_t>{0, (int64_t)i};
-    });
-    const Vec3 c4 = cameraCenter(rec.images[4].pose), c5 = cameraCenter(rec.images[5].pose);
-    const Vec3 c7 = cameraCenter(rec.images[7].pose), c3 = cameraCenter(rec.images[3].pose);
-    check(moved == 3, "rescale: the block's three cameras move");
-    check((c4 - Vec3{4, 0, 0}).norm() < 1e-12 && (c3 - Vec3{3, 0, 0}).norm() < 1e-12,
-          "rescale: the pivot and the solved frames stay");
-    check(std::fabs((c5 - c4).norm() - 1.1) < 1e-12 && std::fabs((c7 - c4).norm() - 3.3) < 1e-12,
-          "rescale: the block scales about the pivot, no step at the junction");
-    check((proj(6, 1) - before).norm() < 1e-12, "rescale: a block-only point reprojects as before");
-    check((rec.points3D[2].xyz - shared).norm() == 0 && (rec.points3D[3].xyz - out).norm() == 0,
-          "rescale: points outside the block, or shared with it, stay");
+// A hand-placed model-space discontinuity between two adjacent capture positions: two fronts
+// meeting at a not-yet-welded seam, the signature gpsScaleEnd must not read as chain drift.
+static void testSeamJump() {
+    Track t;
+    t.walk(500, 0.0);
+    auto f = frames(t);
+    for (size_t i = 300; i < f.size(); i++) f[i].c.x += 2.0;
+    check(!bss::hasJump(f, 250, 299, bss::kSeamJump), "seam jump: a range before it is clean");
+    check(bss::hasJump(f, 295, 305, bss::kSeamJump), "seam jump: a range straddling it is flagged");
+    check(!bss::hasJump(f, 301, 350, bss::kSeamJump), "seam jump: a range after it is clean");
+    check(!bss::hasJump(f, 295, 305, 2.5), "seam jump: a threshold above the jump's size passes it");
+}
+
+// gpsScaleEnd's pool must not let a seam-bridge window outbid a real chain reading: a window
+// whose span crosses the jump is masked out; one clear of it is untouched.
+static void testSeamMask() {
+    Track t;
+    t.walk(300, 1.3);
+    t.walk(200, 1.3);
+    auto f = frames(t);
+    for (size_t i = 300; i < f.size(); i++) f[i].c.x += 2.0;
+    const double all = bss::globalRatio(f);
+
+    const bss::Reading crossing = bss::read(f, 330, all);
+    const bss::Reading maskedCrossing = bss::maskSeamJumps(f, 330, crossing, bss::kSeamJump);
+    check(crossing.have[0][0], "seam mask fixture: the crossing window exists before masking");
+    check(!maskedCrossing.have[0][0], "seam mask: a window crossing the jump is excluded");
+
+    const bss::Reading clear = bss::read(f, 200, all);
+    const bss::Reading maskedClear = bss::maskSeamJumps(f, 200, clear, bss::kSeamJump);
+    check(clear.have[0][0] && maskedClear.have[0][0],
+          "seam mask: a window clear of the jump is not excluded");
 }
 
 static int body(int argc, char** argv) {
@@ -401,9 +345,9 @@ static int body(int argc, char** argv) {
     testThresholds();
     testTwoFronts();
     testFitScale();
-    testBlock();
     testEnd();
-    testRescale();
+    testSeamJump();
+    testSeamMask();
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;
 }

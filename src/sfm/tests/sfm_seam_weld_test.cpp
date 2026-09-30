@@ -431,9 +431,10 @@ static int body(int argc, char** argv) {
         check(k1 < 0.3, "weld: the kink at the join closes");
         check(st.reproj_after > 0 && st.reproj_after < 1.0, "weld: the welded model reprojects");
         check(out.numRegistered() == (uint32_t)cams, "weld: every image stays registered");
-        // Fuse only: a forced retriangulation round re-tracks the whole model and cost Hickory
-        // +0.086 px; the fused points alone close the seam.
-        check(st.rounds == 1, "weld: the refine stops when the model stops changing");
+        // Fuse only, no retriangulation (that re-tracks the whole model and cost Hickory
+        // +0.086 px): a forced second round pulls a large kink further than one round does.
+        check(st.rounds == 2, "weld: the refine always runs a forced second round");
+        check(worst < 0.5, "weld: the forced second round does not retriangulate");
     }
     {
         // --metric-gps full at the true centres, each round capped at a few LM iterations, as
@@ -455,6 +456,8 @@ static int body(int argc, char** argv) {
                     "kink %.3f deg\n", gps_cap, st.points, r1, k1);
         check(std::fabs(r1 - 1.0) <= 0.1, "weld, capped under GPS: the step at the join closes");
         check(k1 < 0.3, "weld, capped under GPS: the kink at the join closes");
+        check(st.rounds == 2,
+              "weld, capped under GPS: a real few-iteration round still forces a second");
     }
     {
         MapperOptions off = opt;
