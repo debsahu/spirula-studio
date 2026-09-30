@@ -99,18 +99,22 @@ struct LensPlan {
     LensFit fit;
 };
 
-// Decides each plan and appends an override for each used one. A setting that
-// covers the folder (a bare --focal is an override with an empty prefix) wins
-// whole: a factory override for the folder would outrank it by prefix length.
+// Decides each plan and appends an override for each used one. Any matching
+// override that sets a focal, extra or params wins whole, whichever its prefix:
+// a factory override for the folder would outrank it by prefix length.
 inline void applyLensPlans(CameraSetupOptions& cam, std::vector<LensPlan>& plans) {
     for (LensPlan& p : plans) {
-        CameraOverride* given = nullptr;
-        for (CameraOverride& o : cam.overrides)
-            if (detail::cameraPrefixMatches(p.prefix + "/", o.prefix) &&
-                (!given || o.prefix.size() > given->prefix.size()))
-                given = &o;
-        p.model = given && given->has_model ? given->model : cam.model;
-        if (given && (given->has_focal || given->has_extra || !given->params.empty()))
+        bool given = false;
+        CameraOverride* exact = nullptr;
+        const CameraOverride* model_from = nullptr;
+        for (CameraOverride& o : cam.overrides) {
+            if (!detail::cameraPrefixMatches(p.prefix + "/", o.prefix)) continue;
+            if (o.has_focal || o.has_extra || !o.params.empty()) given = true;
+            if (o.has_model && (!model_from || o.prefix.size() > model_from->prefix.size())) model_from = &o;
+            if (o.prefix == p.prefix && !exact) exact = &o;
+        }
+        p.model = model_from ? model_from->model : cam.model;
+        if (given)
             p.use = LensUse::Override;
         else if (cam.focal > 0 || !cam.extra.empty() || !cam.params.empty())
             p.use = LensUse::DatasetWide;
@@ -123,8 +127,10 @@ inline void applyLensPlans(CameraSetupOptions& cam, std::vector<LensPlan>& plans
         else
             p.use = LensUse::Used;
         if (p.use != LensUse::Used) continue;
-        if (given && given->prefix == p.prefix) {
-            given->params = p.fit.params;
+        if (exact) {
+            exact->has_model = true;
+            exact->model = p.model;
+            exact->params = p.fit.params;
             continue;
         }
         CameraOverride o;

@@ -297,6 +297,84 @@ static void test_precedence() {
         check(none[0].use == LensUse::NoImages, "plan: not used on a folder with no frames");
         check(cfg.camera.overrides.size() == 1, "plan: nothing added for an unused lens");
     }
+    {
+        // A non-square frame: the width matches the calibration, the height does not.
+        SfmConfig cfg = config();
+        auto ps = plans();
+        ps[0].height = 1920;
+        applyLensPlans(cfg.camera, ps);
+        check(ps[0].use == LensUse::Size && ps[1].use == LensUse::Used,
+              "plan: not used when only the height differs from the calibrated size");
+        SfmConfig cfg2 = config();
+        auto wide = plans();
+        wide[0].width = 1920;
+        applyLensPlans(cfg2.camera, wide);
+        check(wide[0].use == LensUse::Size, "plan: not used when only the width differs");
+    }
+    {
+        SfmConfig cfg = config();
+        cfg.camera.params = {900, 900, 1920, 1920, 0, 0, 0, 0, 0, 0, 0, 0};   // a manifest's dataset-wide calibration
+        auto ps = plans();
+        applyLensPlans(cfg.camera, ps);
+        check(ps[0].use == LensUse::DatasetWide && ps[1].use == LensUse::DatasetWide,
+              "plan: a dataset-wide manifest calibration wins");
+    }
+    {
+        // A focal given for the capture stays in force when another setting
+        // names one of its lenses: the shorter prefix must be read too.
+        SfmConfig cfg = config({"focal:clip=900", "model:clip/cam0=opencv-fisheye"});
+        std::vector<LensPlan> ps(2);
+        ps[0].prefix = "clip/cam0"; ps[0].lens = master();
+        ps[1].prefix = "clip/cam1"; ps[1].lens = slave();
+        for (LensPlan& p : ps) p.width = p.height = 3840;
+        applyLensPlans(cfg.camera, ps);
+        size_t factory = 0;
+        for (const CameraOverride& o : cfg.camera.overrides)
+            factory += (o.prefix == "clip/cam0" || o.prefix == "clip/cam1") && !o.params.empty();
+        check(ps[0].use == LensUse::Override, "plan: a capture focal covers a lens that another setting names");
+        check(ps[1].use == LensUse::Override, "plan: a capture focal covers a lens no other setting names");
+        check(factory == 0, "plan: no factory override added under a capture focal");
+    }
+    {
+        SfmConfig cfg = config();
+        CameraOverride wide;
+        wide.prefix = "clip";
+        wide.params = {900, 900, 1920, 1920, 0, 0, 0, 0, 0, 0, 0, 0};
+        cfg.camera.overrides.push_back(wide);
+        CameraOverride lens;
+        lens.prefix = "clip/cam0";
+        lens.has_model = true;
+        lens.model = CamModel::ThinPrismFisheye;
+        cfg.camera.overrides.push_back(lens);
+        std::vector<LensPlan> ps(1);
+        ps[0].prefix = "clip/cam0"; ps[0].lens = master();
+        ps[0].width = ps[0].height = 3840;
+        applyLensPlans(cfg.camera, ps);
+        size_t factory = 0;
+        for (const CameraOverride& o : cfg.camera.overrides) factory += o.prefix == "clip/cam0" && !o.params.empty();
+        check(ps[0].use == LensUse::Override && factory == 0,
+              "plan: a capture calibration covers a lens that another setting names");
+    }
+    {
+        // The model a person chose for the capture is the one the factory params are cut for.
+        SfmConfig cfg = config({"model:clip=opencv-fisheye"});
+        CameraOverride nothing;   // an entry for the lens that sets nothing
+        nothing.prefix = "clip/cam0";
+        cfg.camera.overrides.push_back(nothing);
+        std::vector<LensPlan> ps(1);
+        ps[0].prefix = "clip/cam0"; ps[0].lens = master();
+        ps[0].width = ps[0].height = 3840;
+        applyLensPlans(cfg.camera, ps);
+        check(ps[0].use == LensUse::Used && ps[0].model == CamModel::OpenCVFisheye &&
+                  ps[0].fit.params.size() == 8,
+              "plan: the capture's model is kept when a nearer entry names none");
+        std::vector<ImageEntry> images = {{"clip/cam0/00008.jpg", 0}};
+        std::vector<FeatureSet> feats(1);
+        feats[0].width = feats[0].height = 3840;
+        const CameraSetup s = buildCameras(images, feats, cfg.camera);
+        check(s.cameras.at(s.ids[0]).model == CamModel::OpenCVFisheye && colmap(s, 0) == ps[0].fit.params,
+              "plan: that lens is built in the model its params were cut for");
+    }
 }
 
 // A model given to the capture reaches its lens folders: the factory override
