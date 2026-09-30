@@ -12,8 +12,6 @@
 #include "app/gui/FrameSelect.h"
 #include "app/gui/Subprocess.h"
 
-#include "app_generated/mask_py.h"   // kMaskPy[], from reference/scripts/mask.py
-
 #include "core/ExrImage.h"
 #include "core/ImageOrient.h"
 #include "sfm/core/Exif.h"
@@ -332,11 +330,12 @@ public:
                 .push_back(f.string());
         }
         for (auto& [camera, group] : groups) {
-            app::FrameMask fm = st.mask;
+            const app::CameraStencil& cs = st.for_camera(camera);
+            app::FrameMask fm = cs.mask;
             app::BorderDetect border;
-            if (st.detect_border) {
+            if (cs.detect_border) {
                 app::BorderDetectOptions o;
-                o.shrink = st.shrink;
+                o.shrink = cs.shrink;
                 border = app::detect_fisheye_border(group, o);
                 // First, so the shapes drawn on top are applied to it in order.
                 if (border.found) fm.shapes.insert(fm.shapes.begin(), border.shape);
@@ -631,68 +630,6 @@ int probe_packed_lenses(const std::string& dir) {
 // ---------------------------------------------------------------------------
 // The ffmpeg fallback, on its own
 // ---------------------------------------------------------------------------
-
-bool ffmpeg_probe_video(const std::string& ffmpeg_exe, const std::string& path,
-                        VideoFacts& out, const std::atomic<bool>& cancel) {
-    out = VideoFacts{};
-    if (!command_exists(ffmpeg_exe)) return false;
-    // No output file, so ffmpeg prints the container and stream table and then
-    // exits non-zero saying it was given nothing to write -- which is why the
-    // return code is not the answer here, the two lines below are. ffprobe
-    // would be tidier and is not assumed to be installed: only the ffmpeg path
-    // is a setting (Tool locations), and a user who set one did not promise
-    // the other is beside it.
-    run_process({ffmpeg_exe, "-nostdin", "-hide_banner", "-i", path}, "",
-                [&](const std::string& line) {
-                    const size_t d = line.find("Duration:");
-                    if (d != std::string::npos) {
-                        int hh = 0, mm = 0;
-                        double ss = 0.0;
-                        if (std::sscanf(line.c_str() + d, "Duration: %d:%d:%lf",
-                                        &hh, &mm, &ss) == 3)
-                            out.duration = hh * 3600.0 + mm * 60.0 + ss;
-                    }
-                    // "... 1920x1080, 19938 kb/s, 30.01 fps, 30 tbr, ..."
-                    // A cover picture is a video stream to ffmpeg and is not a
-                    // lens; counting it gives a DJI .osv three of them.
-                    const size_t f = line.find(" fps");
-                    if (f == std::string::npos ||
-                        line.find("Video:") == std::string::npos ||
-                        line.find("(attached pic)") != std::string::npos)
-                        return;
-                    // The frame size off the same line. The 16-pixel floor is
-                    // what rejects the fourcc ("0x31637661"), which is also
-                    // digits on both sides of an x.
-                    int lw = 0, lh = 0;
-                    for (size_t i = 1; i + 1 < line.size() && !lw; i++) {
-                        if (line[i] != 'x') continue;
-                        size_t b = i, e = i + 1;
-                        while (b > 0 && std::isdigit((unsigned char)line[b - 1])) b--;
-                        while (e < line.size() && std::isdigit((unsigned char)line[e])) e++;
-                        if (b == i || e == i + 1) continue;
-                        const int w = std::atoi(line.c_str() + b);
-                        const int h = std::atoi(line.c_str() + i + 1);
-                        if (w >= 16 && h >= 16) { lw = w; lh = h; }
-                    }
-                    if (lw > 0) {
-                        out.tracks.emplace_back(lw, lh);
-                        if (out.width == 0) { out.width = lw; out.height = lh; }
-                    }
-                    size_t b = f;
-                    while (b > 0 && (std::isdigit((unsigned char)line[b - 1]) ||
-                                     line[b - 1] == '.'))
-                        b--;
-                    if (b < f) {
-                        try {
-                            out.fps = std::stod(line.substr(b, f - b));
-                        } catch (...) {}
-                    }
-                },
-                cancel);
-    if (out.duration > 0.0 && out.fps > 0.0)
-        out.frames = (long long)(out.duration * out.fps);
-    return out.duration > 0.0;
-}
 
 bool ffmpeg_extract_frame(const std::string& ffmpeg_exe, const std::string& video,
                           double seconds, const std::string& out_path,
@@ -1042,11 +979,6 @@ const Backends& backends() {
 #else
         b.masking_reason = "built without the segmentation module "
                            "(-DSS_BUILD_SAM=OFF)";
-        b.masking_note =
-            "Masks are made by an external Python script "
-            "(reference/scripts/mask.py with lang-segment-anything, which "
-            "needs a CUDA PyTorch). Set the Python path under Tool "
-            "locations if it is not on PATH.";
 #endif
         return b;
     }();
@@ -1220,7 +1152,6 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     // can run per input (see generate_masks) instead of over one flat tree.
     struct Prepared {
         std::string images, masks;      // absolute
-        std::string images_rel, masks_rel;  // relative to the workspace
         // This input's masks already exist: brought along by the input, taken
         // from its alpha channel, or kept by a resumed run.
         bool have_masks = false;
@@ -1252,13 +1183,12 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
         // are what says so, since this path copies nothing.
         if (camera_subfolders(out.image_dir).size() > 1)
             out.per_folder_cameras = true;
-        per[0].images = per[0].images_rel = out.image_dir;
+        per[0].images = out.image_dir;
         if (in.mask_dir.empty()) {
             // Nothing came with them, so anything generated goes in the
             // dataset, next to the reconstruction rather than next to the
             // photos -- a folder we were only asked to read.
             per[0].masks = (ws / "masks").string();
-            per[0].masks_rel = "masks";
             skip_dir = per[0].masks;
         } else {
             const std::string bundled = fs::absolute(in.mask_dir, ec).string();
@@ -1267,7 +1197,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
             if (in.stencil.empty()) {
                 // Nothing to fold in, so they are read where they lie and keep
                 // whichever convention they arrived in.
-                per[0].masks = per[0].masks_rel = bundled;
+                per[0].masks = out.mask_dir_cfg = bundled;
                 out.mask_dir_flipped = job.flip_found_masks;
             } else {
                 // The stencil has to go somewhere, and a masks/ under the
@@ -1277,10 +1207,9 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
                 const bool under_images =
                     inside(fs::path(bundled), fs::path(out.image_dir));
                 per[0].masks = under_images ? bundled : (ws / "masks").string();
-                per[0].masks_rel = under_images ? bundled : std::string("masks");
+                out.mask_dir_cfg = under_images ? bundled : std::string("masks");
             }
             out.mask_dir = per[0].masks;
-            out.mask_dir_cfg = per[0].masks_rel;
             skip_dir = per[0].masks;
         }
     } else {
@@ -1295,8 +1224,6 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
             Prepared& p = per[i];
             p.images = under(out.image_dir, in.subdir).string();
             p.masks = under((ws / "masks").string(), in.subdir).string();
-            p.images_rel = under("images", in.subdir).generic_string();
-            p.masks_rel = under("masks", in.subdir).generic_string();
             // Folded in from where they lie, not from the copies gathered next
             // to the images: a second run would otherwise fold the fold.
             if (!in.mask_dir.empty() &&
@@ -1376,8 +1303,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
         // A subject model (BiRefNet) finds what to mask by itself.
         bool subject = false;
 #ifdef SS_BUILD_SAM
-        subject = !job.force_external_masking && backends().builtin_masking &&
-                  sam::is_subject_model(job.mask_model_path);
+        subject = sam::is_subject_model(job.mask_model_path);
 #endif
         if (!subject && job.mask_prompt.empty() && job.mask_clicks.empty()) {
             error = lmsg::err_mask_no_target.get();
@@ -1407,8 +1333,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     // The step's bar covers the stencil pass as well as segmentation, so both
     // are planned before either runs. A stencil the built-in masker folds in
     // is not a pass: planned and dropped afterwards, it doubled the total.
-    const bool folds = job.mask_enable && !job.force_external_masking &&
-                       backends().builtin_masking;
+    const bool folds = job.mask_enable && backends().builtin_masking;
     std::vector<int64_t> stencil_planned(job.inputs.size(), 0);
     for (size_t i = 0; i < job.inputs.size(); i++) {
         if (folds && !per[i].have_masks && !job.inputs[i].stencil.empty())
@@ -1431,8 +1356,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
             // input arrived with. Segmenting over those would replace an
             // answer the user already has.
             if (per[i].have_masks) continue;
-            if (!generate_masks(job, job.inputs[i], per[i].images,
-                                per[i].images_rel, per[i].masks, per[i].masks_rel,
+            if (!generate_masks(job, job.inputs[i], per[i].images, per[i].masks,
                                 per[i].stencil_folded, error))
                 return false;
             _masks_tally.settle(mask_planned[i], mask_planned[i]);
@@ -1568,6 +1492,9 @@ static bool builtin_job(const PrepJob& job, const PrepInput& in,
     const int window = every ? 1 : std::max(job.sharp_window, 1);
     fx.input = in.path;
     fx.device = job.device;
+    // This run has its own ffmpeg path (extract_video_ffmpeg), numbered by
+    // candidate rather than source frame.
+    fx.decoder = app::FrameDecoder::Builtin;
     fx.skip = frame_skip(input_fps(job, in), src_fps);
     fx.keep = window > 1 ? window : 0;
     fx.max_frames = job.max_frames;
@@ -2582,32 +2509,17 @@ bool DatasetPrep::split_packed_frames(const PrepInput& in,
 
 bool DatasetPrep::generate_masks(const PrepJob& job, const PrepInput& in,
                                  const std::string& images,
-                                 const std::string& images_rel,
                                  const std::string& masks,
-                                 const std::string& masks_rel,
                                  bool& folded, std::string& error) {
-    if (!job.force_external_masking && backends().builtin_masking) {
-        // A missing checkpoint is a download, not an install. Falling through
-        // to the Python masker answered "the model is not here" with "pip
-        // install lang-segment-anything", which is advice for another problem.
-        if (job.mask_model_path.empty()) {
-            error = lmsg::err_mask_model_not_downloaded.get();
-            return false;
-        }
-        return generate_masks_builtin(job, in, images, masks, folded, error);
-    }
-    if (job.mask_model_name.empty()) {
-        error = lmsg::err_subject_needs_builtin.get();
+    if (!backends().builtin_masking) {
+        error = lmsg::err_no_builtin_segmentation.get();
         return false;
     }
-    if (!job.mask_clicks.empty()) {
-        // The Python fallback is lang-segment-anything: text in, masks out. It
-        // has no way to take a click, so saying so beats writing masks that
-        // quietly ignore half of what the user asked for.
-        error = lmsg::err_clicks_need_builtin.get();
+    if (job.mask_model_path.empty()) {
+        error = lmsg::err_mask_model_not_downloaded.get();
         return false;
     }
-    return generate_masks_python(job, images_rel, masks_rel, error);
+    return generate_masks_builtin(job, in, images, masks, folded, error);
 }
 
 bool DatasetPrep::generate_masks_builtin(const PrepJob& job, const PrepInput& in,
@@ -2684,7 +2596,7 @@ bool DatasetPrep::generate_masks_builtin(const PrepJob& job, const PrepInput& in
                       [&](const std::string& camera, const app::BorderDetect& d) {
                           const std::string name =
                               camera.empty() ? in.path : camera;
-                          if (!in.stencil.detect_border) return;
+                          if (!in.stencil.for_camera(camera).detect_border) return;
                           if (!d.found) {
                               log(fmt(lmsg::frame_mask_no_border, {name}), false);
                               return;
@@ -2823,7 +2735,7 @@ bool DatasetPrep::apply_stencil(const PrepJob& job, const PrepInput& in,
     };
     sinks.resolved = [&](const std::string& camera, const app::FrameMask&,
                          const app::BorderDetect& d) {
-        if (!in.stencil.detect_border) return;
+        if (!in.stencil.for_camera(camera).detect_border) return;
         const std::string name = camera.empty() ? in.path : camera;
         if (!d.found) {
             log(fmt(lmsg::frame_mask_no_border, {name}), /*detail=*/false);
@@ -2840,76 +2752,6 @@ bool DatasetPrep::apply_stencil(const PrepJob& job, const PrepInput& in,
         return false;
     }
     if (in_place && job.flip_found_masks) std::ofstream(marker.string());
-    return true;
-}
-
-// The Python fallback: the embedded reference/scripts/mask.py run through an
-// external interpreter with lang-segment-anything. It prints an install hint
-// and exits 0 when the packages are missing, so that is detected from its
-// output rather than its exit code.
-bool DatasetPrep::generate_masks_python(const PrepJob& job,
-                                        const std::string& images_rel,
-                                        const std::string& masks_rel,
-                                        std::string& error) {
-    enter(Stage::Masks, lmsg::stage_masks_python.get());
-    if (!command_exists(job.python_exe)) {
-        error = fmt(lmsg::err_python_missing, {job.python_exe});
-        return false;
-    }
-    const fs::path ws = job.workspace;
-    const fs::path script = ws / ".spirula_mask.py";
-    {
-        FILE* f = std::fopen(script.string().c_str(), "wb");
-        if (!f) {
-            error = fmt(lmsg::err_cannot_write, {script.string()});
-            return false;
-        }
-        std::fwrite(kMaskPy, 1, kMaskPySize, f);
-        std::fclose(f);
-    }
-    std::vector<std::string> argv = {
-        job.python_exe, script.string(), ws.string(),
-        "--prompt", job.mask_prompt,
-        "--images", images_rel,
-        "--masks", masks_rel,
-        "--max_image_size", std::to_string(job.mask_max_image_size),
-        "--model", job.mask_model_name,
-    };
-    if (!job.mask_negative_prompt.empty()) {
-        argv.push_back("--negative_prompt");
-        argv.push_back(job.mask_negative_prompt);
-    }
-    // Without this the external path silently ignores the polarity and always
-    // removes what the prompt named -- the exact opposite of what an object
-    // capture asked for.
-    if (job.mask_keep_subject) argv.push_back("--keep_prompted");
-    std::string install_hint;
-    std::string cmd;
-    for (const auto& a : argv) cmd += (cmd.empty() ? "$ " : " ") + a;
-    log(cmd);
-    const int rc = run_process(argv, "", [&](const std::string& l) {
-        log(l);
-        if (l.find("not found or not installed properly") != std::string::npos ||
-            l.find("ModuleNotFoundError") != std::string::npos)
-            install_hint = l;
-    }, _cancel);
-    if (rc == kCancelled) { error = lmsg::err_cancelled.get(); return false; }
-
-    std::error_code ec;
-    const bool have_masks = fs::is_directory(ws / masks_rel, ec) &&
-                            !fs::is_empty(ws / masks_rel, ec);
-    if (!install_hint.empty() || rc != 0 || !have_masks) {
-        // Three whole sentences rather than one with tails appended: the
-        // install advice is the message when there is any, and which advice
-        // depends on the model.
-        if (install_hint.empty())
-            error = lmsg::err_mask_generation_failed.get();
-        else if (job.mask_model_name == "sam3")
-            error = lmsg::err_mask_missing_packages_sam3.get();
-        else
-            error = lmsg::err_mask_missing_packages.get();
-        return false;
-    }
     return true;
 }
 

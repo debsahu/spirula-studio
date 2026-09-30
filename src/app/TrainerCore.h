@@ -18,6 +18,7 @@
 // setup_engine() calls engine_reset(), so a fresh session can follow a
 // finished one in the same process (the GUI's "train again" path).
 
+#include "app/TrainForecast.h"
 #include "engine/Engine.h"
 #include "core/ColorSpace.h"
 #include "data/DatasetParser.h"
@@ -298,9 +299,11 @@ public:
     // train() starts, frozen once it returns.
     double elapsed_seconds() const;
 
-    // Remaining wall clock over the last 100 steps' average, or -1 before
-    // the first step lands.
+    // Remaining wall clock, from TrainForecast's step-time model and the
+    // densify schedule still to come; -1 before the first step lands.
     double eta_seconds() const;
+    // The run's ETA and VRAM forecast, fed by train().
+    const TrainForecast& forecast() const { return _forecast; }
 
     // The /progress response body.
     std::string progress_json();
@@ -333,6 +336,12 @@ private:
     mutable std::mutex _progress_mutex;    // guards the latency window
     std::deque<double> _step_latencies;    // last 100, seconds
     bool _diverged_loss_reported = false;
+
+    void observe_memory(int step, int64_t splats_ran);
+    TrainForecast _forecast;
+    int _batches_per_epoch = 1;
+    std::atomic<int64_t> _live_splats{0};
+    OomRisk _warned_risk = OomRisk::Low;
 };
 
 }  // namespace spirula

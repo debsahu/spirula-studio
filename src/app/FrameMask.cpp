@@ -3,6 +3,7 @@
 #include "app/FrameMask.h"
 
 #include "app/FrameLook.h"
+#include "core/CubicBezier.h"
 #include "core/ExrImage.h"
 #include "core/PolygonFill.h"
 
@@ -517,15 +518,14 @@ float valid_outside(const std::vector<uint8_t>& valid, int w, int h, const Circl
 }
 
 MaskShape to_shape(const Circle& c, float shrink, int w, int h) {
-    const float r = c.r * (1.0f - std::clamp(shrink, -0.5f, 0.9f));
     MaskShape s;
     s.kind = MaskShape::Kind::Ellipse;
     s.remove = false;
     s.cx = (c.cx + 0.5f) / (float)w;
     s.cy = (c.cy + 0.5f) / (float)h;
-    s.rx = r / (float)w;
-    s.ry = r / (float)h;
-    return s;
+    s.rx = c.r / (float)w;
+    s.ry = c.r / (float)h;
+    return shrink_border(s, shrink);
 }
 
 float kept_fraction(const MaskShape& s, int w, int h) {
@@ -569,6 +569,62 @@ void fill_stroke(const MaskShape& s, int W, int H, uint8_t* out) {
 
 }  // namespace
 
+MaskShape shrink_border(MaskShape shape, float shrink) {
+    const float scale = 1.0f - std::clamp(shrink, -0.5f, 0.9f);
+    shape.rx *= scale;
+    shape.ry *= scale;
+    return shape;
+}
+
+bool edit_detected_border(CameraStencil& stencil, const BorderDetect& border) {
+    if (!stencil.detect_border || !border.found) return false;
+    stencil.mask.shapes.insert(stencil.mask.shapes.begin(),
+                              shrink_border(border.shape, stencil.shrink));
+    stencil.detect_border = false;
+    return true;
+}
+
+bool MaskSet::empty() const {
+    for (const auto& [camera, list] : cameras)
+        if (!list.empty()) return false;
+    return shapes.empty();
+}
+
+MaskSet mask_set_of(const FrameStencil& stencil) {
+    MaskSet out;
+    if (!stencil.per_camera()) {
+        out.shapes = stencil.mask.shapes;
+        return out;
+    }
+    // The input's own list is only a fallback here: every camera the panel
+    // knew was given an entry when separate areas were turned on.
+    const std::string first = format_mask_shapes(stencil.cameras.begin()->second.mask.shapes);
+    bool same = true;
+    for (const auto& [camera, cs] : stencil.cameras)
+        same = same && format_mask_shapes(cs.mask.shapes) == first;
+    if (same) {
+        out.shapes = stencil.cameras.begin()->second.mask.shapes;
+        return out;
+    }
+    for (const auto& [camera, cs] : stencil.cameras) out.cameras[camera] = cs.mask.shapes;
+    return out;
+}
+
+void apply_mask_set(FrameStencil& stencil, const MaskSet& set) {
+    auto put = [](CameraStencil& cs, const std::vector<MaskShape>& list) {
+        cs.mask.shapes = list;
+        if (!list.empty() && !list.front().remove) cs.detect_border = false;
+    };
+    put(stencil, set.shapes);
+    for (auto& [camera, cs] : stencil.cameras) put(cs, set.shapes);
+    for (const auto& [camera, list] : set.cameras) {
+        auto it = stencil.cameras.find(camera);
+        if (it == stencil.cameras.end())
+            it = stencil.cameras.emplace(camera, static_cast<const CameraStencil&>(stencil)).first;
+        put(it->second, list);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shapes
 // ---------------------------------------------------------------------------
@@ -601,6 +657,17 @@ bool parse_mask_shapes(const std::string& spec, std::vector<MaskShape>& out,
         if (kind == "path") {
             s.kind = MaskShape::Kind::Path;
             if (!parse_floats(nums, s.pts) || s.pts.size() < 6 || s.pts.size() % 2) {
+                error = piece;
+                return false;
+            }
+            out.push_back(s);
+            continue;
+        }
+        if (kind == "bezier") {
+            s.kind = MaskShape::Kind::Bezier;
+            if (!parse_floats(nums, s.pts) ||
+                s.pts.size() < 2 * bezier::kAnchorFloats ||
+                s.pts.size() % bezier::kAnchorFloats) {
                 error = piece;
                 return false;
             }
@@ -647,7 +714,12 @@ std::string format_mask_shapes(const std::vector<MaskShape>& shapes) {
     char buf[96];
     for (const MaskShape& s : shapes) {
         std::string piece = s.remove ? "-" : "";
-        if (s.kind == MaskShape::Kind::Path || s.kind == MaskShape::Kind::Stroke) {
+        if (s.kind == MaskShape::Kind::Bezier) {
+            // A handle is dragged by a fraction of a pixel; four places lose that at 8K.
+            piece += "bezier ";
+            for (size_t i = 0; i < s.pts.size(); i++)
+                append_printf(piece, "%s%.5f", i ? "," : "", s.pts[i]);
+        } else if (s.kind == MaskShape::Kind::Path || s.kind == MaskShape::Kind::Stroke) {
             const bool stroke = s.kind == MaskShape::Kind::Stroke;
             piece += stroke ? "stroke " : "path ";
             if (stroke) append_printf(piece, "%.5f,%.5f", s.rx, s.ry);
@@ -714,8 +786,9 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
     }
     const bool base = m.shapes.empty() || m.shapes.front().remove;
 
-    // A path or stroke is filled once into its own plane; the pixel loop then
-    // reads it like any other inside test, so the ordering rule is untouched.
+    // A path, curve or stroke is filled once into its own plane; the pixel
+    // loop then reads it like any other inside test, so the ordering rule is
+    // untouched.
     std::vector<std::vector<uint8_t>> paths(m.shapes.size());
     std::vector<float> px;
     for (size_t k = 0; k < m.shapes.size(); k++) {
@@ -725,12 +798,19 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
             fill_stroke(s, width, height, paths[k].data());
             continue;
         }
-        if (s.kind != MaskShape::Kind::Path) continue;
-        paths[k].assign((size_t)width * height, 0);
-        px.resize(s.pts.size());
-        for (size_t i = 0; i + 1 < s.pts.size(); i += 2) {
-            px[i] = s.pts[i] * (float)width;
-            px[i + 1] = s.pts[i + 1] * (float)height;
+        if (s.kind == MaskShape::Kind::Bezier) {
+            paths[k].assign((size_t)width * height, 0);
+            bezier::flatten_closed(s.pts.data(), s.pts.size() / bezier::kAnchorFloats,
+                                   (float)width, (float)height, 0.05f, px);
+        } else if (s.kind == MaskShape::Kind::Path) {
+            paths[k].assign((size_t)width * height, 0);
+            px.resize(s.pts.size());
+            for (size_t i = 0; i + 1 < s.pts.size(); i += 2) {
+                px[i] = s.pts[i] * (float)width;
+                px[i + 1] = s.pts[i + 1] * (float)height;
+            }
+        } else {
+            continue;
         }
         polyfill::fill_even_odd(px.data(), px.size() / 2, width, height, paths[k].data(), 1);
     }
@@ -745,7 +825,7 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
             for (size_t k = 0; k < m.shapes.size(); k++) {
                 const MaskShape& s = m.shapes[k];
                 bool inside;
-                if (s.kind == MaskShape::Kind::Path || s.kind == MaskShape::Kind::Stroke) {
+                if (!paths[k].empty()) {
                     inside = paths[k][(size_t)y * width + x] != 0;
                 } else if (s.kind == MaskShape::Kind::Ellipse) {
                     if (s.rx <= 0.0f || s.ry <= 0.0f) continue;
@@ -1013,11 +1093,12 @@ int64_t apply_frame_stencil(const FrameStencilRun& run,
         if (sinks.cancel && sinks.cancel->load()) return written;
         if (sinks.camera) sinks.camera(rel, (int64_t)files.size());
 
-        FrameMask fm = run.stencil.mask;
+        const CameraStencil& stencil = run.stencil.for_camera(rel);
+        FrameMask fm = stencil.mask;
         BorderDetect border;
-        if (run.stencil.detect_border) {
+        if (stencil.detect_border) {
             BorderDetectOptions o = run.detect;
-            o.shrink = run.stencil.shrink;
+            o.shrink = stencil.shrink;
             border = detect_fisheye_border(files, o);
             // First, so the shapes drawn on top are applied to it in order.
             if (border.found) fm.shapes.insert(fm.shapes.begin(), border.shape);

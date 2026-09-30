@@ -1,21 +1,12 @@
 // spirula-sam -- segmentation, tracking and frame extraction from a shell.
 //
-//   spirula-sam devices
 //   spirula-sam segment --model m.ggml --image cat.jpg --text "cat" --out out/
-//   spirula-sam segment --model m.ggml --image cat.jpg --point 315,250 --out out/
 //   spirula-sam track   --model m.ggml --frames frames/ --text "person" --out out/
-//   spirula-sam video   --info clip.mp4
 //   spirula-sam extract clip.mp4 --skip 30 --model m.ggml --text "person"
 //
-// The GUI drives the same library in-process (src/app/gui/DatasetPrep.cpp);
-// this is the scriptable face of it, and how a masking or extraction problem
-// gets reproduced without the GUI in the way.
-//
-// `video` and `extract` need the in-process decoder, which is only built with
-// -DSS_ENABLE_PATENTED=ON (src/app/cli/sam_extract.cpp); without it they
-// say so and point at ffmpeg.
-//
-// Diagnostics go to stderr, the result table to stdout, so a run pipes cleanly:
+// The scriptable face of what the GUI drives in-process (src/app/gui/DatasetPrep.cpp).
+// `video` needs the in-process decoder (-DSS_ENABLE_PATENTED=ON); `extract`
+// falls back to ffmpeg. Diagnostics go to stderr, the result table to stdout:
 //   spirula-sam segment ... 2>/dev/null > detections.tsv
 
 #include "app/Tools.h"
@@ -689,12 +680,15 @@ int cmd_mask(const Options& o) {
         std::string bad, title;
         const bool svg = o.shape_spec.size() > 4 &&
                          o.shape_spec.compare(o.shape_spec.size() - 4, 4, ".svg") == 0;
-        if (svg ? !app::load_mask_svg(o.shape_spec, run.stencil.mask.shapes, title, bad)
-                : !app::parse_mask_shapes(o.shape_spec, run.stencil.mask.shapes, bad)) {
+        // A file the GUI saved for one camera brings its set's other cameras.
+        app::MaskSet set;
+        if (svg ? !app::load_mask_svg_set(o.shape_spec, set, title, bad)
+                : !app::parse_mask_shapes(o.shape_spec, set.shapes, bad)) {
             std::fprintf(stderr, "%s\n",
                          format(cmsg::sam_mask_bad_shape, {bad}).c_str());
             return 2;
         }
+        app::apply_mask_set(run.stencil, set);
     } else {
         run.stencil.detect_border = true;
     }
@@ -818,9 +812,7 @@ int cmd_video(const Options& o) {
 
 // Defined in src/app/cli/sam_extract.cpp; it has its own option set, so it
 // parses its own argv rather than sharing Options above.
-#ifdef SS_HAVE_VIDEO
 int sam_cli_extract(int argc, char** argv);
-#endif
 
 int spirula_sam_main(int argc, char** argv) {
     app::set_program_name(argc > 0 ? argv[0] : nullptr, "spirula sam");
@@ -831,16 +823,9 @@ int spirula_sam_main(int argc, char** argv) {
         return 0;
     }
     if (argc >= 2 && std::strcmp(argv[1], "extract") == 0) {
-#ifdef SS_HAVE_VIDEO
         int rc = sam_cli_extract(argc - 1, argv + 1);
         nn::shutdown();
         return rc;
-#else
-        std::fprintf(stderr, "%s\n",
-                     format(cmsg::sam_extract_needs_decoder,
-                            {app::program_name()}).c_str());
-        return 1;
-#endif
     }
 
     Options o;

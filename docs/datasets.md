@@ -807,14 +807,28 @@ up to +100% on a 1080p clip, with the tracking itself overlapped with the
 decode. Nothing is buffered: a video's worth of pictures does not fit, and a
 plan cannot be made until the whole cost curve is known.
 
-Without the built-in decoder the same plan is made from the candidate frames
-ffmpeg already extracts, at `fps x max(window, range)` instead of
+In the GUI, without the built-in decoder the same plan is made from the
+candidate frames ffmpeg already extracts, at `fps x max(window, range)` instead of
 `fps x window` so there are enough of them for the fastest rate it may ask for
 (`gui/FrameSelect.h`). That path plans one video at a time -- the candidates of
 a whole group are not on disk at once -- and it numbers the frames it keeps by
 the candidate they were, not by how many it has kept. The stem is what times a
 frame against the video's IMU and GPS (`sfm/map/SensorGauge.h`), and an
 adaptive plan leaves nothing evenly spaced for a frame rate to recover it from.
+
+`spirula sam extract` has no candidates on disk. Without the built-in decoder
+(a build without `SS_ENABLE_PATENTED`, a device without a video queue such as
+MoltenVK's, or `--decoder ffmpeg`) it reads decoded pictures out of ffmpeg over
+a pipe, one process per track, into the same loop the built-in decoder feeds
+(`app/FrameDecode.h`) -- so `--sync`, `--adaptive`, the 360 views and masking
+all work there too, and the stems are source frame indices either way. Its
+motion pass takes every frame's Y plane and reduces it on the host exactly as
+`video.slang`'s thumbnail does, which makes the plan the built-in one: on a
+1920 px dual-fisheye `.insv`, `--sync --adaptive --skip 30` gave identical
+motion costs and 93 of 94 kept frames in common, and a fixed `--skip 30` 39 of
+40 (the rest is the sharpness score, CPU against GPU). That pass decodes in
+software, because NVDEC's download squeezed a full-range Y plane into studio
+range: 38 s against 11 s on that clip.
 
 The pass reports as it goes, in two places. It enters the Frames step itself --
 nothing else has, since a whole rate group is measured before any of it is

@@ -50,7 +50,7 @@ void usage() {
     std::fprintf(stderr, "\n%s\n", P::head_split.get());
     help_row("--parts <n>", P::opt_parts);
     help_row("--max-images <n>", P::opt_max_images);
-    help_row("--method spatial|viewgraph", P::opt_method);
+    help_row("--method graph|viewgraph", P::opt_method);
     help_row("--ring <fraction>", P::opt_ring);
     help_row("--ring-min-points <n>", P::opt_ring_min);
     help_row("--max-seeds <n>", P::opt_max_seeds);

@@ -21,51 +21,85 @@ part grows in front of another part's cameras. The scheme here targets the
 first and the last two directly; appearance drift is left for a later shared
 initialization (see "Not done").
 
-## Regions first (the default, `--method spatial`)
+## The visibility cut (the default, `--method graph`)
 
-Cutting the *cameras* first (steps 2 and 3 below, `--method viewgraph`)
-groups cameras that look the same way even when they stand far apart, and a
-part's region is then wherever those cameras happened to look. On Atrium at
-800 images a part's cameras saw on average only 23-53% of their own part,
-and each part borrowed a ring 1.3-2.2 times its core. So the default cuts
-*space* first and hands out cameras afterwards (`spatial_cut`, `home_parts`):
+What a part needs is that each of its cameras sees mostly its own region,
+and that the region is one coherent piece of the scene rather than a plane's
+worth of it: the cut of a triangle of three rooms must run along the walls,
+not through one room. Both wishes are one number, so the split minimizes
+it: the share of every camera's view that falls outside its part, plus a
+smoothness term between neighbouring points, under the image cap. In graph
+terms:
 
-- The observed points are cut by a plane, recursively. For the region with
-  the heaviest camera load, the candidates are 13 positions (20th to 80th
-  percentile) across each of its two widest principal axes -- never the
-  thinnest, which would split a floor from its ceiling and leave every camera
-  seeing both; each is scored by the cameras the two halves would need -- a
-  half needs a camera holding `--ring` (0.2) or half of that camera's view --
-  as `(l + r)(1 + |l - r| / (l + r))`: few cameras in total, split evenly.
-  Splitting stops when every region needs at most `--max-images` cameras (or
-  at `--parts` regions).
-- Within 1% of a cut (of the 5th-95th percentile extent -- the full extent,
-  stretched by stray SfM points, once widened the band over the whole region
-  and turned it into a per-point vote), a point goes to the side its
-  observers stand on, so a wall's two photographed faces each stay with
-  their own side.
-- A camera's home (its core part) is the region most of its view is in; it
-  also joins the ring of any other region holding `--ring` of its view. A
-  region no camera calls home goes to the home its observers vote for.
+- **Nodes** are the cameras and the observed points, the points grouped
+  into patches of up to 24 linked neighbours (`patch_points`; a patch never
+  crosses a wall, since two faces of one share no observer). A capture of
+  4000 frames and 800k points is a graph of ~70k nodes.
+- **Camera-point edges** carry the observation's weight: `1/d^2`, the image
+  area the point stands for, clamped at the camera's 5th-percentile
+  distance and normalized so each camera's observations sum to 1. A
+  label's weight on a camera is then its share of that camera's view --
+  which is what the ROI masks later drop or keep -- and a point's observers
+  weigh by how close they stand, so the votes are spatially coherent. With
+  unit weights instead (each track a vote) the hall of Atrium came out as
+  salt and pepper, because its cameras are tracked in a random few of the
+  points they see.
+- **Point-point edges** are the 12-NN affinities `own_points` uses (the
+  share of one point's observers that are, or are covisible with, the
+  other's), scaled so a point's neighbours weigh on average twice its
+  observers (`kSmooth`; 4 and 8 cost view share on every capture tried, 1
+  split Atrium into a fourth part).
+- **The cut** is `graph::cut_labels` on that graph -- the same recursive
+  normalized-cut bisection the view-graph method and the SfM mapper use --
+  with node cost 1 per camera and ~0 per patch, so the balance, the leaf
+  size and the tiny-part merges all count cameras. It recurses until every
+  part's core is under `--max-images`; a camera's home is then the part
+  holding most of its view, its ring the parts holding `--ring` (0.1) of it,
+  and when core plus ring overruns the cap the cores are cut smaller in
+  proportion and the cut runs again (at most six times).
 
-On Atrium at `--max-images 800` this gives 12 compact parts, each needing
-424-772 cameras in all, whose cameras see 44-69% of their own part (the CLI
-prints this per part); ownership interleaves 3% of nearest neighbours.
-Cameras standing together may belong to different parts when they look at
-different regions; that is intended. Without point observations (poses
-only) the view-graph method is used.
+Measured at `--max-images 2000 --ring 0.1` (`spirula partition split`
+prints the per-part numbers; "interleaved" is the share of a point's ten
+nearest points owned by another part):
 
-Measured on Atrium, 6000 steps per part, every 8th frame held out,
-colour-corrected PSNR / SSIM of the merge against one model trained on
-everything (22.73 / 0.793, 459 s); per-view differences pair views by their
-ground-truth image, since two runs visit held-out views in different orders:
+| capture | method | parts | cameras see of own part | ring per part | cut of view graph | point owners interleaved |
+|---|---|---|---|---|---|---|
+| Atrium (4102 frames, one open hall with wings) | view graph | 3 | 54-58% | 671-1552 | 6.1% | 1.6% |
+| | plane cuts | 4 | 60-66% | 456-642 | 20.4% | 2.3% |
+| | **visibility cut** | 3 | 61-75% | 430-686 | 17.4% | 2.8% |
+| utias (5314, a street loop with a dome) | view graph | 4 | 69-85% | 264-368 | 1.0% | 0.8% |
+| | plane cuts | 6 | 40-80% | 340-805 | 14.8% | 2.6% |
+| | **visibility cut** | 4 | 59-95% | 60-794 | 7.7% | 3.5% |
+| myhal (7013, a building on five floors) | view graph | 6 | 65-78% | 175-672 | 1.7% | 1.4% |
+| | plane cuts | 8 | 45-72% | 320-730 | 15.8% | 2.5% |
+| | **visibility cut** | 6 | 69-91% | 35-388 | 3.0% | 2.2% |
 
-| split | merge | mean dPSNR | views < -3 dB | worst | train time |
-|---|---|---|---|---|---|
-| view graph, ring 0.05 (before) | 22.58 / 0.801 | -0.15 | 3 | -3.9 | 1285 s |
-| regions first | 22.37 / 0.805 | -0.36 | 15 | -4.4 | 1035 s |
-| regions first + region masks (default) | 22.46 / 0.803 | -0.27 | 9 | -4.8 | 884 s |
-| regions first + opacity decay 0.5 | 20.39 / 0.773 | | | | 943 s |
+The view-graph cut severs the least covisibility by construction, but its
+regions come from camera positions, so a camera sees less of its part; the
+plane cuts run through rooms and across floors (myhal's eight parts each
+mix two or three storeys; the visibility cut's six are floors and wings).
+The split takes 7-9 s on these.
+
+Trained, 6000 steps per part at `--max-images 2000`, every 8th frame held
+out, colour-corrected PSNR / SSIM of the merge; per-view differences pair
+views by their ground-truth image (see below); myhal at half resolution:
+
+| capture | model | PSNR / SSIM | mean dPSNR | views < -3 dB | worst | train time |
+|---|---|---|---|---|---|---|
+| Atrium | one model on everything | 22.73 / 0.793 | | | | 459 s |
+| | view graph, 3 parts, ring 0.1 | 22.71 / 0.799 | -0.02 | 0 | -2.8 | 778 s |
+| | visibility cut, 3 parts, ring 0.2 | 22.45 / 0.796 | -0.28 | 10 | -6.0 | 515 s |
+| | visibility cut, 3 parts, ring 0.1 (default) | 22.63 / 0.799 | -0.10 | 2 | -3.4 | 776 s |
+| myhal | one model on everything | 17.11 / 0.687 | | | | 613 s |
+| | visibility cut, 6 parts, ring 0.2 | 17.11 / 0.694 | +0.00 | 2 | -3.8 | 1072 s |
+
+The ring decides the trade: at `--ring 0.2` the visibility cut trains a
+third faster than the view-graph split (rings of 245-465 cameras against
+845-1336) and loses a quarter of a dB in ten views -- the end of the long
+south corridor, where the merge shows smeared splats in front of the
+camera, and a band across the hall where its seam runs; at 0.1 (the
+default) it costs the same time and a tenth of a dB. On myhal the merge
+matches the full model.
 
 ## The pipeline
 
@@ -81,7 +115,7 @@ ground-truth image, since two runs visit held-out views in different orders:
      points beside them;
    - poses only: k nearest camera centres, weighted `1 + cos(view angle)`.
    `Auto` takes the first of these that works.
-2. **Cut** (view-graph method; `graph::cut_labels`): recursive normalized-cut bisection by the
+2. **Cut** (view-graph method, `--method viewgraph`; `graph::cut_labels`): recursive normalized-cut bisection by the
    Fiedler vector of the normalized Laplacian, the same code the bottom-up SfM
    mapper uses for its atoms, with three things the mapper does not want:
    each side of a bisection must hold at least 30% of the parent (a free
@@ -141,7 +175,7 @@ ground-truth image, since two runs visit held-out views in different orders:
    and a far splat goes to the nearest thing that saw anything. Queried on the
    host through a BVH over the seeds, and on the device through the same
    layout.
-5. **Ring**: an outside camera joins part k when at least `--ring` (0.2) of
+5. **Ring**: an outside camera joins part k when at least `--ring` (0.1) of
    the points it sees (and `--ring-min-points` of them) are owned by k. The
    ring sees the seam from outside, so both neighbouring parts learn it under
    the same supervision. It was 0.05, which let cameras that see a sliver of
@@ -250,14 +284,12 @@ only.
 
 ## Other ways to split, not taken
 
-- Ground-plane tiles (VastGaussian, CityGS): the regions-first split with
-  cells fixed to a ground grid. The principal-axis planes above reduce to it
-  on a street and still work on several storeys.
+- Ground-plane tiles (VastGaussian, CityGS), or recursive plane cuts of the
+  point cloud across its principal axes (the default before the visibility
+  cut): a plane through a hall or a floor splits rooms, and on myhal every
+  part mixed storeys.
 - k-means on the points with Voronoi cells: compact, but the cells know
   nothing about which cameras they will need, and nothing about walls.
-- A joint cut of the bipartite camera-point visibility graph, so a part's
-  cameras and its owned points come out of one optimization instead of
-  cameras first and ownership second.
 - Soft ownership: keep splats a band past the seam from both sides with
   opacity scaled by distance to the boundary, or fine-tune the band jointly.
 

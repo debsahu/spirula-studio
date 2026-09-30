@@ -59,18 +59,13 @@ struct ColmapJob {
     // honoured by the built-in reconstruction.
     std::vector<PrepInput> inputs;
     std::string workspace;               // output dataset dir (created)
-    bool resume = true;                  // reuse artifacts an interrupted
-                                         // run left in the workspace:
-                                         // extracted frames, masks (mask.py
-                                         // resumes), features + matches
-                                         // (COLMAP skips existing DB rows),
-                                         // and completed sparse models.
+    bool resume = true;                  // reuse what an interrupted run
+                                         // left: frames, masks, features +
+                                         // matches, completed sparse models.
                                          // false = require a clean folder.
     std::string colmap_exe = "colmap";
     std::string ffmpeg_exe = "ffmpeg";
-    std::string python_exe = "python3";  // for the masking script
     bool force_external_decode = false;  // ffmpeg even when we could decode
-    bool force_external_masking = false; // mask.py even when we could segment
 
     // Steps a re-run redoes rather than reuses; see PrepJob.
     bool redo_frames = false;
@@ -153,9 +148,7 @@ struct ColmapJob {
     bool final_bundle_adjust = true;     // bundle_adjuster refinement pass
     std::string vocab_tree_path;         // "" = auto find / download
 
-    // AI masking. The built-in path wants a checkpoint file
-    // (mask_model_path, from ModelCache); the mask.py fallback wants
-    // a model name it understands (mask_model).
+    // AI masking
     bool mask_enable = false;
     std::string mask_prompt;             // "people; cars; ..."
     std::string mask_negative_prompt;
@@ -163,7 +156,6 @@ struct ColmapJob {
     std::string mask_model_path;
     std::string mask_detector_path;      // Grounding DINO, when one is paired
     float mask_detector_threshold = 0.3f;
-    std::string mask_model = "sam2.1_hiera_large";
     int mask_max_image_size = 1600;
     float mask_dilate_ratio = 0.05f;
     float mask_threshold = 0.5f;         // all five: see PrepJob in DatasetPrep.h

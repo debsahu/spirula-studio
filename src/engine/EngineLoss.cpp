@@ -146,6 +146,7 @@ static void _engine_raster_proj_backward(
     TorchTensorView v_depth_dist = _tv_null(),
     TorchTensorView v_normal_dist = _tv_null()
 ) {
+    SplatStageTimer stage_timer;
     RenderOutput::TensorTuple v_render_outputs = std::make_tuple(
         DeviceTensor3D<float3>(v_render_rgb),
         DeviceTensor3D<float>(v_render_depth),

@@ -1012,12 +1012,15 @@ void ViewportPanel::handle_input(float /*item_h*/) {
         // active the camera keeps only what nothing competes for.
         const bool letters = !(_interactor && _interactor->blocks_fly_keys());
         NavCamera::Keys k;
-        k.w = letters && ImGui::IsKeyDown(ImGuiKey_W);
-        k.a = letters && ImGui::IsKeyDown(ImGuiKey_A);
-        k.s = letters && ImGui::IsKeyDown(ImGuiKey_S);
-        k.d = letters && ImGui::IsKeyDown(ImGuiKey_D);
-        k.e = letters && ImGui::IsKeyDown(ImGuiKey_E);
-        k.q = letters && ImGui::IsKeyDown(ImGuiKey_Q);
+        auto fly = [&](char c) {
+            return letters && ImGui::IsKeyDown((ImGuiKey)fly_key(c));
+        };
+        k.w = fly('w');
+        k.a = fly('a');
+        k.s = fly('s');
+        k.d = fly('d');
+        k.e = fly('e');
+        k.q = fly('q');
         // The claim is what the Shortcut() calls are for: an unclaimed arrow is
         // ALSO read by imgui's nav, which walks the focus along the toolbar.
         // IsKeyDown still reads it -- ownership only filters the owner-aware.

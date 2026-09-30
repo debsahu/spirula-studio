@@ -2207,6 +2207,184 @@ SS_MSG(vram_help,
        "/ aygıtın kapasitesi. “?”, arka ucun o değeri sorgulayamadığı "
        "anlamına gelir."));
 
+// The VRAM forecast: the risk tag beside the bar, and its hover card.
+SS_MSG(oom_risk_low,
+    EN("OOM risk: low"), JA("メモリ不足リスク: 低"), ZH_HANS("显存不足风险：低"),
+    ZH_HANT("顯示記憶體不足風險：低"), KO("메모리 부족 위험: 낮음"),
+    DE("OOM-Risiko: gering"), FR("Risque de saturation : faible"),
+    ES("Riesgo de falta de memoria: bajo"), PT("Risco de falta de memória: baixo"),
+    IT("Rischio memoria esaurita: basso"), NL("Risico geheugentekort: laag"),
+    RU("Риск нехватки памяти: низкий"), TR("Bellek yetmeme riski: düşük"));
+
+SS_MSG(oom_risk_medium,
+    EN("OOM risk: medium"), JA("メモリ不足リスク: 中"), ZH_HANS("显存不足风险：中"),
+    ZH_HANT("顯示記憶體不足風險：中"), KO("메모리 부족 위험: 보통"),
+    DE("OOM-Risiko: mittel"), FR("Risque de saturation : moyen"),
+    ES("Riesgo de falta de memoria: medio"), PT("Risco de falta de memória: médio"),
+    IT("Rischio memoria esaurita: medio"), NL("Risico geheugentekort: middel"),
+    RU("Риск нехватки памяти: средний"), TR("Bellek yetmeme riski: orta"));
+
+SS_MSG(oom_risk_high,
+    EN("OOM risk: high"), JA("メモリ不足リスク: 高"), ZH_HANS("显存不足风险：高"),
+    ZH_HANT("顯示記憶體不足風險：高"), KO("메모리 부족 위험: 높음"),
+    DE("OOM-Risiko: hoch"), FR("Risque de saturation : élevé"),
+    ES("Riesgo de falta de memoria: alto"), PT("Risco de falta de memória: alto"),
+    IT("Rischio memoria esaurita: alto"), NL("Risico geheugentekort: hoog"),
+    RU("Риск нехватки памяти: высокий"), TR("Bellek yetmeme riski: yüksek"));
+
+SS_MSG(vram_chart_title,
+    EN("GPU memory over the run (GiB)"), JA("学習中の GPU メモリ（GiB）"),
+    ZH_HANS("训练过程中的显存（GiB）"), ZH_HANT("訓練過程中的顯示記憶體（GiB）"),
+    KO("학습 중 GPU 메모리(GiB)"), DE("Grafikspeicher im Verlauf (GiB)"),
+    FR("Mémoire GPU au fil de l'entraînement (Gio)"),
+    ES("Memoria de GPU durante el entrenamiento (GiB)"),
+    PT("Memória da GPU ao longo do treinamento (GiB)"),
+    IT("Memoria GPU durante l'addestramento (GiB)"),
+    NL("GPU-geheugen tijdens de training (GiB)"),
+    RU("Видеопамять по ходу обучения (ГиБ)"), TR("Eğitim boyunca GPU belleği (GiB)"));
+
+SS_MSG(vram_legend_run,
+    EN("this run"), JA("この学習"), ZH_HANS("本次训练"), ZH_HANT("本次訓練"),
+    KO("이 학습"), DE("dieses Training"), FR("cet entraînement"),
+    ES("este entrenamiento"), PT("este treinamento"), IT("questo addestramento"),
+    NL("deze training"), RU("это обучение"), TR("bu eğitim"));
+
+SS_MSG(vram_legend_projected,
+    EN("projected (95% band)"), JA("予測（95% 範囲）"), ZH_HANS("预测（95% 区间）"),
+    ZH_HANT("預測（95% 區間）"), KO("예측(95% 범위)"), DE("Prognose (95-%-Band)"),
+    FR("prévision (bande à 95 %)"), ES("previsión (banda del 95 %)"),
+    PT("previsão (faixa de 95%)"), IT("previsione (banda al 95%)"),
+    NL("prognose (95%-band)"), RU("прогноз (полоса 95 %)"), TR("tahmin (%95 aralığı)"));
+
+SS_MSG(vram_legend_others,
+    EN("other programs"), JA("他のプログラム"), ZH_HANS("其他程序"), ZH_HANT("其他程式"),
+    KO("다른 프로그램"), DE("andere Programme"), FR("autres programmes"),
+    ES("otros programas"), PT("outros programas"), IT("altri programmi"),
+    NL("andere programma's"), RU("другие программы"), TR("diğer programlar"));
+
+SS_MSG(vram_legend_capacity,
+    EN("device capacity"), JA("デバイスの容量"), ZH_HANS("设备容量"), ZH_HANT("裝置容量"),
+    KO("장치 용량"), DE("Kapazität des Geräts"), FR("capacité du périphérique"),
+    ES("capacidad del dispositivo"), PT("capacidade do dispositivo"),
+    IT("capacità del dispositivo"), NL("capaciteit van het apparaat"),
+    RU("объём устройства"), TR("aygıt kapasitesi"));
+
+SS_MSG(vram_chart_peak,
+    EN("Projected peak: {0} ± {1} GiB   free for training: {2} GiB   chance of running out: {3}%"),
+    JA("予測ピーク: {0} ± {1} GiB   学習に使える量: {2} GiB   不足する確率: {3}%"),
+    ZH_HANS("预计峰值：{0} ± {1} GiB   可供训练：{2} GiB   耗尽的概率：{3}%"),
+    ZH_HANT("預計峰值：{0} ± {1} GiB   可供訓練：{2} GiB   耗盡的機率：{3}%"),
+    KO("예상 최대치: {0} ± {1} GiB   학습에 쓸 수 있는 양: {2} GiB   부족할 확률: {3}%"),
+    DE("Erwartete Spitze: {0} ± {1} GiB   für das Training frei: {2} GiB   Wahrscheinlichkeit, dass er ausgeht: {3} %"),
+    FR("Pic prévu : {0} ± {1} Gio   disponible pour l'entraînement : {2} Gio   probabilité de saturation : {3} %"),
+    ES("Pico previsto: {0} ± {1} GiB   libre para entrenar: {2} GiB   probabilidad de quedarse sin memoria: {3} %"),
+    PT("Pico previsto: {0} ± {1} GiB   livre para o treinamento: {2} GiB   chance de faltar memória: {3}%"),
+    IT("Picco previsto: {0} ± {1} GiB   libera per l'addestramento: {2} GiB   probabilità di esaurirla: {3}%"),
+    NL("Verwachte piek: {0} ± {1} GiB   vrij voor training: {2} GiB   kans op tekort: {3}%"),
+    RU("Ожидаемый пик: {0} ± {1} ГиБ   доступно для обучения: {2} ГиБ   вероятность нехватки: {3} %"),
+    TR("Beklenen tepe: {0} ± {1} GiB   eğitim için boş: {2} GiB   yetmeme olasılığı: %{3}"));
+
+SS_MSG(vram_chart_provisional,
+    EN("The estimate firms up once the first densification step has run."),
+    JA("最初の高密度化ステップが済むと、推定の精度が上がります。"),
+    ZH_HANS("第一次加密步骤运行后，估计会更准确。"),
+    ZH_HANT("第一次加密步驟執行後，估計會更準確。"),
+    KO("첫 번째 밀집화 단계가 끝나면 추정이 더 정확해집니다."),
+    DE("Die Schätzung wird genauer, sobald der erste Verdichtungsschritt gelaufen ist."),
+    FR("L'estimation se précise après la première étape de densification."),
+    ES("La estimación se afina en cuanto se ejecuta el primer paso de densificación."),
+    PT("A estimativa fica mais precisa depois do primeiro passo de densificação."),
+    IT("La stima si affina dopo il primo passo di densificazione."),
+    NL("De schatting wordt nauwkeuriger zodra de eerste verdichtingsstap is uitgevoerd."),
+    RU("Оценка уточнится после первого шага уплотнения."),
+    TR("İlk yoğunlaştırma adımı çalıştıktan sonra tahmin netleşir."));
+
+SS_MSG(vram_chart_waiting,
+    EN("The projection appears after the first steps have been measured."),
+    JA("最初のステップを計測すると予測が表示されます。"),
+    ZH_HANS("测量完最初的若干步后会显示预测。"),
+    ZH_HANT("量測完最初的若干步後會顯示預測。"),
+    KO("처음 몇 단계를 측정하면 예측이 표시됩니다."),
+    DE("Die Prognose erscheint, sobald die ersten Schritte gemessen sind."),
+    FR("La prévision apparaît une fois les premières étapes mesurées."),
+    ES("La previsión aparece cuando se han medido los primeros pasos."),
+    PT("A previsão aparece depois que os primeiros passos são medidos."),
+    IT("La previsione compare dopo che i primi passi sono stati misurati."),
+    NL("De prognose verschijnt zodra de eerste stappen gemeten zijn."),
+    RU("Прогноз появится, когда будут измерены первые шаги."),
+    TR("Tahmin, ilk adımlar ölçüldükten sonra görünür."));
+
+SS_MSG(vram_breakdown_title,
+    EN("This run by category (GiB)"), JA("この学習の内訳（GiB）"),
+    ZH_HANS("本次训练按类别（GiB）"), ZH_HANT("本次訓練按類別（GiB）"),
+    KO("이 학습의 항목별 사용량(GiB)"), DE("Dieses Training nach Kategorie (GiB)"),
+    FR("Cet entraînement par catégorie (Gio)"), ES("Este entrenamiento por categoría (GiB)"),
+    PT("Este treinamento por categoria (GiB)"), IT("Questo addestramento per categoria (GiB)"),
+    NL("Deze training per categorie (GiB)"), RU("Это обучение по категориям (ГиБ)"),
+    TR("Bu eğitim, kategoriye göre (GiB)"));
+
+SS_MSG(vram_breakdown_growth,
+    EN("Faded: growth still to come, up to the projected peak."),
+    JA("薄い部分: 予測ピークまでにこれから増える分。"),
+    ZH_HANS("浅色部分：到预计峰值前还会增加的量。"),
+    ZH_HANT("淺色部分：到預計峰值前還會增加的量。"),
+    KO("흐린 부분: 예상 최대치까지 앞으로 늘어날 양."),
+    DE("Blass: der Zuwachs, der bis zur erwarteten Spitze noch kommt."),
+    FR("En pâle : la croissance encore à venir, jusqu'au pic prévu."),
+    ES("Atenuado: el crecimiento que aún falta hasta el pico previsto."),
+    PT("Esmaecido: o crescimento que ainda virá, até o pico previsto."),
+    IT("Sbiadito: la crescita ancora da venire, fino al picco previsto."),
+    NL("Vaag: de groei die nog komt, tot de verwachte piek."),
+    RU("Бледным: рост, который ещё впереди, до ожидаемого пика."),
+    TR("Soluk: beklenen tepeye kadar daha gelecek artış."));
+
+SS_MSG(vram_cat_splat,
+    EN("Splats"), JA("スプラット"), ZH_HANS("泼溅"), ZH_HANT("潑濺"), KO("스플랫"),
+    DE("Splats"), FR("Splats"), ES("Splats"), PT("Splats"), IT("Splat"),
+    NL("Splats"), RU("Сплаты"), TR("Splat'ler"));
+
+SS_MSG(vram_cat_splat_x_img,
+    EN("Splats × images"), JA("スプラット × 画像"), ZH_HANS("泼溅 × 图像"),
+    ZH_HANT("潑濺 × 影像"), KO("스플랫 × 이미지"), DE("Splats × Bilder"),
+    FR("Splats × images"), ES("Splats × imágenes"), PT("Splats × imagens"),
+    IT("Splat × immagini"), NL("Splats × beelden"), RU("Сплаты × изображения"),
+    TR("Splat × görüntü"));
+
+SS_MSG(vram_cat_image,
+    EN("Images"), JA("画像"), ZH_HANS("图像"), ZH_HANT("影像"), KO("이미지"),
+    DE("Bilder"), FR("Images"), ES("Imágenes"), PT("Imagens"), IT("Immagini"),
+    NL("Beelden"), RU("Изображения"), TR("Görüntüler"));
+
+SS_MSG(vram_cat_appearance,
+    EN("Appearance"), JA("外観補正"), ZH_HANS("外观校正"), ZH_HANT("外觀校正"),
+    KO("외관 보정"), DE("Erscheinungsbild"), FR("Apparence"), ES("Apariencia"),
+    PT("Aparência"), IT("Aspetto"), NL("Uiterlijk"), RU("Внешний вид"),
+    TR("Görünüm"));
+
+SS_MSG(vram_cat_viewer,
+    EN("Viewer"), JA("ビューア"), ZH_HANS("查看器"), ZH_HANT("檢視器"), KO("뷰어"),
+    DE("Betrachter"), FR("Visionneuse"), ES("Visor"), PT("Visualizador"),
+    IT("Visualizzatore"), NL("Viewer"), RU("Просмотр"), TR("Görüntüleyici"));
+
+SS_MSG(vram_cat_other,
+    EN("Other"), JA("その他"), ZH_HANS("其他"), ZH_HANT("其他"), KO("기타"),
+    DE("Sonstiges"), FR("Autre"), ES("Otros"), PT("Outros"), IT("Altro"),
+    NL("Overig"), RU("Прочее"), TR("Diğer"));
+
+SS_MSG(vram_cat_scratch,
+    EN("Sort scratch"), JA("ソート用の作業領域"), ZH_HANS("排序临时缓冲"),
+    ZH_HANT("排序暫存緩衝"), KO("정렬 작업 공간"), DE("Sortierpuffer"),
+    FR("Tampon de tri"), ES("Búfer de ordenación"), PT("Buffer de ordenação"),
+    IT("Buffer di ordinamento"), NL("Sorteerbuffer"), RU("Буфер сортировки"),
+    TR("Sıralama tamponu"));
+
+SS_MSG(vram_cat_unpooled,
+    EN("Backend and staging"), JA("バックエンドと転送用"), ZH_HANS("后端与中转"),
+    ZH_HANT("後端與中轉"), KO("백엔드와 전송용"), DE("Backend und Staging"),
+    FR("Backend et transfert"), ES("Backend y transferencia"),
+    PT("Backend e transferência"), IT("Backend e trasferimento"),
+    NL("Backend en staging"), RU("Бэкенд и передача"), TR("Arka uç ve aktarım"));
+
 // ===========================================================================
 // Log panel
 // ===========================================================================
@@ -4628,31 +4806,63 @@ SS_MSG(batch_clear_done,
     NL("Klare rijen verwijderen"), RU("Убрать завершённые строки"),
     TR("Biten satırları temizle"));
 SS_MSG(batch_clear_done_help,
-    EN("Removes every row whose tasks all finished well in the last run of the "
-       "list. Rows that failed, were stopped or never ran stay."),
-    JA("直近の実行で全タスクが成功した行をすべて消します。失敗・停止・未実行の行は"
+    EN("Removes every row whose tasks all finished well the last time it ran. "
+       "Rows that failed, were stopped or never ran stay."),
+    JA("最後に実行したとき全タスクが成功した行をすべて消します。失敗・停止・未実行の行は"
        "残ります。"),
-    ZH_HANS("删除上次运行中所有任务都成功完成的行。失败、被停止或未运行的行保留。"),
-    ZH_HANT("刪除上次執行中所有任務都成功完成的列。失敗、被停止或未執行的列保留。"),
-    KO("마지막 실행에서 모든 작업이 잘 끝난 행을 모두 지웁니다. 실패했거나 중단됐"
-       "거나 실행되지 않은 행은 남습니다."),
-    DE("Entfernt jede Zeile, deren Aufgaben beim letzten Lauf der Liste alle gut "
+    ZH_HANS("删除上次运行时所有任务都成功完成的行。失败、被停止或未运行的行保留。"),
+    ZH_HANT("刪除上次執行時所有任務都成功完成的列。失敗、被停止或未執行的列保留。"),
+    KO("마지막으로 실행했을 때 모든 작업이 잘 끝난 행을 모두 지웁니다. 실패했거나 "
+       "중단됐거나 실행되지 않은 행은 남습니다."),
+    DE("Entfernt jede Zeile, deren Aufgaben bei ihrem letzten Lauf alle gut "
        "endeten. Fehlgeschlagene, gestoppte oder nie gelaufene Zeilen bleiben."),
-    FR("Retire chaque ligne dont toutes les tâches ont bien fini lors du dernier "
-       "passage. Les lignes échouées, arrêtées ou jamais lancées restent."),
-    ES("Quita cada fila cuyas tareas terminaron todas bien en la última ejecución "
-       "de la lista. Las filas fallidas, detenidas o nunca ejecutadas se quedan."),
-    PT("Remove cada linha cujas tarefas terminaram todas bem na última execução "
-       "da lista. As linhas falhadas, paradas ou nunca executadas ficam."),
-    IT("Rimuove ogni riga i cui compiti sono finiti tutti bene nell'ultima "
-       "esecuzione della lista. Le righe fallite, fermate o mai eseguite restano."),
-    NL("Verwijdert elke rij waarvan alle taken bij de laatste run goed eindigden. "
-       "Mislukte, gestopte of nooit gedraaide rijen blijven."),
-    RU("Убирает каждую строку, все задачи которой успешно завершились при "
-       "последнем прогоне списка. Неудачные, остановленные и не запускавшиеся "
-       "строки остаются."),
-    TR("Listenin son çalışmasında tüm görevleri iyi biten her satırı kaldırır. "
-       "Başarısız, durdurulmuş ya da hiç çalışmamış satırlar kalır."));
+    FR("Retire chaque ligne dont toutes les tâches ont bien fini la dernière fois "
+       "qu'elle a tourné. Les lignes échouées, arrêtées ou jamais lancées restent."),
+    ES("Quita cada fila cuyas tareas terminaron todas bien la última vez que se "
+       "ejecutó. Las filas fallidas, detenidas o nunca ejecutadas se quedan."),
+    PT("Remove cada linha cujas tarefas terminaram todas bem da última vez que "
+       "correu. As linhas falhadas, paradas ou nunca executadas ficam."),
+    IT("Rimuove ogni riga i cui compiti sono finiti tutti bene l'ultima volta che "
+       "è stata eseguita. Le righe fallite, fermate o mai eseguite restano."),
+    NL("Verwijdert elke rij waarvan alle taken de laatste keer dat hij draaide goed "
+       "eindigden. Mislukte, gestopte of nooit gedraaide rijen blijven."),
+    RU("Убирает каждую строку, все задачи которой успешно завершились при её "
+       "последнем запуске. Неудачные, остановленные и не запускавшиеся строки "
+       "остаются."),
+    TR("Son çalıştığında tüm görevleri iyi biten her satırı kaldırır. Başarısız, "
+       "durdurulmuş ya da hiç çalışmamış satırlar kalır."));
+SS_MSG(batch_clear_unchecked,
+    EN("Clear unchecked rows"), JA("チェックのない行を消す"), ZH_HANS("清除未勾选的行"),
+    ZH_HANT("清除未勾選的列"), KO("체크 해제된 행 지우기"),
+    DE("Nicht angehakte Zeilen entfernen"), FR("Retirer les lignes non cochées"),
+    ES("Quitar las filas sin marcar"), PT("Remover as linhas não marcadas"),
+    IT("Rimuovi le righe non spuntate"), NL("Niet-aangevinkte rijen verwijderen"),
+    RU("Убрать строки без отметки"), TR("İşaretsiz satırları temizle"));
+SS_MSG(batch_clear_unchecked_help,
+    EN("Removes every row whose box is unticked, done or not: the ones a run "
+       "would leave out."),
+    JA("チェックの外れた行を、完了したかどうかに関わらずすべて消します。実行で"
+       "飛ばされる行です。"),
+    ZH_HANS("删除所有未勾选的行，无论是否已完成：即运行时会跳过的行。"),
+    ZH_HANT("刪除所有未勾選的列，無論是否已完成：即執行時會略過的列。"),
+    KO("완료 여부와 상관없이 체크가 해제된 행을 모두 지웁니다. 실행 때 건너뛰는 "
+       "행들입니다."),
+    DE("Entfernt jede Zeile ohne Haken, ob fertig oder nicht: die, die ein Lauf "
+       "auslassen würde."),
+    FR("Retire chaque ligne décochée, terminée ou non : celles qu'un passage "
+       "laisserait de côté."),
+    ES("Quita cada fila sin marcar, terminada o no: las que una ejecución dejaría "
+       "fuera."),
+    PT("Remove cada linha sem marca, terminada ou não: as que uma execução "
+       "deixaria de fora."),
+    IT("Rimuove ogni riga senza spunta, finita o no: quelle che un'esecuzione "
+       "salterebbe."),
+    NL("Verwijdert elke rij zonder vinkje, klaar of niet: de rijen die een run "
+       "zou overslaan."),
+    RU("Убирает каждую строку без отметки, завершённую или нет, — те, что запуск "
+       "пропустил бы."),
+    TR("İşareti kaldırılmış her satırı, bitmiş olsun olmasın, kaldırır: bir "
+       "çalışmanın atlayacağı satırlar."));
 SS_MSG(batch_confirm_title,
     EN("Batch list"), JA("バッチ一覧"), ZH_HANS("批处理列表"), ZH_HANT("批次處理列表"),
     KO("배치 목록"), DE("Stapelliste"), FR("Liste du lot"), ES("Lista del lote"),
@@ -4698,6 +4908,22 @@ SS_MSG(batch_clear_done_confirm,
     NL("De goed geëindigde rijen verwijderen? Wat ze schreven blijft op schijf."),
     RU("Убрать успешно завершённые строки? Записанное ими остаётся на диске."),
     TR("İyi biten satırlar kaldırılsın mı? Yazdıkları diskte kalır."));
+SS_MSG(batch_clear_unchecked_confirm,
+    EN("Remove the unticked rows? What they wrote stays on disk."),
+    JA("チェックのない行を消しますか？書き出したものはディスクに残ります。"),
+    ZH_HANS("删除未勾选的行？它们写出的内容仍保留在磁盘上。"),
+    ZH_HANT("刪除未勾選的列？它們寫出的內容仍保留在磁碟上。"),
+    KO("체크 해제된 행을 지울까요? 그 행들이 기록한 것은 디스크에 남습니다."),
+    DE("Die nicht angehakten Zeilen entfernen? Was sie geschrieben haben, bleibt "
+       "auf der Platte."),
+    FR("Retirer les lignes non cochées ? Ce qu'elles ont écrit reste sur le "
+       "disque."),
+    ES("¿Quitar las filas sin marcar? Lo que escribieron sigue en el disco."),
+    PT("Remover as linhas não marcadas? O que escreveram fica no disco."),
+    IT("Rimuovere le righe non spuntate? Ciò che hanno scritto resta su disco."),
+    NL("De niet-aangevinkte rijen verwijderen? Wat ze schreven blijft op schijf."),
+    RU("Убрать строки без отметки? Записанное ими остаётся на диске."),
+    TR("İşaretsiz satırlar kaldırılsın mı? Yazdıkları diskte kalır."));
 
 SS_MSG(batch_clear,
     EN("Clear list"),

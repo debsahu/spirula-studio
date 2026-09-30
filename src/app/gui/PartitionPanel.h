@@ -10,6 +10,7 @@
 #include "data/RegionMesh.h"
 #include "data/ScenePartition.h"
 #include "data/SparseEdit.h"
+#include "i18n/Message.h"
 
 #include <atomic>
 #include <functional>
@@ -63,6 +64,8 @@ private:
     std::atomic<bool> _busy{false};
     std::atomic<Job> _job{Job::None};
     std::atomic<bool> _done{false};
+    std::atomic<bool> _cancel{false};
+    bool _cancelled = false;   // under _mu: the last job was stopped
     std::mutex _mu;
     std::string _error;
 
@@ -77,7 +80,11 @@ private:
     spirula::ScenePartition _part;
     std::vector<spirula::RegionMesh> _part_meshes;   // per part, its boundary
     spirula::PartitionOptions _part_opt;  // the options _part was built with
+    spirula::PartitionOptions _compute_opt;   // the options the running compute uses
     bool _part_valid = false;
+    // A finished compute's result, moved into _part by poll() on the GUI thread.
+    spirula::ScenePartition _new_part;
+    std::vector<spirula::RegionMesh> _new_meshes;
     std::vector<std::string> _log_lines;
 
     // ---- options on screen ----
@@ -96,7 +103,8 @@ private:
     // ---- save / batch / merge ----
     std::string _save_path;
     std::string _saved_path;   // where the CURRENT partition was last written
-    std::string _status;
+    std::string _status;   // an error
+    const spirula::i18n::Msg* _notice = nullptr;   // not one, e.g. a cancelled compute
     std::string _runs_dir;
     std::vector<std::string> _runs;
     bool _scanned = false;

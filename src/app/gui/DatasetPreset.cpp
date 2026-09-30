@@ -58,7 +58,6 @@ namespace {
     X("mask_memory",                sfm.prep.mask_memory)                     \
     X("mask_detect_every",          sfm.prep.mask_detect_every)               \
     X("mask_memory_frames",         sfm.prep.mask_memory_frames)              \
-    X("force_external_masking",     sfm.prep.force_external_masking)          \
     /* ---- depth and normals ---- */                                         \
     X("geometry_enable",            sfm.geometry.enable)                      \
     X("geometry_model",             sfm.geometry.model)                       \

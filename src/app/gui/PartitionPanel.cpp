@@ -8,6 +8,7 @@
 #include "app/gui/Ui.h"
 #include "checkpoint/SplatMerge.h"
 #include "checkpoint/SplatPly.h"
+#include "i18n/catalog/Gui.h"
 #include "i18n/catalog/Partition.h"
 
 #include "imgui.h"
@@ -19,6 +20,7 @@
 #include <filesystem>
 
 namespace fs = std::filesystem;
+namespace gmsg = spirula::i18n::msg::gui;
 namespace pmsg = spirula::i18n::msg::partition;
 
 using spirula::i18n::format;
@@ -50,6 +52,7 @@ ImVec4 part_vec(int part, float alpha = 1.0f) {
 PartitionPanel::PartitionPanel() = default;
 
 PartitionPanel::~PartitionPanel() {
+    _cancel = true;
     if (_worker.joinable()) _worker.join();
 }
 
@@ -83,6 +86,8 @@ void PartitionPanel::open(const std::string& dataset_dir, Hooks hooks) {
 
 void PartitionPanel::close() {
     _open = false;
+    // A split nobody will look at is not worth finishing.
+    if (_job.load() == Job::Compute) _cancel = true;
     if (_worker.joinable() && !_busy.load()) _worker.join();
     _view.detach();
 }
@@ -98,10 +103,13 @@ void PartitionPanel::start(Job job) {
     if (_worker.joinable()) _worker.join();
     _busy = true;
     _done = false;
+    _cancel = false;
     _job = job;
     {
         std::lock_guard<std::mutex> lk(_mu);
         _error.clear();
+        _notice = nullptr;
+        _cancelled = false;
         _log_lines.clear();
     }
     _worker = std::thread([this, job] {
@@ -112,6 +120,9 @@ void PartitionPanel::start(Job job) {
                 case Job::Merge: run_merge(); break;
                 case Job::None: break;
             }
+        } catch (const spirula::PartitionCancelled&) {
+            std::lock_guard<std::mutex> lk(_mu);
+            _cancelled = true;
         } catch (const std::exception& e) {
             std::lock_guard<std::mutex> lk(_mu);
             _error = e.what();
@@ -142,19 +153,20 @@ void PartitionPanel::run_compute() {
     spirula::PartitionOptions opt;
     {
         std::lock_guard<std::mutex> lk(_mu);
-        opt = _part_opt;
+        opt = _compute_opt;
     }
     const bool reuse = _cov_valid && _cov_opt.source == opt.source &&
                        _cov_opt.max_projected_points == opt.max_projected_points &&
                        _cov_opt.proximity_neighbours == opt.proximity_neighbours;
     if (!reuse) {
-        spirula::Covisibility cov = spirula::build_covisibility(_ds, &_tracks, opt, log);
+        spirula::Covisibility cov = spirula::build_covisibility(_ds, &_tracks, opt, log, &_cancel);
         std::lock_guard<std::mutex> lk(_mu);
         _cov = std::move(cov);
         _cov_opt = opt;
         _cov_valid = true;
     }
-    spirula::ScenePartition part = spirula::partition_scene(_ds, _cov, opt, log);
+    spirula::ScenePartition part = spirula::partition_scene(_ds, _cov, opt, log, &_cancel);
+    if (_cancel.load()) throw spirula::PartitionCancelled();
     std::vector<spirula::RegionMesh> meshes;
     if (part.field && !part.field->empty()) {
         std::vector<float> xyz;
@@ -163,12 +175,12 @@ void PartitionPanel::run_compute() {
             for (int r = 0; r < 3; r++) xyz.push_back((float)(_ds.points.xyz[(size_t)i * 3 + r] + _ds.center[r]));
         const spirula::Aabb box = xyz.empty() ? part.field->bounds()
                                               : spirula::robust_bounds(xyz.data(), (int64_t)xyz.size() / 3);
-        meshes = spirula::label_boundary_meshes(*part.field, box, 96);
+        meshes = spirula::label_boundary_meshes(*part.field, box, 96, &_cancel);
+        if (_cancel.load()) throw spirula::PartitionCancelled();
     }
     std::lock_guard<std::mutex> lk(_mu);
-    _part = std::move(part);
-    _part_meshes = std::move(meshes);
-    _part_valid = true;
+    _new_part = std::move(part);
+    _new_meshes = std::move(meshes);
 }
 
 void PartitionPanel::run_merge() {
@@ -195,13 +207,19 @@ void PartitionPanel::poll() {
     const Job job = _job.exchange(Job::None);
     std::vector<std::string> lines;
     std::string error;
+    bool cancelled = false;
     {
         std::lock_guard<std::mutex> lk(_mu);
         lines.swap(_log_lines);
         error = _error;
+        cancelled = _cancelled;
     }
     if (_hooks.log)
         for (const std::string& l : lines) _hooks.log(l);
+    if (cancelled) {
+        _notice = &pmsg::status_cancelled;
+        return;
+    }
     if (!error.empty()) {
         if (job == Job::Merge) _merge_error = error;
         else _status = error;
@@ -215,6 +233,10 @@ void PartitionPanel::poll() {
             _view_dirty = true;
             break;
         case Job::Compute:
+            _part = std::move(_new_part);
+            _part_meshes = std::move(_new_meshes);
+            _part_opt = _compute_opt;
+            _part_valid = true;
             _status.clear();
             _saved_path.clear();
             _scanned = false;
@@ -366,8 +388,16 @@ void PartitionPanel::draw_controls() {
     if (busy) {
         ui::TextDisabled(_job.load() == Job::Load ? pmsg::status_reading
                          : _job.load() == Job::Merge ? pmsg::merge_head : pmsg::status_computing);
+        if (_job.load() == Job::Compute) {
+            ImGui::SameLine();
+            ImGui::BeginDisabled(_cancel.load());
+            if (ui::Button(gmsg::cancel)) _cancel = true;
+            ImGui::EndDisabled();
+        }
     } else if (!_status.empty()) {
         ui::TextColoredWrappedRaw(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), _status);
+    } else if (_notice) {
+        ui::TextDisabledWrapped(*_notice);
     } else if (_part_valid) {
         char cut[32];
         std::snprintf(cut, sizeof cut, "%.1f", 100.0 * _part.cut_fraction);
@@ -381,20 +411,22 @@ void PartitionPanel::draw_controls() {
     // ---- options ----
     {
         int m = _opt.method == spirula::PartitionMethod::ViewGraph ? 1 : 0;
-        ImGui::SetNextItemWidth(px(-8.0f));
-        if (ui::Combo(pmsg::lbl_method, &m, {&pmsg::meth_spatial, &pmsg::meth_viewgraph}))
-            _opt.method = m == 1 ? spirula::PartitionMethod::ViewGraph : spirula::PartitionMethod::Spatial;
+        ImGui::SetNextItemWidth(px(-80.0f));
+        if (ui::Combo(pmsg::lbl_method, &m, {&pmsg::meth_graph, &pmsg::meth_viewgraph}))
+            _opt.method = m == 1 ? spirula::PartitionMethod::ViewGraph : spirula::PartitionMethod::Graph;
         ui::help_on_hover(pmsg::opt_method);
     }
-    ImGui::SetNextItemWidth(px(-8.0f));
+    ImGui::SetNextItemWidth(px(-80.0f));
     if (ui::Combo(pmsg::lbl_source, &_source_idx,
                   {&pmsg::src_auto, &pmsg::src_tracks, &pmsg::src_projection, &pmsg::src_proximity}))
         _opt.source = kSources[std::clamp(_source_idx, 0, 3)];
     ui::help_on_hover(pmsg::lbl_source_help);
     if (_loaded) {
+        const bool tracked = spirula::tracks_usable(_ds, _tracks);
         ui::TextDisabled(pmsg::log_dataset,
                          {(long long)_ds.num_cameras, (long long)_ds.points.num(),
-                          _tracks.empty() ? pmsg::word_no.get() : pmsg::word_yes.get()});
+                          tracked ? pmsg::word_yes.get() : pmsg::word_no.get()});
+        if (!tracked) ui::TextColoredWrapped(ImVec4(1.0f, 0.75f, 0.30f, 1.0f), pmsg::warn_no_tracks);
     }
 
     ui::Text(pmsg::lbl_split_by);
@@ -413,9 +445,9 @@ void PartitionPanel::draw_controls() {
         if (ui::InputIntRaw("##maximages", &mx)) _opt.max_images = std::max(10, mx);
     }
 
-    ImGui::SetNextItemWidth(px(160.0f));
-    ui::SliderFloat(pmsg::lbl_ring, &_opt.ring_fraction, 0.0f, 0.5f, "%.2f");
-    ui::help_on_hover(pmsg::lbl_ring_help);
+    // ImGui::SetNextItemWidth(px(160.0f));
+    // ui::SliderFloat(pmsg::lbl_ring, &_opt.ring_fraction, 0.0f, 0.5f, "%.2f");
+    // ui::help_on_hover(pmsg::lbl_ring_help);
     {
         static const int kSeeds[] = {250000, 500000, 1000000, 2000000, 4000000};
         static const char* kSeedNames[] = {"250k", "500k", "1M", "2M", "4M"};
@@ -431,7 +463,7 @@ void PartitionPanel::draw_controls() {
     const bool stale = options_changed();
     if (stale) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.75f, 1.0f));
     if (ui::Button(pmsg::btn_compute)) {
-        _part_opt = _opt;
+        _compute_opt = _opt;
         start(Job::Compute);
     }
     if (stale) ImGui::PopStyleColor();

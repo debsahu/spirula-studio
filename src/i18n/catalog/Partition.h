@@ -157,51 +157,54 @@ SS_MSG(opt_parts,
        "Varsayılan: 0"));
 
 SS_MSG(opt_max_images,
-    EN("Most cameras in a part's core when --parts is 0. Default: 400"),
-    JA("--parts が 0 のときの、パートのコアに入るカメラの上限。既定: 400"),
-    ZH_HANS("--parts 为 0 时每个分区核心中的最多相机数。默认：400"),
-    ZH_HANT("--parts 為 0 時每個分區核心中的最多相機數。預設：400"),
-    KO("--parts가 0일 때 파트 핵심에 들어가는 최대 카메라 수. 기본값: 400"),
-    DE("Höchstzahl an Kameras im Kern eines Teils, wenn --parts 0 ist. Standard: 400"),
-    FR("Nombre maximal de caméras dans le cœur d'une partie quand --parts vaut 0. "
-       "Défaut : 400"),
-    ES("Máximo de cámaras en el núcleo de una parte cuando --parts es 0. "
-       "Predeterminado: 400"),
-    PT("Máximo de câmaras no núcleo de uma parte quando --parts é 0. "
-       "Predefinição: 400"),
-    IT("Massimo di fotocamere nel nucleo di una parte quando --parts è 0. "
-       "Predefinito: 400"),
-    NL("Meeste camera's in de kern van een deel als --parts 0 is. Standaard: 400"),
-    RU("Наибольшее число камер в ядре части, когда --parts равно 0. "
-       "По умолчанию: 400"),
-    TR("--parts 0 iken bir parçanın çekirdeğindeki en çok kamera sayısı. "
-       "Varsayılan: 400"));
+    EN("Most cameras a part trains with, core and ring, when --parts is 0. "
+       "Default: 2000"),
+    JA("--parts が 0 のときの、パートが学習に使うカメラ（コアとリング）の上限。既定: 2000"),
+    ZH_HANS("--parts 为 0 时每个分区训练所用相机（核心加环）的上限。默认：2000"),
+    ZH_HANT("--parts 為 0 時每個分區訓練所用相機（核心加環）的上限。預設：2000"),
+    KO("--parts가 0일 때 파트가 학습에 쓰는 카메라(핵심과 링) 상한. 기본값: 2000"),
+    DE("Höchstzahl an Kameras, Kern und Ring, mit denen ein Teil trainiert, wenn "
+       "--parts 0 ist. Standard: 2000"),
+    FR("Nombre maximal de caméras, cœur et anneau, avec lesquelles une partie "
+       "s'entraîne quand --parts vaut 0. Défaut : 2000"),
+    ES("Máximo de cámaras, núcleo y anillo, con las que entrena una parte cuando "
+       "--parts es 0. Predeterminado: 2000"),
+    PT("Máximo de câmaras, núcleo e anel, com que uma parte treina quando --parts "
+       "é 0. Predefinição: 2000"),
+    IT("Massimo di fotocamere, nucleo e anello, con cui una parte si addestra "
+       "quando --parts è 0. Predefinito: 2000"),
+    NL("Meeste camera's, kern en ring, waarmee een deel traint als --parts 0 is. "
+       "Standaard: 2000"),
+    RU("Наибольшее число камер, ядро и кольцо, на которых обучается часть, когда "
+       "--parts равно 0. По умолчанию: 2000"),
+    TR("--parts 0 iken bir parçanın eğitimde kullandığı en çok kamera sayısı, "
+       "çekirdek ve halka. Varsayılan: 2000"));
 
 SS_MSG(opt_ring,
     EN("A camera outside a part joins its ring when at least this share of the "
-       "points it sees belongs to the part. Default: 0.2"),
+       "points it sees belongs to the part. Default: 0.1"),
     JA("パート外のカメラは、見ている点のうちこの割合以上がそのパートに属するとき"
-       "リングに加わります。既定: 0.2"),
-    ZH_HANS("分区外的相机所见点中属于该分区的比例达到此值时，加入其外环。默认：0.2"),
-    ZH_HANT("分區外的相機所見點中屬於該分區的比例達到此值時，加入其外環。預設：0.2"),
+       "リングに加わります。既定: 0.1"),
+    ZH_HANS("分区外的相机所见点中属于该分区的比例达到此值时，加入其外环。默认：0.1"),
+    ZH_HANT("分區外的相機所見點中屬於該分區的比例達到此值時，加入其外環。預設：0.1"),
     KO("파트 밖의 카메라는 자신이 보는 점 중 이 비율 이상이 그 파트에 속할 때 고리에 "
-       "들어갑니다. 기본값: 0.2"),
+       "들어갑니다. 기본값: 0.1"),
     DE("Eine Kamera außerhalb eines Teils tritt seinem Ring bei, wenn mindestens "
-       "dieser Anteil der von ihr gesehenen Punkte zum Teil gehört. Standard: 0.2"),
+       "dieser Anteil der von ihr gesehenen Punkte zum Teil gehört. Standard: 0.1"),
     FR("Une caméra hors d'une partie rejoint son anneau quand au moins cette part "
-       "des points qu'elle voit appartient à la partie. Défaut : 0.2"),
+       "des points qu'elle voit appartient à la partie. Défaut : 0.1"),
     ES("Una cámara fuera de una parte entra en su anillo cuando al menos esta "
-       "fracción de los puntos que ve pertenece a la parte. Predeterminado: 0.2"),
+       "fracción de los puntos que ve pertenece a la parte. Predeterminado: 0.1"),
     PT("Uma câmara fora de uma parte entra no seu anel quando pelo menos esta "
-       "fração dos pontos que vê pertence à parte. Predefinição: 0.2"),
+       "fração dos pontos que vê pertence à parte. Predefinição: 0.1"),
     IT("Una fotocamera fuori da una parte entra nel suo anello quando almeno "
-       "questa quota dei punti che vede appartiene alla parte. Predefinito: 0.2"),
+       "questa quota dei punti che vede appartiene alla parte. Predefinito: 0.1"),
     NL("Een camera buiten een deel komt in zijn ring als minstens dit aandeel van "
-       "de punten die ze ziet bij het deel hoort. Standaard: 0.2"),
+       "de punten die ze ziet bij het deel hoort. Standaard: 0.1"),
     RU("Камера вне части входит в её кольцо, если хотя бы такая доля видимых ею "
-       "точек принадлежит части. По умолчанию: 0.2"),
+       "точек принадлежит части. По умолчанию: 0.1"),
     TR("Bir parçanın dışındaki kamera, gördüğü noktaların en az bu payı parçaya "
-       "aitse halkasına katılır. Varsayılan: 0.2"));
+       "aitse halkasına katılır. Varsayılan: 0.1"));
 
 SS_MSG(opt_ring_min,
     EN("...and at least this many of them. Default: 20"),
@@ -245,42 +248,45 @@ SS_MSG(opt_max_seeds,
        "kameralar her zaman içindedir. Varsayılan: 1000000"));
 
 SS_MSG(opt_method,
-    EN("spatial cuts the point cloud into compact regions and gives each the "
-       "cameras that see enough of it; viewgraph cuts the cameras where they "
-       "share the least and derives the regions. Default: spatial"),
-    JA("spatial は点群をまとまった領域に切り、十分に見ているカメラを各領域に割り当てます。"
-       "viewgraph は共有の最も少ない所でカメラを分け、そこから領域を決めます。既定: spatial"),
-    ZH_HANS("spatial 把点云切成紧凑的区域，再把看得足够多的相机分给每个区域；viewgraph "
-            "在相机共享最少处切分相机，再推出区域。默认：spatial"),
-    ZH_HANT("spatial 把點雲切成緊湊的區域，再把看得足夠多的相機分給每個區域；viewgraph "
-            "在相機共享最少處切分相機，再推出區域。預設：spatial"),
-    KO("spatial은 점 구름을 촘촘한 영역으로 자르고 각 영역을 충분히 보는 카메라를 "
-       "배정합니다. viewgraph는 공유가 가장 적은 곳에서 카메라를 나누고 영역을 "
-       "이끌어 냅니다. 기본값: spatial"),
-    DE("spatial schneidet die Punktwolke in kompakte Bereiche und gibt jedem die "
-       "Kameras, die genug davon sehen; viewgraph trennt die Kameras, wo sie am "
-       "wenigsten teilen, und leitet die Bereiche ab. Standard: spatial"),
-    FR("spatial découpe le nuage en régions compactes et donne à chacune les "
-       "caméras qui en voient assez ; viewgraph coupe les caméras là où elles "
-       "partagent le moins et en déduit les régions. Défaut : spatial"),
-    ES("spatial corta la nube en regiones compactas y da a cada una las cámaras "
-       "que ven bastante de ella; viewgraph corta las cámaras donde menos "
-       "comparten y deduce las regiones. Predeterminado: spatial"),
-    PT("spatial corta a nuvem em regiões compactas e dá a cada uma as câmaras "
-       "que veem o suficiente dela; viewgraph corta as câmaras onde menos "
-       "partilham e deduz as regiões. Predefinição: spatial"),
-    IT("spatial taglia la nuvola in regioni compatte e dà a ciascuna le "
-       "fotocamere che ne vedono abbastanza; viewgraph taglia le fotocamere dove "
-       "condividono meno e ne ricava le regioni. Predefinito: spatial"),
-    NL("spatial snijdt de puntenwolk in compacte gebieden en geeft elk de "
-       "camera's die er genoeg van zien; viewgraph snijdt de camera's waar ze het "
-       "minst delen en leidt de gebieden af. Standaard: spatial"),
-    RU("spatial режет облако точек на компактные области и даёт каждой камеры, "
-       "которые видят её достаточно; viewgraph режет камеры там, где у них меньше "
-       "всего общего, и выводит области. По умолчанию: spatial"),
-    TR("spatial nokta bulutunu derli toplu bölgelere böler ve her birine onu "
-       "yeterince gören kameraları verir; viewgraph kameraları en az paylaştıkları "
-       "yerden böler ve bölgeleri buradan çıkarır. Varsayılan: spatial"));
+    EN("graph cuts the cameras and the points together where the least view "
+       "crosses, so each camera sees most of its part; viewgraph cuts the "
+       "cameras alone and takes regions from their positions. Default: graph"),
+    JA("graph はカメラと点をまとめて、視野の交差が最も少ない所で切り、各カメラが自分の"
+       "パートを最もよく見るようにします。viewgraph はカメラだけを切り、領域は位置から"
+       "決めます。既定: graph"),
+    ZH_HANS("graph 把相机和点一起在视野交叉最少处切分，让每台相机看到的大多是自己的"
+            "分区；viewgraph 只切分相机，区域按相机位置推出。默认：graph"),
+    ZH_HANT("graph 把相機和點一起在視野交叉最少處切分，讓每台相機看到的大多是自己的"
+            "分區；viewgraph 只切分相機，區域按相機位置推出。預設：graph"),
+    KO("graph는 카메라와 점을 함께, 시야가 가장 적게 걸치는 곳에서 잘라 각 카메라가 "
+       "자기 파트를 가장 많이 보게 합니다. viewgraph는 카메라만 자르고 영역은 위치에서 "
+       "정합니다. 기본값: graph"),
+    DE("graph schneidet Kameras und Punkte gemeinsam dort, wo am wenigsten Sicht "
+       "die Grenze kreuzt, sodass jede Kamera meist ihren eigenen Teil sieht; "
+       "viewgraph schneidet nur die Kameras und nimmt die Bereiche aus ihren "
+       "Positionen. Standard: graph"),
+    FR("graph coupe caméras et points ensemble là où le moins de vue traverse, "
+       "pour que chaque caméra voie surtout sa partie ; viewgraph ne coupe que "
+       "les caméras et tire les régions de leurs positions. Défaut : graph"),
+    ES("graph corta cámaras y puntos juntos por donde menos vista cruza, para "
+       "que cada cámara vea sobre todo su parte; viewgraph corta solo las "
+       "cámaras y saca las regiones de sus posiciones. Predeterminado: graph"),
+    PT("graph corta câmaras e pontos juntos por onde menos vista atravessa, para "
+       "que cada câmara veja sobretudo a sua parte; viewgraph corta só as "
+       "câmaras e tira as regiões das suas posições. Predefinição: graph"),
+    IT("graph taglia fotocamere e punti insieme dove passa meno vista, così ogni "
+       "fotocamera vede soprattutto la propria parte; viewgraph taglia solo le "
+       "fotocamere e ricava le regioni dalle loro posizioni. Predefinito: graph"),
+    NL("graph snijdt camera's en punten samen waar het minste zicht de grens "
+       "kruist, zodat elke camera vooral haar eigen deel ziet; viewgraph snijdt "
+       "alleen de camera's en haalt de gebieden uit hun posities. Standaard: graph"),
+    RU("graph режет камеры и точки вместе там, где границу пересекает меньше "
+       "всего обзора, чтобы каждая камера видела в основном свою часть; viewgraph "
+       "режет только камеры, а области берёт из их положений. По умолчанию: graph"),
+    TR("graph kameraları ve noktaları birlikte, sınırı en az görüşün kestiği "
+       "yerden böler; böylece her kamera çoğunlukla kendi parçasını görür. "
+       "viewgraph yalnızca kameraları böler, bölgeleri konumlarından çıkarır. "
+       "Varsayılan: graph"));
 
 SS_MSG(opt_source,
     EN("Where covisibility comes from. auto takes the model's own tracks, else "
@@ -672,6 +678,72 @@ SS_MSG(status_computing,
     IT("Calcolo della partizione..."), NL("Partitie wordt berekend..."),
     RU("Вычисление разбиения..."), TR("Bölümleme hesaplanıyor..."));
 
+SS_MSG(status_cancelled,
+    EN("Cancelled; the partition shown is the previous one, if any."),
+    JA("中止しました。表示中の分割は前回のもの（あれば）です。"),
+    ZH_HANS("已取消；显示的是之前的分区（如果有）。"),
+    ZH_HANT("已取消；顯示的是先前的分區（如果有）。"),
+    KO("취소했습니다. 보이는 분할은 이전 것입니다(있다면)."),
+    DE("Abgebrochen; angezeigt wird die vorige Partition, falls es eine gibt."),
+    FR("Annulé ; la partition affichée est la précédente, s'il y en a une."),
+    ES("Cancelado; la partición mostrada es la anterior, si la hay."),
+    PT("Cancelado; a partição mostrada é a anterior, se houver."),
+    IT("Annullato; la partizione mostrata è quella precedente, se c'è."),
+    NL("Geannuleerd; de getoonde partitie is de vorige, als die er is."),
+    RU("Отменено; показано предыдущее разбиение, если оно было."),
+    TR("İptal edildi; gösterilen bölümleme, varsa, öncekidir."));
+
+SS_MSG(warn_no_tracks,
+    EN("This dataset has no feature tracks (which camera saw which point), so the "
+       "split guesses visibility by projecting the points into the frames. A COLMAP "
+       "reconstruction of the same capture (sparse/0 with images.bin and points3D.bin) "
+       "has them and gives much better parts."),
+    JA("このデータセットには特徴トラック（どのカメラがどの点を見たか）がないため、"
+       "点をフレームに投影して可視性を推測します。同じ撮影の COLMAP 再構成"
+       "（images.bin と points3D.bin を含む sparse/0）にはトラックがあり、"
+       "はるかに良い分割になります。"),
+    ZH_HANS("此数据集没有特征轨迹（哪台相机看到了哪个点），因此分区只能把点投影到各帧中"
+            "来猜测可见性。同一拍摄的 COLMAP 重建（含 images.bin 和 points3D.bin 的 "
+            "sparse/0）带有轨迹，分区效果会好得多。"),
+    ZH_HANT("此資料集沒有特徵軌跡（哪台相機看到了哪個點），因此分區只能把點投影到各幀中"
+            "來猜測可見性。同一拍攝的 COLMAP 重建（含 images.bin 和 points3D.bin 的 "
+            "sparse/0）帶有軌跡，分區效果會好得多。"),
+    KO("이 데이터셋에는 특징 트랙(어느 카메라가 어느 점을 봤는지)이 없어서, 점을 "
+       "프레임에 투영해 가시성을 추측합니다. 같은 촬영의 COLMAP 재구성(images.bin과 "
+       "points3D.bin이 있는 sparse/0)에는 트랙이 있어 훨씬 나은 분할을 얻습니다."),
+    DE("Dieser Datensatz hat keine Feature-Spuren (welche Kamera welchen Punkt sah), "
+       "daher schätzt die Teilung die Sichtbarkeit, indem sie die Punkte in die Bilder "
+       "projiziert. Eine COLMAP-Rekonstruktion derselben Aufnahme (sparse/0 mit "
+       "images.bin und points3D.bin) hat sie und ergibt viel bessere Teile."),
+    FR("Ce jeu de données n'a pas de pistes de points (quelle caméra a vu quel point) : "
+       "le découpage devine donc la visibilité en projetant les points dans les images. "
+       "Une reconstruction COLMAP de la même prise (sparse/0 avec images.bin et "
+       "points3D.bin) les contient et donne de bien meilleures parties."),
+    ES("Este conjunto de datos no tiene pistas de puntos (qué cámara vio qué punto), "
+       "así que la división adivina la visibilidad proyectando los puntos en los "
+       "fotogramas. Una reconstrucción de COLMAP de la misma captura (sparse/0 con "
+       "images.bin y points3D.bin) las tiene y da partes mucho mejores."),
+    PT("Este conjunto de dados não tem pistas de pontos (que câmara viu que ponto), "
+       "por isso a divisão adivinha a visibilidade projetando os pontos nas imagens. "
+       "Uma reconstrução COLMAP da mesma captura (sparse/0 com images.bin e "
+       "points3D.bin) tem-nas e dá partes muito melhores."),
+    IT("Questo dataset non ha tracce dei punti (quale fotocamera ha visto quale "
+       "punto), quindi la divisione indovina la visibilità proiettando i punti nei "
+       "fotogrammi. Una ricostruzione COLMAP della stessa ripresa (sparse/0 con "
+       "images.bin e points3D.bin) le ha e dà parti molto migliori."),
+    NL("Deze dataset heeft geen puntsporen (welke camera welk punt zag), dus de "
+       "splitsing raadt de zichtbaarheid door de punten in de beelden te projecteren. "
+       "Een COLMAP-reconstructie van dezelfde opname (sparse/0 met images.bin en "
+       "points3D.bin) heeft ze en geeft veel betere delen."),
+    RU("В этом наборе данных нет треков (какая камера видела какую точку), поэтому "
+       "разбиение угадывает видимость, проецируя точки в кадры. Реконструкция COLMAP "
+       "той же съёмки (sparse/0 с images.bin и points3D.bin) содержит их и даёт "
+       "гораздо лучшие части."),
+    TR("Bu veri kümesinde nokta izleri (hangi kameranın hangi noktayı gördüğü) yok; "
+       "bu yüzden bölme, noktaları karelere izdüşürerek görünürlüğü tahmin ediyor. "
+       "Aynı çekimin bir COLMAP yeniden oluşturması (images.bin ve points3D.bin içeren "
+       "sparse/0) bu izleri içerir ve çok daha iyi parçalar verir."));
+
 SS_MSG(status_summary,
     EN("Parts: {0}   cameras: {1}   points: {2}   covisibility cut: {3}%   from {4}"),
     JA("パート: {0}   カメラ: {1}   点: {2}   切れた共視性: {3}%   出どころ {4}"),
@@ -691,11 +763,11 @@ SS_MSG(lbl_method,
     EN("Split"), JA("分割方法"), ZH_HANS("切分方式"), ZH_HANT("切分方式"), KO("분할 방식"),
     DE("Aufteilung"), FR("Découpe"), ES("División"), PT("Divisão"), IT("Suddivisione"),
     NL("Opsplitsing"), RU("Разбиение"), TR("Bölme"));
-SS_MSG(meth_spatial,
-    EN("Regions first"), JA("領域を先に"), ZH_HANS("先分区域"), ZH_HANT("先分區域"),
-    KO("영역 먼저"), DE("Bereiche zuerst"), FR("Régions d'abord"), ES("Regiones primero"),
-    PT("Regiões primeiro"), IT("Prima le regioni"), NL("Eerst gebieden"),
-    RU("Сначала области"), TR("Önce bölgeler"));
+SS_MSG(meth_graph,
+    EN("Visibility cut"), JA("可視性カット"), ZH_HANS("可见性切分"), ZH_HANT("可見性切分"),
+    KO("가시성 컷"), DE("Sichtbarkeitsschnitt"), FR("Coupe de visibilité"),
+    ES("Corte de visibilidad"), PT("Corte de visibilidade"), IT("Taglio di visibilità"),
+    NL("Zichtbaarheidssnede"), RU("Разрез по видимости"), TR("Görünürlük kesimi"));
 SS_MSG(meth_viewgraph,
     EN("Cameras first (view graph)"), JA("カメラを先に（ビューグラフ）"),
     ZH_HANS("先分相机（视图图）"), ZH_HANT("先分相機（視圖圖）"), KO("카메라 먼저(뷰 그래프)"),

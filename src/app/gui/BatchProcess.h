@@ -113,6 +113,8 @@ struct BatchRow {
 
     bool stages[kNumBatchStages] = {false, true, false, false};
     bool enabled = true;      // kept on the list, left out of this run
+    // Ran through in a finished batch; ticking the row again clears it.
+    bool done = false;
 
     // From the last batch_check_row(); empty until one has run.
     std::vector<BatchIssue> issues;

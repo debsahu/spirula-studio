@@ -139,7 +139,10 @@ static std::map<std::string, float> _engine_step_fwd_bwd_only(
         engine().ppisp.enabled && engine().ppisp.cur_run_before_color_space;
     engine().background.match_luma_pending = cfg.background.match_luminance;
 
-    forward_3dgs(primitive, sh_degree, packed, /*output_median=*/false, (int)dist_type);
+    {
+        SplatStageTimer stage_timer;
+        forward_3dgs(primitive, sh_degree, packed, /*output_median=*/false, (int)dist_type);
+    }
 
     // PPISP already ran inside the forward in the before-color-space order.
     const bool ppisp_after = engine().ppisp.enabled &&
@@ -186,7 +189,10 @@ static void _engine_step_optim_and_densify(
     const EngineStepConfig& cfg,
     std::map<std::string, float>& loss_dict
 ) {
-    engine_optim_step(step, cfg.optim);
+    {
+        SplatStageTimer stage_timer;
+        engine_optim_step(step, cfg.optim);
+    }
 
     if (engine().background.enabled) {
         engine_background_optim_step(step, cfg.background);
@@ -226,7 +232,11 @@ static void _engine_step_optim_and_densify(
         ppisp_reg_readout.issue(losses_buf);
     }
 
-    int num_added = engine_densify_step(step, max_steps, cfg.densify);
+    int num_added = 0;
+    {
+        SplatStageTimer stage_timer;
+        num_added = engine_densify_step(step, max_steps, cfg.densify);
+    }
 
     loss_dict["num_added"] = (float)num_added;
     loss_dict["cur_num_splats"] = (float)engine().cur_num_splats;

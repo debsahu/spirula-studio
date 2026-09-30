@@ -407,10 +407,7 @@ void check_dataset_stage(const BatchRow& row, const BatchCapabilities& caps,
         const bool prompted = !caps.mask_model_prompted || caps.mask_model_prompted(s.mask_model_id);
         if (prompted && s.mask.prompt.empty())
             out.push_back(issue_of(msg::chk_mask_no_prompt, kSt, true));
-        if (s.sfm.prep.force_external_masking) {
-            // mask.py resolves its own model by name; nothing here can say
-            // whether it is there.
-        } else if (!caps.masking) {
+        if (!caps.masking) {
             out.push_back(issue_of(msg::chk_masking_unavailable, kSt, true));
         } else if (caps.mask_model_ready &&
                    !caps.mask_model_ready(s.mask_model_id, s.mask_detector_id)) {
@@ -694,15 +691,16 @@ bool batch_build_dataset_job(const BatchRow& row, const std::string& ffmpeg_exe,
     }
     // The screen draws these on each input; a batch row has only the preset.
     if (settings.border_enable) {
-        std::vector<app::MaskShape> shapes;
+        app::MaskSet set;
         if (!settings.frame_shapes.empty() &&
-            !load_stencil_preset(settings.frame_shapes, shapes, error)) {
+            !load_stencil_preset(settings.frame_shapes, set, error)) {
             error = "drawn areas not found: " + error;
             return false;
         }
         for (PrepInput& in : sources) {
-            in.stencil.detect_border = true;
-            in.stencil.mask.shapes = shapes;
+            // A GoPro's views are cut out of its sphere: no lens border to fit.
+            in.stencil.detect_border = !in.pano360.valid() && !is_pano360_path(in.path);
+            app::apply_mask_set(in.stencil, set);
         }
     }
     resolve_source_lenses(sources, settings.sfm, settings.colmap);
@@ -864,6 +862,7 @@ BatchRow read_row(const JsonValue& j) {
         for (int i = 0; i < kNumBatchStages && i < (int)v->arr.size(); i++)
             r.stages[i] = v->arr[(size_t)i].as_bool();
     if (const JsonValue* v = j.find("enabled")) r.enabled = v->as_bool(true);
+    if (const JsonValue* v = j.find("done")) r.done = v->as_bool(false) && !r.enabled;
     return r;
 }
 
@@ -948,6 +947,7 @@ void save_batch_list(const std::vector<BatchRow>& rows) {
         for (int i = 0; i < kNumBatchStages; i++) w.value(r.stages[i]);
         w.end();
         w.field("enabled", r.enabled);
+        if (r.done) w.field("done", true);
         w.end();
     }
     w.end();

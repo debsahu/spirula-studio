@@ -22,22 +22,34 @@ On macOS, Ctrl below means Command, as elsewhere in the app.
 
 | tool | key | what it does |
 |---|---|---|
-| Box, Ellipse, Lasso, Polygon, Brush | `B` `E` `L` `P` `C` | the 3D editor's shapes, painted into the mask |
+| Box, Ellipse, Lasso, Brush | `B` `E` `L` `C` | the 3D editor's shapes, painted into the mask |
+| Pen | `P` | Bezier curves, as in a vector editor; clicks alone make a polygon |
 | Eraser | `X` | the brush with the modes swapped: a plain drag keeps |
 | Path | `I` | pen with livewire: each anchor snaps to the edge |
 | SAM | `G` | click an object, or type what to drop |
 
-Shapes, brush and path paint with the 3D editor's selection grammar:
+Shapes, brush, pen and path paint with the 3D editor's selection grammar:
 a plain or Shift drag **drops**, Ctrl **keeps**, Shift+Ctrl **clears** the
 correction back to what the run wrote. The modifiers are read when the shape
-completes. **Add / Subtract**, beside the frame slider, swaps drop and keep
-for every tool, SAM clicks included: under Subtract a plain drag keeps and Ctrl
-drops. The eraser swaps them too, so under Subtract it drops. Right click or Enter closes a polygon; Ctrl+Z takes back its last
-point. Esc cancels a shape in progress.
+completes, or, for the pen and the path, when the first anchor is placed.
+**Add / Subtract**, beside the frame slider, swaps drop and keep for every
+tool, SAM clicks included: under Subtract a plain drag keeps and Ctrl drops.
+The eraser swaps them too, so under Subtract it drops. Esc cancels a shape in
+progress.
 
 **Brush size** is in mask pixels, 1 to 4096, and shared by the brush and the
 eraser. The slider shows while either is active; `[` and `]` step it, and
 Alt+wheel over the picture changes it continuously.
+
+**Pen.** A click drops a corner and a drag a smooth anchor whose handles
+follow the pointer; Shift snaps to 45-degree steps, Alt while dragging moves
+the out-handle alone, Space while dragging moves the anchor, a click on the
+last anchor straightens the next segment, and Ctrl+drag moves any anchor or
+handle already placed. Hold Ctrl (keep) or Shift+Ctrl (clear) when you place
+the first anchor. Click the first anchor, press Enter or right click to close
+and paint the inside; Ctrl+Z or Backspace removes an anchor; Esc cancels. The
+full table is in [frame-stencil.md](frame-stencil.md#the-pen); the path keeps
+frame pixels, so zooming mid-path is fine.
 
 **Path.** Click along an edge to drop anchors; the segment from the last
 anchor follows the lowest-cost edge path to the cursor (Mortensen and
@@ -139,7 +151,8 @@ MaskDoc       one frame in memory: base, two layers, composite, undo history
 MaskWindow    the view: pane <-> mask mapping and the window texture's pixels
 MaskSession   the frames, the worker, the scan, the open frame, SAM, slideshow
 MaskPanel.cpp the window: canvas, tools, status, keys; the only GL
-PathTool / Livewire   the pen and its edge search
+PathTool / Livewire   the livewire path and its edge search
+PenTool       the Bezier pen, shared with the stencil panel
 MaskAdd / MaskSam     SAM results to stencils / the checkpoint and its job thread
 MaskSlideshow the slideshow's decoder ring and clock
 ```

@@ -143,7 +143,9 @@ RegionMesh region_boundary_mesh(const Region& r, const Aabb& box, int cells_long
     return extract(g, lab, 1, [&](const double* p) { return r.contains(p); });
 }
 
-std::vector<RegionMesh> label_boundary_meshes(const LabelField& f, const Aabb& box, int cells_long_axis) {
+std::vector<RegionMesh> label_boundary_meshes(const LabelField& f, const Aabb& box, int cells_long_axis,
+                                              const std::atomic<bool>* cancel) {
+    auto stop = [&] { return cancel && cancel->load(std::memory_order_relaxed); };
     const Grid g = make_grid(box, cells_long_axis);
     const int n = f.num_labels();
     std::vector<RegionMesh> out((size_t)std::max(0, n));
@@ -151,8 +153,10 @@ std::vector<RegionMesh> label_boundary_meshes(const LabelField& f, const Aabb& b
     std::vector<int32_t> lab((size_t)g.num_samples());
 #pragma omp parallel for schedule(static)
     for (int64_t i = 0; i < g.num_samples(); i++) lab[(size_t)i] = f.label(&g.at[(size_t)i * 3]);
-    for (int k = 0; k < n; k++)
+    for (int k = 0; k < n; k++) {
+        if (stop()) return {};
         out[(size_t)k] = extract(g, lab, k, [&](const double* p) { return f.label(p) == k; });
+    }
     return out;
 }
 

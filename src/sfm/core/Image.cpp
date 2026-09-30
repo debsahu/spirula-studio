@@ -22,10 +22,15 @@ namespace sfm {
 // the gray one, which matters for the batch decoder's memory budget.
 static std::vector<uint8_t> downscaleRgb(const unsigned char* src, int w, int h, int dw, int dh) {
     std::vector<uint8_t> out((size_t)dw * dh * 3);
+    std::vector<int> cx0(dw), cx1(dw);
+    for (int x = 0; x < dw; x++) {
+        cx0[x] = (int)((int64_t)x * w / dw);
+        cx1[x] = std::max(cx0[x] + 1, (int)((int64_t)(x + 1) * w / dw));
+    }
     for (int y = 0; y < dh; y++) {
         int sy0 = (int)((int64_t)y * h / dh), sy1 = std::max(sy0 + 1, (int)((int64_t)(y + 1) * h / dh));
         for (int x = 0; x < dw; x++) {
-            int sx0 = (int)((int64_t)x * w / dw), sx1 = std::max(sx0 + 1, (int)((int64_t)(x + 1) * w / dw));
+            const int sx0 = cx0[x], sx1 = cx1[x];
             uint32_t acc[3] = {0, 0, 0}, n = 0;
             for (int sy = sy0; sy < sy1; sy++)
                 for (int sx = sx0; sx < sx1; sx++) {
@@ -49,32 +54,46 @@ static inline float lumaAt(const unsigned char* rgb, int w, int x, int y) {
     return kLumaR * p[0] + kLumaG * p[1] + kLumaB * p[2];
 }
 
-// Bilinearly resample interleaved-RGB uint8 straight to a (dw,dh) gray float
-// image, converting to luma at the four taps. Arithmetically identical to
-// building the full-resolution gray image and running resizeGray() on it --
-// same expression, same order, same rounding -- but it never materializes the
-// full-resolution float buffer. That buffer was 4 of the 7 bytes per source
-// pixel the batch decoder budgets per concurrent decode (sfm/core/ImageLoader.h),
-// and on 20 MP inputs the budget was what capped the decode pool at 3 threads.
+// Bit-identical to resizeGray() of the full-size luma image, which is never
+// held (it capped the decode pool, sfm/core/ImageLoader.h). Luma once per source
+// row, column taps tabulated (floor is a libm call pre-SSE4.1): 84 -> 30 ms, 20 MP.
 static void resizeGrayFromRgb(const unsigned char* rgb, int w, int h, int dw, int dh,
                               std::vector<float>& out) {
     out.resize((size_t)dw * dh);
     const float sx = w / (float)dw;
     const float sy = h / (float)dh;
+    std::vector<int> cx0(dw), cx1(dw);
+    std::vector<float> cwx(dw);
+    for (int x = 0; x < dw; x++) {
+        float fx = (x + 0.5f) * sx - 0.5f;
+        int x0 = (int)std::floor(fx);
+        cwx[x] = fx - x0;
+        cx0[x] = std::max(0, std::min(w - 1, x0));
+        cx1[x] = std::max(0, std::min(w - 1, x0 + 1));
+    }
+    std::vector<float> lumaRows[2] = {std::vector<float>(w), std::vector<float>(w)};
+    int rowOf[2] = {-1, -1};
+    auto lumaRow = [&](int sy) -> const float* {
+        for (int i = 0; i < 2; i++)
+            if (rowOf[i] == sy) return lumaRows[i].data();
+        // Evict the slot the other tap of this row is not using.
+        const int i = rowOf[0] < rowOf[1] ? 0 : 1;
+        for (int x = 0; x < w; x++) lumaRows[i][x] = lumaAt(rgb, w, x, sy);
+        rowOf[i] = sy;
+        return lumaRows[i].data();
+    };
     for (int y = 0; y < dh; y++) {
         float fy = (y + 0.5f) * sy - 0.5f;
         int y0 = (int)std::floor(fy);
         float wy = fy - y0;
         int y0c = std::max(0, std::min(h - 1, y0));
         int y1c = std::max(0, std::min(h - 1, y0 + 1));
+        const float* r0 = lumaRow(y0c);
+        const float* r1 = lumaRow(y1c);
         for (int x = 0; x < dw; x++) {
-            float fx = (x + 0.5f) * sx - 0.5f;
-            int x0 = (int)std::floor(fx);
-            float wx = fx - x0;
-            int x0c = std::max(0, std::min(w - 1, x0));
-            int x1c = std::max(0, std::min(w - 1, x0 + 1));
-            float a = lumaAt(rgb, w, x0c, y0c), b = lumaAt(rgb, w, x1c, y0c);
-            float c = lumaAt(rgb, w, x0c, y1c), d = lumaAt(rgb, w, x1c, y1c);
+            const float wx = cwx[x];
+            float a = r0[cx0[x]], b = r0[cx1[x]];
+            float c = r1[cx0[x]], d = r1[cx1[x]];
             float top = a + (b - a) * wx;
             float bot = c + (d - c) * wx;
             out[(size_t)y * dw + x] = top + (bot - top) * wy;

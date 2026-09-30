@@ -3327,6 +3327,38 @@ SS_MSG(mask_enable_help,
        "en çok artıran tek şey budur. Kendi maskeleriyle gelen girdiler "
        "onları korur; bu ayar geri kalanlar içindir."));
 
+SS_MSG(mask_objects_need_segmentation,
+    EN("Removing objects needs a build with the segmentation module, and this "
+       "one has none. Removing fixed areas of the frame still works."),
+    JA("物体を取り除くには分割モジュール入りのビルドが必要ですが、このビルドには"
+       "入っていません。画面の決まった位置を取り除くことはできます。"),
+    ZH_HANS("移除物体需要包含分割模块的版本，而此版本没有。去掉画面中固定的区域"
+            "仍然可用。"),
+    ZH_HANT("移除物體需要包含分割模組的版本，而此版本沒有。去掉畫面中固定的區域"
+            "仍然可用。"),
+    KO("물체를 제거하려면 분할 모듈이 포함된 빌드가 필요한데, 이 빌드에는 "
+       "없습니다. 화면에서 늘 같은 자리를 없애는 기능은 그대로 쓸 수 있습니다."),
+    DE("Objekte entfernen braucht einen Build mit Segmentierungsmodul, und "
+       "dieser hat keines. Feste Bereiche des Bildes lassen sich weiterhin "
+       "entfernen."),
+    FR("Retirer des objets demande une version avec le module de segmentation, "
+       "et celle-ci ne l'a pas. Retirer les zones fixes de l'image reste "
+       "possible."),
+    ES("Quitar objetos requiere una compilación con el módulo de segmentación, "
+       "y esta no lo tiene. Quitar las zonas fijas del fotograma sigue "
+       "funcionando."),
+    PT("Remover objetos exige uma versão com o módulo de segmentação, e esta "
+       "não o tem. Tirar as áreas fixas do quadro continua funcionando."),
+    IT("Rimuovere oggetti richiede una build con il modulo di segmentazione, e "
+       "questa non ce l'ha. Togliere le zone fisse del fotogramma funziona "
+       "comunque."),
+    NL("Objecten verwijderen vraagt een build met de segmentatiemodule, en deze "
+       "heeft er geen. Vaste gebieden van het beeld weghalen werkt nog steeds."),
+    RU("Чтобы убирать объекты, нужна сборка с модулем сегментации, а в этой его "
+       "нет. Убирать постоянные участки кадра по-прежнему можно."),
+    TR("Nesneleri kaldırmak için bölütleme modülü içeren bir sürüm gerekir; bu "
+       "sürümde yok. Karenin sabit alanlarını çıkarmak yine de çalışır."));
+
 SS_MSG(mask_model,
     EN("Model"),         JA("モデル"),        ZH_HANS("模型"),     ZH_HANT("模型"),
     KO("모델"),           DE("Modell"),       FR("Modèle"),       ES("Modelo"),
@@ -5922,30 +5954,75 @@ SS_MSG(stencil_shrink,
     TR("Daralt"));
 
 SS_MSG(stencil_shrink_help,
-    EN("Pulls the circle in a little. The outermost ring of a lens circle is "
-       "dark and smeared, and it costs nothing to lose."),
-    JA("円を少しだけ内側に寄せます。レンズ円のいちばん外側は暗くにじんでおり、"
-       "捨てても損はありません。"),
-    ZH_HANS("把圆稍微往里收一点。镜头圆最外的一圈又暗又糊，丢掉不可惜。"),
-    ZH_HANT("把圓稍微往裡收一點。鏡頭圓最外的一圈又暗又糊，丟掉不可惜。"),
-    KO("원을 조금 안쪽으로 당깁니다. 렌즈 원의 가장 바깥 테는 어둡고 번져 있어 "
-       "버려도 아깝지 않습니다."),
-    DE("Zieht den Kreis ein Stück nach innen. Der äußerste Ring eines "
-       "Objektivkreises ist dunkel und verschmiert und kostet nichts."),
-    FR("Resserre un peu le cercle. L'anneau le plus extérieur d'un "
-       "cercle-image est sombre et étalé : le perdre ne coûte rien."),
-    ES("Mete un poco el círculo. El anillo más externo del círculo del "
-       "objetivo es oscuro y borroso, y perderlo no cuesta nada."),
-    PT("Puxa o círculo um pouco para dentro. O anel mais externo do círculo da "
-       "lente é escuro e borrado, e perdê-lo não custa nada."),
-    IT("Stringe un poco il cerchio. L'anello più esterno del cerchio "
-       "dell'obiettivo è scuro e sbavato, e perderlo non costa nulla."),
-    NL("Haalt de cirkel een stukje naar binnen. De buitenste ring van een "
-       "lenscirkel is donker en uitgesmeerd, en kost niets om kwijt te raken."),
-    RU("Немного поджимает круг. Самое внешнее кольцо круга изображения тусклое "
-       "и смазанное, потерять его не жалко."),
-    TR("Daireyi biraz içeri çeker. Mercek dairesinin en dış halkası sönük ve "
-       "bulaşıktır, gitmesi bir şey kaybettirmez."));
+    EN("Shrinks the detected radius by this percentage. Ctrl+click to enter a value. For an offset or uneven border, edit the border ellipse."),
+    JA("検出した半径をこの割合だけ縮めます。Ctrl+クリックで数値を入力できます。境界がずれている場合は楕円を編集してください。"),
+    ZH_HANS("按此百分比缩小检测出的半径。Ctrl+单击可输入数值。边界偏心或不均匀时，可编辑边界椭圆。"),
+    ZH_HANT("按此百分比縮小偵測出的半徑。Ctrl+點擊可輸入數值。邊界偏心或不均勻時，可編輯邊界橢圓。"),
+    KO("감지된 반지름을 이 비율만큼 줄입니다. Ctrl+클릭으로 값을 입력합니다. 경계가 치우치거나 고르지 않으면 경계 타원을 편집하세요."),
+    DE("Verkleinert den erkannten Radius um diesen Prozentsatz. Strg+Klick zur Werteingabe. Bei versetztem oder ungleichmäßigem Rand die Randellipse bearbeiten."),
+    FR("Réduit le rayon détecté de ce pourcentage. Ctrl+clic pour saisir une valeur. Si le bord est décentré ou irrégulier, modifiez son ellipse."),
+    ES("Reduce el radio detectado en este porcentaje. Ctrl+clic para introducir un valor. Si el borde está desplazado o es irregular, edita su elipse."),
+    PT("Reduz o raio detectado nesta porcentagem. Ctrl+clique para inserir um valor. Se a borda estiver deslocada ou irregular, edite sua elipse."),
+    IT("Riduce il raggio rilevato di questa percentuale. Ctrl+clic per inserire un valore. Se il bordo è decentrato o irregolare, modifica la sua ellisse."),
+    NL("Verkleint de gedetecteerde straal met dit percentage. Ctrl+klik om een waarde in te voeren. Bewerk de randellips bij een verschoven of onregelmatige rand."),
+    RU("Уменьшает найденный радиус на указанный процент. Ctrl+щелчок для ввода значения. Если граница смещена или неровная, измените её эллипс."),
+    TR("Algılanan yarıçapı bu yüzde kadar küçültür. Değer girmek için Ctrl+tıklayın. Sınır kaymış veya düzensizse sınır elipsini düzenleyin."));
+
+SS_MSG(stencil_edit_border,
+    EN("Edit border ellipse"), JA("境界の楕円を編集"),
+    ZH_HANS("编辑边界椭圆"), ZH_HANT("編輯邊界橢圓"),
+    KO("경계 타원 편집"), DE("Randellipse bearbeiten"),
+    FR("Modifier l'ellipse du bord"), ES("Editar elipse del borde"),
+    PT("Editar elipse da borda"), IT("Modifica ellisse del bordo"),
+    NL("Randellips bewerken"), RU("Изменить эллипс границы"),
+    TR("Sınır elipsini düzenle"));
+
+SS_MSG(stencil_edit_border_help,
+    EN("Use the current border as a fixed ellipse you can move and resize, and turn off "
+       "automatic detection. On an input with several cameras the ellipse is this camera's "
+       "only: separate areas for each camera are turned on, and the other lenses keep their "
+       "own borders."),
+    JA("現在の境界を、移動や大きさの変更ができる固定の楕円にし、自動検出を無効にします。複数の"
+       "カメラを持つ入力では、カメラごとの範囲が有効になり、楕円はこのカメラだけのものに"
+       "なります。ほかのレンズは自分の境界のままです。"),
+    ZH_HANS("将当前边界转为可移动、可改变大小的固定椭圆，并关闭自动检测。对有多台相机的输入，"
+            "会开启每台相机单独设置区域，椭圆只属于这台相机，其他镜头保留各自的边界。"),
+    ZH_HANT("將目前邊界轉為可移動、可改變大小的固定橢圓，並關閉自動偵測。對有多台相機的輸入，"
+            "會開啟每台相機分別設定區域，橢圓只屬於這台相機，其他鏡頭保留各自的邊界。"),
+    KO("현재 경계를 옮기고 크기를 바꿀 수 있는 고정 타원으로 만들고 자동 감지를 끕니다. "
+       "카메라가 여럿인 입력에서는 카메라마다 따로 영역 지정이 켜져 타원은 이 카메라에만 "
+       "적용되고, 다른 렌즈는 각자의 경계를 유지합니다."),
+    DE("Macht den aktuellen Rand zu einer festen Ellipse, die sich verschieben und skalieren "
+       "lässt, und schaltet die automatische Erkennung aus. Bei einer Eingabe mit mehreren "
+       "Kameras werden eigene Bereiche je Kamera eingeschaltet: Die Ellipse gilt nur für "
+       "diese Kamera, die anderen Objektive behalten ihren eigenen Rand."),
+    FR("Fait du bord actuel une ellipse fixe que l'on peut déplacer et redimensionner, et "
+       "désactive la détection automatique. Sur une entrée à plusieurs caméras, les zones "
+       "distinctes par caméra sont activées : l'ellipse ne vaut que pour cette caméra, et les "
+       "autres objectifs gardent leur propre bord."),
+    ES("Convierte el borde actual en una elipse fija que se puede mover y redimensionar, y "
+       "desactiva la detección automática. En una entrada con varias cámaras se activan las "
+       "zonas distintas para cada cámara: la elipse es solo de esta cámara y los demás "
+       "objetivos conservan su propio borde."),
+    PT("Transforma a borda atual numa elipse fixa que pode ser movida e redimensionada, e "
+       "desativa a detecção automática. Numa entrada com várias câmeras, as áreas separadas "
+       "para cada câmera são ativadas: a elipse é só desta câmera, e as outras lentes mantêm "
+       "sua própria borda."),
+    IT("Trasforma il bordo attuale in un'ellisse fissa che si può spostare e ridimensionare, e "
+       "disattiva il rilevamento automatico. Su un ingresso con più fotocamere si attivano le "
+       "aree separate per ogni fotocamera: l'ellisse vale solo per questa, e gli altri "
+       "obiettivi mantengono il proprio bordo."),
+    NL("Maakt van de huidige rand een vaste ellips die kan worden verplaatst en geschaald, en "
+       "schakelt automatische detectie uit. Bij een invoer met meerdere camera's worden aparte "
+       "gebieden per camera ingeschakeld: de ellips geldt alleen voor deze camera en de andere "
+       "lenzen houden hun eigen rand."),
+    RU("Превращает текущую границу в фиксированный эллипс, который можно двигать и менять в "
+       "размере, и отключает автоопределение. Для входа с несколькими камерами включаются "
+       "отдельные области для каждой камеры: эллипс относится только к этой камере, а другие "
+       "объективы сохраняют свои границы."),
+    TR("Geçerli sınırı taşınabilen ve boyutlandırılabilen sabit bir elipse çevirir ve otomatik "
+       "algılamayı kapatır. Birden çok kameralı bir girdide her kamera için ayrı alanlar "
+       "açılır: elips yalnızca bu kameranındır, diğer mercekler kendi sınırlarını korur."));
 
 SS_MSG(stencil_looking,
     EN("Looking for the border..."),
@@ -6187,48 +6264,88 @@ SS_MSG(stencil_save,
 
 SS_MSG(stencil_save_help,
     EN("Keep what is drawn here, without the fitted lens circle, as an SVG file in "
-       "normalized coordinates. A saved set can be loaded onto another input, and "
-       "picked on the dataset screen for every input and for dataset presets."),
+       "normalized coordinates. With separate areas for each camera and cameras that "
+       "differ, each camera gets its own file, and loading the set puts each back on "
+       "its camera. A saved set can be loaded onto another input, and picked on the "
+       "dataset screen for every input and for dataset presets."),
     JA("ここで描いたもの（検出したレンズの円は含みません）を、正規化座標の SVG "
-       "ファイルとして保存します。保存したものは別の入力に読み込めるほか、データ"
-       "セット画面で全入力とデータセットのプリセットに使えます。"),
+       "ファイルとして保存します。カメラごとに別の範囲を使い、カメラで内容が違うときは"
+       "カメラごとにファイルを分け、読み込むとそれぞれのカメラに戻ります。保存したものは"
+       "別の入力に読み込めるほか、データセット画面で全入力とデータセットのプリセットに"
+       "使えます。"),
     ZH_HANS("把这里画的内容（不含检测到的镜头圆）保存为归一化坐标的 SVG 文件。"
-            "保存后可以载入到其他输入，也可以在数据集界面中用于所有输入和数据集预设。"),
+            "每台相机单独设置区域且各相机不同时，每台相机各存一个文件，载入时各自回到"
+            "对应的相机。保存后可以载入到其他输入，也可以在数据集界面中用于所有输入和"
+            "数据集预设。"),
     ZH_HANT("把這裡畫的內容（不含偵測到的鏡頭圓）儲存為正規化座標的 SVG 檔案。"
-            "儲存後可以載入到其他輸入，也可以在資料集畫面中用於所有輸入和資料集預設。"),
+            "每台相機分別設定區域且各相機不同時，每台相機各存一個檔案，載入時各自回到"
+            "對應的相機。儲存後可以載入到其他輸入，也可以在資料集畫面中用於所有輸入和"
+            "資料集預設。"),
     KO("여기서 그린 것을(찾아낸 렌즈 원은 빼고) 정규화 좌표의 SVG 파일로 저장합니다. "
-       "저장한 것은 다른 입력에 불러올 수 있고, 데이터셋 화면에서 모든 입력과 데이터셋 "
-       "프리셋에 쓸 수 있습니다."),
+       "카메라마다 따로 영역을 지정했고 카메라끼리 다르면 카메라마다 파일을 따로 두고, "
+       "불러오면 각자의 카메라로 돌아갑니다. 저장한 것은 다른 입력에 불러올 수 있고, "
+       "데이터셋 화면에서 모든 입력과 데이터셋 프리셋에 쓸 수 있습니다."),
     DE("Das hier Gezeichnete ohne den erkannten Objektivkreis als SVG-Datei in "
-       "normierten Koordinaten speichern. Gespeichertes lässt sich auf eine andere "
+       "normierten Koordinaten speichern. Mit eigenen Bereichen je Kamera und "
+       "unterschiedlichen Kameras bekommt jede Kamera eine eigene Datei, und beim Laden "
+       "kommt jede wieder auf ihre Kamera. Gespeichertes lässt sich auf eine andere "
        "Eingabe laden und im Datensatz-Bildschirm für alle Eingaben und für "
        "Datensatz-Voreinstellungen wählen."),
     FR("Garder ce qui est dessiné ici, sans le cercle d'objectif détecté, dans un "
-       "fichier SVG en coordonnées normalisées. Un ensemble enregistré se charge sur "
-       "une autre entrée et se choisit dans l'écran du jeu de données pour toutes "
-       "les entrées et pour les préréglages."),
+       "fichier SVG en coordonnées normalisées. Avec des zones distinctes par caméra et "
+       "des caméras qui diffèrent, chaque caméra a son propre fichier, et le chargement "
+       "remet chacun sur sa caméra. Un ensemble enregistré se charge sur une autre "
+       "entrée et se choisit dans l'écran du jeu de données pour toutes les entrées et "
+       "pour les préréglages."),
     ES("Guardar lo dibujado aquí, sin el círculo de objetivo detectado, como archivo "
-       "SVG en coordenadas normalizadas. Lo guardado se puede cargar en otra entrada "
-       "y elegir en la pantalla del conjunto de datos para todas las entradas y los "
-       "ajustes predefinidos."),
+       "SVG en coordenadas normalizadas. Con zonas distintas para cada cámara y cámaras "
+       "que difieren, cada cámara tiene su propio archivo, y al cargar el juego cada uno "
+       "vuelve a su cámara. Lo guardado se puede cargar en otra entrada y elegir en la "
+       "pantalla del conjunto de datos para todas las entradas y los ajustes "
+       "predefinidos."),
     PT("Guardar o que foi desenhado aqui, sem o círculo de lente detectado, como "
-       "arquivo SVG em coordenadas normalizadas. O que foi salvo pode ser carregado "
-       "em outra entrada e escolhido na tela do conjunto de dados para todas as "
-       "entradas e para as predefinições."),
+       "arquivo SVG em coordenadas normalizadas. Com áreas separadas para cada câmera e "
+       "câmeras diferentes, cada câmera tem seu próprio arquivo, e ao carregar o "
+       "conjunto cada um volta à sua câmera. O que foi salvo pode ser carregado em outra "
+       "entrada e escolhido na tela do conjunto de dados para todas as entradas e para "
+       "as predefinições."),
     IT("Salva ciò che è disegnato qui, senza il cerchio dell'obiettivo rilevato, "
-       "come file SVG in coordinate normalizzate. Un insieme salvato si carica su "
-       "un altro input e si sceglie nella schermata del dataset per tutti gli input "
-       "e per i preset."),
+       "come file SVG in coordinate normalizzate. Con aree separate per ogni fotocamera "
+       "e fotocamere diverse, ogni fotocamera ha il suo file, e caricando l'insieme "
+       "ognuno torna sulla sua fotocamera. Un insieme salvato si carica su un altro "
+       "input e si sceglie nella schermata del dataset per tutti gli input e per i "
+       "preset."),
     NL("Bewaar wat hier getekend is, zonder de gevonden lenscirkel, als SVG-bestand "
-       "in genormaliseerde coördinaten. Een opgeslagen set kun je op een andere "
-       "invoer laden en op het datasetscherm kiezen voor alle invoer en voor "
+       "in genormaliseerde coördinaten. Met aparte gebieden per camera en camera's die "
+       "verschillen krijgt elke camera een eigen bestand, en bij het laden gaat elk "
+       "terug naar zijn camera. Een opgeslagen set kan op een andere invoer worden "
+       "geladen en op het datasetscherm worden gekozen voor alle invoer en voor "
        "datasetvoorinstellingen."),
     RU("Сохранить нарисованное здесь, без найденного круга объектива, в файл SVG в "
-       "нормированных координатах. Сохранённое можно загрузить на другой вход и "
-       "выбрать на экране набора данных для всех входов и для пресетов."),
+       "нормированных координатах. При отдельных областях для каждой камеры и разных "
+       "камерах у каждой камеры свой файл, и при загрузке набора каждый возвращается на "
+       "свою камеру. Сохранённое можно загрузить на другой вход и выбрать на экране "
+       "набора данных для всех входов и для пресетов."),
     TR("Burada çizileni, bulunan mercek dairesi olmadan, normalize koordinatlarda "
-       "bir SVG dosyası olarak sakla. Kaydedilen, başka bir girdiye yüklenebilir ve "
-       "veri kümesi ekranında tüm girdiler ve ön ayarlar için seçilebilir."));
+       "bir SVG dosyası olarak sakla. Her kamera için ayrı alanlar açıkken kameralar "
+       "farklıysa her kameranın kendi dosyası olur ve takım yüklenince her biri kendi "
+       "kamerasına döner. Kaydedilen, başka bir girdiye yüklenebilir ve veri kümesi "
+       "ekranında tüm girdiler ve ön ayarlar için seçilebilir."));
+
+SS_MSG(stencil_set_no_camera,
+    EN("These areas are for the cameras {0}, and this input has none of them."),
+    JA("この範囲はカメラ {0} 用ですが、この入力にはそのどれもありません。"),
+    ZH_HANS("这些区域是为相机 {0} 设置的，而此输入没有其中任何一台。"),
+    ZH_HANT("這些區域是為相機 {0} 設定的，而此輸入沒有其中任何一台。"),
+    KO("이 영역은 카메라 {0} 용인데, 이 입력에는 그중 어느 것도 없습니다."),
+    DE("Diese Bereiche gehören zu den Kameras {0}, und diese Eingabe hat keine davon."),
+    FR("Ces zones sont pour les caméras {0}, et cette entrée n'en a aucune."),
+    ES("Estas zonas son para las cámaras {0}, y esta entrada no tiene ninguna."),
+    PT("Estas áreas são para as câmeras {0}, e esta entrada não tem nenhuma delas."),
+    IT("Queste aree sono per le fotocamere {0}, e questo input non ne ha nessuna."),
+    NL("Deze gebieden zijn voor de camera's {0}, en deze invoer heeft er geen van."),
+    RU("Эти области — для камер {0}, а у этого входа нет ни одной из них."),
+    TR("Bu alanlar {0} kameraları için ve bu girdide bunların hiçbiri yok."));
 
 SS_MSG(stencil_saved_as,
     EN("Saved: {0}"),    JA("保存しました: {0}"), ZH_HANS("已保存：{0}"), ZH_HANT("已儲存：{0}"),
@@ -6495,6 +6612,299 @@ SS_MSG(stencil_drag_hint,
        "размер."),
     TR("Taşımak için resimde sürükleyin, boyutlandırmak için beyaz noktalarını "
        "sürükleyin."));
+
+SS_MSG(stencil_shape_curve,
+    EN("Pen shape {0}"),  JA("ペン図形 {0}"),   ZH_HANS("钢笔形状 {0}"), ZH_HANT("鋼筆形狀 {0}"),
+    KO("펜 도형 {0}"),     DE("Zeichenstift-Form {0}"), FR("Forme à la plume {0}"),
+    ES("Forma de pluma {0}"), PT("Forma da caneta {0}"), IT("Forma a penna {0}"),
+    NL("Penvorm {0}"),    RU("Фигура пером {0}"), TR("Kalem şekli {0}"));
+
+SS_MSG(stencil_tool_points,
+    EN("Points"),        JA("ポイント"),      ZH_HANS("锚点"),     ZH_HANT("錨點"),
+    KO("포인트"),         DE("Punkte"),        FR("Points"),
+    ES("Puntos"),        PT("Pontos"),        IT("Punti"),
+    NL("Punten"),        RU("Точки"),         TR("Noktalar"));
+
+SS_MSG(stencil_tool_points_help,
+    EN("Direct selection: drag a pen shape's anchors (squares) and handles (circles). A "
+       "handle of a smooth anchor turns the other with it; Alt+drag moves it alone, Shift "
+       "keeps 45-degree steps, Delete removes the picked anchor. Click inside a shape to "
+       "pick it; other shapes move and resize as under Select."),
+    JA("ダイレクト選択: ペン図形の点（四角）とハンドル（丸）をドラッグします。なめらかな点の"
+       "ハンドルは反対側も一緒に回り、Alt+ドラッグで片方だけ、Shift で 45 度刻みになります。"
+       "Delete で選んだ点を削除します。図形の内側をクリックすると選べます。ほかの図形は"
+       "「選択」と同じく移動と大きさの変更ができます。"),
+    ZH_HANS("直接选择：拖动钢笔形状的锚点（方块）和手柄（圆点）。平滑锚点的一侧手柄会带着"
+            "另一侧转动；Alt+拖动只移动一侧，Shift 以 45 度为步长，Delete 删除选中的锚点。"
+            "在形状内部单击即可选中；其他形状与“选择”一样可移动和改变大小。"),
+    ZH_HANT("直接選取：拖曳鋼筆形狀的錨點（方塊）和控制把手（圓點）。平滑錨點的一側把手會"
+            "帶著另一側轉動；Alt+拖曳只移動一側，Shift 以 45 度為步長，Delete 刪除選取的"
+            "錨點。在形狀內部點一下即可選取；其他形狀與「選取」一樣可移動和改變大小。"),
+    KO("직접 선택: 펜 도형의 앵커(네모)와 핸들(동그라미)을 드래그합니다. 부드러운 앵커의 "
+       "핸들은 반대쪽도 함께 돌고, Alt+드래그는 한쪽만 옮기며, Shift는 45도 단위로 맞춥니다. "
+       "Delete는 고른 앵커를 지웁니다. 도형 안쪽을 클릭하면 고를 수 있고, 다른 도형은 "
+       "선택 도구처럼 옮기거나 크기를 바꿉니다."),
+    DE("Direktauswahl: die Anker (Quadrate) und Griffe (Kreise) einer Zeichenstift-Form "
+       "ziehen. Der Griff eines glatten Ankers dreht den anderen mit; Alt+Ziehen bewegt ihn "
+       "allein, Umschalt rastet in 45-Grad-Schritten ein, Entf löscht den gewählten Anker. "
+       "Ein Klick in eine Form wählt sie; andere Formen werden wie unter Auswählen "
+       "verschoben und skaliert."),
+    FR("Sélection directe : faites glisser les ancres (carrés) et poignées (cercles) d'une "
+       "forme à la plume. La poignée d'une ancre lisse fait tourner l'autre ; Alt+glisser la "
+       "déplace seule, Maj force des pas de 45 degrés, Suppr retire l'ancre choisie. Un clic "
+       "dans une forme la choisit ; les autres formes se déplacent et se redimensionnent "
+       "comme avec Sélectionner."),
+    ES("Selección directa: arrastre las anclas (cuadrados) y tiradores (círculos) de una "
+       "forma de pluma. El tirador de un ancla suave gira el otro con él; Alt+arrastrar lo "
+       "mueve solo, Mayús fija pasos de 45 grados y Supr quita el ancla elegida. Un clic "
+       "dentro de una forma la elige; las demás se mueven y redimensionan como con "
+       "Seleccionar."),
+    PT("Seleção direta: arraste as âncoras (quadrados) e alças (círculos) de uma forma da "
+       "caneta. A alça de uma âncora suave gira a outra junto; Alt+arrastar a move sozinha, "
+       "Shift fixa passos de 45 graus e Delete remove a âncora escolhida. Um clique dentro "
+       "de uma forma a escolhe; as outras se movem e redimensionam como em Selecionar."),
+    IT("Selezione diretta: trascini gli ancoraggi (quadrati) e le maniglie (cerchi) di una "
+       "forma a penna. La maniglia di un ancoraggio morbido fa ruotare l'altra; Alt+trascina "
+       "la sposta da sola, Maiusc blocca a passi di 45 gradi, Canc toglie l'ancoraggio "
+       "scelto. Un clic dentro una forma la sceglie; le altre si spostano e ridimensionano "
+       "come con Seleziona."),
+    NL("Directe selectie: sleep de ankers (vierkantjes) en grepen (rondjes) van een penvorm. "
+       "De greep van een glad anker draait de andere mee; Alt+slepen beweegt hem alleen, "
+       "Shift houdt stappen van 45 graden aan, Delete verwijdert het gekozen anker. Klik in "
+       "een vorm om hem te kiezen; andere vormen verschuiven en schalen zoals bij Selecteren."),
+    RU("Прямое выделение: перетаскивайте опорные точки (квадраты) и ручки (кружки) фигуры, "
+       "нарисованной пером. Ручка гладкой точки поворачивает и вторую; Alt+перетаскивание "
+       "двигает её одну, Shift держит шаг 45 градусов, Delete удаляет выбранную точку. "
+       "Щелчок внутри фигуры выбирает её; остальные фигуры двигаются и меняют размер, как "
+       "в «Выделении»."),
+    TR("Doğrudan seçim: bir kalem şeklinin çapalarını (kareler) ve tutamaçlarını (daireler) "
+       "sürükleyin. Düzgün bir çapanın tutamacı diğerini de döndürür; Alt+sürükleme onu tek "
+       "başına taşır, Shift 45 derecelik adımlar tutar, Delete seçilen çapayı siler. Bir "
+       "şeklin içine tıklamak onu seçer; diğer şekiller Seç aracındaki gibi taşınır ve "
+       "boyutlanır."));
+
+SS_MSG(stencil_tool_pen_help,
+    EN("Click for a corner, drag for a curve, as in a vector editor. Shift keeps 45-degree "
+       "steps; Alt while dragging moves one handle alone; Space while dragging moves the "
+       "anchor; Ctrl+drag moves a point already placed. Click the first anchor, press Enter "
+       "or right-click to close it; Backspace or Ctrl+Z takes an anchor back, Esc cancels. "
+       "With a pen shape picked, click its outline to add an anchor, click an anchor to "
+       "delete it, and Alt+click an anchor to make it a corner or Alt+drag it to pull new "
+       "handles."),
+    JA("ベクター編集ソフトと同じく、クリックで角、ドラッグで曲線の点を置きます。Shift で "
+       "45 度刻み、ドラッグ中の Alt で片方のハンドルだけ、ドラッグ中の Space で点そのものを"
+       "動かし、Ctrl+ドラッグで置いた点を動かせます。最初の点をクリックするか Enter か右"
+       "クリックで閉じます。Backspace か Ctrl+Z で点を戻し、Esc で中止します。ペン図形を"
+       "選んでいるときは、輪郭のクリックで点を追加、点のクリックで削除、点の Alt+クリックで"
+       "角に、Alt+ドラッグで新しいハンドルを引き出します。"),
+    ZH_HANS("与矢量绘图软件一样：点击放下角点，拖动放下曲线点。Shift 以 45 度为步长；拖动时按 "
+            "Alt 只移动一侧手柄；拖动时按 Space 移动锚点本身；Ctrl+拖动移动已放下的点。点击"
+            "第一个锚点、按 Enter 或右键闭合；Backspace 或 Ctrl+Z 撤回一个锚点，Esc 取消。"
+            "选中钢笔形状时，点击轮廓添加锚点，点击锚点将其删除，Alt+点击锚点将其变为角点，"
+            "Alt+拖动则拉出新手柄。"),
+    ZH_HANT("與向量繪圖軟體一樣：點擊放下角點，拖曳放下曲線點。Shift 以 45 度為步長；拖曳時"
+            "按 Alt 只移動一側控制把手；拖曳時按 Space 移動錨點本身；Ctrl+拖曳移動已放下的"
+            "點。點擊第一個錨點、按 Enter 或右鍵閉合；Backspace 或 Ctrl+Z 收回一個錨點，Esc "
+            "取消。選取鋼筆形狀時，點擊輪廓新增錨點，點擊錨點將其刪除，Alt+點擊錨點將其變為"
+            "角點，Alt+拖曳則拉出新的控制把手。"),
+    KO("벡터 편집기처럼 클릭하면 모서리, 드래그하면 곡선 앵커를 놓습니다. Shift는 45도 단위로 "
+       "맞추고, 드래그 중 Alt는 핸들 한쪽만, 드래그 중 Space는 앵커 자체를 옮기며, Ctrl+"
+       "드래그는 이미 놓은 점을 옮깁니다. 첫 앵커 클릭, Enter 또는 오른쪽 클릭으로 닫고, "
+       "Backspace나 Ctrl+Z는 앵커를 되돌리며 Esc는 취소합니다. 펜 도형을 고른 상태에서는 "
+       "윤곽을 클릭해 앵커를 더하고, 앵커를 클릭해 지우고, 앵커를 Alt+클릭해 모서리로 "
+       "만들거나 Alt+드래그해 새 핸들을 뽑습니다."),
+    DE("Klick setzt eine Ecke, Ziehen eine Kurve, wie in einem Vektorprogramm. Umschalt "
+       "rastet in 45-Grad-Schritten ein; Alt beim Ziehen bewegt nur einen Griff, Leertaste "
+       "beim Ziehen den Anker selbst; Strg+Ziehen verschiebt einen schon gesetzten Punkt. "
+       "Erster Anker, Eingabe oder Rechtsklick schließt den Pfad; Rücktaste oder Strg+Z "
+       "nimmt einen Anker zurück, Esc bricht ab. Ist eine Zeichenstift-Form gewählt, fügt "
+       "ein Klick auf ihre Kontur einen Anker hinzu, ein Klick auf einen Anker löscht ihn, "
+       "Alt+Klick macht ihn zur Ecke und Alt+Ziehen zieht neue Griffe heraus."),
+    FR("Un clic pose un angle, un glissé une courbe, comme dans un logiciel vectoriel. Maj "
+       "force des pas de 45 degrés ; Alt pendant le glissé déplace une seule poignée, Espace "
+       "l'ancre elle-même ; Ctrl+glisser déplace un point déjà posé. La première ancre, "
+       "Entrée ou un clic droit ferme le tracé ; Retour arrière ou Ctrl+Z retire une ancre, "
+       "Échap annule. Une forme à la plume choisie, un clic sur son contour ajoute une ancre, "
+       "un clic sur une ancre la supprime, Alt+clic en fait un angle et Alt+glisser en tire "
+       "de nouvelles poignées."),
+    ES("Un clic pone una esquina y un arrastre una curva, como en un editor vectorial. Mayús "
+       "fija pasos de 45 grados; Alt al arrastrar mueve un solo tirador y Espacio el ancla; "
+       "Ctrl+arrastrar mueve un punto ya puesto. La primera ancla, Intro o clic derecho cierra "
+       "el trazado; Retroceso o Ctrl+Z quita un ancla, Esc cancela. Con una forma de pluma "
+       "elegida, un clic en su contorno añade un ancla, un clic en un ancla la borra, Alt+clic "
+       "la vuelve esquina y Alt+arrastrar saca tiradores nuevos."),
+    PT("Um clique põe um canto e um arraste uma curva, como num editor vetorial. Shift fixa "
+       "passos de 45 graus; Alt ao arrastar move uma só alça e Espaço a própria âncora; "
+       "Ctrl+arrastar move um ponto já posto. A primeira âncora, Enter ou clique direito fecha "
+       "o traçado; Backspace ou Ctrl+Z tira uma âncora, Esc cancela. Com uma forma da caneta "
+       "escolhida, um clique no contorno acrescenta uma âncora, um clique numa âncora a "
+       "apaga, Alt+clique a torna canto e Alt+arrastar puxa alças novas."),
+    IT("Un clic mette un angolo, un trascinamento una curva, come in un editor vettoriale. "
+       "Maiusc blocca a passi di 45 gradi; Alt durante il trascinamento muove una sola "
+       "maniglia, Spazio l'ancoraggio stesso; Ctrl+trascina sposta un punto già messo. Il "
+       "primo ancoraggio, Invio o il clic destro chiude il tracciato; Backspace o Ctrl+Z "
+       "toglie un ancoraggio, Esc annulla. Con una forma a penna scelta, un clic sul contorno "
+       "aggiunge un ancoraggio, un clic su un ancoraggio lo elimina, Alt+clic lo rende un "
+       "angolo e Alt+trascina estrae nuove maniglie."),
+    NL("Klik zet een hoek, slepen een kromme, zoals in een vectorprogramma. Shift houdt "
+       "stappen van 45 graden aan; Alt tijdens het slepen beweegt één greep, Spatie het anker "
+       "zelf; Ctrl+slepen verplaatst een al gezet punt. Het eerste anker, Enter of rechtsklik "
+       "sluit het pad; Backspace of Ctrl+Z neemt een anker terug, Esc breekt af. Met een "
+       "penvorm gekozen voegt een klik op de omtrek een anker toe, verwijdert een klik op een "
+       "anker het, maakt Alt+klik er een hoek van en trekt Alt+slepen nieuwe grepen uit."),
+    RU("Щелчок ставит угол, перетаскивание — кривую, как в векторном редакторе. Shift держит "
+       "шаг 45 градусов; Alt при перетаскивании двигает одну ручку, пробел — саму точку; "
+       "Ctrl+перетаскивание двигает уже поставленную точку. Первая точка, Enter или правая "
+       "кнопка замыкают контур; Backspace или Ctrl+Z убирает точку, Esc отменяет. Когда "
+       "выбрана фигура пером, щелчок по контуру добавляет точку, щелчок по точке удаляет её, "
+       "Alt+щелчок делает её угловой, а Alt+перетаскивание вытягивает новые ручки."),
+    TR("Bir vektör düzenleyicideki gibi tıklama bir köşe, sürükleme bir eğri bırakır. Shift "
+       "45 derecelik adımlar tutar; sürüklerken Alt tek bir tutamacı, Boşluk çapanın "
+       "kendisini taşır; Ctrl+sürükleme önceden konmuş bir noktayı taşır. İlk çapa, Enter "
+       "veya sağ tık yolu kapatır; Backspace veya Ctrl+Z bir çapayı geri alır, Esc iptal "
+       "eder. Bir kalem şekli seçiliyken dış hattına tıklamak çapa ekler, bir çapaya "
+       "tıklamak onu siler, Alt+tıklama onu köşe yapar, Alt+sürükleme yeni tutamaçlar çeker."));
+
+SS_MSG(stencil_per_camera,
+    EN("Separate areas for each camera"),
+    JA("カメラごとに別の範囲"),
+    ZH_HANS("每台相机单独设置区域"),
+    ZH_HANT("每台相機分別設定區域"),
+    KO("카메라마다 따로 영역 지정"),
+    DE("Eigene Bereiche je Kamera"),
+    FR("Zones distinctes par caméra"),
+    ES("Zonas distintas para cada cámara"),
+    PT("Áreas separadas para cada câmera"),
+    IT("Aree separate per ogni fotocamera"),
+    NL("Aparte gebieden per camera"),
+    RU("Отдельные области для каждой камеры"),
+    TR("Her kamera için ayrı alanlar"));
+
+SS_MSG(stencil_per_camera_help,
+    EN("This input writes several cameras: the two lenses of a dual-fisheye file, the "
+       "views of a 360 video, or subfolders of photos. Tick this to give each its own border "
+       "setting and shapes. Every camera starts from the shared ones, and the camera picker "
+       "(or the frame slider) chooses which one the tools edit. Untick to go back to one "
+       "set, keeping the camera shown."),
+    JA("この入力は複数のカメラを書き出します（デュアル魚眼ファイルの 2 つのレンズ、360 度"
+       "動画の各ビュー、写真のサブフォルダーなど）。チェックすると、カメラごとに境界の設定と"
+       "図形を持てます。どのカメラも共通の設定から始まり、カメラの選択（またはフレームの"
+       "スライダー）でツールが編集するカメラを選びます。外すと、表示中のカメラの設定を"
+       "残して 1 組に戻ります。"),
+    ZH_HANS("这个输入会写出多台相机：双鱼眼文件的两个镜头、360 视频的各个视图，或照片的子"
+            "文件夹。勾选后每台相机都有自己的边界设置和形状。每台相机都从共用的设置开始，"
+            "相机选择（或帧滑块）决定工具编辑哪一台。取消勾选则回到一组设置，保留当前显示"
+            "的相机的。"),
+    ZH_HANT("這個輸入會寫出多台相機：雙魚眼檔案的兩個鏡頭、360 影片的各個視角，或照片的子"
+            "資料夾。勾選後每台相機都有自己的邊界設定和形狀。每台相機都從共用的設定開始，"
+            "相機選擇（或影格滑桿）決定工具編輯哪一台。取消勾選則回到一組設定，保留目前"
+            "顯示的相機的。"),
+    KO("이 입력은 여러 카메라를 씁니다. 듀얼 어안 파일의 두 렌즈, 360 영상의 각 뷰, 사진의 "
+       "하위 폴더 같은 경우입니다. 체크하면 카메라마다 경계 설정과 도형을 따로 둡니다. 모든 "
+       "카메라는 공통 설정에서 시작하고, 카메라 선택(또는 프레임 슬라이더)으로 도구가 편집할 "
+       "카메라를 고릅니다. 체크를 풀면 보이는 카메라의 설정을 남기고 한 벌로 돌아갑니다."),
+    DE("Diese Eingabe schreibt mehrere Kameras: die zwei Objektive einer Dual-Fisheye-Datei, "
+       "die Ansichten eines 360-Videos oder Unterordner mit Fotos. Angehakt bekommt jede "
+       "ihre eigene Randeinstellung und eigene Formen. Jede Kamera beginnt mit den "
+       "gemeinsamen, und die Kameraauswahl (oder der Bildregler) bestimmt, welche die "
+       "Werkzeuge bearbeiten. Abgewählt gilt wieder ein Satz, der der gezeigten Kamera."),
+    FR("Cette entrée écrit plusieurs caméras : les deux objectifs d'un fichier double "
+       "fisheye, les vues d'une vidéo 360 ou des sous-dossiers de photos. Cochez pour donner "
+       "à chacune son propre réglage de bord et ses formes. Chaque caméra part des réglages "
+       "communs, et le choix de caméra (ou le curseur d'image) désigne celle que les outils "
+       "modifient. Décochez pour revenir à un seul jeu, celui de la caméra affichée."),
+    ES("Esta entrada escribe varias cámaras: los dos objetivos de un archivo de doble ojo de "
+       "pez, las vistas de un video 360 o subcarpetas de fotos. Márquelo para dar a cada una "
+       "su propio ajuste de borde y sus formas. Cada cámara parte de las comunes, y el "
+       "selector de cámara (o el deslizador de fotogramas) elige cuál editan las "
+       "herramientas. Desmárquelo para volver a un solo juego, el de la cámara mostrada."),
+    PT("Esta entrada grava várias câmeras: as duas lentes de um arquivo olho de peixe "
+       "duplo, as vistas de um vídeo 360 ou subpastas de fotos. Marque para dar a cada uma "
+       "sua própria configuração de borda e suas formas. Cada câmera parte das comuns, e o "
+       "seletor de câmera (ou o controle de quadros) escolhe qual as ferramentas editam. "
+       "Desmarque para voltar a um só conjunto, o da câmera mostrada."),
+    IT("Questo ingresso scrive più fotocamere: i due obiettivi di un file doppio fisheye, le "
+       "viste di un video 360 o sottocartelle di foto. Selezionandolo, ognuna ha la propria "
+       "impostazione del bordo e le proprie forme. Ogni fotocamera parte da quelle comuni, "
+       "e la scelta della fotocamera (o il cursore dei fotogrammi) indica quale modificano "
+       "gli strumenti. Deselezionandolo si torna a un solo insieme, quello della fotocamera "
+       "mostrata."),
+    NL("Deze invoer schrijft meerdere camera's: de twee lenzen van een dubbel-fisheyebestand, "
+       "de aanzichten van een 360-video of submappen met foto's. Aangevinkt krijgt elke "
+       "camera een eigen randinstelling en eigen vormen. Elke camera begint met de gedeelde, "
+       "en de camerakeuze (of de beeldschuif) bepaalt welke de gereedschappen bewerken. "
+       "Uitgevinkt geldt weer één set: die van de getoonde camera."),
+    RU("Этот вход даёт несколько камер: два объектива файла с двойным «рыбьим глазом», виды "
+       "360-градусного видео или подпапки с фотографиями. Отметьте, чтобы у каждой были свои "
+       "настройка границы и фигуры. Каждая камера начинает с общих, а выбор камеры (или "
+       "ползунок кадров) определяет, какую правят инструменты. Снимите отметку, чтобы "
+       "вернуться к одному набору — набору показанной камеры."),
+    TR("Bu girdi birden çok kamera yazar: çift balıkgözü bir dosyanın iki merceği, 360 "
+       "videonun görünümleri ya da fotoğraf alt klasörleri. İşaretlerseniz her birinin kendi "
+       "sınır ayarı ve şekilleri olur. Her kamera ortak olanlardan başlar; kamera seçimi (ya "
+       "da kare kaydırıcısı) araçların hangisini düzenleyeceğini seçer. İşareti kaldırınca, "
+       "gösterilen kameranınki kalarak tek bir takıma dönülür."));
+
+SS_MSG(stencil_per_camera_editing,
+    EN("Editing camera: {0}"),
+    JA("編集中のカメラ: {0}"),
+    ZH_HANS("正在编辑的相机：{0}"),
+    ZH_HANT("正在編輯的相機：{0}"),
+    KO("편집 중인 카메라: {0}"),
+    DE("Bearbeitete Kamera: {0}"),
+    FR("Caméra modifiée : {0}"),
+    ES("Cámara en edición: {0}"),
+    PT("Câmera em edição: {0}"),
+    IT("Fotocamera in modifica: {0}"),
+    NL("Bewerkte camera: {0}"),
+    RU("Редактируемая камера: {0}"),
+    TR("Düzenlenen kamera: {0}"));
+
+SS_MSG(stencil_drag_hint_pen,
+    EN("Drag it on the picture to move it; Points (A) edits its anchors and handles."),
+    JA("画像上でドラッグすると移動します。点とハンドルは「ポイント」（A）で編集します。"),
+    ZH_HANS("在图片上拖动即可移动；锚点和手柄用“锚点”（A）编辑。"),
+    ZH_HANT("在圖片上拖曳即可移動；錨點和控制把手用「錨點」（A）編輯。"),
+    KO("사진 위에서 드래그하면 옮겨집니다. 앵커와 핸들은 포인트(A)로 편집합니다."),
+    DE("Auf dem Bild ziehen, um sie zu verschieben; Punkte (A) bearbeitet Anker und Griffe."),
+    FR("Faites-la glisser sur l'image pour la déplacer ; Points (A) modifie ses ancres et "
+       "poignées."),
+    ES("Arrástrela sobre la imagen para moverla; Puntos (A) edita sus anclas y tiradores."),
+    PT("Arraste-a sobre a imagem para movê-la; Pontos (A) edita suas âncoras e alças."),
+    IT("La trascini sull'immagine per spostarla; Punti (A) ne modifica ancoraggi e maniglie."),
+    NL("Sleep hem op de afbeelding om hem te verplaatsen; Punten (A) bewerkt ankers en grepen."),
+    RU("Перетащите её на изображении, чтобы сдвинуть; «Точки» (A) правят опорные точки и "
+       "ручки."),
+    TR("Taşımak için resim üzerinde sürükleyin; çapaları ve tutamaçları Noktalar (A) "
+       "düzenler."));
+
+SS_MSG(stencil_points_hint,
+    EN("Drag its squares (anchors) and circles (handles); Alt+drag a handle to move it "
+       "alone. Delete removes the picked anchor."),
+    JA("四角（点）と丸（ハンドル）をドラッグします。Alt+ドラッグでハンドルを片方だけ動かし、"
+       "Delete で選んだ点を削除します。"),
+    ZH_HANS("拖动方块（锚点）和圆点（手柄）；Alt+拖动手柄只移动这一侧。Delete 删除选中的"
+            "锚点。"),
+    ZH_HANT("拖曳方塊（錨點）和圓點（控制把手）；Alt+拖曳把手只移動這一側。Delete 刪除選取"
+            "的錨點。"),
+    KO("네모(앵커)와 동그라미(핸들)를 드래그하세요. 핸들을 Alt+드래그하면 그쪽만 옮겨지고, "
+       "Delete는 고른 앵커를 지웁니다."),
+    DE("Quadrate (Anker) und Kreise (Griffe) ziehen; Alt+Ziehen bewegt einen Griff allein. "
+       "Entf löscht den gewählten Anker."),
+    FR("Faites glisser ses carrés (ancres) et cercles (poignées) ; Alt+glisser déplace une "
+       "poignée seule. Suppr retire l'ancre choisie."),
+    ES("Arrastre sus cuadrados (anclas) y círculos (tiradores); Alt+arrastrar mueve un "
+       "tirador solo. Supr quita el ancla elegida."),
+    PT("Arraste seus quadrados (âncoras) e círculos (alças); Alt+arrastar move uma alça "
+       "sozinha. Delete remove a âncora escolhida."),
+    IT("Trascini i quadrati (ancoraggi) e i cerchi (maniglie); Alt+trascina sposta una "
+       "maniglia da sola. Canc toglie l'ancoraggio scelto."),
+    NL("Sleep de vierkantjes (ankers) en rondjes (grepen); Alt+slepen beweegt één greep "
+       "alleen. Delete verwijdert het gekozen anker."),
+    RU("Перетаскивайте квадраты (опорные точки) и кружки (ручки); Alt+перетаскивание "
+       "двигает одну ручку. Delete удаляет выбранную точку."),
+    TR("Karelerini (çapalar) ve dairelerini (tutamaçlar) sürükleyin; Alt+sürükleme bir "
+       "tutamacı tek başına taşır. Delete seçilen çapayı siler."));
 
 SS_MSG(mask_border_enable,
     EN("Remove fixed areas of the frame"),
@@ -9962,49 +10372,6 @@ SS_MSG(use_ffmpeg_always,
     RU("Эта сборка всегда использует ffmpeg для видео."),
     TR("Bu sürüm video için her zaman ffmpeg kullanır."));
 
-SS_MSG(use_python_masking,
-    EN("Mask with the external Python script"),
-    JA("外部の Python スクリプトでマスクする"),
-    ZH_HANS("用外部 Python 脚本做蒙版"),
-    ZH_HANT("用外部 Python 指令稿做遮罩"),
-    KO("외부 Python 스크립트로 마스킹"),
-    DE("Mit dem externen Python-Skript maskieren"),
-    FR("Masquer avec le script Python externe"),
-    ES("Enmascarar con el script externo de Python"),
-    PT("Mascarar com o script externo em Python"),
-    IT("Mascherare con lo script Python esterno"),
-    NL("Maskeren met het externe Python-script"),
-    RU("Маскировать внешним скриптом Python"),
-    TR("Harici Python betiğiyle maskele"));
-
-SS_MSG(use_python_masking_help,
-    EN("Use reference/scripts/mask.py through an external Python with "
-       "lang-segment-anything, instead of the built-in segmentation."),
-    JA("内蔵のセグメンテーションの代わりに、lang-segment-anything を入れた"
-       "外部の Python で reference/scripts/mask.py を使います。"),
-    ZH_HANS("不用内置分割，而是通过装有 lang-segment-anything 的外部 Python "
-            "运行 reference/scripts/mask.py。"),
-    ZH_HANT("不用內建分割，而是透過裝有 lang-segment-anything 的外部 Python "
-            "執行 reference/scripts/mask.py。"),
-    KO("내장 분할 대신, lang-segment-anything이 설치된 외부 Python으로 "
-       "reference/scripts/mask.py를 실행합니다."),
-    DE("reference/scripts/mask.py über ein externes Python mit "
-       "lang-segment-anything benutzen statt der eingebauten Segmentierung."),
-    FR("Utiliser reference/scripts/mask.py via un Python externe doté de "
-       "lang-segment-anything, au lieu de la segmentation intégrée."),
-    ES("Usar reference/scripts/mask.py mediante un Python externo con "
-       "lang-segment-anything, en lugar de la segmentación integrada."),
-    PT("Usar reference/scripts/mask.py por meio de um Python externo com "
-       "lang-segment-anything, em vez da segmentação integrada."),
-    IT("Usare reference/scripts/mask.py tramite un Python esterno con "
-       "lang-segment-anything, invece della segmentazione integrata."),
-    NL("reference/scripts/mask.py gebruiken via een externe Python met "
-       "lang-segment-anything, in plaats van de ingebouwde segmentatie."),
-    RU("Использовать reference/scripts/mask.py через внешний Python с "
-       "lang-segment-anything вместо встроенной сегментации."),
-    TR("Yerleşik bölütleme yerine, lang-segment-anything kurulu harici bir "
-       "Python üzerinden reference/scripts/mask.py kullanır."));
-
 // ===========================================================================
 // Advanced: external COLMAP
 //
@@ -11334,36 +11701,6 @@ SS_MSG(ffmpeg_executable_help_always,
     NL("Wordt gebruikt om beelden uit de video te halen."),
     RU("Используется для извлечения кадров из видео."),
     TR("Videodan kare çıkarmak için kullanılır."));
-
-SS_MSG(python_executable,
-    EN("python executable"),
-    JA("python の実行ファイル"),
-    ZH_HANS("python 可执行文件"),
-    ZH_HANT("python 執行檔"),
-    KO("python 실행 파일"),
-    DE("python-Programmdatei"),
-    FR("exécutable python"),
-    ES("ejecutable de python"),
-    PT("executável do python"),
-    IT("eseguibile python"),
-    NL("python-programma"),
-    RU("исполняемый файл python"),
-    TR("python çalıştırılabiliri"));
-
-SS_MSG(python_executable_help,
-    EN("Only used by the external masking script."),
-    JA("外部のマスキングスクリプトだけが使います。"),
-    ZH_HANS("只有外部的蒙版脚本会用到。"),
-    ZH_HANT("只有外部的遮罩指令稿會用到。"),
-    KO("외부 마스킹 스크립트만 사용합니다."),
-    DE("Wird nur vom externen Maskierungsskript benutzt."),
-    FR("Utilisé uniquement par le script de masquage externe."),
-    ES("Solo lo usa el script externo de enmascarado."),
-    PT("Usado apenas pelo script externo de mascaramento."),
-    IT("Usato solo dallo script esterno di mascheratura."),
-    NL("Wordt alleen gebruikt door het externe maskeerscript."),
-    RU("Используется только внешним скриптом маскирования."),
-    TR("Yalnızca harici maskeleme betiği kullanır."));
 
 // ===========================================================================
 // The segmentation checkpoints (src/app/gui/ModelCache.cpp)

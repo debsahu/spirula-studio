@@ -7,6 +7,7 @@
 
 #include "data/Region.h"
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -21,9 +22,11 @@ struct RegionMesh {
 };
 
 RegionMesh region_boundary_mesh(const Region& r, const Aabb& box, int cells_long_axis = 96);
-// One mesh per label of the field, from one pass of queries over the grid.
+// One mesh per label of the field, from one pass of queries over the grid;
+// {} once `cancel` is set.
 std::vector<RegionMesh> label_boundary_meshes(const LabelField& f, const Aabb& box,
-                                              int cells_long_axis = 96);
+                                              int cells_long_axis = 96,
+                                              const std::atomic<bool>* cancel = nullptr);
 
 // 1st..99th percentile of the points per axis, padded by a tenth: a box one
 // stray point far away cannot blow up.

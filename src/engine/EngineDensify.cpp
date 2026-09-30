@@ -90,7 +90,7 @@ int engine_densify_step(int step, int max_steps, const DensifyConfig& cfg) {
     bool densify_ongoing =
         (step < std::max(cfg.refine_stop_iter,
                          max_steps - cfg.refine_stop_num_iter));
-    bool do_densify = densify_ongoing && (step > cfg.refine_start_iter && step % cfg.refine_every == 0);
+    bool do_densify = densify_grows_at(cfg, step, max_steps);
     float progress = ((float)step + 0.5f) / (float)max_steps;
 
     // Use pool-backed DeviceVector/DeviceTensor from Buffers directly
@@ -340,7 +340,7 @@ int engine_densify_step(int step, int max_steps, const DensifyConfig& cfg) {
         );
 
         // Add more splats
-        int64_t n_target = std::min(max_num_splats, (int64_t)(cfg.growth_factor * cur_num_splats));
+        int64_t n_target = densify_target(cfg, cur_num_splats, max_num_splats);
         num_added = (int)std::max((int64_t)0, n_target - cur_num_splats);
         if (num_added > 0) {
             // The oversize channel draws first, so its candidate set is the
@@ -406,7 +406,7 @@ int engine_densify_step(int step, int max_steps, const DensifyConfig& cfg) {
         , engine().region.weight);
 
         // MCMC sample add
-        int64_t n_target = std::min(max_num_splats, (int64_t)(cfg.growth_factor * cur_num_splats));
+        int64_t n_target = densify_target(cfg, cur_num_splats, max_num_splats);
         num_added = (int)std::max((int64_t)0, n_target - cur_num_splats);
         if (num_added > 0) {
             add_splats_mcmc_tensor(
@@ -449,5 +449,6 @@ int engine_densify_step(int step, int max_steps, const DensifyConfig& cfg) {
     }
 
     engine().cur_num_splats = cur_num_splats + num_added;
+    DevicePool::global().set_splat_counts(engine().cur_num_splats, engine().max_num_splats);
     return num_added;
 }

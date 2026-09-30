@@ -1,13 +1,16 @@
 // dataset_prep_test -- the two places DatasetPrep (app/gui/DatasetPrep.h) meets
 // the mask editor's layer folder: a re-run re-applies hand corrections over
 // the masks it rewrites, and the camera scan never takes mask_edits/ for a
-// camera. Real DatasetPrep::run, no model: the re-mask is the frame stencil.
+// camera. Real DatasetPrep::run, no model: the re-mask is the frame stencil,
+// which is also checked per camera folder. Built without SS_BUILD_SAM, so it
+// also checks that asking for a model fails.
 
 #include "app/FrameMask.h"
 #include "app/gui/DatasetPrep.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "core/SourcePath.h"
 #include "external/stb_image_write.h"
+#include "i18n/catalog/Log.h"
 #include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
@@ -163,11 +166,66 @@ void test_camera_scan_skips_mask_edits() {
           "is_mask_edits_folder: by name");
 }
 
+// An input whose cameras have their own stencils: cam1's replaces the
+// input's for its frames, and cam0 keeps the input's.
+void test_per_camera_stencil() {
+    const int W = 40, H = 20;
+    const fs::path root = scratch("percamera");
+    const fs::path photos = root / "photos", ws = root / "dataset";
+    for (const char* f : {"f.jpg", "g.jpg"}) {
+        write_jpg(photos / "cam0" / f, W, H, 0);
+        write_jpg(photos / "cam1" / f, W, H, 1);
+    }
+    gui::PrepJob job;
+    job.workspace = ws.string();
+    job.photo_import = gui::PhotoImport::InPlace;
+    gui::PrepInput in;
+    in.path = photos.string();
+    std::string err;
+    app::parse_mask_shapes("-rect 0,0,0.5,1", in.stencil.mask.shapes, err);
+    app::parse_mask_shapes("-rect 0.5,0,1,1", in.stencil.cameras["cam1"].mask.shapes, err);
+    job.inputs = {in};
+    gui::RunProgress prog;
+    check(run_prep(job, prog, err), "per camera: run: " + err);
+    std::vector<uint8_t> m0, m1;
+    int w = 0, h = 0;
+    const bool read = app::load_stencil((ws / "masks" / "cam0" / "f.png").string(), w, h, m0) &&
+                      app::load_stencil((ws / "masks" / "cam1" / "f.png").string(), w, h, m1) &&
+                      m0.size() == (size_t)W * H && m1.size() == m0.size();
+    check(read, "per camera: a mask per camera folder");
+    if (!read) return;
+    check(at(m0, W, 5, 10) == 0 && at(m0, W, 35, 10) == 255,
+          "per camera: cam0 has the input's shapes, the left half out");
+    check(at(m1, W, 5, 10) == 255 && at(m1, W, 35, 10) == 0,
+          "per camera: cam1 has its own, the right half out");
+}
+
+void test_model_masking_needs_segmentation() {
+    const fs::path root = scratch("nosam");
+    const fs::path photos = root / "photos";
+    for (int i = 0; i < 3; i++) write_jpg(photos / (std::string(1, (char)('a' + i)) + ".jpg"), 64, 48, i);
+    gui::PrepJob job;
+    job.workspace = (root / "dataset").string();
+    job.photo_import = gui::PhotoImport::InPlace;
+    job.mask_enable = true;
+    job.mask_prompt = "person";
+    gui::PrepInput in;
+    in.path = photos.string();
+    job.inputs = {in};
+    gui::RunProgress prog;
+    std::string err;
+    const bool ran = run_prep(job, prog, err);
+    check(!ran && err == spirula::i18n::msg::log::err_no_builtin_segmentation.get(),
+          "no segmentation module: a model-masking run is refused: " + err);
+}
+
 }  // namespace
 
 int main() {
     test_rerun_reapplies_corrections();
     test_camera_scan_skips_mask_edits();
+    test_per_camera_stencil();
+    test_model_masking_needs_segmentation();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }

@@ -7,6 +7,7 @@
 // reconstruction cut through the same code.
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <numeric>
@@ -28,6 +29,10 @@ struct WeightedGraph {
         return d;
     }
 };
+
+inline bool cancelled(const std::atomic<bool>* flag) {
+    return flag && flag->load(std::memory_order_relaxed);
+}
 
 struct Edge {
     uint32_t a = 0, b = 0;
@@ -123,7 +128,8 @@ namespace detail {
 // iteration on M = D^-1/2 W D^-1/2 deflated against its top eigenvector
 // D^1/2 * 1. Per-node values in `nodes` order; empty when it did not converge.
 inline std::vector<double> fiedler(const WeightedGraph& g, const std::vector<uint32_t>& nodes,
-                                   const std::vector<uint32_t>& local_of, int iters = 300) {
+                                   const std::vector<uint32_t>& local_of, int iters = 300,
+                                   const std::atomic<bool>* cancel = nullptr) {
     const size_t m = nodes.size();
     std::vector<double> deg(m, 0.0);
     for (size_t i = 0; i < m; i++) {
@@ -161,6 +167,7 @@ inline std::vector<double> fiedler(const WeightedGraph& g, const std::vector<uin
     // (M + I)/2 makes the wanted eigenvector the dominant mode of a positive
     // operator, so the iteration cannot land on the most negative one.
     for (int it = 0; it < iters; it++) {
+        if (cancelled(cancel)) return {};
         std::fill(y.begin(), y.end(), 0.0);
         for (size_t i = 0; i < m; i++) {
             const uint32_t v = nodes[i];
@@ -195,6 +202,8 @@ struct BisectOptions {
     // normalized cut free to shave off a weakly attached clump, which is right
     // for SfM atoms and wrong for parts that should be of a size.
     double balance = 0.0;
+    // Set: the split gives up and returns {}.
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 // Split `nodes` in two along the normalized cut, then give each side the
@@ -207,7 +216,8 @@ inline std::vector<std::vector<uint32_t>> bisect(const WeightedGraph& g,
     std::vector<uint32_t> local_of(g.n(), UINT32_MAX);
     for (size_t i = 0; i < nodes.size(); i++) local_of[nodes[i]] = (uint32_t)i;
 
-    std::vector<double> f = detail::fiedler(g, nodes, local_of);
+    std::vector<double> f = detail::fiedler(g, nodes, local_of, 300, opt.cancel);
+    if (cancelled(opt.cancel)) return {};
     std::vector<uint32_t> order(nodes.size());
     std::iota(order.begin(), order.end(), 0u);
     // No Fiedler vector (disconnected or degenerate): the input order, which
@@ -343,6 +353,8 @@ struct LabelCutOptions {
     // the part it shares the most with.
     size_t min_final = 2;
     int refine_passes = 3;
+    // Set: the cut stops within one power iteration and returns {}.
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 namespace detail {
@@ -361,8 +373,8 @@ inline void label_links(const WeightedGraph& g, const std::vector<int32_t>& labe
 // are best connected to, when at most `max_share` of the part: stranded nodes
 // are repaired, a part that is genuinely two halves is left to be split again.
 inline void reconnect_parts(const WeightedGraph& g, std::vector<int32_t>& label, int n_labels,
-                            double max_share = 1.0) {
-    for (int l = 0; l < n_labels; l++) {
+                            double max_share = 1.0, const std::atomic<bool>* cancel = nullptr) {
+    for (int l = 0; l < n_labels && !cancelled(cancel); l++) {
         std::vector<uint32_t> nodes;
         for (uint32_t v = 0; v < g.n(); v++)
             if (label[v] == l) nodes.push_back(v);
@@ -396,8 +408,9 @@ inline std::vector<int32_t> cut_labels(const WeightedGraph& g, const LabelCutOpt
     std::iota(all.begin(), all.end(), 0u);
     std::vector<std::vector<uint32_t>> parts = connected_components(g, all);
     std::vector<char> final_(parts.size(), 0);
-    const BisectOptions bo{0, opt.min_part, opt.cost, opt.balance};
+    const BisectOptions bo{0, opt.min_part, opt.cost, opt.balance, opt.cancel};
     for (;;) {
+        if (cancelled(opt.cancel)) return {};
         // The part to cut next: the costliest one still cuttable.
         int pick = -1;
         double pick_cost = -1;
@@ -410,6 +423,7 @@ inline std::vector<int32_t> cut_labels(const WeightedGraph& g, const LabelCutOpt
         }
         if (pick < 0) break;
         std::vector<std::vector<uint32_t>> halves = bisect(g, parts[(size_t)pick], bo);
+        if (cancelled(opt.cancel)) return {};
         if (halves.size() != 2 || halves[0].empty() || halves[1].empty()) {
             final_[(size_t)pick] = 1;
             continue;
@@ -444,6 +458,7 @@ inline std::vector<int32_t> cut_labels(const WeightedGraph& g, const LabelCutOpt
     // A boundary node that shares more with another part moves over while
     // the sizes stay within a quarter of the mean; stranded pieces follow.
     for (int pass = 0; pass < opt.refine_passes; pass++) {
+        if (cancelled(opt.cancel)) return {};
         std::vector<double> sz = sizes();
         double mean = 0;
         for (double x : sz) mean += x;
@@ -467,12 +482,13 @@ inline std::vector<int32_t> cut_labels(const WeightedGraph& g, const LabelCutOpt
             moved++;
         }
         if (moved == 0) break;
-        detail::reconnect_parts(g, label, n_labels, 0.25);
+        detail::reconnect_parts(g, label, n_labels, 0.25, opt.cancel);
     }
 
     // Parts too small to be worth a model join their best-connected neighbour;
     // an isolated one stays as it is and is the caller's to place.
     for (;;) {
+        if (cancelled(opt.cancel)) return {};
         std::vector<double> sz = sizes();
         int tiny = -1;
         for (int k = 0; k < n_labels; k++)
