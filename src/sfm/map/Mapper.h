@@ -272,7 +272,7 @@ struct MapperOptions {
     bool seam_order_by_name = false;
     // The block scale check (map/BlockScale.h): a chain that shrinks or stretches by a few
     // percent stays inside gpsCheck's gate (Hickory's west chain, 6.7 % over 100 frames), so
-    // it is read against the GPS over 60-150 m and rescaled. Any value over 0 turns it on.
+    // it is read against the GPS over 60-150 m; past threshold it asks for a BA (gpsScaleCheck).
     double gps_scale_band = 1.0;
     // Auditing an assembled model (D44). An image is put back only when the
     // structure it did *not* bring supports a competing pose: one that clears
@@ -544,6 +544,10 @@ public:
         uint32_t before = 0, after = 0;
         uint32_t registered = 0;   // images this pass brought in
         bool refined = false;      // whether a final refinement ran
+        // An index into priorStats().scale_requests growByPnP raised during this pass, or -1.
+        // growByPnP defers its own BA to the caller's joint solve, so its ScaleRequest::post
+        // stays NaN unless the caller resolves it itself -- see resolveScaleReading.
+        long scale_request = -1;
     };
 
     // Adopt `m` and keep registering into it until nothing else fits. An image
@@ -798,6 +802,7 @@ public:
             st.registered -= std::min(st.registered, bad);
         }
         st.after = rec_.numRegistered();
+        st.scale_request = bss_pending_;
         if (out) *out = st;
         if (!st.registered) return m;  // unchanged: hand back the original
         return snapshotModel();
@@ -852,6 +857,25 @@ public:
         }
         ba_over_budget_throws_ = false;
         return true;
+    }
+
+    // growByPnP defers its own BA to the caller's joint solve, which never adopts any one
+    // model into rec_, so bssAfterBa (only called from checkedRefine) never runs for a
+    // request it raised (GrowStats::scale_request) -- refine `grown` on its own and read it.
+    void resolveScaleReading(const Reconstruction& grown, long request_index) {
+        if (request_index < 0 || (size_t)request_index >= prior_stats_.scale_requests.size())
+            return;
+        const Reconstruction refined = refine(grown, true);
+        resetModel();
+        adopt(refined);
+        fitGpsFrame();
+        if (!gps_frame_.ok) return;
+        bssStart();
+        PriorStats::ScaleRequest& q = prior_stats_.scale_requests[(size_t)request_index];
+        const std::vector<bss::Frame> f = bssFrames();
+        const size_t k = bssIndex(f, q.img);
+        if (k == f.size()) return;
+        bssSide(bss::read(f, k, bss::globalRatio(f)), q.side, q.post);
     }
 
     // Two registration fronts that meet without sharing structure leave every point there

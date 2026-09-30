@@ -2118,32 +2118,32 @@ SS_MSG(seam_weld_help,
        "ve yeniden ayarlanır; atlamak için 0"));
 
 SS_MSG(gps_scale_band_help,
-    EN("Check the growing chain's scale against the GPS over 60-150 m of track and rescale a "
-       "block that drifted before bundle adjusting it; 0 to skip"),
-    JA("成長中の区間の縮尺を 60〜150 m の軌跡で GPS と照合し、ずれたブロックを縮尺補正して"
-       "からバンドル調整します。0 で省略"),
-    ZH_HANS("在 60–150 米轨迹上将正在增长的链段尺度与 GPS 对照，对漂移的区块先做尺度校正再进行"
+    EN("Check the growing chain's scale against the GPS over 60-150 m of track and request a "
+       "bundle adjustment when a block has drifted; 0 to skip"),
+    JA("成長中の区間の縮尺を 60〜150 m の軌跡で GPS と照合し、ブロックがずれていたらバンドル"
+       "調整を要求します。0 で省略"),
+    ZH_HANS("在 60–150 米轨迹上将正在增长的链段尺度与 GPS 对照，区块漂移时请求进行"
             "光束法平差；0 表示跳过"),
-    ZH_HANT("在 60–150 公尺軌跡上將正在增長的鏈段尺度與 GPS 對照，對漂移的區塊先做尺度校正再進行"
+    ZH_HANT("在 60–150 公尺軌跡上將正在增長的鏈段尺度與 GPS 對照，區塊漂移時請求進行"
             "光束法平差；0 表示略過"),
-    KO("성장 중인 구간의 축척을 60~150 m 궤적에서 GPS와 대조하고, 어긋난 블록은 축척을 바로잡은 "
-       "뒤 번들 조정합니다. 0이면 건너뜁니다"),
-    DE("Den Maßstab der wachsenden Kette über 60-150 m Strecke mit dem GPS vergleichen und einen "
-       "abgedrifteten Block vor dem Ausgleich neu skalieren; 0 überspringt"),
-    FR("Comparer l'échelle de la chaîne en croissance au GPS sur 60 à 150 m de trajet et remettre "
-       "à l'échelle un bloc qui a dérivé avant de l'ajuster ; 0 pour sauter"),
+    KO("성장 중인 구간의 축척을 60~150 m 궤적에서 GPS와 대조하고, 블록이 어긋나면 "
+       "번들 조정을 요청합니다. 0이면 건너뜁니다"),
+    DE("Den Maßstab der wachsenden Kette über 60-150 m Strecke mit dem GPS vergleichen und bei "
+       "einem abgedrifteten Block einen Bündelausgleich anfordern; 0 überspringt"),
+    FR("Comparer l'échelle de la chaîne en croissance au GPS sur 60 à 150 m de trajet et "
+       "demander un ajustement de faisceaux quand un bloc a dérivé ; 0 pour sauter"),
     ES("Comparar la escala de la cadena en crecimiento con el GPS sobre 60-150 m de recorrido y "
-       "reescalar un bloque que derivó antes de ajustarlo; 0 para saltarlo"),
+       "solicitar un ajuste de haces cuando un bloque haya derivado; 0 para saltarlo"),
     PT("Comparar a escala da cadeia em crescimento com o GPS em 60-150 m de percurso e "
-       "reescalar um bloco que derivou antes de ajustá-lo; 0 para pular"),
+       "solicitar um ajuste de feixes quando um bloco tiver derivado; 0 para pular"),
     IT("Confrontare la scala della catena in crescita con il GPS su 60-150 m di percorso e "
-       "riscalare un blocco che è derivato prima di ottimizzarlo; 0 per saltare"),
+       "richiedere un bundle adjustment quando un blocco è derivato; 0 per saltare"),
     NL("De schaal van de groeiende keten over 60-150 m spoor met het GPS vergelijken en een "
-       "verlopen blok herschalen voordat het wordt vereffend; 0 om over te slaan"),
-    RU("Сверять масштаб растущей цепочки с GPS на 60-150 м пути и перемасштабировать "
-       "уплывший блок перед уточнением; 0 -- пропустить"),
-    TR("Büyüyen zincirin ölçeğini 60-150 m iz boyunca GPS ile karşılaştır ve kaymış bir bloğu "
-       "ayarlamadan önce yeniden ölçekle; atlamak için 0"));
+       "bundelaanpassing aanvragen wanneer een blok is verlopen; 0 om over te slaan"),
+    RU("Сверять масштаб растущей цепочки с GPS на 60-150 м пути и запрашивать "
+       "уточнение при уплывшем блоке; 0 -- пропустить"),
+    TR("Büyüyen zincirin ölçeğini 60-150 m iz boyunca GPS ile karşılaştır ve bir blok "
+       "kaydığında demet dengelemesi iste; atlamak için 0"));
 
 SS_MSG(rank_by_visibility_help,
     EN("Rank the next image by how its visible structure spreads over the frame, "

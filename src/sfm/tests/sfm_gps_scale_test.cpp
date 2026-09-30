@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "sfm/core/Model.h"
+#include "sfm/map/Assemble.h"
 #include "sfm/map/Mapper.h"
 #include "sfm/map/SensorPriors.h"
 #include "sfm/tests/TestMain.h"
@@ -171,6 +172,68 @@ static void print(const char* what, const Out& o) {
                     std::exp(q.x[2]), std::exp(q.post[0]), std::exp(q.post[1]), std::exp(q.post[2]));
 }
 
+// `full`, cut down to images 0..hi and the tracks that still have 2+ views left.
+static Reconstruction subModel(const Reconstruction& full, uint32_t hi) {
+    Reconstruction r = full;
+    for (auto it = r.images.begin(); it != r.images.end();)
+        it = it->first > hi ? r.images.erase(it) : std::next(it);
+    for (auto it = r.points3D.begin(); it != r.points3D.end();) {
+        auto& tr = it->second.track;
+        tr.erase(std::remove_if(tr.begin(), tr.end(),
+                                [&](const TrackElement& e) { return e.image_id > hi; }),
+                 tr.end());
+        it = tr.size() < 2 ? r.points3D.erase(it) : std::next(it);
+    }
+    return r;
+}
+
+// The bottom-up/atoms path (Assemble.h's growModels, growByPnP's only caller): unlike
+// Mapper::run()'s flat path (grow() -> checkedRefine -> bssAfterBa), growByPnP defers its own
+// BA to the caller, so a request it raises needs Mapper::resolveScaleReading for a `post`.
+static void testAssemblyScaleRequest(const Scene& sc, const Reconstruction& full,
+                                     MapperOptions opt, int from_walk, double k) {
+    const int n = (int)sc.centres.size();
+    const int from = from_walk < kWalk ? g_walk_cam[from_walk] : n;
+    // 15 images of margin: enough that gpsScaleCheck's own 10-registrations-since-adoption
+    // gate clears at almost exactly the point growth crosses into the drifted tail, so most
+    // of the growth this test drives sees the stretch.
+    const uint32_t hi = (uint32_t)std::max(0, from - 15);
+    const Reconstruction part = subModel(full, hi);
+
+    std::vector<std::optional<Geodetic>> fixes(n);
+    for (int c = 0; c < n; c++) {
+        const Vec3 o = sc.centres[std::min(from, n - 1)];
+        const Vec3 C = c < from ? sc.centres[c] : o + (sc.centres[c] - o) * k;
+        fixes[c] = fixAt(C.x, C.z, 250.0 - C.y);
+    }
+    SensorPriorOptions so;
+    so.gps_flat = true;
+    ExifGpsPriors gps(fixes, so);
+    MapperOptions o = opt;
+    o.ba_growth_ratio = 1.5;
+    o.gps_scale_band = 1.0;
+    Mapper m(sc.db, sc.feats, o, {}, nullptr, nullptr, &gps);
+
+    std::vector<Reconstruction> models{part};
+    std::vector<char> dirty(1, 0);
+    size_t rejected = 0;
+    detail::growModels(m, models, dirty, {}, 4.0, (size_t)n, rejected);
+
+    const std::vector<Mapper::PriorStats::ScaleRequest> req = m.priorStats().scale_requests;
+    std::printf("growByPnP scale: %u..%u adopted, %u registered after growth, %zu request(s)\n",
+               0u, hi, models[0].numRegistered(), req.size());
+    check(!req.empty(),
+         "fixture: growth through growByPnP alone reaches the drift and asks for a BA");
+    if (req.empty()) return;
+    const Mapper::PriorStats::ScaleRequest& q = req.back();
+    // Only the (side, l) the pick actually chose is guaranteed a reading at request time
+    // (q.x itself is NaN on the other lengths whenever their own window lacks support).
+    check(!std::isnan(q.post[q.l]),
+         "assembly: a scale request growByPnP raises gets a post-BA reading, not NaN forever");
+    check(std::fabs(q.post[q.l]) < 0.7 * std::fabs(q.x[q.l]),
+         "assembly: that reading is a real post-BA one -- much nearer the GPS than the request");
+}
+
 static int body(int argc, char** argv) {
     MapperOptions opt;
     opt.verbose = false;
@@ -205,6 +268,8 @@ static int body(int argc, char** argv) {
           "scale: after the requested BA alone (no rescale) the reading is much nearer the GPS");
     check(big.in_run <= 1 + big.registered / 10,
           "scale: at most one request per ten registrations");
+
+    testAssemblyScaleRequest(sc, same.model, opt, kWalk - 80, k_big);
 
     using Req = Mapper::PriorStats::ScaleRequest;
     const Req last = big.req.empty() ? Req{} : big.req.back();
