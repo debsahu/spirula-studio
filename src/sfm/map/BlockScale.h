@@ -202,7 +202,7 @@ inline Pick pickEnd(const std::vector<Reading>& stored, size_t& which) {
 // junction by 25 frames, as the woods' per-pair ratios swing 0.85-1.02 with the GPS.
 struct Block {
     bool ok = false;
-    size_t newest = 0, pivot = 0, far = 0;  // far: the block frame next to the pivot
+    size_t newest = 0, pivot = 0, bound = 0;  // bound: the block frame next to the pivot
     int side = 0;
     size_t frames = 0, pairs = 0;
     bool capped = false;
@@ -243,7 +243,7 @@ inline Block block(const std::vector<Frame>& f, size_t k, int side, double x, do
         b.capped = true;
     }
     b.pivot = (size_t)pivot;
-    b.far = (size_t)(pivot - dir);
+    b.bound = (size_t)(pivot - dir);
     b.frames = (size_t)std::labs(pivot - (long)k);
     if (b.frames == 0) return b;
     std::vector<Pair> own;
@@ -269,8 +269,8 @@ template <class KeyFn>
 inline size_t rescale(Reconstruction& rec, const std::vector<Frame>& f, const Block& b,
                       KeyFn key) {
     const int64_t seq = f[b.newest].seq;
-    const int64_t lo = std::min(f[b.newest].pos, f[b.far].pos);
-    const int64_t hi = std::max(f[b.newest].pos, f[b.far].pos);
+    const int64_t lo = std::min(f[b.newest].pos, f[b.bound].pos);
+    const int64_t hi = std::max(f[b.newest].pos, f[b.bound].pos);
     const Vec3 c = cameraCenter(rec.images.at(f[b.pivot].img).pose);
     std::unordered_set<uint32_t> moved;
     for (auto& kv : rec.images) {

@@ -516,20 +516,20 @@ static void testGpsOnlySource() {
 
     // --metric-gps horizontal and no IMU up: level about the cameras' mean up.
     const GpsOnlyRun level = gpsOnlyRun(false, true);
-    int vertical = 0, far = 0;
+    int vertical = 0, farCount = 0;
     const GpsOnlyScene s = gpsOnlyScene(false);
     for (const PriorCentre& f : level.pf.centres) {
         vertical += f.sigma.z != 0.0;
         Vec3 d = mul(f.A[0], cameraCenter(s.imgs[f.img[0]].pose)) - f.b;
         d.z = 0;
-        far += d.norm() > 0.5;
+        farCount += d.norm() > 0.5;
     }
     std::printf("GPS only, horizontal: ok=%d reason=%d, %zu centres, %d vertical, %d level "
                 "residual over 0.5 m\n", level.st.gps_ok, (int)level.st.gps_reason,
-                level.pf.centres.size(), vertical, far);
+                level.pf.centres.size(), vertical, farCount);
     check(level.st.gps_ok && level.pf.centres.size() == 59 && level.pf.gps.flat && vertical == 0,
           "GPS horizontal: a straight track with no IMU up gets level factors");
-    check(far == 0, "GPS horizontal: the level factors hold at the true poses");
+    check(farCount == 0, "GPS horizontal: the level factors hold at the true poses");
 }
 
 // With an IMU up the telemetry fit is level whatever gps_flat says: the mean up

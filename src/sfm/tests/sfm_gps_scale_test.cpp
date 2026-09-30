@@ -166,9 +166,9 @@ static void print(const char* what, const Out& o) {
     std::printf("%s: %u registered, %u in-run request(s), %u after growth\n", what, o.registered,
                 o.in_run, o.end);
     for (const auto& q : o.req)
-        std::printf("  %s img %u pivot %u far %u frames %zu pairs %zu s %.4f | 60/100/150 "
+        std::printf("  %s img %u pivot %u bound %u frames %zu pairs %zu s %.4f | 60/100/150 "
                     "%.4f %.4f %.4f -> %.4f %.4f %.4f -> BA %.4f %.4f %.4f\n",
-                    q.end ? "end" : "run", q.img, q.pivot, q.far, q.frames, q.pairs, q.s,
+                    q.end ? "end" : "run", q.img, q.pivot, q.bound, q.frames, q.pairs, q.s,
                     std::exp(q.x[0]), std::exp(q.x[1]), std::exp(q.x[2]), std::exp(q.after[0]),
                     std::exp(q.after[1]), std::exp(q.after[2]), std::exp(q.post[0]),
                     std::exp(q.post[1]), std::exp(q.post[2]));

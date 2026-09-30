@@ -547,9 +547,9 @@ static void testRig(MapperOptions opt) {
         for (size_t k = 0, seen = 0; k < r0.placed.size(); k++)
             if (r0.fitted[k] && seen++ == frames / 2) pick = k;
         const uint32_t f = r0.placed.empty() ? 0 : r0.placed[pick] % M;
-        ScriptedGps far(script(n, {}));
-        far.always = {{f, 25.0}, {M + f, 25.0}};
-        const RigRun r = runRig(sc, rigs, opt, far, far.events);
+        ScriptedGps farGps(script(n, {}));
+        farGps.always = {{f, 25.0}, {M + f, 25.0}};
+        const RigRun r = runRig(sc, rigs, opt, farGps, farGps.events);
         std::printf("rig, frame %u at 25 m: %u/%u registered, frame in: %d %d | refused %u, gyro "
                     "refused %u\n", f, r.model.numRegistered(), n, (int)registered(r.model, f),
                     (int)registered(r.model, M + f), r.st.gps_refused, r.st.refused);
@@ -713,10 +713,10 @@ static int body(int argc, char** argv) {
               limited.solvedAfter(m),
           "trigger: ten registrations between triggered BAs");
 
-    ScriptedGps far(script(n, {{j, 25.0}}));
-    const Run r4 = runWith(sc, opt, far);
-    const uint32_t far_img = far.image_at.count(j) ? far.image_at.at(j) : ~0u;
-    const int far_calls = far.calls.count(far_img) ? far.calls.at(far_img) : 0;
+    ScriptedGps farGps(script(n, {{j, 25.0}}));
+    const Run r4 = runWith(sc, opt, farGps);
+    const uint32_t far_img = farGps.image_at.count(j) ? farGps.image_at.at(j) : ~0u;
+    const int far_calls = farGps.calls.count(far_img) ? farGps.calls.at(far_img) : 0;
     std::printf("one at 25 m: refused %u, ba %u, image %u checked %d time(s), %u/%d registered\n",
                 r4.st.gps_refused, r4.st.gps_ba, far_img, far_calls, r4.registered, M);
     check(r4.st.gps_refused == 1 && r4.st.gps_ba == 0, "refuse: four radii off after an in-radius one");

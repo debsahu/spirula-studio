@@ -303,10 +303,10 @@ static void testBlock() {
     const bss::Pick p = bss::pickOver(r, bss::kTauRun);
     const bss::Block b = bss::block(f, 299, p.side, p.x, all, 0);
     if (verbose)
-        std::printf("  block: fire %d x %.4f pivot %zu far %zu pairs %zu capped %d s %.4f\n",
-                    p.ok, p.x, b.pivot, b.far, b.pairs, b.capped, b.s);
+        std::printf("  block: fire %d x %.4f pivot %zu bound %zu pairs %zu capped %d s %.4f\n",
+                    p.ok, p.x, b.pivot, b.bound, b.pairs, b.capped, b.s);
     check(p.ok && p.side == 0, "block: a 6 % short block fires on its own side");
-    check(b.ok && f[b.pivot].img == 199 && f[b.far].img == 200 && !b.capped,
+    check(b.ok && f[b.pivot].img == 199 && f[b.bound].img == 200 && !b.capped,
           "block: the pivot is the last solved frame");
     check(std::fabs(b.s * 0.94 / all - 1.0) < 0.01, "block: the factor undoes the block's ratio");
     auto every = f;
@@ -368,7 +368,7 @@ static void testRescale() {
     b.ok = true;
     b.newest = 7;
     b.pivot = 4;
-    b.far = 5;
+    b.bound = 5;
     b.s = 1.1;
     auto proj = [&](uint32_t cam, uint64_t pt) {
         const Pose& ps = rec.images.at(cam).pose;

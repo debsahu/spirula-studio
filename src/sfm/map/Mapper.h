@@ -417,7 +417,7 @@ public:
         uint32_t gps_scale_ba = 0; // ... of which the block scale check asked for
         uint32_t gps_scale_end = 0; // block rescales the end-of-growth test made
         struct ScaleRequest {
-            uint32_t check = 0, img = 0, pivot = 0, far = 0;  // far: block end at the pivot
+            uint32_t check = 0, img = 0, pivot = 0, bound = 0;  // bound: block end at the pivot
             bool end = false, rescaled = false, capped = false;
             int side = 0, l = 0;
             size_t frames = 0, pairs = 0;
@@ -2251,7 +2251,7 @@ public:
             q.rescaled = true;
             q.capped = b.capped;
             q.pivot = f[b.pivot].img;
-            q.far = f[b.far].img;
+            q.bound = f[b.bound].img;
             q.frames = b.frames;
             q.pairs = b.pairs;
             q.s = b.s;
@@ -2271,7 +2271,7 @@ public:
                            "%s, factor %.4f; after it %.3f/%.3f/%.3f; bundle adjusting\n",
                            end ? " after growth" : "", nm(q.img), std::exp(q.x[0]),
                            std::exp(q.x[1]), std::exp(q.x[2]), p.side ? "later" : "earlier",
-                           nm(q.img), nm(q.far), q.frames, q.pairs, q.capped ? ", capped" : "",
+                           nm(q.img), nm(q.bound), q.frames, q.pairs, q.capped ? ", capped" : "",
                            q.ratio, nm(q.pivot), q.s, std::exp(q.after[0]), std::exp(q.after[1]),
                            std::exp(q.after[2]));
             else
