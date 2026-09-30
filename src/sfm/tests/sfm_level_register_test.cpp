@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -19,6 +21,7 @@
 #include "sfm/core/Rig.h"
 #include "sfm/map/ImuExtrinsic.h"
 #include "sfm/map/Mapper.h"
+#include "sfm/map/SensorPriors.h"
 #include "sfm/tests/SyntheticRegister.h"
 #include "sfm/tests/SyntheticRig.h"
 #include "sfm/tests/TestMain.h"
@@ -125,6 +128,211 @@ static void testLevelRig(MapperOptions opt) {
           "level rig: a frame with one lens tilted off its declared up is refused");
 }
 
+// ---- the production source through the mapper ---------------------------------
+
+// The real ExifGpsPriors on an image set with no fixes, every image marked level,
+// recording what the mapper was handed on each solve. The constants under test are
+// the production ones; nothing here restates them except the checks' literals.
+class ProdLevel : public PriorSource {
+public:
+    struct Call {
+        int votes = 0;
+        bool ok = false;
+        double spread = 0, tol = 0, sigma = 0;
+        size_t ups = 0;
+    };
+    explicit ProdLevel(size_t n)
+        : inner_(std::vector<std::optional<Geodetic>>(n), SensorPriorOptions{},
+                 std::vector<char>(n, 1)) {}
+    bool has(uint32_t i) const override { return inner_.has(i); }
+    bool relativeRotation(uint32_t i, uint32_t j, Mat3& R, double& s) const override {
+        return inner_.relativeRotation(i, j, R, s);
+    }
+    std::vector<uint32_t> neighbours(uint32_t i) const override { return inner_.neighbours(i); }
+    PosePriors factors(const std::vector<PosedImage>& imgs) override {
+        PosePriors p = inner_.factors(imgs);
+        const SensorFactorStats st = inner_.lastFactors();
+        Call c;
+        c.votes = st.level_votes;
+        c.ok = p.level.ok;
+        c.spread = st.level_spread_deg;
+        c.tol = p.level.tol_deg;
+        c.ups = p.ups.size();
+        c.sigma = p.ups.empty() ? 0.0 : p.ups.front().sigma * 180.0 / M_PI;
+        calls.push_back(c);
+        return p;
+    }
+    bool declaredUp(uint32_t i, Vec3& u) const override { return inner_.declaredUp(i, u); }
+    void disableLevel() override {
+        disables++;
+        inner_.disableLevel();
+    }
+    // The call over the most posed images: the whole capture's reading.
+    Call fullest() const {
+        Call best;
+        for (const Call& c : calls)
+            if (c.votes >= best.votes) best = c;
+        return best;
+    }
+    bool everOk() const {
+        for (const Call& c : calls)
+            if (c.ok) return true;
+        return false;
+    }
+    std::vector<Call> calls;
+    int disables = 0;
+
+private:
+    ExifGpsPriors inner_;
+};
+
+// Roll (deg) of camera i: a steady ramp of `total` degrees over the set, about its mean.
+static std::vector<double> rampRoll(int M, double total) {
+    std::vector<double> r((size_t)M);
+    for (int i = 0; i < M; i++) r[(size_t)i] = total * (double(i) / (M - 1) - 0.5);
+    return r;
+}
+
+struct ProdRun {
+    uint32_t registered = 0, total = 0;
+    Mapper::PriorStats st;
+    ProdLevel::Call full;
+    bool ever_ok = false;
+    int disables = 0;
+};
+
+static ProdRun runProd(int M, const std::vector<double>& roll, MapperOptions opt) {
+    const Scene sc = makeScene(M, roll, 0.0);
+    ProdLevel src((size_t)M);
+    Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &src);
+    const std::vector<Reconstruction> r = m.run();
+    ProdRun o;
+    o.total = (uint32_t)M;
+    o.registered = r.empty() ? 0 : r.front().numRegistered();
+    o.st = m.priorStats();
+    o.full = src.fullest();
+    o.ever_ok = src.everOk();
+    o.disables = src.disables;
+    return o;
+}
+
+static void report(const char* what, const ProdRun& o) {
+    std::printf("%s: %u/%u registered, checked %u, refused %u, spread %.3f tol %.2f, gate %d, "
+                "latched %d (%d disable call(s))\n",
+                what, o.registered, o.total, o.st.level_checked, o.st.level_refused, o.full.spread,
+                o.full.tol, (int)o.full.ok, (int)o.st.level_latched, o.disables);
+}
+
+// A capture that passes the gate refuses none of its honest images, however the tilt
+// is spread inside the gate: a steady roll ramp of 3 and 4 deg.
+static void testLevelRamp(MapperOptions opt) {
+    for (int M : {40, 60})
+        for (double total : {3.0, 4.0}) {
+            const ProdRun o = runProd(M, rampRoll(M, total), opt);
+            char what[96];
+            std::snprintf(what, sizeof what, "level ramp %.0f deg over %d", total, M);
+            report(what, o);
+            check(o.registered == o.total, "level ramp: every image of a capture inside the gate registers");
+            check(o.st.level_refused == 0 && !o.st.level_latched,
+                  "level ramp: no honest image is refused and the prior is not latched off");
+            check(o.ever_ok, "level ramp: the level prior engaged");
+            if (M == 40 && total == 3.0)
+                check(o.full.spread > 0.6 && o.full.spread < 0.9 && o.full.tol > 1.8,
+                      "level ramp: the fixture sits at spread 0.6-0.9 and the tolerance follows it");
+        }
+}
+
+// The gate on the whole capture, through the mapper: spread 1.25 deg is refused, 0.83 is not.
+static void testLevelGate(MapperOptions opt) {
+    const ProdRun over = runProd(40, rampRoll(40, 6.0), opt);
+    report("level gate, spread ~1.25", over);
+    check(over.registered == over.total && !over.full.ok && over.full.spread > 1.0,
+          "level gate: a capture spread 1.25 deg states no up, and registers");
+    const ProdRun under = runProd(40, rampRoll(40, 4.0), opt);
+    report("level gate, spread ~0.83", under);
+    check(under.registered == under.total && under.full.ok && under.full.spread < 1.0,
+          "level gate: a capture spread 0.83 deg keeps its up");
+}
+
+// The per-image tolerance: 1 deg floor on a level capture, 3 x spread on a rolled one.
+static void testLevelTolerance(MapperOptions opt) {
+    for (const auto& [roll_deg, want_in, what] :
+         {std::tuple<double, bool, const char*>{1.5, false, "level tolerance: 1.5 deg off a level capture is refused"},
+          std::tuple<double, bool, const char*>{0.8, true, "level tolerance: 0.8 deg off a level capture is kept"}}) {
+        std::vector<double> roll(60, 0.0);
+        roll[5] = roll_deg;
+        const Scene sc = makeScene(60, roll, 0.0);
+        ProdLevel src(60);
+        Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &src);
+        const std::vector<Reconstruction> r = m.run();
+        const bool in = !r.empty() && registered(r.front(), 5);
+        const Mapper::PriorStats st = m.priorStats();
+        std::printf("level tolerance, image 5 %.1f deg off: in %d, checked %u, refused %u, latched %d\n",
+                    roll_deg, (int)in, st.level_checked, st.level_refused, (int)st.level_latched);
+        check(in == want_in && !st.level_latched, what);
+        check(!r.empty() && r.front().numRegistered() == (want_in ? 60u : 59u),
+              "level tolerance: the other images are untouched by it");
+    }
+    // Spread 0.9: 3 x spread = 2.7 deg. One image 3.3 deg off is refused; the ramp's own
+    // ends, 1.8 deg off, are not; and one refusal in ~30 checked images does not latch.
+    std::vector<double> roll = rampRoll(60, 3.6);
+    roll[5] = 3.3;
+    const Scene sc = makeScene(60, roll, 0.0);
+    ProdLevel src(60);
+    Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &src);
+    const std::vector<Reconstruction> r = m.run();
+    const Mapper::PriorStats st = m.priorStats();
+    std::printf("level tolerance, spread 0.9 + one image 3.3 deg off: %u/60, refused %u, latched %d\n",
+                r.empty() ? 0 : r.front().numRegistered(), st.level_refused, (int)st.level_latched);
+    check(!r.empty() && !registered(r.front(), 5) && r.front().numRegistered() == 59,
+          "level tolerance: 3 x spread refuses one image at 3.3 deg and only that one");
+    check(!st.level_latched && src.disables == 0, "level latch: one dissenter does not switch the prior off");
+}
+
+// A capture whose level images are a minority-tilted mix: the gate opens on the first
+// level window, the tolerance refuses the rest, and the latch must put them back.
+static void testLevelLatch(MapperOptions opt) {
+    std::vector<double> roll(80, 0.0);
+    for (int i = 56; i < 80; i++) roll[(size_t)i] = 8.0;
+    const ProdRun o = runProd(80, roll, opt);
+    report("level latch, images 56-79 rolled 8 deg", o);
+    check(o.registered == o.total, "level latch: every image registers once the prior is latched off");
+    check(o.st.level_latched && o.disables >= 1, "level latch: refusals past a few percent switch the prior off");
+    check(o.st.level_refused >= 1, "level latch: the dissenters were refused before it fired");
+}
+
+// A capture that is not level at all: every image registers, and the prior is off
+// (the gate closed, or latched) by the end.
+static void testLevelSteep(MapperOptions opt) {
+    for (double total : {8.0, 12.0}) {
+        const ProdRun o = runProd(80, rampRoll(80, total), opt);
+        char what[96];
+        std::snprintf(what, sizeof what, "level steep ramp %.0f deg over 80", total);
+        report(what, o);
+        check(o.registered == o.total, "level steep: every image of a non-level capture registers");
+        check(!o.full.ok || o.st.level_latched, "level steep: the prior is off by the end of a non-level capture");
+    }
+}
+
+// The vote minimum and the up factors' sigma, as the mapper meets them.
+static void testLevelVotesAndSigma(MapperOptions opt) {
+    const ProdRun few = runProd(29, {}, opt);
+    report("level, 29 images", few);
+    check(!few.ever_ok && few.st.level_checked == 0, "level votes: 29 posed images never open the gate");
+    const Scene sc = makeScene(45, {}, 0.0);
+    ProdLevel src(45);
+    Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &src);
+    const std::vector<Reconstruction> r = m.run();
+    const Mapper::PriorStats st = m.priorStats();
+    double sigma = 0;
+    for (const ProdLevel::Call& c : src.calls)
+        if (c.ok) sigma = c.sigma;
+    std::printf("level, 45 images: %u checked, up sigma %.4f deg\n", st.level_checked, sigma);
+    check(!r.empty() && r.front().numRegistered() == 45 && src.everOk() && st.level_checked > 0,
+          "level votes: a 45-image level capture opens the gate and is checked");
+    check(std::fabs(sigma - 0.3) < 1e-9, "level sigma: the BA is handed 0.3 deg up factors");
+}
+
 static int body(int argc, char** argv) {
     MapperOptions opt;
     opt.verbose = false;
@@ -137,6 +345,12 @@ static int body(int argc, char** argv) {
     }
     testLevel(makeScene(40), opt);
     testLevelRig(opt);
+    testLevelRamp(opt);
+    testLevelGate(opt);
+    testLevelTolerance(opt);
+    testLevelLatch(opt);
+    testLevelSteep(opt);
+    testLevelVotesAndSigma(opt);
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;
 }

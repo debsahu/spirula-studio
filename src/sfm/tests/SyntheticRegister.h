@@ -34,9 +34,10 @@ struct Scene {
     std::vector<Pose> gt;
 };
 
-// 40 cameras on a 150-degree arc round a cloud of points, so growth crosses
-// many BA boundaries and every camera sees most of the cloud.
-inline Scene makeScene(int M) {
+// M cameras on a 150-degree arc round a cloud of points, so growth crosses many
+// BA boundaries. `roll_deg[c]` rolls camera c about its axis; `bob` 0 keeps every
+// up axis vertical, as a horizon-levelled camera's is.
+inline Scene makeScene(int M, const std::vector<double>& roll_deg = {}, double bob = 1.5) {
     const int W = 1280, H = 960, N = 400;
     Camera K = Camera::defaultFor(1, W, H, 1200);
     std::mt19937 rng(5);
@@ -49,7 +50,12 @@ inline Scene makeScene(int M) {
     s.feats.resize(M);
     for (int c = 0; c < M; c++) {
         const double ang = -1.3 + 2.6 * c / (M - 1);
-        const Pose P = lookAt({9 * std::sin(ang), 1.5 * std::sin(0.7 * c), 9 * std::cos(ang)}, {0, 0, 0});
+        Pose P = lookAt({9 * std::sin(ang), bob * std::sin(0.7 * c), 9 * std::cos(ang)}, {0, 0, 0});
+        if ((size_t)c < roll_deg.size()) {
+            const Mat3 Rz = angleAxisToRotation({0.0, 0.0, roll_deg[(size_t)c] * M_PI / 180.0});
+            P.R = mul(Rz, P.R);
+            P.t = mul(Rz, P.t);
+        }
         s.gt.push_back(P);
         s.feats[c].width = W;
         s.feats[c].height = H;

@@ -419,6 +419,7 @@ public:
         uint32_t level_checked = 0; // registrations measured against the level frame
         uint32_t level_refused = 0; // ... refused as tilted past its tolerance
         double level_tol = 0;       // degrees, that tolerance at the last check
+        bool level_latched = false; // level prior switched off for the run
         // `post` is filled only on the flat path (checkedRefine -> bssAfterBa). A request
         // growByPnP raises during assembly stays NaN: that model's BA is the caller's later
         // joint solve, not one this struct's owner ever runs.
@@ -2002,7 +2003,7 @@ public:
     void fitGpsFrame() {
         const PosePriors pf = priors_ ? priors_->factors(posedImages(rec_)) : PosePriors{};
         gps_frame_ = pf.gps;
-        level_frame_ = pf.level;
+        setLevelFrame(pf.level);
     }
 
     // The factors a solve over `rec` takes, in rec's own gauge.
@@ -2089,20 +2090,38 @@ public:
         return true;
     }
 
+    void setLevelFrame(const LevelFrame& f) {
+        if (!level_latched_) level_frame_ = f;
+    }
+
     // A PnP pose of an image that declares its up, against the up the last solve's
-    // level images agreed on: tilted past the tolerance, refused.
+    // level images agreed on: tilted past the tolerance, refused. Refused images
+    // never vote, so past kLevelLatchFrac of the checked ones the prior is off for the run.
     bool levelCheck(uint32_t img, const Pose& pose) {
         Vec3 u;
         if (!priors_ || !level_frame_.ok || !priors_->declaredUp(img, u)) return true;
         prior_stats_.level_checked++;
         prior_stats_.level_tol = level_frame_.tol_deg;
+        level_checked_imgs_.insert(img);
         const Vec3 g = mul(pose.R, level_frame_.up_w);
         const double tilt = std::atan2(g.cross(u).norm(), g.dot(u)) * 180.0 / M_PI;
         if (tilt <= level_frame_.tol_deg) return true;
         prior_stats_.level_refused++;
+        level_refused_imgs_.insert(img);
         if (opt_.verbose)
             slog::diag(slog::Tag::Map, "[prior] level: %s refused, tilted %.2f deg (tol %.1f)\n",
                        db_.images[img].name.c_str(), tilt, level_frame_.tol_deg);
+        const size_t seen = level_checked_imgs_.size(), bad = level_refused_imgs_.size();
+        if (seen >= kLevelLatchMinImages && (double)bad > kLevelLatchFrac * (double)seen) {
+            level_latched_ = true;
+            prior_stats_.level_latched = true;
+            level_frame_ = LevelFrame{};
+            priors_->disableLevel();
+            slog::diag(slog::Tag::Map,
+                       "[prior] level: %zu of %zu checked images tilted past %.1f deg; the level "
+                       "prior is off for this run\n",
+                       bad, seen, prior_stats_.level_tol);
+        }
         return false;
     }
 
@@ -5200,7 +5219,7 @@ private:
             if (priors_) {
                 pf = priorFactors(rec_);
                 gps_frame_ = pf.gps;
-                level_frame_ = pf.level;
+                setLevelFrame(pf.level);
                 bo.priors = &pf;
                 if (tight && pf.hasAbsoluteCentres()) {
                     bo.max_iters = opt_.ba_final_prior_max_iters;
@@ -5900,6 +5919,11 @@ private:
     static constexpr int64_t kSeamKinkWindow = 10;
     GpsFrame gps_frame_;               // the last global solve's, on this model
     LevelFrame level_frame_;           // ... and its level images' up
+    // Level captures refused 1-3 of ~1800 images; an honest tail refuses 0.2%.
+    static constexpr double kLevelLatchFrac = 0.05;
+    static constexpr size_t kLevelLatchMinImages = 20;
+    bool level_latched_ = false;       // the level prior is off for the run
+    std::unordered_set<uint32_t> level_checked_imgs_, level_refused_imgs_;
     uint32_t gps_out_run_ = 0;         // consecutive registrations beyond its radius
     uint32_t gps_regs_since_ba_ = 0;   // registrations since a BA gpsCheck asked for
     static constexpr uint32_t kBssUnseen = UINT32_MAX;

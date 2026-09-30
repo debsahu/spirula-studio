@@ -402,7 +402,7 @@ static void testLevelUps() {
     check(st.level_ok && pf.ups.size() == 40 && good_u == 40,
           "level: one camera -Y up factor per posed image, the unpositioned one included");
     check(angleDeg(pf.up_w, up_true) < 0.2, "level: the factors' world up is the loop's up");
-    check(pf.level.ok && angleDeg(pf.level.up_w, up_true) < 0.2 && pf.level.tol_deg == kLevelTolDeg,
+    check(pf.level.ok && angleDeg(pf.level.up_w, up_true) < 0.2 && pf.level.tol_deg == 1.0,
           "level: the frame a registration is checked against");
     Vec3 u;
     check(src.declaredUp(3, u) && u.y == -1.0 && !ExifGpsPriors(level.fixes, {}).declaredUp(3, u),
@@ -423,16 +423,42 @@ static void testLevelUps() {
 
     // Only marked images vote and get a factor; too few marked says nothing.
     std::vector<char> some(40, 0);
-    for (int k = 0; k < 40; k += 2) some[(size_t)k] = 1;
+    for (int k = 0; k < 40; k++) some[(size_t)k] = k % 4 != 0;
     ExifGpsPriors half(level.fixes, SensorPriorOptions{}, some);
     const PosePriors p2 = half.factors(level.imgs);
-    int odd = 0;
-    for (const PriorUp& q : p2.ups) odd += q.i % 2;
-    check(p2.ups.size() == 20 && odd == 0, "level: only the marked images");
-    const std::vector<PosedImage> few(level.imgs.begin(), level.imgs.begin() + kLevelMinVotes - 1);
+    int unmarked = 0;
+    for (const PriorUp& q : p2.ups) unmarked += q.i % 4 == 0;
+    check(p2.ups.size() == 30 && unmarked == 0, "level: only the marked images");
+    // Literals, not the constants: a loosened constant must fail here, not move with itself.
+    check(kLevelSigmaDeg == 0.3 && kLevelMaxSpreadDeg == 1.0 && kLevelTolDeg == 1.0 &&
+              kLevelTolSpreadMul == 3.0 && kLevelMinVotes == 30,
+          "level: the constants are the measured ones");
     ExifGpsPriors fsrc(level.fixes, SensorPriorOptions{}, all);
-    const PosePriors p3 = fsrc.factors(few);
-    check(p3.ups.empty() && !p3.level.ok, "level: nothing under the minimum of voting images");
+    const PosePriors p29 = fsrc.factors({level.imgs.begin(), level.imgs.begin() + 29});
+    const PosePriors p30 = fsrc.factors({level.imgs.begin(), level.imgs.begin() + 30});
+    check(p29.ups.empty() && !p29.level.ok && p30.ups.size() == 30 && p30.level.ok,
+          "level: 29 voting images state nothing, 30 open the gate");
+
+    // The tolerance follows the spread: 1 deg on a level set, 3 x spread once that passes 1/3 deg.
+    const Loop mid = makeLoop(0.0, true, 0.0125);
+    ExifGpsPriors msrc(mid.fixes, SensorPriorOptions{}, all);
+    const PosePriors pm = msrc.factors(mid.imgs);
+    const double sm = msrc.lastFactors().level_spread_deg;
+    std::printf("level, mid tilt: spread %.3f deg, tolerance %.3f deg\n", sm, pm.level.tol_deg);
+    check(pm.level.ok && sm > 0.6 && sm < 0.9,
+          "fixture: a loop at spread 0.6-0.9 deg is inside the gate");
+    check(std::fabs(pm.level.tol_deg - 3.0 * sm) < 1e-9 && pm.level.tol_deg > 1.8,
+          "level: the tolerance is 3 x the measured spread once that passes 1 deg");
+
+    // The mapper's latch: a disabled source states no up, no frame and no declaration.
+    ExifGpsPriors dsrc(level.fixes, SensorPriorOptions{}, all);
+    dsrc.disableLevel();
+    const PosePriors pd = dsrc.factors(level.imgs);
+    Vec3 ud;
+    check(pd.ups.empty() && !pd.level.ok && !dsrc.declaredUp(3, ud) && !dsrc.lastFactors().level_ok,
+          "level: a disabled source states no up, no frame and declares nothing");
+    RemappedPriorSource dsub(dsrc, {5, 6, 3});
+    check(!dsub.declaredUp(0, ud), "level: the switch reaches a source seen through a renumbering");
 
     // With a level up a full fit keeps its vertical; horizontal drops it, as with an IMU up.
     SensorPriorOptions tr;

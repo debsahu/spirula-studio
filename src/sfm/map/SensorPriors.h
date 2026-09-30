@@ -10,6 +10,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -168,10 +169,17 @@ inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_er
 // as up. Tilt spread about the consensus measured 0.15-0.37 deg on three such
 // captures, 2.7 and 10.8 deg on a handheld 360's two lens streams.
 inline const Vec3 kLevelErpUp{0, -1, 0};
-constexpr double kLevelSigmaDeg = 0.3;      // Hickory's clean 150-frame blocks: 0.07-0.24 deg
+constexpr double kLevelSigmaDeg = 0.3;      // clean 150-frame blocks of a 1800-frame capture: 0.07-0.24 deg
 constexpr double kLevelMaxSpreadDeg = 1.0;  // past this median the set is refused as not level
-constexpr double kLevelTolDeg = 1.0;        // registration check: max(1 deg, 3 sigma)
-constexpr int kLevelMinVotes = 10;
+constexpr int kLevelMinVotes = 30;          // a 10-14 image window of a tilting capture reads under the gate
+// A registration may sit max(kLevelTolDeg, kLevelTolSpreadMul * spread) off the consensus.
+// Isotropic scatter of median m has tail 2^(-k^2) past k*m: 0.2% at k = 3, against 50% past
+// a fixed 1 deg when m sits at the gate.
+constexpr double kLevelTolDeg = 1.0;
+constexpr double kLevelTolSpreadMul = 3.0;
+inline double levelTolDeg(double spread_deg) {
+    return std::max(kLevelTolDeg, kLevelTolSpreadMul * spread_deg);
+}
 
 struct LevelFit {
     bool ok = false;
@@ -201,7 +209,7 @@ inline LevelFit levelUpFactors(const std::vector<PosedImage>& imgs,
     if (!c.ok || c.spread_deg > kLevelMaxSpreadDeg) return f;
     f.ok = true;
     out.up_w = c.up;
-    out.level = {true, c.up, kLevelTolDeg};
+    out.level = {true, c.up, levelTolDeg(c.spread_deg)};
     for (uint32_t i : ids) {
         PriorUp u;
         u.i = i;
@@ -760,15 +768,16 @@ public:
         return true;
     }
     bool declaredUp(uint32_t img, Vec3& u) const override {
-        if (img >= level_.size() || !level_[img]) return false;
+        if (level_off_ || img >= level_.size() || !level_[img]) return false;
         u = kLevelErpUp;
         return true;
     }
+    void disableLevel() override { level_off_ = true; }
 
     PosePriors factors(const std::vector<PosedImage>& imgs) override {
         PosePriors out;
         SensorFactorStats st;
-        const LevelFit lv = levelUpFactors(imgs, level_, out);
+        const LevelFit lv = level_off_ ? LevelFit{} : levelUpFactors(imgs, level_, out);
         st.level_votes = lv.votes;
         st.level_ok = lv.ok;
         st.level_spread_deg = lv.spread_deg;
@@ -814,6 +823,7 @@ public:
 private:
     SensorPriorOptions opt_;
     std::vector<char> level_;
+    std::atomic<bool> level_off_{false};
     std::vector<std::optional<Vec3>> pos_;
     SensorFactorStats stats_;
     mutable std::mutex mu_;

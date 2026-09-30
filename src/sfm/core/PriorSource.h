@@ -64,6 +64,9 @@ public:
         (void)u;
         return false;
     }
+    // The mapper found the level declaration wrong for this capture: state no
+    // up factors and no level frame from here on.
+    virtual void disableLevel() {}
 };
 
 // A source over a database seen through a renumbering (map/Atoms.h): local
@@ -126,6 +129,7 @@ public:
     bool declaredUp(uint32_t img, Vec3& u) const override {
         return img < to_global_.size() && inner_.declaredUp(to_global_[img], u);
     }
+    void disableLevel() override { inner_.disableLevel(); }
 
 private:
     PriorSource& inner_;
