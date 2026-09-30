@@ -199,6 +199,7 @@ struct ProdRun {
     ProdLevel::Call full;
     bool ever_ok = false;
     int disables = 0;
+    std::vector<ProdLevel::Call> calls;
 };
 
 static ProdRun runProd(int M, const std::vector<double>& roll, MapperOptions opt) {
@@ -213,6 +214,7 @@ static ProdRun runProd(int M, const std::vector<double>& roll, MapperOptions opt
     o.full = src.fullest();
     o.ever_ok = src.everOk();
     o.disables = src.disables;
+    o.calls = src.calls;
     return o;
 }
 
@@ -236,6 +238,14 @@ static void testLevelRamp(MapperOptions opt) {
             check(o.st.level_refused == 0 && !o.st.level_latched,
                   "level ramp: no honest image is refused and the prior is not latched off");
             check(o.ever_ok, "level ramp: the level prior engaged");
+            if (M == 60 && total == 4.0) {
+                // The tolerance the mapper last applied is one the source stated: 3 x a spread.
+                bool three_x = false;
+                for (const ProdLevel::Call& c : o.calls)
+                    three_x = three_x || (c.ok && std::fabs(c.tol - o.st.level_tol) < 1e-9 &&
+                                          c.tol > 1.8 && std::fabs(c.tol - 3.0 * c.spread) < 1e-9);
+                check(three_x, "level ramp: the mapper applies a tolerance of 3 x the measured spread");
+            }
             if (M == 40 && total == 3.0)
                 check(o.full.spread > 0.6 && o.full.spread < 0.9 && o.full.tol > 1.8,
                       "level ramp: the fixture sits at spread 0.6-0.9 and the tolerance follows it");
@@ -273,19 +283,19 @@ static void testLevelTolerance(MapperOptions opt) {
         check(!r.empty() && r.front().numRegistered() == (want_in ? 60u : 59u),
               "level tolerance: the other images are untouched by it");
     }
-    // Spread 0.9: 3 x spread = 2.7 deg. One image 3.3 deg off is refused; the ramp's own
-    // ends, 1.8 deg off, are not; and one refusal in ~30 checked images does not latch.
+    // Spread ~0.75: 3 x spread = 2.25 deg, 4 x = 3.0. One image 2.9 deg off is refused; the
+    // ramp's own ends, 1.8 deg off, are not; and one refusal in ~30 checked images does not latch.
     std::vector<double> roll = rampRoll(60, 3.6);
-    roll[5] = 3.3;
+    roll[5] = 2.9;
     const Scene sc = makeScene(60, roll, 0.0);
     ProdLevel src(60);
     Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &src);
     const std::vector<Reconstruction> r = m.run();
     const Mapper::PriorStats st = m.priorStats();
-    std::printf("level tolerance, spread 0.9 + one image 3.3 deg off: %u/60, refused %u, latched %d\n",
+    std::printf("level tolerance, spread 0.75 + one image 2.9 deg off: %u/60, refused %u, latched %d\n",
                 r.empty() ? 0 : r.front().numRegistered(), st.level_refused, (int)st.level_latched);
     check(!r.empty() && !registered(r.front(), 5) && r.front().numRegistered() == 59,
-          "level tolerance: 3 x spread refuses one image at 3.3 deg and only that one");
+          "level tolerance: 3 x spread refuses one image at 2.9 deg and only that one");
     check(!st.level_latched && src.disables == 0, "level latch: one dissenter does not switch the prior off");
 }
 
@@ -299,6 +309,22 @@ static void testLevelLatch(MapperOptions opt) {
     check(o.registered == o.total, "level latch: every image registers once the prior is latched off");
     check(o.st.level_latched && o.disables >= 1, "level latch: refusals past a few percent switch the prior off");
     check(o.st.level_refused >= 1, "level latch: the dissenters were refused before it fired");
+}
+
+// The latch through a scripted source that keeps declaring its up after the switch: the
+// mapper must drop its own level frame, or the liars stay refused.
+static void testLevelLatchScripted(const Scene& sc, MapperOptions opt) {
+    std::set<uint32_t> liars;
+    for (uint32_t i = 56; i < 80; i++) liars.insert(i);
+    TruthLevel src(sc.gt, liars);
+    Mapper m(sc.db, sc.feats, opt, {}, nullptr, nullptr, &src);
+    const std::vector<Reconstruction> r = m.run();
+    const Mapper::PriorStats st = m.priorStats();
+    std::printf("level latch, scripted: %u/80 registered, refused %u, latched %d\n",
+                r.empty() ? 0 : r.front().numRegistered(), st.level_refused, (int)st.level_latched);
+    check(st.level_latched && st.level_refused >= 1, "level latch: a scripted source's liars trip it");
+    check(!r.empty() && r.front().numRegistered() == 80,
+          "level latch: the mapper clears its own level frame when it latches");
 }
 
 // A capture that is not level at all: every image registers, and the prior is off
@@ -349,6 +375,7 @@ static int body(int argc, char** argv) {
     testLevelGate(opt);
     testLevelTolerance(opt);
     testLevelLatch(opt);
+    testLevelLatchScripted(makeScene(80), opt);
     testLevelSteep(opt);
     testLevelVotesAndSigma(opt);
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
