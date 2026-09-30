@@ -416,6 +416,9 @@ public:
         uint32_t gps_ba = 0;       // global BAs a run of those asked for
         uint32_t gps_scale_ba = 0; // ... of which the block scale check asked for
         uint32_t gps_scale_end = 0; // ... of which the end-of-growth test asked for
+        uint32_t level_checked = 0; // registrations measured against the level frame
+        uint32_t level_refused = 0; // ... refused as tilted past its tolerance
+        double level_tol = 0;       // degrees, that tolerance at the last check
         // `post` is filled only on the flat path (checkedRefine -> bssAfterBa). A request
         // growByPnP raises during assembly stays NaN: that model's BA is the caller's later
         // joint solve, not one this struct's owner ever runs.
@@ -1997,7 +2000,9 @@ public:
     // An adopted model registers before any solve of its own sets gps_frame_, so
     // it is checked through its own fit: a source serves several models at once.
     void fitGpsFrame() {
-        gps_frame_ = priors_ ? priors_->factors(posedImages(rec_)).gps : GpsFrame{};
+        const PosePriors pf = priors_ ? priors_->factors(posedImages(rec_)) : PosePriors{};
+        gps_frame_ = pf.gps;
+        level_frame_ = pf.level;
     }
 
     // The factors a solve over `rec` takes, in rec's own gauge.
@@ -2082,6 +2087,23 @@ public:
         constrained = true;
         prior_stats_.corrected++;
         return true;
+    }
+
+    // A PnP pose of an image that declares its up, against the up the last solve's
+    // level images agreed on: tilted past the tolerance, refused.
+    bool levelCheck(uint32_t img, const Pose& pose) {
+        Vec3 u;
+        if (!priors_ || !level_frame_.ok || !priors_->declaredUp(img, u)) return true;
+        prior_stats_.level_checked++;
+        prior_stats_.level_tol = level_frame_.tol_deg;
+        const Vec3 g = mul(pose.R, level_frame_.up_w);
+        const double tilt = std::atan2(g.cross(u).norm(), g.dot(u)) * 180.0 / M_PI;
+        if (tilt <= level_frame_.tol_deg) return true;
+        prior_stats_.level_refused++;
+        if (opt_.verbose)
+            slog::diag(slog::Tag::Map, "[prior] level: %s refused, tilted %.2f deg (tol %.1f)\n",
+                       db_.images[img].name.c_str(), tilt, level_frame_.tol_deg);
+        return false;
     }
 
     // A PnP pose against the GPS, through the last solve's fit: four radii off
@@ -2600,6 +2622,12 @@ private:
                            prior_stats_.gps_checked, prior_stats_.gps_refused,
                            kGpsRefuseGates * prior_stats_.gps_gate,
                            prior_stats_.gps_ba, prior_stats_.gps_out, prior_stats_.gps_gate);
+            if (priors_ && opt_.verbose && prior_stats_.level_checked)
+                slog::diag(slog::Tag::Map,
+                           "[prior] level check: %u registrations checked, %u refused tilted "
+                           "past %.1f deg\n",
+                           prior_stats_.level_checked, prior_stats_.level_refused,
+                           prior_stats_.level_tol);
             if (priors_ && opt_.verbose && opt_.gps_scale_band > 0)
                 slog::diag(slog::Tag::Map,
                            "[prior] GPS scale: %u request(s) during growth, %u after it\n",
@@ -3178,6 +3206,7 @@ private:
         bss_stored_.clear();
         bss_pending_ = -1;
         gps_frame_ = GpsFrame{};
+        level_frame_ = LevelFrame{};
         rig_refined_at_ = 0;
         rec_.points3D.clear();
         rec_.cameras.clear();
@@ -4306,6 +4335,7 @@ private:
             seqDump(img, X, nearf, r, rival, "refused (ratio after refinement)");
             return false;
         }
+        if (!levelCheck(img, r.pose)) return false;
         if (!gpsCheck(img, r.pose)) return false;
         if (!ratioOk(r.num_inliers, pool) && reg_vouched_ == vouched_before) reg_fail_.strong++;
         seqDump(img, X, nearf, r, rival, reg_vouched_ > vouched_before ? "placed (rival excluded)"
@@ -4645,6 +4675,8 @@ private:
         if (!ok) return false;
         // One check per frame, as the rate limit counts frames: the candidate's
         // lens, else the first lens with a position, each at its own camera pose.
+        for (const Member& e : ms)
+            if (!levelCheck(e.img, c.camFromWorld(e.m, best))) return false;
         bool measured = false;
         if (!gpsCheck(img, c.camFromWorld(sl.member, best), &measured)) return false;
         for (const Member& e : ms)
@@ -5168,6 +5200,7 @@ private:
             if (priors_) {
                 pf = priorFactors(rec_);
                 gps_frame_ = pf.gps;
+                level_frame_ = pf.level;
                 bo.priors = &pf;
                 if (tight && pf.hasAbsoluteCentres()) {
                     bo.max_iters = opt_.ba_final_prior_max_iters;
@@ -5866,6 +5899,7 @@ private:
     static constexpr double kSeamMinKink = 10.0;
     static constexpr int64_t kSeamKinkWindow = 10;
     GpsFrame gps_frame_;               // the last global solve's, on this model
+    LevelFrame level_frame_;           // ... and its level images' up
     uint32_t gps_out_run_ = 0;         // consecutive registrations beyond its radius
     uint32_t gps_regs_since_ba_ = 0;   // registrations since a BA gpsCheck asked for
     static constexpr uint32_t kBssUnseen = UINT32_MAX;

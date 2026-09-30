@@ -626,6 +626,18 @@ future sensor implements the same way (`core/PriorSource.h`;
   `--sensor-pair-radius` metres (20) of each other are matched whatever the
   shortlist thought.
 
+An image folder with EXIF GPS and no telemetry takes the same GPS factors
+(`ExifGpsPriors`). There, every image of an equirect camera group declares
+camera -Y as up (`--level-erp`, on): a horizon-levelled stitch, as DJI Studio
+and the Osmo 360 write, is level to 0.15-0.37 deg about its images' consensus.
+Each solve then states one up factor per image (sigma 0.3 deg) against that
+consensus, fits the GPS level about it, and a PnP pose tilted more than 1 deg
+off it is refused. When the images disagree by more than 1 deg (the median
+about their consensus; a handheld 360's lens streams measure 2.7 and 10.8) the
+solve takes no up factor and the GPS fit is what it was without them. Under
+`--metric-gps full` a GPS fit levelled by any up source keeps its vertical
+factor; `horizontal` drops it.
+
 `--sensor-max-dt` (3 s) bounds the gap a gyro rotation may span. The mapper
 ends with how many registrations the gyro re-solved or refused and how many
 factors the last solve held; `SS_SFM_PRIOR_DUMP=1` prints each one. With no

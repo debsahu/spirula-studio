@@ -57,12 +57,21 @@ struct GpsFrame {
     double gate = 0;          // metres, the fit's inlier radius
 };
 
+// The world up the images that declare their own (PriorSource::declaredUp)
+// were found to agree on, for checking a pose between solves.
+struct LevelFrame {
+    bool ok = false;
+    Vec3 up_w{0, 0, 1};
+    double tol_deg = 0;   // tilt past which a registration is refused
+};
+
 // Image indices are whatever the holder says: the mapper fills them with
 // reconstruction image ids, buildBundle remaps them to BA indices.
 struct PosePriors {
     Vec3 up_w{0, 0, 1};    // the world up every PriorUp is measured against
     double huber = 1.345;  // in sigmas, per factor
     GpsFrame gps;          // where the single-image centres are stated
+    LevelFrame level;
     std::vector<PriorRotation> rotations;
     std::vector<PriorUp> ups;
     std::vector<PriorCentre> centres;

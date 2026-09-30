@@ -121,10 +121,12 @@ MetricGpsEvidence metricGpsEvidence(const SfmConfig& cfg, const SensorCaptures& 
 MetricGpsChoice applyMetricGpsAuto(SfmConfig& cfg, const SensorCaptures& sensors,
                                    const std::string& imagedir);
 
-// Each image's EXIF GPS as a prior source (ExifGpsPriors); null when no image
-// under `imagedir` carries a fix, or with --no-sensor-map and --no-sensor-pairs.
+// Each image's EXIF GPS as a prior source (ExifGpsPriors), an equirect group in
+// `cams` declaring its up unless --no-level-erp; null when no image under
+// `imagedir` carries a fix, or with --no-sensor-map and --no-sensor-pairs.
 std::unique_ptr<ExifGpsPriors> makeExifGpsPriors(const SfmConfig& cfg, const std::string& imagedir,
-                                                 const MatchesDatabase& db, bool verbose);
+                                                 const MatchesDatabase& db, const CameraSetup& cams,
+                                                 bool verbose);
 
 // Calibrate `priors` against the gyro from pairs and their matches (a
 // sample's putative ones, or the database's verified ones), reporting per group.

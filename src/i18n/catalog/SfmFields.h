@@ -4078,6 +4078,41 @@ SS_MSG(sensor_map_help,
     TR("Kayıtları ve demet ayarlamalarını sensörlere bağla: jiroskopun dönüşleri, yerçekimi, "
        "ivmeölçerin ölçeği ve GPS"));
 
+SS_MSG(level_erp_help,
+    EN("Hold every equirect image level, camera -Y up: an up factor per image in each bundle "
+       "adjustment and a tilt check on each registration, refused when the images disagree"),
+    JA("正距円筒画像をすべて水平 (カメラ -Y が上) として扱います: 各バンドル調整で画像ごとに上方向"
+       "の因子を加え、各登録の傾きを検査します。画像同士が一致しなければ使いません"),
+    ZH_HANS("将每张等距柱状投影图像视为水平（相机 -Y 朝上）：每次光束法平差为每张图像加入向上因子，"
+            "并检查每次注册的倾斜；图像之间不一致时不使用"),
+    ZH_HANT("將每張等距長方投影影像視為水平（相機 -Y 朝上）：每次光束法平差為每張影像加入向上因子，"
+            "並檢查每次註冊的傾斜；影像之間不一致時不使用"),
+    KO("모든 등장방형 이미지를 수평(카메라 -Y가 위)으로 취급합니다. 번들 조정마다 이미지별 위쪽 "
+       "인자를 넣고 등록마다 기울기를 검사하며, 이미지끼리 일치하지 않으면 사용하지 않습니다"),
+    DE("Jedes äquirektanguläre Bild waagerecht halten, Kamera -Y oben: ein Oben-Faktor je Bild in "
+       "jedem Bündelausgleich und eine Neigungsprüfung bei jeder Registrierung, verworfen, wenn die "
+       "Bilder uneinig sind"),
+    FR("Tenir chaque image équirectangulaire de niveau, caméra -Y vers le haut : un facteur de "
+       "verticale par image dans chaque ajustement de faisceaux et un contrôle d'inclinaison à "
+       "chaque enregistrement, refusés quand les images sont en désaccord"),
+    ES("Mantener cada imagen equirrectangular nivelada, cámara -Y arriba: un factor de vertical por "
+       "imagen en cada ajuste de haces y una comprobación de inclinación en cada registro, "
+       "rechazados cuando las imágenes discrepan"),
+    PT("Manter cada imagem equirretangular nivelada, câmara -Y para cima: um fator de vertical por "
+       "imagem em cada ajuste de feixes e uma verificação de inclinação em cada registo, recusados "
+       "quando as imagens discordam"),
+    IT("Tenere ogni immagine equirettangolare in piano, camera -Y in alto: un fattore di verticale "
+       "per immagine in ogni bundle adjustment e un controllo dell'inclinazione a ogni "
+       "registrazione, rifiutati quando le immagini non concordano"),
+    NL("Elk equirectangulair beeld waterpas houden, camera -Y omhoog: een opwaartse factor per "
+       "beeld in elke bundelaanpassing en een kantelcontrole bij elke registratie, geweigerd "
+       "wanneer de beelden het oneens zijn"),
+    RU("Держать каждое равнопромежуточное изображение по горизонту, камера -Y вверх: фактор "
+       "вертикали на изображение в каждом уравнивании и проверка наклона при каждой регистрации; "
+       "отвергается, если изображения не согласны"),
+    TR("Her eşdikdörtgen görüntüyü yatay tut, kamera -Y yukarı: her demet dengelemesinde görüntü "
+       "başına bir yukarı faktörü ve her kayıtta bir eğim denetimi; görüntüler uyuşmazsa reddedilir"));
+
 SS_MSG(sensor_pairs_help,
     EN("Match images the GPS puts within --sensor-pair-radius metres of each other"),
     JA("GPS 上で互いに --sensor-pair-radius メートル以内にある画像同士をマッチします"),

@@ -100,8 +100,8 @@ struct Loop {
 };
 
 // `level` turns every camera upright about the loop's up (the model's Rm z),
-// tilted by up to ~2 deg, so the cameras' mean up is the true one.
-static Loop makeLoop(double fold, bool level = false) {
+// tilted by up to ~1.41 `tilt` radians, so the cameras' mean up is the true one.
+static Loop makeLoop(double fold, bool level = false, double tilt_amp = 0.03) {
     const int n = 40;
     std::mt19937 rng(11);
     std::normal_distribution<double> N(0, 0.5);
@@ -124,7 +124,8 @@ static Loop makeLoop(double fold, bool level = false) {
             const Vec3 fwd{std::cos(h), std::sin(h), 0}, down{0, 0, -1};
             const Vec3 right = down.cross(fwd);
             const Mat3 wc{right.x, down.x, fwd.x, right.y, down.y, fwd.y, right.z, down.z, fwd.z};
-            const Mat3 tilt = angleAxisToRotation({0.03 * std::sin(1.7 * k), 0.03 * std::cos(2.3 * k), 0});
+            const Mat3 tilt = angleAxisToRotation(
+                {tilt_amp * std::sin(1.7 * k), tilt_amp * std::cos(2.3 * k), 0});
             p.pose.R = transpose(mul(L.Rm, mul(tilt, wc)));
         }
         const Vec3 c = mul(L.Rm, placed) * L.sm + tm;
@@ -218,11 +219,28 @@ static void testTrustedFactors() {
     ref.targets = enuFromGeodetic(g);
     PosePriors lv;
     gpsCentreFactors(ref, &up, 5.0, 0.03, lv, true);
-    int level = 0;
+    int iso = 0;
     for (const PriorCentre& f : lv.centres)
-        level += f.sigma.x == 1.0 && f.sigma.y == 1.0 && f.sigma.z == 0.0 && f.cauchy == 7.815;
-    check(!lv.centres.empty() && level == (int)lv.centres.size(),
-          "trusted under an up axis: level only, still Cauchy (D75)");
+        iso += f.sigma.x == 1.0 && f.sigma.y == 1.0 && f.sigma.z == 1.0 && f.cauchy == 7.815;
+    check(!lv.centres.empty() && iso == (int)lv.centres.size() && !lv.gps.flat,
+          "trusted under an up axis: the vertical is kept, isotropic 1 m under Cauchy");
+    // Level fit, full factors: the vertical residual at the truth is the GPS noise.
+    double rz2 = 0;
+    for (const PriorCentre& f : lv.centres) {
+        const double dz = (mul(f.A[0], cameraCenter(U.imgs[f.img[0]].pose)) - f.b).z;
+        rz2 += dz * dz;
+    }
+    std::printf("trusted + up: vertical residual at the truth %.3f m RMS\n",
+                std::sqrt(rz2 / std::max<size_t>(lv.centres.size(), 1)));
+    check(std::sqrt(rz2 / std::max<size_t>(lv.centres.size(), 1)) < 1.0,
+          "trusted under an up axis: the level fit's vertical target is the altitude");
+
+    PosePriors hz;
+    gpsCentreFactors(ref, &up, 5.0, 0.03, hz, false);
+    int flat_n = 0;
+    for (const PriorCentre& f : hz.centres) flat_n += f.sigma.z == 0.0 && f.cauchy == 0.0;
+    check(!hz.centres.empty() && flat_n == (int)hz.centres.size() && hz.gps.flat,
+          "untrusted under an up axis: level only, as before (D75)");
 }
 
 // Six images 15 m off their fixes, three gates: the fit is the other 33's,
@@ -347,6 +365,101 @@ static void testLevelCheck() {
     check(ok && u1 - u0 > 8.0, "check: the lift is seen under a full fit");
 }
 
+// ---- a levelled equirect's declared up -----------------------------------------
+
+static double angleDeg(const Vec3& a, const Vec3& b) {
+    return std::atan2(a.cross(b).norm(), a.dot(b)) * 180.0 / M_PI;
+}
+
+// Median angle between each camera's -Y and the loop's true up: the fixture's own tilt.
+static double trueTiltDeg(const Loop& L) {
+    const Vec3 up = mul(L.Rm, Vec3{0, 0, 1});
+    std::vector<double> t;
+    for (const PosedImage& p : L.imgs) t.push_back(angleDeg(mul(transpose(p.pose.R), Vec3{0, -1, 0}), up));
+    std::nth_element(t.begin(), t.begin() + t.size() / 2, t.end());
+    return t[t.size() / 2];
+}
+
+static void testLevelUps() {
+    const Loop level = makeLoop(0.0, true, 0.002);   // ~0.1 deg: a Studio stitch
+    const Loop hand = makeLoop(0.0, true, 0.06);     // ~3.5 deg: a handheld lens
+    const double tl = trueTiltDeg(level), th = trueTiltDeg(hand);
+    std::printf("level fixtures: tilt median %.3f deg (level), %.3f deg (handheld)\n", tl, th);
+    check(tl < 0.3 && th > 2.0 * kLevelMaxSpreadDeg,
+          "fixture: the level and handheld loops sit either side of the gate");
+    const std::vector<char> all(40, 1);
+    const Vec3 up_true = mul(level.Rm, Vec3{0, 0, 1});
+
+    ExifGpsPriors src(level.fixes, SensorPriorOptions{}, all);
+    const PosePriors pf = src.factors(level.imgs);
+    const SensorFactorStats st = src.lastFactors();
+    int good_u = 0;
+    for (const PriorUp& u : pf.ups)
+        good_u += u.u.x == 0.0 && u.u.y == -1.0 && u.u.z == 0.0 &&
+                  std::fabs(u.sigma - kLevelSigmaDeg * M_PI / 180.0) < 1e-12;
+    std::printf("level: %zu ups, spread %.3f deg, up_w %.3f deg off the truth, level frame %d\n",
+                pf.ups.size(), st.level_spread_deg, angleDeg(pf.up_w, up_true), (int)pf.level.ok);
+    check(st.level_ok && pf.ups.size() == 40 && good_u == 40,
+          "level: one camera -Y up factor per posed image, the unpositioned one included");
+    check(angleDeg(pf.up_w, up_true) < 0.2, "level: the factors' world up is the loop's up");
+    check(pf.level.ok && angleDeg(pf.level.up_w, up_true) < 0.2 && pf.level.tol_deg == kLevelTolDeg,
+          "level: the frame a registration is checked against");
+    Vec3 u;
+    check(src.declaredUp(3, u) && u.y == -1.0 && !ExifGpsPriors(level.fixes, {}).declaredUp(3, u),
+          "level: an image declares its up only when marked");
+
+    ExifGpsPriors hsrc(hand.fixes, SensorPriorOptions{}, all);
+    const PosePriors ph = hsrc.factors(hand.imgs);
+    const SensorFactorStats sh = hsrc.lastFactors();
+    std::printf("handheld: %zu ups, spread %.3f deg, level frame %d, %zu centres\n", ph.ups.size(),
+                sh.level_spread_deg, (int)ph.level.ok, ph.centres.size());
+    check(!sh.level_ok && ph.ups.empty() && !ph.level.ok && sh.level_votes == 40,
+          "level: a handheld set states no up and no frame");
+    check(sh.level_spread_deg > kLevelMaxSpreadDeg, "level: the refusal reports the spread");
+    int full = 0;
+    for (const PriorCentre& f : ph.centres) full += f.sigma.z == 3.0 * f.sigma.x;
+    check(ph.centres.size() == 39 && full == 39 && !ph.gps.flat,
+          "level: a refused set leaves the GPS fit full, as without it");
+
+    // Only marked images vote and get a factor; too few marked says nothing.
+    std::vector<char> some(40, 0);
+    for (int k = 0; k < 40; k += 2) some[(size_t)k] = 1;
+    ExifGpsPriors half(level.fixes, SensorPriorOptions{}, some);
+    const PosePriors p2 = half.factors(level.imgs);
+    int odd = 0;
+    for (const PriorUp& q : p2.ups) odd += q.i % 2;
+    check(p2.ups.size() == 20 && odd == 0, "level: only the marked images");
+    const std::vector<PosedImage> few(level.imgs.begin(), level.imgs.begin() + kLevelMinVotes - 1);
+    ExifGpsPriors fsrc(level.fixes, SensorPriorOptions{}, all);
+    const PosePriors p3 = fsrc.factors(few);
+    check(p3.ups.empty() && !p3.level.ok, "level: nothing under the minimum of voting images");
+
+    // With a level up a full fit keeps its vertical; horizontal drops it, as with an IMU up.
+    SensorPriorOptions tr;
+    tr.trusted_position = true;
+    ExifGpsPriors tsrc(level.fixes, tr, all);
+    const PosePriors pt = tsrc.factors(level.imgs);
+    int vert = 0;
+    for (const PriorCentre& f : pt.centres) vert += f.sigma.z == 1.0;
+    std::printf("level + full: %zu ups, %d of %zu centres with a vertical\n", pt.ups.size(), vert,
+                pt.centres.size());
+    check(pt.ups.size() == 40 && pt.centres.size() == 39 && vert == 39,
+          "level + full: up factors and the vertical GPS together");
+    SensorPriorOptions hz;
+    hz.gps_flat = true;
+    ExifGpsPriors hsrc2(level.fixes, hz, all);
+    const PosePriors pz = hsrc2.factors(level.imgs);
+    int none_v = 0;
+    for (const PriorCentre& f : pz.centres) none_v += f.sigma.z == 0.0;
+    check(pz.ups.size() == 40 && none_v == 39 && pz.gps.flat,
+          "level + horizontal: the vertical is dropped");
+
+    // Through the renumbering an atom's mapper sees.
+    RemappedPriorSource sub(src, {5, 6, 3});
+    check(sub.declaredUp(2, u) && !RemappedPriorSource(src, {}).declaredUp(0, u),
+          "level: the declaration survives a renumbering");
+}
+
 // ---- the pipeline's builder, off files --------------------------------------
 
 namespace {
@@ -422,7 +535,7 @@ static void testBuilder() {
     MatchesDatabase db;
     for (const char* s : {"sub/b", "c", "a", "missing", "d", "e"}) db.images.push_back({s, 0});
     SfmConfig cfg;
-    std::unique_ptr<ExifGpsPriors> src = makeExifGpsPriors(cfg, dir.string(), db, false);
+    std::unique_ptr<ExifGpsPriors> src = makeExifGpsPriors(cfg, dir.string(), db, CameraSetup{}, false);
     check(src != nullptr, "builder: a source over a geotagged folder");
     if (src) {
         std::printf("builder: %zu of %zu images positioned\n", src->positioned(), db.images.size());
@@ -445,11 +558,11 @@ static void testBuilder() {
     check(src && !src->options().gps_flat, "builder: a full fit by default");
     SfmConfig level = cfg;
     level.metric_gps = "horizontal";
-    std::unique_ptr<ExifGpsPriors> lsrc = makeExifGpsPriors(level, dir.string(), db, false);
+    std::unique_ptr<ExifGpsPriors> lsrc = makeExifGpsPriors(level, dir.string(), db, CameraSetup{}, false);
     check(lsrc && lsrc->options().gps_flat, "builder: --metric-gps horizontal fits level");
     SfmConfig whole = cfg;
     whole.metric_gps = "full";
-    std::unique_ptr<ExifGpsPriors> wsrc = makeExifGpsPriors(whole, dir.string(), db, false);
+    std::unique_ptr<ExifGpsPriors> wsrc = makeExifGpsPriors(whole, dir.string(), db, CameraSetup{}, false);
     check(wsrc && !wsrc->options().gps_flat, "builder: --metric-gps full keeps the vertical");
     check(wsrc && wsrc->options().trusted_position && src && !src->options().trusted_position &&
               lsrc && !lsrc->options().trusted_position,
@@ -458,21 +571,39 @@ static void testBuilder() {
     SfmConfig off = cfg;
     off.sensor_map = false;
     off.sensor_pairs = false;
-    check(!makeExifGpsPriors(off, dir.string(), db, false),
+    check(!makeExifGpsPriors(off, dir.string(), db, CameraSetup{}, false),
           "builder: none with --no-sensor-map and --no-sensor-pairs");
     SfmConfig pairs_only = off;
     pairs_only.sensor_pairs = true;
-    check(makeExifGpsPriors(pairs_only, dir.string(), db, false) != nullptr,
+    check(makeExifGpsPriors(pairs_only, dir.string(), db, CameraSetup{}, false) != nullptr,
           "builder: pairs alone still want the positions");
-    check(!makeExifGpsPriors(cfg, "", db, false), "builder: none without an image folder");
+    check(!makeExifGpsPriors(cfg, "", db, CameraSetup{}, false), "builder: none without an image folder");
     MatchesDatabase bare;
     bare.images.push_back({"c", 0});
-    check(!makeExifGpsPriors(cfg, dir.string(), bare, false), "builder: none when nothing has a fix");
+    check(!makeExifGpsPriors(cfg, dir.string(), bare, CameraSetup{}, false), "builder: none when nothing has a fix");
+
+    // An equirect group declares its up, any other does not, and --level-erp 0 silences both.
+    CameraSetup cs;
+    cs.ids = {1, 2, 1, 1, 2, 1};
+    cs.cameras[1] = Camera::defaultFor(1, 4000, 2000, 0, CamModel::Equirect);
+    cs.cameras[2] = Camera::defaultFor(2, 4000, 3000, 3000);
+    std::unique_ptr<ExifGpsPriors> esrc = makeExifGpsPriors(cfg, dir.string(), db, cs, false);
+    SfmConfig nolevel = cfg;
+    nolevel.level_erp = false;
+    std::unique_ptr<ExifGpsPriors> nsrc = makeExifGpsPriors(nolevel, dir.string(), db, cs, false);
+    Vec3 u;
+    int declared = 0, silenced = 0;
+    for (uint32_t i = 0; i < 6; i++) {
+        declared += esrc && esrc->declaredUp(i, u) == (cs.ids[i] == 1);
+        silenced += nsrc && !nsrc->declaredUp(i, u);
+    }
+    check(declared == 6, "builder: every image of an equirect group declares its up, no other");
+    check(silenced == 6, "builder: --level-erp 0 declares nothing");
 
     // Telemetry wins where it exists; the EXIF source stands in only without it.
     VerifyCalibration calib;
     check(calib.positionPriors() == nullptr, "calibration: no source by default");
-    calib.exif_priors = makeExifGpsPriors(cfg, dir.string(), db, false);
+    calib.exif_priors = makeExifGpsPriors(cfg, dir.string(), db, CameraSetup{}, false);
     check(calib.positionPriors() == calib.exif_priors.get() && calib.exif_priors,
           "calibration: the EXIF source without telemetry");
     calib.priors = std::make_unique<TelemetryPriors>(std::vector<SensorCapture>{},
@@ -647,6 +778,7 @@ static int run(int, char**) {
     testTrustedFactors();
     testPositionError();
     testLevelCheck();
+    testLevelUps();
     testBuilder();
     testAutoRule();
     testAutoFromCapture();
