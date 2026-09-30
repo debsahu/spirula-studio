@@ -40,6 +40,7 @@
 #include "sfm/core/Log.h"
 #include "sfm/core/Features.h"
 #include "sfm/core/Image.h"
+#include "sfm/core/LensCalibration.h"
 #include "sfm/core/ImageLoader.h"
 #include "sfm/core/Manifest.h"
 #include "sfm/core/Mask.h"
@@ -194,6 +195,31 @@ std::string metricReason(const MetricFit& f) {
     return {};
 }
 
+
+static void logLensPlan(const LensPlan& p) {
+    const std::string lens = p.lens.lens, model = camInfo(p.model).cli_name;
+    if (p.use == LensUse::Used) {
+        const std::vector<double>& v = p.fit.params;
+        L::out(Tag::Run, M::lens_calib_used,
+               {p.prefix, lens, p.source, model, L::num(v[0], 2), L::num(v[1], 2), L::num(v[2], 2),
+                L::num(v[3], 2), L::num(p.fit.max_px, 2)});
+        return;
+    }
+    std::string why;
+    switch (p.use) {
+        case LensUse::Override: why = M::lens_skip_override.get(); break;
+        case LensUse::DatasetWide: why = M::lens_skip_dataset.get(); break;
+        case LensUse::Model: why = spirula::i18n::format(M::lens_skip_model, {model}); break;
+        case LensUse::Size:
+            why = spirula::i18n::format(M::lens_skip_size,
+                                        {(long long)p.width, (long long)p.height,
+                                         (long long)p.lens.width, (long long)p.lens.height});
+            break;
+        case LensUse::NoImages: why = M::lens_skip_images.get(); break;
+        case LensUse::Used: break;
+    }
+    L::out(Tag::Run, M::lens_calib_skipped, {p.prefix, lens, p.source, why});
+}
 
 SensorCaptures loadSensorCaptures(const SfmConfig& cfg, bool verbose) {
     SensorCaptures out;
@@ -2139,6 +2165,9 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
             (long long)cfg.sift.max_num_features});
     L::out(Tag::Run, M::run_data_type, {cfg.data_type});
     L::out(Tag::Run, M::run_cameras, {cfg.camera_model, cfg.camera_mode});
+    std::vector<LensPlan> lens_plans = collectLensPlans(cfg.telemetry_inputs, _imagedir);
+    applyLensPlans(cfg.camera, lens_plans);
+    for (const LensPlan& p : lens_plans) logLensPlan(p);
     if (!cfg.mask_dir.empty()) L::out(Tag::Run, M::run_masks, {cfg.mask_dir});
     if (!cfg.feature_mask_dir.empty()) L::out(Tag::Run, M::run_masks, {cfg.feature_mask_dir});
     // What the two knobs moved, so a surprising run is explainable from its own

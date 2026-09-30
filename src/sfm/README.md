@@ -316,6 +316,15 @@ pixel units. Existing CLI camera overrides retain precedence. Bundle adjustment
 still refines focal lengths; `--no-refine-extra-params --no-final-extra-params`
 holds distortion and the principal point at their supplied values.
 
+A DJI Avata 360 `.OSV` named by `--telemetry` or a manifest capture supplies
+the same thing unasked: its clip header holds each lens's factory calibration,
+and `cam0`/`cam1` (tracks 0 and 1) get it as a `params` entry in the run's
+fisheye model, refitted from the lens's five radial terms to four. Any camera
+setting that covers a lens folder, from the command line or the manifest, wins
+instead; the `[run]` lines say which lens got what. `--sensor-gauge none` does not
+turn it off. Field map and measurements:
+`docs/notes/imu-gps-for-sfm.md` §2.3.
+
 Every line a default run prints is **localized**, in the language `--lang`,
 `SS_LANG` or the OS says, and carries a translated stage tag padded to a common
 width: `[extract] 12/512   frame_0012.png   Features: 4096`. The mechanism is

@@ -110,6 +110,22 @@ bool telemetry_read(uint64_t size, const TelemetryRead& read, Telemetry& out, st
 // container's own boxes carry it. Empty when the file names none.
 VideoProjection video_projection(const std::string& path);
 
+// A lens's factory calibration (Avata 360 StreamMeta.5): theta_d = theta (1 +
+// k1 theta^2 + ... + k5 theta^10), p1 p2 as THIN_PRISM_FISHEYE's, pixel i
+// centred at i. Measured: docs/notes/imu-gps-for-sfm.md §2.3.
+struct LensCalibration {
+    int track = -1;        // the video track, i.e. the camN folder
+    std::string lens;      // "master" | "slave"
+    int width = 0, height = 0;
+    double fx = 0, fy = 0, cx = 0, cy = 0;
+    double k[5] = {0, 0, 0, 0, 0};
+    double p1 = 0, p2 = 0;
+};
+std::vector<LensCalibration> djmd_lenses(const uint8_t* sample, size_t n);
+// From the first djmd sample that holds a calibration; empty when none does.
+std::vector<LensCalibration> video_lenses(const std::string& path);
+std::vector<LensCalibration> video_lenses(const uint8_t* data, size_t size);
+
 // Whether the readings look like a working sensor, not whether they are
 // precise: units, coverage of the video, sample-rate regularity, a gravity
 // norm, a GPS that moves rather than repeating one stale fix.

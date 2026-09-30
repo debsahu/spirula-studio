@@ -559,6 +559,113 @@ static void test_avata_hover() {
 // Checks
 // ================
 
+// ================
+// Lens calibration: StreamMeta.5, numbered as real Avata 360 clips read
+// ================
+
+struct DewarpSpec { float fx, fy, cx, cy, k[5], p[2], w, h, model; };
+
+// The two lenses of a real clip; distinct in every field, so a swap shows.
+static const DewarpSpec kSlave = {1046.979f, 1047.15088f, 1906.91724f, 1911.23059f,
+                                  {0.0674323887f, -0.0157264061f, 0.0115848193f, -0.00665603066f, 0.000904370507f},
+                                  {0.000813371211f, 0.000434809597f}, 3840, 3840, 8};
+static const DewarpSpec kMaster = {1038.1936f, 1038.35229f, 1926.75354f, 1923.78381f,
+                                   {0.0909626037f, -0.0467612185f, 0.0301645789f, -0.0117680114f, 0.00143191358f},
+                                   {-0.000353124284f, -0.000570476695f}, 3840, 3840, 8};
+
+// One DewarpParams: k1..k4 at 5..8, k5 at 15, p packed at 20, lens_model at 24.
+static Bytes dewarp(const DewarpSpec& d) {
+    Bytes pp;
+    put_lef32(pp, d.p[0]);
+    put_lef32(pp, d.p[1]);
+    return cat({pb_f32(1, d.fx), pb_f32(2, d.fy), pb_f32(3, d.cx), pb_f32(4, d.cy), pb_f32(5, d.k[0]),
+                pb_f32(6, d.k[1]), pb_f32(7, d.k[2]), pb_f32(8, d.k[3]), pb_f32(10, d.w), pb_f32(11, d.h),
+                pb_f32(12, -179.489f), pb_f32(13, 90.159f), pb_f32(14, 0.334f), pb_f32(15, d.k[4]),
+                pb_bytes(20, pp), pb_f32(24, d.model), pb_f32(25, 34.0f)});
+}
+
+// Entries 1 and 2 hold only a temperature on every real clip.
+static Bytes lens_sample(const char* proto, const Bytes& slave, const Bytes& master) {
+    Bytes hdr = cat({pb_str(1, proto), pb_str(10, "cam")});
+    Bytes pano = cat({pb_bytes(1, pb_f32(25, 34.0f)), pb_bytes(2, pb_f32(25, 38.0f)), pb_bytes(3, slave),
+                      pb_bytes(4, master)});
+    Bytes stream = cat({pb_bytes(1, pb_str(3, "video")), pb_bytes(3, pb_v(1, 3840)), pb_bytes(5, pano)});
+    return cat({pb_bytes(1, pb_bytes(1, hdr)), pb_bytes(2, stream)});
+}
+
+static bool lens_is(const LensCalibration& l, const DewarpSpec& d) {
+    bool ok = l.fx == (double)d.fx && l.fy == (double)d.fy && l.cx == (double)d.cx && l.cy == (double)d.cy &&
+              l.p1 == (double)d.p[0] && l.p2 == (double)d.p[1] && l.width == (int)d.w && l.height == (int)d.h;
+    for (int i = 0; i < 5; i++) ok = ok && l.k[i] == (double)d.k[i];
+    return ok;
+}
+
+static const LensCalibration* on_track(const std::vector<LensCalibration>& ls, int track) {
+    for (const LensCalibration& l : ls)
+        if (l.track == track) return &l;
+    return nullptr;
+}
+
+static std::vector<LensCalibration> lenses_of(const Bytes& b) { return djmd_lenses(b.data(), b.size()); }
+
+static void test_dji_lenses() {
+    const auto ls = lenses_of(lens_sample("dvtm_AVATA360.proto", dewarp(kSlave), dewarp(kMaster)));
+    check(ls.size() == 2, "lens: two lenses in an Avata 360 header");
+    const LensCalibration *t0 = on_track(ls, 0), *t1 = on_track(ls, 1);
+    check(t0 && t0->lens == "master" && lens_is(*t0, kMaster), "lens: 2.5.4 is the master lens, on track 0");
+    check(t1 && t1->lens == "slave" && lens_is(*t1, kSlave), "lens: 2.5.3 is the slave lens, on track 1");
+
+    check(lenses_of(lens_sample("dvtm_oq101.proto", dewarp(kSlave), dewarp(kMaster))).empty(),
+          "lens: none read from an Osmo 360 header");
+    check(lenses_of(lens_sample("dvtm_new.proto", dewarp(kSlave), dewarp(kMaster))).empty(),
+          "lens: none read from an unknown proto");
+    DewarpSpec other = kSlave;
+    other.model = 7;
+    const auto one = lenses_of(lens_sample("dvtm_AVATA360.proto", dewarp(other), dewarp(kMaster)));
+    check(one.size() == 1 && one[0].track == 0, "lens: a lens_model other than 8 is not read");
+    DewarpSpec zero = kMaster;
+    zero.fx = 0;
+    check(lenses_of(lens_sample("dvtm_AVATA360.proto", dewarp(kSlave), dewarp(zero))).size() == 1,
+          "lens: a lens with no focal is not read");
+
+    // Through a file: the header is looked for in the first samples, as for the colour.
+    TrackSpec t{"djmd", "meta", "CAM meta", 60000, 1001,
+                {lens_sample("dvtm_AVATA360.proto", dewarp(kSlave), dewarp(kMaster)),
+                 avata_sample("dvtm_AVATA360.proto", false, 200847283ull)}};
+    const Bytes file = build_mp4({t}, 60000, 2002, 0);
+    const auto fl = video_lenses(file.data(), file.size());
+    check(fl.size() == 2 && on_track(fl, 0) && lens_is(*on_track(fl, 0), kMaster),
+          "lens: read from a file's clip header");
+}
+
+// Real clips: values as an independent protobuf walker read them.
+static void test_avata_lenses() {
+    const char* flight = spirula::env("TEST_AVATA_OSV");
+    const char* hover = spirula::env("TEST_AVATA_OSV_HOVER");
+    if (!flight && !hover) {
+        std::printf("SKIP avata lenses (SS_TEST_AVATA_OSV and SS_TEST_AVATA_OSV_HOVER unset)\n");
+        return;
+    }
+    if (hover) {
+        const auto ls = video_lenses(std::string(hover));
+        check(ls.size() == 2 && on_track(ls, 0) && lens_is(*on_track(ls, 0), kMaster) && on_track(ls, 1) &&
+                  lens_is(*on_track(ls, 1), kSlave),
+              "avata hover: factory lenses");
+    }
+    if (flight) {
+        const DewarpSpec m = {1038.18347f, 1038.34192f, 1927.07397f, 1924.07776f,
+                              {kMaster.k[0], kMaster.k[1], kMaster.k[2], kMaster.k[3], kMaster.k[4]},
+                              {kMaster.p[0], kMaster.p[1]}, 3840, 3840, 8};
+        const DewarpSpec sl = {1046.1012f, 1046.27332f, 1905.30188f, 1911.14246f,
+                               {kSlave.k[0], kSlave.k[1], kSlave.k[2], kSlave.k[3], kSlave.k[4]},
+                               {kSlave.p[0], kSlave.p[1]}, 3840, 3840, 8};
+        const auto ls = video_lenses(std::string(flight));
+        check(ls.size() == 2 && on_track(ls, 0) && lens_is(*on_track(ls, 0), m) && on_track(ls, 1) &&
+                  lens_is(*on_track(ls, 1), sl),
+              "avata flight: factory lenses");
+    }
+}
+
 static void test_checks() {
     Telemetry tm;
     tm.video_duration = 10;
@@ -675,6 +782,10 @@ static int cmdTelemetryTest(int argc, char** argv) {
                 continue;
             }
             std::printf("%s", telemetry_report(tm, telemetry_check(tm)).c_str());
+            for (const LensCalibration& l : video_lenses(std::string(argv[i])))
+                std::printf("lens track %d (%s): %dx%d fx %.4f fy %.4f cx %.4f cy %.4f k %.7g %.7g %.7g %.7g %.7g "
+                            "p %.7g %.7g\n", l.track, l.lens.c_str(), l.width, l.height, l.fx, l.fy, l.cx, l.cy,
+                            l.k[0], l.k[1], l.k[2], l.k[3], l.k[4], l.p1, l.p2);
             if (head > 0) print_head(tm, head);
             if (tm.carrier == TelemetryCarrier::None) rc = 1;
         }
@@ -690,6 +801,8 @@ static int cmdTelemetryTest(int argc, char** argv) {
     test_dji_unknown_proto();
     test_avata_flight();
     test_avata_hover();
+    test_dji_lenses();
+    test_avata_lenses();
     test_checks();
     test_rejects();
     if (fails) {

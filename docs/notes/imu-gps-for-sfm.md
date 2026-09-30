@@ -189,6 +189,46 @@ the up it gives came out 0.23 deg from the GPS-levelled model. A carrier with
 an accelerometer never takes either path, and an accelerometer-less attitude
 with no declared vertical gives no up vote.
 
+**Avata 360 lens calibration.** Sample 0's StreamMeta carries `PanoDewarpParams`
+at `2.5`: 24 `DewarpParams` entries, of which only `2.5.3`
+(`native_refine_far_slave`) and `2.5.4` (`native_refine_far_master`) are
+filled on every clip read (entries 1-2 hold a temperature, the rest nothing).
+Both djmd tracks carry the same pair. Per entry, all f32:
+
+| field | meaning |
+|---|---|
+| 1, 2, 3, 4 | fx, fy, cx, cy in pixels of the 3840 x 3840 frame (fx = fy to 0.02%) |
+| 5, 6, 7, 8, 15 | k1..k5: theta_d = theta (1 + k1 theta^2 + ... + k5 theta^10), r = f theta_d |
+| 20 (packed, 2) | p1, p2, on the equidistant coordinates as THIN_PRISM_FISHEYE's |
+| 10, 11 | width, height (3840, 3840) |
+| 12, 13, 14 | yaw, pitch, roll in degrees; 26, 28 quaternions (not read) |
+| 24 | lens_model, 8 on every clip; the reader takes only 8 |
+| 25, 31 | temperature (C), temperature-compensation k |
+
+k1..k5 and p are identical across the five clips read; fx, cx, cy (and the
+slave's yaw) move by up to 1 px and 3 px from clip to clip, so each clip's own
+header is used. Measured, on real frames:
+
+- **k5 is a fifth radial term.** Without it the polynomial turns over at 86.9
+  (master) and 90.1 deg (slave), short of the image circle; with it r(100 deg)
+  = 1917 and 1920 px, the frame's half width.
+- **Master is video track 0 (cam0), slave is track 1.** Against DJI Studio's
+  equirect export of the same frame (one hover clip, 2200 SIFT matches per lens,
+  one rotation fitted per candidate): master on track 0 0.55 px median, the
+  slave's set 2.2 px; slave on track 1 1.07 px, the master's set 4.6 px. Lens
+  to lens with no stitch involved (a flight at 37 m, rim overlap, 2500 and
+  1700 matches): 0.88 and 0.90 px, swapped 6.2 and 8.4 px.
+- **p is tangential, in that order and sign**: without it 2.0-2.2 px lens to
+  lens, swapped 1.4-1.7x worse, negated 2-3x worse. A 0.5 px shift of the
+  principal point is not resolved (0.55 against 0.57 px), so the pixel-centre
+  convention is taken from the code: keypoints put pixel i's centre at i.
+
+spirula's fisheye models stop at k4, so `sfm/core/LensCalibration.h` refits
+the radial curve (focal free) out to the inscribed circle: at worst 1.97 px
+(master) and 1.22 px (slave), and 0.98 against 0.88 px median lens to lens.
+A lens folder gets it as a #119 params override only when no setting a
+person gave covers it; the run prints which, and why not.
+
 ### 2.4 What the reader does with all this
 
 `telemetry_read` picks the carrier by content, never by extension: the
