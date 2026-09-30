@@ -636,7 +636,10 @@ extends against the GPS: model over GPS chord sums between nodes 5 m apart on th
 path, over 60, 100 and 150 m, against the whole model's ratio (`map/BlockScale.h`). Past
 5 / 4 / 3 % a bundle adjustment is requested for the frames registered since the last BA
 (detection only -- nothing is rescaled); once growth ends, the strongest of the last 20
-readings is held to 4 / 3 / 2.5 %. `SS_SFM_SCALE_DUMP=1` prints every reading.
+readings is held to 4 / 3 / 2.5 %. `SS_SFM_SCALE_DUMP=1` prints every reading. On the
+bottom-up/atoms path (`map/Assemble.h`'s `growModels`) a request `growByPnP` raises is
+recorded but its `post` reading is never filled -- that model's BA is the caller's later
+joint solve, not one this check runs itself.
 
 The sources run in order -- the video's sensors, the recorded attitude, a
 metric reference, the fallback -- and read each other: `gauge.txt`'s two bits

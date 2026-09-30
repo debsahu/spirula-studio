@@ -259,10 +259,6 @@ inline size_t growModels(Mapper& mapper, std::vector<Reconstruction>& models,
             mapper.growByPnP(models[i], &gs, others, have + budget, &bad);
         rejected += bad;
         if (!gs.registered) continue;
-        // growByPnP itself never bundle-adjusts (that is this level's later joint solve), so a
-        // scale request it raised has no post-BA reading yet -- give it one here, while both
-        // the model and the request's index are still at hand (Mapper::resolveScaleReading).
-        if (gs.scale_request >= 0) mapper.resolveScaleReading(grown, gs.scale_request);
         registered += gs.registered;
         models[i] = std::move(grown);
         dirty[i] = 1;

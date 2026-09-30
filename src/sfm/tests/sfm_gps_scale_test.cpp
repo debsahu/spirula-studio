@@ -189,7 +189,7 @@ static Reconstruction subModel(const Reconstruction& full, uint32_t hi) {
 
 // The bottom-up/atoms path (Assemble.h's growModels, growByPnP's only caller): unlike
 // Mapper::run()'s flat path (grow() -> checkedRefine -> bssAfterBa), growByPnP defers its own
-// BA to the caller, so a request it raises needs Mapper::resolveScaleReading for a `post`.
+// BA to the caller's later joint solve, so a request it raises here is never resolved.
 static void testAssemblyScaleRequest(const Scene& sc, const Reconstruction& full,
                                      MapperOptions opt, int from_walk, double k) {
     const int n = (int)sc.centres.size();
@@ -228,10 +228,11 @@ static void testAssemblyScaleRequest(const Scene& sc, const Reconstruction& full
     const Mapper::PriorStats::ScaleRequest& q = req.back();
     // Only the (side, l) the pick actually chose is guaranteed a reading at request time
     // (q.x itself is NaN on the other lengths whenever their own window lacks support).
-    check(!std::isnan(q.post[q.l]),
-         "assembly: a scale request growByPnP raises gets a post-BA reading, not NaN forever");
-    check(std::fabs(q.post[q.l]) < 0.7 * std::fabs(q.x[q.l]),
-         "assembly: that reading is a real post-BA one -- much nearer the GPS than the request");
+    check(!std::isnan(q.x[q.l]),
+         "fixture: the recorded request carries the firing side's reading");
+    check(std::isnan(q.post[q.l]),
+         "assembly: growByPnP's request is recorded but never resolved -- post stays unset, "
+         "because that model's BA is the caller's later joint solve");
 }
 
 static int body(int argc, char** argv) {

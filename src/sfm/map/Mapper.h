@@ -416,6 +416,9 @@ public:
         uint32_t gps_ba = 0;       // global BAs a run of those asked for
         uint32_t gps_scale_ba = 0; // ... of which the block scale check asked for
         uint32_t gps_scale_end = 0; // ... of which the end-of-growth test asked for
+        // `post` is filled only on the flat path (checkedRefine -> bssAfterBa). A request
+        // growByPnP raises during assembly stays NaN: that model's BA is the caller's later
+        // joint solve, not one this struct's owner ever runs.
         struct ScaleRequest {
             uint32_t check = 0, img = 0;
             bool end = false;
@@ -544,10 +547,6 @@ public:
         uint32_t before = 0, after = 0;
         uint32_t registered = 0;   // images this pass brought in
         bool refined = false;      // whether a final refinement ran
-        // An index into priorStats().scale_requests growByPnP raised during this pass, or -1.
-        // growByPnP defers its own BA to the caller's joint solve, so its ScaleRequest::post
-        // stays NaN unless the caller resolves it itself -- see resolveScaleReading.
-        long scale_request = -1;
     };
 
     // Adopt `m` and keep registering into it until nothing else fits. An image
@@ -802,7 +801,6 @@ public:
             st.registered -= std::min(st.registered, bad);
         }
         st.after = rec_.numRegistered();
-        st.scale_request = bss_pending_;
         if (out) *out = st;
         if (!st.registered) return m;  // unchanged: hand back the original
         return snapshotModel();
@@ -857,25 +855,6 @@ public:
         }
         ba_over_budget_throws_ = false;
         return true;
-    }
-
-    // growByPnP defers its own BA to the caller's joint solve, which never adopts any one
-    // model into rec_, so bssAfterBa (only called from checkedRefine) never runs for a
-    // request it raised (GrowStats::scale_request) -- refine `grown` on its own and read it.
-    void resolveScaleReading(const Reconstruction& grown, long request_index) {
-        if (request_index < 0 || (size_t)request_index >= prior_stats_.scale_requests.size())
-            return;
-        const Reconstruction refined = refine(grown, true);
-        resetModel();
-        adopt(refined);
-        fitGpsFrame();
-        if (!gps_frame_.ok) return;
-        bssStart();
-        PriorStats::ScaleRequest& q = prior_stats_.scale_requests[(size_t)request_index];
-        const std::vector<bss::Frame> f = bssFrames();
-        const size_t k = bssIndex(f, q.img);
-        if (k == f.size()) return;
-        bssSide(bss::read(f, k, bss::globalRatio(f)), q.side, q.post);
     }
 
     // Two registration fronts that meet without sharing structure leave every point there
