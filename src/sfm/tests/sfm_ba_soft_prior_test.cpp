@@ -2,7 +2,7 @@
 // cameras in a line, each link's points private to it, so every link's scale is
 // a null direction and the tail answers only to an absolute centre factor. At the
 // damping a growth BA leaves, a step cuts the total cost by far less than rtol:
-// the tie-zone regime that left the Hickory woods chain where PnP put it.
+// the tie-zone regime that left a canopy capture's woods chain where PnP put it.
 //
 //   sfm_ba_soft_prior_test [--device N] [--real double|df|float] [--no-gpu]
 //

@@ -24,16 +24,16 @@ constexpr double kNode = 5.0;
 constexpr int64_t kMaxGap = 3;  // capture positions; a wider gap ends a run
 constexpr int kLengths = 3;
 constexpr double kLength[kLengths] = {60, 100, 150};
-// Open-sky sd of the log ratio on finished Hickory, 0726power and OSV models, per length.
+// Open-sky sd of the log ratio on finished canopy-capture, power-corridor and OSV models, per length.
 constexpr double kSigma[kLengths] = {0.008, 0.006, 0.0045};
-// In-run: no fire at sky >= 0.5 in 3 x 1795 Hickory checks or 939 0726power ones. After
-// growth, lower: Hickory's milder modes finish their west chain at 0.956-0.958 over 60 m.
+// In-run: no fire at sky >= 0.5 in 3 x 1795 canopy-capture checks or 939 power-corridor ones. After
+// growth, lower: the canopy capture's milder modes finish their west chain at 0.956-0.958 over 60 m.
 constexpr double kTauRun[kLengths] = {0.05, 0.04, 0.03};
 constexpr double kTauEnd[kLengths] = {0.04, 0.03, 0.025};
 constexpr size_t kEndChecks = 20;
 // A model-space jump this big between capture-adjacent frames is an unwelded seam, not chain
 // drift (rigcheck's own "0 model jumps" bar). gpsScaleEnd excludes any window crossing one, so
-// a seam step cannot outbid a real reading (Hickory L3: seam window 1.046 vs west chain 0.958).
+// a seam step cannot outbid a real reading (canopy capture: seam window 1.046 vs west chain 0.958).
 constexpr double kSeamJump = 1.5;
 
 struct Frame {
@@ -186,7 +186,7 @@ inline Pick pickStrongest(const Reading& r, const double (&tau)[kLengths], doubl
 
 // After growth: the strongest of the stored readings, NOT the newest frame's. The last
 // registrations are the ones that bridge two fronts, and a window ending on them reads the
-// step between the fronts (Hickory S2: 1.043 at the last check, 0.958 three checks earlier).
+// step between the fronts (canopy capture: 1.043 at the last check, 0.958 three checks earlier).
 inline Pick pickEnd(const std::vector<Reading>& stored, size_t& which) {
     Pick best;
     double z = -1;

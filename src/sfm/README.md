@@ -631,10 +631,13 @@ An image folder with EXIF GPS and no telemetry takes the same GPS factors
 camera -Y as up (`--level-erp`, on): a horizon-levelled stitch, as DJI Studio
 and the Osmo 360 write, is level to 0.15-0.37 deg about its images' consensus.
 Each solve then states one up factor per image (sigma 0.3 deg) against that
-consensus, fits the GPS level about it, and a PnP pose tilted more than 1 deg
-off it is refused. When the images disagree by more than 1 deg (the median
-about their consensus; a handheld 360's lens streams measure 2.7 and 10.8) the
-solve takes no up factor and the GPS fit is what it was without them. Under
+consensus, fits the GPS level about it, and a PnP pose tilted more than
+max(1 deg, 3 x the spread) off it is refused. The gate opens at 30 posed images
+and closes when the images disagree by more than 1 deg (the median about their
+consensus; a handheld 360's lens streams measure 2.7 and 10.8): the solve then
+takes no up factor and the GPS fit is what it was without them. Refused images
+never vote, so when more than 5% of the 20 or more images checked are refused
+the mapper drops the prior for the rest of the run and logs it once. Under
 `--metric-gps full` a GPS fit levelled by any up source keeps its vertical
 factor; `horizontal` drops it.
 
@@ -985,7 +988,7 @@ registration fronts that meet on thin support leave every point there twice, met
 apart; no merge test accepts that union and the epipolar check cannot see an offset
 along the baseline. A verified pair of `seam_min_matches` (100) or more whose matches
 the model explains by a shared point below the bar is a candidate. Loop revisits and
-weak woods pairs read as low as the seam (220-481 candidates per Hickory model), and
+weak woods pairs read as low as the seam (220-481 candidates per canopy-capture model), and
 what separates them is the neighbourhood: a seam link's two images share at most one
 third image that both see with `seam_covis_min` (20) points, a loop revisit dozens. A
 candidate is open when that count is at most 1 and either the pair's duplicated points
@@ -997,10 +1000,10 @@ order; a photo folder has none, so only the offset branch runs. The open pairs'
 duplicated points are fused at the track-length-weighted mean and the model is
 refined with the fused points spared the first round's filter, then forced through a
 second round without retriangulation -- one round rarely closes a large kink before
-the ordinary stopping test exits it (Hickory WH1 2.95->1.19 deg, WH2 3.20->0.78 deg).
+the ordinary stopping test exits it (a canopy drone capture: 2.95->1.19 deg and 3.20->0.78 deg).
 On 27 saved models
-(Hickory, 0726power, the Osmo 0023 clip, Avata 0006), measured offline, the rule flags
-only links at Hickory's seam (at most 3 per model) and nothing on the other captures. `[seam]` lines report what it found; under
+(a canopy drone capture, a power-corridor capture, the Osmo 0023 clip, Avata 0006), measured offline, the rule flags
+only links at the canopy capture's seam (at most 3 per model) and nothing on the other captures. `[seam]` lines report what it found; under
 `SS_SFM_MAP_PROF` the models as they were before a weld are written to
 `sparse/pre_weld/` (in the mapper's frame, not the gauge's).
 

@@ -255,7 +255,7 @@ static int body(int argc, char** argv) {
     check(same.in_run == 0 && same.end == 0,
           "scale: a true-scale track with a hover and a loop asks for nothing");
 
-    // Hickory's west chain grew 112 frames past its last growth BA; at 1.1 the corridor's
+    // A canopy drone capture's west chain grew 112 frames past its last growth BA; at 1.1 the corridor's
     // blocks would be ten frames, whose factor has to come from the window, not the block.
     MapperOptions sparse = opt;
     sparse.ba_growth_ratio = 1.5;

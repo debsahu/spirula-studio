@@ -227,7 +227,7 @@ struct MapperOptions {
     double ba_growth_ratio = 1.1;      // COLMAP ba_global_images_ratio
     int ba_max_refinements = 5;        // final pass; growth passes use 2
     // LM cap of a final pass holding absolute centre factors: COLMAP's
-    // ba_global_max_num_iterations. At 25, both of Hickory's final solves under
+    // ba_global_max_num_iterations. At 25, both final solves of a canopy drone capture under
     // --metric-gps full stopped at the cap with the damping still at its floor.
     int ba_final_prior_max_iters = 50;
     // ... and the gradient_tolerance COLMAP sets beside it (Ceres' max-norm test, in metres).
@@ -260,18 +260,18 @@ struct MapperOptions {
     bool merge_tracks = true;
     // A verified pair with seam_min_matches matches, of which the finished model explains
     // fewer than this fraction by a shared 3D point, is a seam candidate; Mapper::openSeams
-    // has the rest of the rule. Hickory's seam read 0.015-0.15 against a p01 of 0.43. 0 = off.
+    // has the rest of the rule. A canopy drone capture's seam read 0.015-0.15 against a p01 of 0.43. 0 = off.
     double seam_weld_frac = 0.25;
     int seam_min_matches = 100;
     // Shared points for two images to count as neighbours in openSeams' covisibility test.
-    // 10 and 20 flag the same pairs on Hickory, 0726power and the Osmo clip; 40 adds 7
-    // false seams on a sparse 0726power model.
+    // 10 and 20 flag the same pairs on a canopy drone capture, a power-corridor capture and the Osmo clip; 40 adds 7
+    // false seams on a sparse power-corridor model.
     int seam_covis_min = 20;
     // Image ids are a capture order within a folder (what --pairs sequential assumes);
     // a declared sequence is one regardless. Without either, openSeams uses no order.
     bool seam_order_by_name = false;
     // The block scale check (map/BlockScale.h): a chain that shrinks or stretches by a few
-    // percent stays inside gpsCheck's gate (Hickory's west chain, 6.7 % over 100 frames), so
+    // percent stays inside gpsCheck's gate (a canopy drone capture's west chain, 6.7 % over 100 frames), so
     // it is read against the GPS over 60-150 m; past threshold it asks for a BA (gpsScaleCheck).
     double gps_scale_band = 1.0;
     // Auditing an assembled model (D44). An image is put back only when the
@@ -978,7 +978,7 @@ public:
     };
 
     // The mean of the middle two for an even count: a seam flank holds as few as 14 duplicated
-    // points, where the upper middle alone read Hickory's offsets up to 13 % low.
+    // points, where the upper middle alone read a canopy drone capture's offsets up to 13 % low.
     static double medianOf(std::vector<double> v) {
         if (v.empty()) return 0;
         const size_t h = v.size() / 2;
@@ -1127,7 +1127,7 @@ public:
         rebuildScores();
         st.reproj_before = meanReprojPx();
         fuseSeams(st);
-        // One round rarely closes a large kink (Hickory WH1 2.95->1.19 deg, WH2 3.20->0.78 deg,
+        // One round rarely closes a large kink (a canopy drone capture: 2.95->1.19 deg, 3.20->0.78 deg,
         // both over the 0.3 deg bar) before the ordinary stopping test exits it. A forced
         // second round, without retriangulation (44a78445 dropped that deliberately), pulls it.
         final_.min_rounds = 2;
@@ -2184,7 +2184,7 @@ public:
 
     // After growth, once: the strongest of the last checks since the last BA, against lower
     // thresholds, with any seam-crossing window masked first -- it reads like a scale error and
-    // would otherwise win the pick (Hickory L3 chose erp_01299's seam step, 1.046, over 0.958).
+    // would otherwise win the pick (a canopy drone capture chose a seam step, 1.046, over 0.958).
     void gpsScaleEnd() {
         if (opt_.gps_scale_band <= 0 || !priors_ || !gps_frame_.ok) return;
         const std::vector<bss::Frame> f = bssFrames();
@@ -5909,7 +5909,7 @@ private:
     // A registration four fit radii off the GPS with its predecessor inside
     // one is refused; a drifting run is never refused, or its chain stalls.
     static constexpr double kGpsRefuseGates = 4.0;
-    // openSeams' rule, set on 27 models (Hickory, 0726power, Osmo 0023, Avata 0006): a seam link
+    // openSeams' rule, set on 27 models (canopy, power-corridor, Osmo 0023, Avata 0006): a seam link
     // shares 0-1 covisible images (any other candidate 27+), its offset is 0.12-0.26 of depth
     // (loop pairs <= 0.033) and its kink ratio 31-138 (other pairs 3 apart or fewer <= 8.3).
     static constexpr int kSeamMaxCommon = 1;

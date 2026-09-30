@@ -431,14 +431,14 @@ static int body(int argc, char** argv) {
         check(k1 < 0.3, "weld: the kink at the join closes");
         check(st.reproj_after > 0 && st.reproj_after < 1.0, "weld: the welded model reprojects");
         check(out.numRegistered() == (uint32_t)cams, "weld: every image stays registered");
-        // Fuse only, no retriangulation (that re-tracks the whole model and cost Hickory
+        // Fuse only, no retriangulation (that re-tracks the whole model and cost a canopy drone capture
         // +0.086 px): a forced second round pulls a large kink further than one round does.
         check(st.rounds == 2, "weld: the refine always runs a forced second round");
         check(worst < 0.5, "weld: the forced second round does not retriangulate");
     }
     {
         // --metric-gps full at the true centres, each round capped at a few LM iterations, as
-        // Hickory's final solves are: the fused points must survive a round that ends short.
+        // a canopy drone capture's final solves are: the fused points must survive a round that ends short.
         std::vector<std::optional<Geodetic>> fixes(cams);
         for (int c = 0; c < cams; c++)
             fixes[c] = fixAt(sc.centres[c].x, sc.centres[c].z, 250.0 - sc.centres[c].y);
