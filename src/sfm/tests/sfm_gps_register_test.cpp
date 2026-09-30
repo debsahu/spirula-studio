@@ -12,7 +12,6 @@
 #include <cstdlib>
 #include <map>
 #include <random>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -21,9 +20,9 @@
 #include "sfm/core/PriorSource.h"
 #include "sfm/core/Rig.h"
 #include "sfm/map/Assemble.h"
-#include "sfm/map/ImuExtrinsic.h"
 #include "sfm/map/Mapper.h"
 #include "sfm/map/MetricGauge.h"
+#include "sfm/tests/SyntheticRegister.h"
 #include "sfm/tests/SyntheticRig.h"
 #include "sfm/tests/TestMain.h"
 
@@ -37,67 +36,7 @@ static void check(bool ok, const std::string& what) {
     }
 }
 
-static Pose lookAt(const Vec3& C, const Vec3& target) {
-    Vec3 f = (target - C).normalized();
-    Vec3 up0 = {0, 1, 0};
-    Vec3 r = up0.cross(f).normalized();
-    Vec3 u = f.cross(r);
-    Mat3 R = {r.x, r.y, r.z, u.x, u.y, u.z, f.x, f.y, f.z};
-    Vec3 t = mul(R, C);
-    return {R, {-t.x, -t.y, -t.z}};
-}
-
-struct Scene {
-    MatchesDatabase db;
-    std::vector<FeatureSet> feats;
-    std::vector<Pose> gt;
-};
-
-// 40 cameras on a 150-degree arc round a cloud of points, so growth crosses
-// many BA boundaries and every camera sees most of the cloud.
-static Scene makeScene(int M) {
-    const int W = 1280, H = 960, N = 400;
-    Camera K = Camera::defaultFor(1, W, H, 1200);
-    std::mt19937 rng(5);
-    std::uniform_real_distribution<double> ub(-2.5, 2.5);
-    std::normal_distribution<double> noise(0.0, 0.4);
-    std::vector<Vec3> pts(N);
-    for (auto& p : pts) p = {ub(rng), ub(rng), ub(rng)};
-    Scene s;
-    std::vector<std::vector<char>> vis(M, std::vector<char>(N, 0));
-    s.feats.resize(M);
-    for (int c = 0; c < M; c++) {
-        const double ang = -1.3 + 2.6 * c / (M - 1);
-        const Pose P = lookAt({9 * std::sin(ang), 1.5 * std::sin(0.7 * c), 9 * std::cos(ang)}, {0, 0, 0});
-        s.gt.push_back(P);
-        s.feats[c].width = W;
-        s.feats[c].height = H;
-        s.feats[c].keypoints.resize(N);
-        for (int p = 0; p < N; p++) {
-            const Vec3 pc = mul(P.R, pts[p]) + P.t;
-            const Vec2 px = K.project(pc);
-            if (pc.z > 0.1 && px.x > 0 && px.x < W && px.y > 0 && px.y < H) {
-                s.feats[c].keypoints[p] = {(float)(px.x + noise(rng)), (float)(px.y + noise(rng)), 2, 0, 0};
-                vis[c][p] = 1;
-            } else {
-                s.feats[c].keypoints[p] = {-1000, -1000, 2, 0, 0};
-            }
-        }
-    }
-    s.db.images.resize(M);
-    for (int c = 0; c < M; c++) s.db.images[c] = {"cam" + std::to_string(c), (uint32_t)N};
-    for (int i = 0; i < M; i++)
-        for (int j = i + 1; j < M; j++) {
-            TwoViewMatches tv;
-            tv.image1 = i;
-            tv.image2 = j;
-            tv.config = (int)TwoViewConfig::Uncalibrated;
-            for (int p = 0; p < N; p++)
-                if (vis[i][p] && vis[j][p]) tv.matches.push_back({(uint32_t)p, (uint32_t)p, 0});
-            if (tv.matches.size() >= 15) s.db.pairs.push_back(std::move(tv));
-        }
-    return s;
-}
+using namespace synth_reg;
 
 // Metres off the fix for each image's FIRST check, in check order; a retry and
 // anything past the script read 1 m, `always` pins an image's. No factors, so solves
@@ -452,61 +391,6 @@ private:
     std::vector<Vec3> centre_;
 };
 
-static void setEnv(const char* k, const char* v) {
-#ifdef _WIN32
-    _putenv_s(k, v ? v : "");
-#else
-    if (v) setenv(k, v, 1);
-    else unsetenv(k);
-#endif
-}
-
-// The frames registerFrame placed whole, read off SS_SFM_RIG_DUMP: the candidate
-// each was tried through, and whether the source had been asked for a fit by then.
-struct RigRun {
-    Mapper::PriorStats st;
-    Reconstruction model;
-    size_t models = 0;
-    std::vector<uint32_t> placed;
-    std::vector<char> fitted;
-    std::vector<uint32_t> triggers;   // images a GPS trigger fired on, in order
-};
-
-static RigRun runRig(const synth_rig::RigScene& sc, const RigTable& rigs, MapperOptions opt,
-                     PriorSource& gps, const std::string& events) {
-    RigRun r;
-    std::map<std::string, uint32_t> id;
-    for (uint32_t i = 0; i < sc.names.size(); i++) id[sc.names[i]] = i;
-    setEnv("SS_SFM_RIG_DUMP", "1");
-    slog::set_sink([&](slog::Tag, slog::Level lv, const std::string& line) {
-        static const std::string key = "[rig] frame of ", fired = "[prior] GPS: ";
-        if (lv == slog::Level::Diag && line.compare(0, fired.size(), fired) == 0 &&
-            line.find("bundle adjusting now") != std::string::npos) {
-            auto it = id.find(line.substr(fired.size(), line.find(" is ") - fired.size()));
-            if (it != id.end()) r.triggers.push_back(it->second);
-            return;
-        }
-        if (lv != slog::Level::Diag || line.compare(0, key.size(), key) != 0) return;
-        if (line.find("-> placed together") == std::string::npos) return;
-        auto it = id.find(line.substr(key.size(), line.find(':') - key.size()));
-        if (it == id.end()) return;
-        r.placed.push_back(it->second);
-        r.fitted.push_back(events.find('F') != std::string::npos);
-    });
-    Mapper m(sc.db, sc.feats, opt, sc.cam_ids, &rigs, nullptr, &gps);
-    std::vector<Reconstruction> models = m.run();
-    slog::set_sink({});
-    setEnv("SS_SFM_RIG_DUMP", nullptr);
-    r.st = m.priorStats();
-    r.models = models.size();
-    if (!models.empty()) r.model = models.front();
-    return r;
-}
-
-static bool registered(const Reconstruction& rec, uint32_t img) {
-    auto it = rec.images.find(img);
-    return it != rec.images.end() && it->second.registered;
-}
 
 // Frames placed whole after a fit, and how many of them one check covered exactly.
 template <class Calls>
@@ -642,97 +526,6 @@ static void testRig(MapperOptions opt) {
     check(no_fix_candidates > 0, "fixture: some frame's candidate lens has no position");
 }
 
-// ---- the level check on a registration (Mapper::levelCheck) -----------------
-
-// Every image declares its true camera-frame up (world +Y through its pose), the
-// images in `lie` one 3 deg off it; the level frame is the posed images' consensus,
-// as ExifGpsPriors fits it. `checked` lists the images the check asked about, in order.
-class TruthLevel : public PriorSource {
-public:
-    TruthLevel(const std::vector<Pose>& gt, std::set<uint32_t> lie) : lie_(std::move(lie)) {
-        for (const Pose& p : gt) u_.push_back(mul(p.R, Vec3{0, 1, 0}));
-    }
-    bool has(uint32_t) const override { return false; }
-    bool relativeRotation(uint32_t, uint32_t, Mat3&, double&) const override { return false; }
-    std::vector<uint32_t> neighbours(uint32_t) const override { return {}; }
-    PosePriors factors(const std::vector<PosedImage>& imgs) override {
-        std::vector<Vec3> votes;
-        for (const PosedImage& im : imgs)
-            if (im.image < u_.size() && !lie_.count(im.image))
-                votes.push_back(mul(transpose(im.pose.R), u_[im.image]));
-        PosePriors p;
-        const UpConsensus c = consensusUp(votes);
-        p.level = {c.ok, c.up, 1.0};
-        return p;
-    }
-    bool declaredUp(uint32_t img, Vec3& u) const override {
-        if (img >= u_.size()) return false;
-        checked.push_back(img);
-        u = lie_.count(img) ? mul(angleAxisToRotation({0.0, 0.0, 3.0 * M_PI / 180.0}), u_[img])
-                            : u_[img];
-        return true;
-    }
-    mutable std::vector<uint32_t> checked;
-
-private:
-    std::set<uint32_t> lie_;
-    std::vector<Vec3> u_;
-};
-
-static void testLevel(const Scene& sc, MapperOptions opt) {
-    const uint32_t M = (uint32_t)sc.db.images.size();
-    TruthLevel honest(sc.gt, {});
-    Mapper m0(sc.db, sc.feats, opt, {}, nullptr, nullptr, &honest);
-    const std::vector<Reconstruction> r0 = m0.run();
-    const Mapper::PriorStats s0 = m0.priorStats();
-    const uint32_t reg0 = r0.empty() ? 0 : r0.front().numRegistered();
-    std::printf("level honest: %u/%u registered, checked %u, refused %u\n", reg0, M,
-                s0.level_checked, s0.level_refused);
-    check(reg0 == M && s0.level_refused == 0, "level: no registration of a level image is refused");
-    check(s0.level_checked >= M / 2 && s0.level_checked == honest.checked.size(),
-          "level: the check reads every registration once the frame exists");
-    const uint32_t liar = honest.checked.empty() ? 0 : honest.checked.back();
-
-    TruthLevel lying(sc.gt, {liar});
-    Mapper m1(sc.db, sc.feats, opt, {}, nullptr, nullptr, &lying);
-    const std::vector<Reconstruction> r1 = m1.run();
-    const Mapper::PriorStats s1 = m1.priorStats();
-    const bool in = !r1.empty() && registered(r1.front(), liar);
-    const size_t asked = (size_t)std::count(lying.checked.begin(), lying.checked.end(), liar);
-    std::printf("level, image %u 3 deg off: in %d, asked %zu time(s), refused %u, %u/%u registered\n",
-                liar, (int)in, asked, s1.level_refused, r1.empty() ? 0 : r1.front().numRegistered(), M);
-    check(asked >= 1 && !in && s1.level_refused >= 1,
-          "level: a registration tilted off its declared up is refused");
-    check(!r1.empty() && r1.front().numRegistered() == M - 1 && s1.refused == 0 &&
-              s1.gps_refused == 0,
-          "level: every other image registers, and the refusal is the level check's");
-}
-
-static void testLevelRig(MapperOptions opt) {
-    std::vector<char> weak(40, 0);
-    for (int f = 8; f < 37; f++) weak[f] = f % 4 != 0;
-    const synth_rig::RigScene sc = synth_rig::makeRigScene(40, 37, weak);
-    const uint32_t M = (uint32_t)sc.M, n = 2 * M;
-    const RigTable rigs = buildRigTable(sc.names, {RigDef{"rig", {{"cam0"}, {"cam1"}}}});
-    TruthLevel honest(sc.gt, {});
-    const RigRun r0 = runRig(sc, rigs, opt, honest, "F");
-    std::printf("level rig honest: %u/%u registered, checked %u, refused %u\n",
-                r0.model.numRegistered(), n, r0.st.level_checked, r0.st.level_refused);
-    check(r0.model.numRegistered() == n && r0.st.level_refused == 0,
-          "level rig: no frame of level images is refused");
-    // A weak frame the rig placed late; only its cam1 lies, so the rig must check every lens.
-    uint32_t f = M;
-    for (auto it = r0.placed.rbegin(); it != r0.placed.rend() && f == M; ++it)
-        if (weak[*it % M]) f = *it % M;
-    TruthLevel lying(sc.gt, {M + f});
-    const RigRun r1 = runRig(sc, rigs, opt, lying, "F");
-    std::printf("level rig, frame %u cam1 3 deg off: in %d %d, refused %u, %u/%u registered\n", f,
-                (int)registered(r1.model, f), (int)registered(r1.model, M + f), r1.st.level_refused,
-                r1.model.numRegistered(), n);
-    check(f < M && !registered(r1.model, M + f) && r1.st.level_refused >= 1,
-          "level rig: a frame with one lens tilted off its declared up is refused");
-}
-
 static int body(int argc, char** argv) {
     MapperOptions opt;
     opt.verbose = false;
@@ -828,8 +621,6 @@ static int body(int argc, char** argv) {
     testAssembly(sc, full, opt);
     testFinalCap(sc, full, opt);
     testRig(opt);
-    testLevel(sc, opt);
-    testLevelRig(opt);
 
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;
