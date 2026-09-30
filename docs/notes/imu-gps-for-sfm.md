@@ -130,7 +130,7 @@ first reported) drops it, leaving a 1.16 km path where the raw numbers said
 the file from being usable; both say the DOP is not enough of a gate on its
 own.
 
-### 2.3 DJI Osmo 360 (`.OSV`)
+### 2.3 DJI Osmo 360 and Avata 360 (`.OSV`)
 
 | stream | rate | notes |
 |---|---|---|
@@ -147,6 +147,38 @@ camera's own fusion output. Rotating the per-frame accelerometer by the
 quaternion gives a world vector steady to 2.8 degrees over a 146 s handheld
 clip, so the quaternion maps sensor to world and the accelerometer shares its
 frame. No GPS.
+
+**DJI Avata 360** (`dvtm_AVATA360`) writes the same message tree with its own
+field numbers; `read_dji` picks the numbers from the clip header's proto name.
+Field paths below are from the djmd sample root. The GPS, altitude and
+exposure rows were checked frame by frame against the SRT of a 139 s flight
+(8354 frames, packet p = SRT `FrameCnt` p+1): lat/lon within 5e-7 deg,
+altitudes within 1 mm, ISO and colour temperature exact, shutter within the
+SRT's 1/3-stop rounding. The rate matches the sample count (557781 attitude
+samples over 139.4 s is 4000 Hz).
+
+| quantity | Osmo (`dvtm_oq101`) | Avata (`dvtm_AVATA360`) | wire, unit |
+|---|---|---|---|
+| IMU fusion rate | `1.10.1` | `1.8.1` | varint Hz (4000) |
+| sensor fps | `1.11.1` | `1.9.1` | f32 (59.909) |
+| focal | `1.8.1` | none (`1.6` is empty) | f32 px |
+| accel per frame | `3.2.10.{2,3,4}` | none (`3.2.10.1` is a constant 4-byte pair) | f32 g |
+| attitude | `3.3.2.1.{1,2,3,4}` | same, no offset field 4; 66-67 quaternions per frame | f32 w,x,y,z |
+| GPS lat/lon | `3.4.2.1.{1 unit,2,3}` | `3.4.4.1.{2,3}`, no unit field | f64 degrees |
+| abs altitude | `3.4.2.2` | `3.4.4.2` | varint mm |
+| rel altitude | none | `3.4.5.1` | f32 mm, above take-off |
+| GPS status | `3.4.2.3` | not known (`3.4.4.4` = 1 always); every fix is kept, so the fix fraction says nothing here | |
+| ISO | none | `3.2.3.1` | f32 |
+| shutter | none | `3.2.4.1` | bytes holding two varints n, d: n/d s |
+| colour temperature | none | `3.2.6.1` | varint K |
+
+`1.10.1` (int64 -555) and `1.11.1` (4207) mean something else on the Avata
+and are not read. Aperture and EV are not read: both flights' SRTs carry one
+constant value (f/1.9, EV 0), so no field can be told apart. No accelerometer
+is written, so the report says `IMU absent` and the attitude alone gives
+rotation but not up; a hover also reads `GPS not usable` (no spread), which is
+the right answer. The `.LRF` proxy carries the same metadata at 30 fps; its
+second attitude batch (`3.3.2.2`) is not read.
 
 ### 2.4 What the reader does with all this
 

@@ -1,7 +1,8 @@
 #pragma once
 // The IMU and GPS a video file carries alongside its pictures, recognised by
 // content rather than by extension: a GoPro `gpmd` track (GPMF), the Insta360
-// trailer after the MP4, a DJI `djmd` track (protobuf), or a CAMM track.
+// trailer after the MP4, a DJI `djmd` track (protobuf: Osmo 360 and Avata
+// 360, field numbers per proto), or a CAMM track.
 //
 // map/SensorGauge.h consumes it through core/SensorTimeline.h;
 // `sfm_telemetry_test FILE` prints what a file carries. Only the sample
@@ -44,6 +45,15 @@ struct TelemetryGps {
     double speed = -1;         // m/s over ground; < 0 unknown
     double track = -1;         // degrees clockwise from north; < 0 unknown
     double dop = 0;            // dilution of precision; 0 unknown
+    double rel_alt = 0;        // metres above take-off; read only with has_rel_alt
+    bool has_rel_alt = false;
+};
+
+struct TelemetryExposure {
+    double t = 0;
+    double iso = -1, shutter = -1, fnum = -1, color_temp = -1;  // < 0 unknown; shutter in s, colour in K
+    double ev = 0;
+    bool has_ev = false;
 };
 
 enum class TelemetryCarrier { None, Gpmf, Insta360, DjiDvtm, Camm };
@@ -70,6 +80,7 @@ struct Telemetry {
     // takes (X, Z, Y) of the ORIN frame: measured, see the note it carries.
     std::string orientation_axes = "XYZ";
     std::vector<TelemetryGps> gps;
+    std::vector<TelemetryExposure> exposure;  // not sensor data: empty() ignores it
     std::vector<std::string> notes;
 
     bool empty() const {
