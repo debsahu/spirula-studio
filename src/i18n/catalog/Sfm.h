@@ -2941,6 +2941,142 @@ SS_MSG(metric_gps_read,
     RU("GPS из EXIF: у {0}/{1} камер есть отсчёт ({2} из них без высоты)"),
     TR("EXIF GPS: {0}/{1} kamerada konum var ({2} tanesi yükseklik olmadan)"));
 
+SS_MSG(metric_gps_auto_dji,
+    EN("--metric-gps auto: `full` (DJI telemetry GPS, barometric altitude; tracks: {0})"),
+    JA("--metric-gps auto: `full` (DJI テレメトリの GPS、高度は気圧計; トラック数: {0})"),
+    ZH_HANS("--metric-gps auto: `full` (DJI 遥测 GPS，高度来自气压计; 轨迹数: {0})"),
+    ZH_HANT("--metric-gps auto: `full` (DJI 遙測 GPS，高度來自氣壓計; 軌跡數: {0})"),
+    KO("--metric-gps auto: `full` (DJI 텔레메트리 GPS, 고도는 기압계; 트랙 수: {0})"),
+    DE("--metric-gps auto: `full` (DJI-Telemetrie-GPS, barometrische Höhe; Spuren: {0})"),
+    FR("--metric-gps auto : `full` (GPS de télémétrie DJI, altitude barométrique ; pistes : "
+       "{0})"),
+    ES("--metric-gps auto: `full` (GPS de telemetría DJI, altitud barométrica; pistas: {0})"),
+    PT("--metric-gps auto: `full` (GPS de telemetria DJI, altitude barométrica; faixas: "
+       "{0})"),
+    IT("--metric-gps auto: `full` (GPS della telemetria DJI, quota barometrica; tracce: "
+       "{0})"),
+    NL("--metric-gps auto: `full` (DJI-telemetrie-gps, barometrische hoogte; sporen: {0})"),
+    RU("--metric-gps auto: `full` (GPS из телеметрии DJI, барометрическая высота; треков: "
+       "{0})"),
+    TR("--metric-gps auto: `full` (DJI telemetri GPS'i, barometrik yükseklik; iz sayısı: "
+       "{0})"));
+
+SS_MSG(metric_gps_auto_telemetry,
+    EN("--metric-gps auto: `horizontal` (telemetry GPS whose altitude is not trusted; "
+       "tracks not from DJI: {0}/{1})"),
+    JA("--metric-gps auto: `horizontal` (高度を信頼できないテレメトリ GPS; DJI 以外のトラック: {0}/{1})"),
+    ZH_HANS("--metric-gps auto: `horizontal` (遥测 GPS 的高度不可信; 非 DJI 轨迹: {0}/{1})"),
+    ZH_HANT("--metric-gps auto: `horizontal` (遙測 GPS 的高度不可信; 非 DJI 軌跡: {0}/{1})"),
+    KO("--metric-gps auto: `horizontal` (고도를 믿을 수 없는 텔레메트리 GPS; DJI 가 아닌 트랙: {0}/{1})"),
+    DE("--metric-gps auto: `horizontal` (Telemetrie-GPS mit unzuverlässiger Höhe; Spuren "
+       "nicht von DJI: {0}/{1})"),
+    FR("--metric-gps auto : `horizontal` (GPS de télémétrie à l'altitude peu fiable ; "
+       "pistes hors DJI : {0}/{1})"),
+    ES("--metric-gps auto: `horizontal` (GPS de telemetría con altitud poco fiable; pistas "
+       "que no son de DJI: {0}/{1})"),
+    PT("--metric-gps auto: `horizontal` (GPS de telemetria com altitude pouco confiável; "
+       "faixas que não são da DJI: {0}/{1})"),
+    IT("--metric-gps auto: `horizontal` (GPS della telemetria con quota inaffidabile; "
+       "tracce non DJI: {0}/{1})"),
+    NL("--metric-gps auto: `horizontal` (telemetrie-gps met onbetrouwbare hoogte; sporen "
+       "niet van DJI: {0}/{1})"),
+    RU("--metric-gps auto: `horizontal` (GPS из телеметрии с ненадёжной высотой; треков не "
+       "от DJI: {0}/{1})"),
+    TR("--metric-gps auto: `horizontal` (yüksekliği güvenilmez telemetri GPS'i; DJI olmayan "
+       "izler: {0}/{1})"));
+
+SS_MSG(metric_gps_auto_exif_alt,
+    EN("--metric-gps auto: `full` (EXIF GPS with altitude; images: {0})"),
+    JA("--metric-gps auto: `full` (高度付きの EXIF GPS; 画像数: {0})"),
+    ZH_HANS("--metric-gps auto: `full` (带高度的 EXIF GPS; 图像数: {0})"),
+    ZH_HANT("--metric-gps auto: `full` (帶高度的 EXIF GPS; 影像數: {0})"),
+    KO("--metric-gps auto: `full` (고도가 있는 EXIF GPS; 이미지 수: {0})"),
+    DE("--metric-gps auto: `full` (EXIF-GPS mit Höhe; Bilder: {0})"),
+    FR("--metric-gps auto : `full` (GPS EXIF avec altitude ; images : {0})"),
+    ES("--metric-gps auto: `full` (GPS EXIF con altitud; imágenes: {0})"),
+    PT("--metric-gps auto: `full` (GPS EXIF com altitude; imagens: {0})"),
+    IT("--metric-gps auto: `full` (GPS EXIF con quota; immagini: {0})"),
+    NL("--metric-gps auto: `full` (EXIF-gps met hoogte; beelden: {0})"),
+    RU("--metric-gps auto: `full` (GPS из EXIF с высотой; изображений: {0})"),
+    TR("--metric-gps auto: `full` (yükseklikli EXIF GPS; görüntü sayısı: {0})"));
+
+SS_MSG(metric_gps_auto_exif_noalt,
+    EN("--metric-gps auto: `horizontal` (EXIF GPS missing an altitude; images without one: "
+       "{0}/{1})"),
+    JA("--metric-gps auto: `horizontal` (高度のない EXIF GPS; 高度なしの画像: {0}/{1})"),
+    ZH_HANS("--metric-gps auto: `horizontal` (EXIF GPS 缺少高度; 没有高度的图像: {0}/{1})"),
+    ZH_HANT("--metric-gps auto: `horizontal` (EXIF GPS 缺少高度; 沒有高度的影像: {0}/{1})"),
+    KO("--metric-gps auto: `horizontal` (고도가 없는 EXIF GPS; 고도 없는 이미지: {0}/{1})"),
+    DE("--metric-gps auto: `horizontal` (EXIF-GPS ohne Höhe; Bilder ohne Höhe: {0}/{1})"),
+    FR("--metric-gps auto : `horizontal` (GPS EXIF sans altitude ; images sans altitude : "
+       "{0}/{1})"),
+    ES("--metric-gps auto: `horizontal` (GPS EXIF sin altitud; imágenes sin altitud: "
+       "{0}/{1})"),
+    PT("--metric-gps auto: `horizontal` (GPS EXIF sem altitude; imagens sem altitude: "
+       "{0}/{1})"),
+    IT("--metric-gps auto: `horizontal` (GPS EXIF senza quota; immagini senza quota: "
+       "{0}/{1})"),
+    NL("--metric-gps auto: `horizontal` (EXIF-gps zonder hoogte; beelden zonder hoogte: "
+       "{0}/{1})"),
+    RU("--metric-gps auto: `horizontal` (GPS из EXIF без высоты; изображений без высоты: "
+       "{0}/{1})"),
+    TR("--metric-gps auto: `horizontal` (yüksekliksiz EXIF GPS; yüksekliği olmayan "
+       "görüntüler: {0}/{1})"));
+
+SS_MSG(metric_gps_auto_exif_phone,
+    EN("--metric-gps auto: `horizontal` (a phone's EXIF GPS, whose altitude is poor; images "
+       "from {2}: {0}/{1})"),
+    JA("--metric-gps auto: `horizontal` (スマートフォンの EXIF GPS で高度の精度が低い; {2} の画像: {0}/{1})"),
+    ZH_HANS("--metric-gps auto: `horizontal` (手机的 EXIF GPS，高度不准; 来自 {2} 的图像: {0}/{1})"),
+    ZH_HANT("--metric-gps auto: `horizontal` (手機的 EXIF GPS，高度不準; 來自 {2} 的影像: {0}/{1})"),
+    KO("--metric-gps auto: `horizontal` (고도가 부정확한 휴대폰의 EXIF GPS; {2} 의 이미지: {0}/{1})"),
+    DE("--metric-gps auto: `horizontal` (EXIF-GPS eines Telefons mit schlechter Höhe; "
+       "Bilder von {2}: {0}/{1})"),
+    FR("--metric-gps auto : `horizontal` (GPS EXIF d'un téléphone, à l'altitude médiocre ; "
+       "images de {2} : {0}/{1})"),
+    ES("--metric-gps auto: `horizontal` (GPS EXIF de un teléfono, con altitud pobre; "
+       "imágenes de {2}: {0}/{1})"),
+    PT("--metric-gps auto: `horizontal` (GPS EXIF de um telefone, com altitude ruim; "
+       "imagens de {2}: {0}/{1})"),
+    IT("--metric-gps auto: `horizontal` (GPS EXIF di un telefono, con quota scadente; "
+       "immagini di {2}: {0}/{1})"),
+    NL("--metric-gps auto: `horizontal` (EXIF-gps van een telefoon, met slechte hoogte; "
+       "beelden van {2}: {0}/{1})"),
+    RU("--metric-gps auto: `horizontal` (GPS из EXIF телефона с плохой высотой; изображений "
+       "от {2}: {0}/{1})"),
+    TR("--metric-gps auto: `horizontal` (yüksekliği zayıf bir telefonun EXIF GPS'i; {2} "
+       "görüntüleri: {0}/{1})"));
+
+SS_MSG(metric_gps_auto_positions,
+    EN("--metric-gps auto: `none` (--metric-positions is the metric reference)"),
+    JA("--metric-gps auto: `none` (--metric-positions をメートル基準にします)"),
+    ZH_HANS("--metric-gps auto: `none` (以 --metric-positions 为米制基准)"),
+    ZH_HANT("--metric-gps auto: `none` (以 --metric-positions 為公制基準)"),
+    KO("--metric-gps auto: `none` (--metric-positions 를 미터 기준으로 씁니다)"),
+    DE("--metric-gps auto: `none` (--metric-positions ist die metrische Referenz)"),
+    FR("--metric-gps auto : `none` (--metric-positions est la référence métrique)"),
+    ES("--metric-gps auto: `none` (--metric-positions es la referencia métrica)"),
+    PT("--metric-gps auto: `none` (--metric-positions é a referência métrica)"),
+    IT("--metric-gps auto: `none` (--metric-positions è il riferimento metrico)"),
+    NL("--metric-gps auto: `none` (--metric-positions is de metrische referentie)"),
+    RU("--metric-gps auto: `none` (метрическая опора -- --metric-positions)"),
+    TR("--metric-gps auto: `none` (metrik referans --metric-positions)"));
+
+SS_MSG(metric_gps_auto_none,
+    EN("--metric-gps auto: `none` (no image or telemetry carries GPS)"),
+    JA("--metric-gps auto: `none` (GPS を持つ画像もテレメトリもありません)"),
+    ZH_HANS("--metric-gps auto: `none` (没有带 GPS 的图像或遥测)"),
+    ZH_HANT("--metric-gps auto: `none` (沒有帶 GPS 的影像或遙測)"),
+    KO("--metric-gps auto: `none` (GPS 가 있는 이미지도 텔레메트리도 없습니다)"),
+    DE("--metric-gps auto: `none` (weder Bilder noch Telemetrie tragen GPS)"),
+    FR("--metric-gps auto : `none` (ni les images ni la télémétrie ne portent de GPS)"),
+    ES("--metric-gps auto: `none` (ninguna imagen ni telemetría trae GPS)"),
+    PT("--metric-gps auto: `none` (nenhuma imagem nem telemetria traz GPS)"),
+    IT("--metric-gps auto: `none` (né le immagini né la telemetria hanno GPS)"),
+    NL("--metric-gps auto: `none` (geen beeld of telemetrie heeft gps)"),
+    RU("--metric-gps auto: `none` (ни у изображений, ни в телеметрии нет GPS)"),
+    TR("--metric-gps auto: `none` (ne görüntülerde ne telemetride GPS var)"));
+
 SS_MSG(metric_axes,
     EN("Residual RMS per reference axis: {0}/{1}/{2} m; fitted up axis vs the "
        "cameras' mean up: {3} deg"),

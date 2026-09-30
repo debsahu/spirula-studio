@@ -65,6 +65,7 @@ struct MatchStats {
 struct LoadedCapture {
     SensorCapture cap;
     SensorTimeline timeline;
+    TelemetryCarrier carrier = TelemetryCarrier::None;
 };
 
 struct SensorCaptures {
@@ -86,6 +87,39 @@ std::unique_ptr<TelemetryPriors> makeSensorPriors(const SfmConfig& cfg,
                                                   const SensorCaptures& sensors,
                                                   const MatchesDatabase& db,
                                                   const std::vector<uint32_t>& cam_ids);
+
+// What --metric-gps auto reads off a capture to pick a mode.
+struct MetricGpsEvidence {
+    bool positions_file = false;
+    int telemetry_gps = 0;   // telemetry files with a usable GPS track
+    int telemetry_dji = 0;   // ... of them a DJI djmd track (an Avata or Osmo .OSV)
+    int exif_fixes = 0;
+    int exif_no_alt = 0;
+    int exif_phone = 0;      // ... fixes a phone maker's camera wrote
+    std::string phone_make;  // one of those makers, for the log
+};
+
+enum class MetricGpsWhy {
+    Explicit, Positions, DjiTelemetry, OtherTelemetry, ExifAltitude, ExifNoAltitude,
+    ExifPhone, NoGps
+};
+
+struct MetricGpsChoice {
+    std::string mode;   // none | horizontal | full
+    MetricGpsWhy why = MetricGpsWhy::NoGps;
+};
+
+// `full` for a DJI telemetry track (barometric altitude) or EXIF fixes with an
+// altitude; `horizontal` where the altitude is a phone's or an action camera's
+// (D75), or missing; `none` without GPS or beside a positions file.
+MetricGpsChoice resolveMetricGps(const MetricGpsEvidence& e);
+bool isPhoneMake(const std::string& make);
+MetricGpsEvidence metricGpsEvidence(const SfmConfig& cfg, const SensorCaptures& sensors,
+                                    const std::string& imagedir);
+// Replaces an `auto` cfg.metric_gps with the mode it resolves to, and logs why;
+// an explicit mode is returned as is.
+MetricGpsChoice applyMetricGpsAuto(SfmConfig& cfg, const SensorCaptures& sensors,
+                                   const std::string& imagedir);
 
 // Each image's EXIF GPS as a prior source (ExifGpsPriors); null when no image
 // under `imagedir` carries a fix, or with --no-sensor-map and --no-sensor-pairs.

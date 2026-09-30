@@ -904,6 +904,7 @@ static int cmdMap(int argc, char** argv) {
     }
     // The sensors, calibrated against the gyro on the verified pairs.
     const SensorCaptures sensors = loadSensorCaptures(cfg, opt.verbose);
+    applyMetricGpsAuto(cfg, sensors, cfg.image_dir);
     std::unique_ptr<TelemetryPriors> priors =
         cfg.sensor_map ? makeSensorPriors(cfg, sensors, db, cs.ids) : nullptr;
     if (priors)
@@ -1110,7 +1111,9 @@ static int cmdMerge(int argc, char** argv) {
     }
     // A reference re-gauges a model instead of joining it to another, which is
     // the one thing this command does that one model can want (D74).
-    const bool metric = cfg.metric_gps != "none" || !cfg.metric_positions.empty() ||
+    const SensorCaptures merge_sensors = loadSensorCaptures(cfg, mo.verbose);
+    applyMetricGpsAuto(cfg, merge_sensors, cfg.image_dir);
+    const bool metric = cfg.metricGps() || !cfg.metric_positions.empty() ||
                         (!cfg.telemetry_inputs.empty() && cfg.sensor_gauge != "none") ||
                         (cfg.orient && cfg.exif_attitude != "none" && !cfg.image_dir.empty());
     if (models.size() < 2 && !metric) {
@@ -1149,7 +1152,8 @@ static int cmdMerge(int argc, char** argv) {
     std::vector<sfm::ModelGauge> merge_gauge;
     // These models came off disk, which records no Orientation tag.
     if (cfg.exif_orientation == "orient") fillExifOrientations(models, cfg.image_dir);
-    const bool merge_metric = fixGauge(models, cfg, cfg.image_dir, mo.verbose, merge_gauge);
+    const bool merge_metric =
+        fixGauge(models, cfg, cfg.image_dir, mo.verbose, merge_gauge, &merge_sensors);
     recolorPoints(models, cfg);
     writeModels(models, fs::path(output), mo.verbose, merge_gauge);
     // In place, the models that were absorbed must not stay behind as stale

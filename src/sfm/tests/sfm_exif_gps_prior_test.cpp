@@ -366,14 +366,20 @@ struct Tiff {
 }  // namespace
 
 // Little-endian TIFF with a GPS IFD at 42 deg 12' (sec100/100)" N,
-// 83 deg 40' 17.86" W, altitude alt100/100 m when `with_alt`.
-static std::vector<uint8_t> gpsTiff(uint32_t sec100, bool with_alt, uint32_t alt100 = 25366) {
+// 83 deg 40' 17.86" W, altitude alt100/100 m when `with_alt`; a Make tag when given.
+static std::vector<uint8_t> gpsTiff(uint32_t sec100, bool with_alt, uint32_t alt100 = 25366,
+                                    const std::string& make = "") {
     Tiff t;
     t.u8('I'); t.u8('I'); t.u16(42); t.u32(8);
-    t.u16(1);
-    const uint32_t gps = 8 + 2 + 12 + 4;
+    const uint32_t n0 = make.empty() ? 1 : 2;
+    t.u16((uint16_t)n0);
+    const uint32_t str = 8 + 2 + 12 * n0 + 4;
+    const uint32_t gps = str + (make.empty() ? 0 : (uint32_t)make.size() + 1);
+    if (!make.empty()) t.ent(0x010F, 2, (uint32_t)make.size() + 1, str);
     t.ent(0x8825, 4, 1, gps);
     t.u32(0);
+    for (char c : make) t.u8((uint8_t)c);
+    if (!make.empty()) t.u8(0);
     const uint32_t nv = with_alt ? 6 : 5;
     t.u16((uint16_t)nv);
     const uint32_t vals = gps + 2 + nv * 12 + 4;
@@ -476,6 +482,164 @@ static void testBuilder() {
     fs::remove_all(dir);
 }
 
+// ---- --metric-gps auto --------------------------------------------------------
+
+static void testAutoRule() {
+    struct Case {
+        const char* name;
+        MetricGpsEvidence e;
+        const char* mode;
+        MetricGpsWhy why;
+    };
+    auto ev = [](int tg, int dji, int fixes, int no_alt, int phone, bool pos = false) {
+        MetricGpsEvidence e;
+        e.telemetry_gps = tg;
+        e.telemetry_dji = dji;
+        e.exif_fixes = fixes;
+        e.exif_no_alt = no_alt;
+        e.exif_phone = phone;
+        e.positions_file = pos;
+        return e;
+    };
+    const Case cases[] = {
+        {"auto: no GPS is none", ev(0, 0, 0, 0, 0), "none", MetricGpsWhy::NoGps},
+        {"auto: two fixes are no GPS", ev(0, 0, 2, 0, 0), "none", MetricGpsWhy::NoGps},
+        {"auto: a positions file is the reference", ev(1, 1, 40, 0, 0, true), "none",
+         MetricGpsWhy::Positions},
+        {"auto: DJI telemetry is full", ev(1, 1, 0, 0, 0), "full", MetricGpsWhy::DjiTelemetry},
+        {"auto: other telemetry is horizontal", ev(1, 0, 0, 0, 0), "horizontal",
+         MetricGpsWhy::OtherTelemetry},
+        {"auto: one non-DJI track makes it horizontal", ev(2, 1, 0, 0, 0), "horizontal",
+         MetricGpsWhy::OtherTelemetry},
+        {"auto: telemetry is read before EXIF", ev(1, 0, 40, 0, 0), "horizontal",
+         MetricGpsWhy::OtherTelemetry},
+        {"auto: EXIF with altitude is full", ev(0, 0, 40, 0, 0), "full",
+         MetricGpsWhy::ExifAltitude},
+        {"auto: a tenth without altitude is still full", ev(0, 0, 40, 4, 0), "full",
+         MetricGpsWhy::ExifAltitude},
+        {"auto: more than a tenth without altitude is horizontal", ev(0, 0, 40, 5, 0),
+         "horizontal", MetricGpsWhy::ExifNoAltitude},
+        {"auto: a phone's EXIF is horizontal", ev(0, 0, 40, 0, 21), "horizontal",
+         MetricGpsWhy::ExifPhone},
+        {"auto: a phone minority does not decide it", ev(0, 0, 40, 0, 20), "full",
+         MetricGpsWhy::ExifAltitude},
+    };
+    for (const Case& c : cases) {
+        const MetricGpsChoice got = resolveMetricGps(c.e);
+        if (got.mode != c.mode || got.why != c.why)
+            std::printf("  %s: got %s (%d)\n", c.name, got.mode.c_str(), (int)got.why);
+        check(got.mode == c.mode && got.why == c.why, c.name);
+    }
+    check(isPhoneMake("Apple") && isPhoneMake("samsung ") && isPhoneMake("Google") &&
+              !isPhoneMake("DJI") && !isPhoneMake("Canon") && !isPhoneMake("SONY") &&
+              !isPhoneMake(""),
+          "auto: phone makers by EXIF Make");
+}
+
+// A GPS-only telemetry file whose track passes the timeline's usability check.
+static Telemetry gpsTelemetry(TelemetryCarrier carrier) {
+    Telemetry t;
+    t.carrier = carrier;
+    t.camera = "synthetic";
+    t.video_fps = 30;
+    t.video_duration = 60;
+    for (int k = 0; k <= 600; k++) {
+        TelemetryGps g;
+        g.t = 0.1 * k;
+        g.fix = true;
+        const Geodetic f = fixAt(1.5 * g.t, 0.5 * g.t, kAlt0);
+        g.lat = f.lat_deg;
+        g.lon = f.lon_deg;
+        g.alt = f.alt_m;
+        g.has_alt = true;
+        g.dop = 1.0;
+        t.gps.push_back(g);
+    }
+    return t;
+}
+
+static void addCapture(SensorCaptures& sc, const Telemetry& t) {
+    auto lc = std::make_unique<LoadedCapture>();
+    std::string err;
+    lc->timeline.init(t, telemetry_check(t), err);
+    lc->cap.fps = t.video_fps;
+    lc->cap.timeline = &lc->timeline;
+    lc->carrier = t.carrier;
+    sc.loaded.push_back(std::move(lc));
+}
+
+static void testAutoFromCapture() {
+    const fs::path dir = fs::temp_directory_path() / "sfm_exif_gps_auto_test";
+    fs::remove_all(dir);
+    fs::create_directories(dir / "alt");
+    fs::create_directories(dir / "noalt");
+    fs::create_directories(dir / "phone");
+    fs::create_directories(dir / "none");
+    for (int k = 0; k < 4; k++) {
+        const std::string n = "f" + std::to_string(k) + ".jpg";
+        writeJpeg(dir / "alt" / n, gpsTiff(355 + 100 * k, true));
+        writeJpeg(dir / "noalt" / n, gpsTiff(355 + 100 * k, false));
+        writeJpeg(dir / "phone" / n, gpsTiff(355 + 100 * k, true, 25366, "Apple"));
+        writeJpeg(dir / "none" / n, {});
+    }
+    const SensorCaptures none_sensors;
+    auto resolve = [&](const std::string& sub, const std::string& given,
+                       const SensorCaptures& sensors, const std::string& positions = "") {
+        SfmConfig cfg;
+        cfg.metric_gps = given;
+        cfg.metric_positions = positions;
+        const MetricGpsChoice c = applyMetricGpsAuto(cfg, sensors, (dir / sub).string());
+        return std::make_pair(cfg.metric_gps, c.why);
+    };
+    const MetricGpsEvidence ea = metricGpsEvidence(SfmConfig{}, none_sensors, (dir / "phone").string());
+    std::printf("auto evidence, phone folder: %d fixes, %d without altitude, %d phone (%s)\n",
+                ea.exif_fixes, ea.exif_no_alt, ea.exif_phone, ea.phone_make.c_str());
+    check(ea.exif_fixes == 4 && ea.exif_no_alt == 0 && ea.exif_phone == 4 && ea.phone_make == "Apple",
+          "auto: the evidence reads fixes, altitudes and makers off the files");
+    check(resolve("alt", "auto", none_sensors).first == "full",
+          "auto: a folder with altitude resolves to full");
+    check(resolve("noalt", "auto", none_sensors).first == "horizontal",
+          "auto: a folder without altitude resolves to horizontal");
+    check(resolve("phone", "auto", none_sensors).first == "horizontal",
+          "auto: a phone's folder resolves to horizontal");
+    check(resolve("none", "auto", none_sensors).first == "none",
+          "auto: a folder without GPS resolves to none");
+    check(resolve("alt", "auto", none_sensors, "positions.txt").first == "none",
+          "auto: a positions file stands it down");
+    const auto kept = resolve("noalt", "full", none_sensors);
+    check(kept.first == "full" && kept.second == MetricGpsWhy::Explicit,
+          "auto: an explicit mode is kept as given");
+
+    SensorCaptures dji, gopro, silent;
+    addCapture(dji, gpsTelemetry(TelemetryCarrier::DjiDvtm));
+    addCapture(gopro, gpsTelemetry(TelemetryCarrier::Gpmf));
+    Telemetry quiet = gpsTelemetry(TelemetryCarrier::DjiDvtm);
+    quiet.gps.clear();
+    quiet.accel.push_back({0.0, 0.0, 0.0, 9.8});
+    quiet.accel.push_back({1.0, 0.0, 0.0, 9.8});
+    addCapture(silent, quiet);
+    check(dji.loaded[0]->timeline.hasGps() && !silent.loaded[0]->timeline.hasGps(),
+          "fixture: one telemetry file has usable GPS, one has none");
+    check(resolve("none", "auto", dji).first == "full", "auto: DJI telemetry GPS resolves to full");
+    check(resolve("alt", "auto", gopro).first == "horizontal",
+          "auto: a GoPro's GPS resolves to horizontal over EXIF altitude");
+    check(resolve("noalt", "auto", silent).first == "horizontal",
+          "auto: telemetry without GPS leaves the EXIF to decide");
+
+    // --metric-gps horizontal levels the telemetry source too.
+    MatchesDatabase db;
+    db.images.push_back({"f0", 0});
+    SfmConfig level;
+    level.metric_gps = "horizontal";
+    std::unique_ptr<TelemetryPriors> tp = makeSensorPriors(level, dji, db, {1});
+    SfmConfig whole;
+    whole.metric_gps = "full";
+    std::unique_ptr<TelemetryPriors> tw = makeSensorPriors(whole, dji, db, {1});
+    check(tp && tp->options().gps_flat && tw && !tw->options().gps_flat,
+          "builder: --metric-gps horizontal fits the telemetry's GPS level");
+    fs::remove_all(dir);
+}
+
 static int run(int, char**) {
     testPositionsAndPairs();
     testFactors();
@@ -484,6 +648,8 @@ static int run(int, char**) {
     testPositionError();
     testLevelCheck();
     testBuilder();
+    testAutoRule();
+    testAutoFromCapture();
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;
 }
