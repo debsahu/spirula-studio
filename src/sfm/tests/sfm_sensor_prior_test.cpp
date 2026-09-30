@@ -305,10 +305,155 @@ static void testTelemetryPriors() {
     check(in_range && lp.rotations.size() >= 38, "remapped: factors on local ids");
 }
 
+// ---- a fused attitude with no accelerometer to settle its sense -----------------
+
+struct AttitudeRun {
+    bool has_up = false, calibrated = false, gravity = false, right_handed = false;
+    double sign = 0, x_err = 180, rel_worst = 180, up_err = 180, imu_up_err = 180;
+    int rel_n = 0;
+    size_t images = 0;
+    PosePriors pf;
+    SensorFactorStats st;
+};
+
+// Pairs up to 2.5 s apart, as the mapper's calibration spread: the wrong sense
+// hides at short gaps (1.9 deg at 0.13 s on one Avata flight, 7.8 at 3 s).
+static AttitudeRun runAttitude(const Scenario& sc, const Mat3& R_ci) {
+    AttitudeRun out;
+    Telemetry t = synthesize(sc, R_ci);
+    const TelemetryCheck c = telemetry_check(t);
+    SensorTimeline tl;
+    std::string err;
+    check(tl.init(t, c, err), "attitude: timeline init: " + err);
+    out.has_up = tl.hasUp();
+    check(tl.attitudeSenseOpen() == sc.no_accel, "attitude: sense open exactly when there is no accelerometer");
+    Sim3 M;
+    M.scale = 0.37;
+    M.R = angleAxisToRotation(Vec3{1.1, 0.4, -0.9});
+    M.t = {2.0, -1.0, 0.5};
+    Reconstruction rec = synthesizeModel(sc, M, 2.0);
+    std::vector<std::string> names;
+    std::vector<uint32_t> cams, ids;
+    for (const auto& kv : rec.images) {
+        ids.push_back(kv.first);
+        names.push_back(kv.second.name);
+        cams.push_back(1);
+    }
+    out.images = ids.size();
+    SensorCapture cap;
+    cap.fps = 24;
+    cap.timeline = &tl;
+    TelemetryPriors src({cap}, names, cams, SensorPriorOptions());
+    std::mt19937 rng(4);
+    std::normal_distribution<double> N(0, 1);
+    std::vector<PairRotationObs> obs;
+    for (uint32_t d : {1u, 3u, 5u})
+        for (uint32_t k = 0; k + d < ids.size(); k++) {
+            const Pose& a = rec.images.at(ids[k]).pose;
+            const Pose& b = rec.images.at(ids[k + d]).pose;
+            const double s = 0.08 * M_PI / 180.0;
+            obs.push_back({k, k + d, mul(angleAxisToRotation({s * N(rng), s * N(rng), s * N(rng)}),
+                                         mul(b.R, transpose(a.R)))});
+        }
+    src.calibrateFromPairs(obs);
+    if (src.groups().size() != 1) return out;
+    const SensorGroupState& g0 = src.groups()[0];
+    out.calibrated = g0.ok;
+    out.x_err = std::min(angleDeg(g0.X, R_ci), angleDeg(mat3Scale(g0.X, -1.0), R_ci));
+    out.rel_worst = 0;
+    for (uint32_t k = 0; k + 3 < ids.size(); k += 7) {
+        Mat3 R;
+        double sig;
+        if (!src.relativeRotation(k, k + 3, R, sig)) continue;
+        const Pose& a = rec.images.at(ids[k]).pose;
+        const Pose& b = rec.images.at(ids[k + 3]).pose;
+        out.rel_worst = std::max(out.rel_worst, angleDeg(R, mul(b.R, transpose(a.R))));
+        out.rel_n++;
+    }
+    std::vector<PosedImage> imgs;
+    for (uint32_t k = 0; k < ids.size(); k++) imgs.push_back({k, 1, rec.images.at(ids[k]).pose});
+    out.pf = src.factors(imgs);
+    out.st = src.lastFactors();
+    const SensorGroupState& g = src.groups()[0];
+    out.gravity = g.gravity;
+    out.right_handed = det3(g.X) > 0;
+    out.sign = g.sign;
+    out.up_err = angleDeg(out.pf.up_w, mul(transpose(M.R), Vec3{0, 0, 1}));
+    // The vote itself, in the IMU frame, against the true up there.
+    out.imu_up_err = 0;
+    for (double ts = 5; ts < sc.duration - 5; ts += 7) {
+        const UpVote v = tl.upAt(ts, 0.25, g.sign);
+        Mat3 R_wc;
+        Vec3 p;
+        poseAt(sc, ts - sc.clock_offset, R_wc, p);
+        const double e = v.ok ? angleDeg(v.up, mul(transpose(mul(R_wc, R_ci)), Vec3{0, 0, 1})) : 180.0;
+        out.imu_up_err = std::max(out.imu_up_err, e);
+    }
+    std::printf("attitude (accel %s, up %s): calibrated=%d sign=%.0f X within %.2f deg, rel %d worst "
+                "%.3f deg | %zu rotations, %zu ups, up err %.3f deg, IMU-frame up err %.3f deg, "
+                "gravity refit %d, det %+.0f, gps %d, triples %d\n",
+                sc.no_accel ? "none" : "30 Hz", sc.declare_up ? "declared" : "undeclared",
+                out.calibrated, out.sign, out.x_err, out.rel_n, out.rel_worst, out.pf.rotations.size(),
+                out.pf.ups.size(), out.up_err, out.imu_up_err, out.gravity, out.right_handed ? 1.0 : -1.0,
+                out.st.gps, out.st.triples);
+    return out;
+}
+
+static void testAttitudeWithoutAccel() {
+    const Mat3 R_ci = angleAxisToRotation(Vec3{0.3, -1.2, 0.7});
+    // The Avata 360: its vertical declared, as the DJI reader declares it.
+    Scenario sc;
+    sc.attitude_only = true;
+    sc.no_accel = true;
+    sc.z_down_world = true;
+    sc.declare_up = true;
+    const AttitudeRun a = runAttitude(sc, R_ci);
+    check(a.calibrated && a.x_err < 1.0, "no accel: sense found, extrinsic within 1 deg");
+    check(a.rel_n > 20 && a.rel_worst < 1.5, "no accel: relative rotations within 1.5 deg of the poses");
+    check(a.pf.rotations.size() >= a.images - 2, "no accel: a rotation per consecutive pair");
+    check(a.has_up && a.gravity, "no accel: the declared vertical is an up source");
+    check(a.imu_up_err < 0.1, "no accel: up vote is the declared vertical in the IMU frame");
+    check(a.st.up_ok && a.up_err < 0.5 && a.pf.ups.size() >= 0.9 * a.images,
+          "no accel: an up per frame, axis within 0.5 deg");
+    check(a.right_handed, "no accel: X a rotation, not a reflection");
+    check(!a.st.scale_ok && a.st.triples == 0, "no accel: no inertial scale");
+    check(a.st.gps_ok && a.st.gps >= 0.8 * (int)a.images, "no accel: GPS positions");
+
+    // Undeclared, the rotations still hold but nothing says which way is up.
+    sc.declare_up = false;
+    const AttitudeRun b = runAttitude(sc, R_ci);
+    check(b.calibrated && b.x_err < 1.0 && b.pf.rotations.size() >= b.images - 2,
+          "no accel, undeclared: rotations without a vertical");
+    check(!b.has_up && !b.gravity && b.pf.ups.empty() && !b.st.up_ok, "no accel, undeclared: no up");
+
+    // With an accelerometer the declaration is not read: a wrong one changes nothing.
+    Scenario so;
+    so.attitude_only = true;
+    so.accel_rate = 30;
+    so.accel_noise = 0.06;
+    Telemetry to = synthesize(so, R_ci);
+    to.attitude_world_up[0] = 1;
+    const TelemetryCheck co = telemetry_check(to);
+    check(co.attitude_is_sensor_to_world, "accel: sense measured as sensor->world");
+    SensorTimeline tlo;
+    std::string err;
+    check(tlo.init(to, co, err), "accel: timeline init: " + err);
+    // The accelerometer settled the sense, so the conjugate is not a hypothesis
+    // to test; the same stream without one leaves it open.
+    check(!tlo.attitudeSenseOpen(), "accel: attitude sense settled, not open");
+    Mat3 R_wc;
+    Vec3 p;
+    poseAt(so, 30.0, R_wc, p);
+    const UpVote v = tlo.upAt(30.0);
+    check(v.ok && angleDeg(v.up, mul(transpose(mul(R_wc, R_ci)), Vec3{0, 0, 1})) < 1.0,
+          "accel: up from the accelerometer, not a declared vertical");
+}
+
 int cmdSensorPriorTest(int, char**) {
     testKnownRotationTwoView();
     testKnownRotationPnP();
     testTelemetryPriors();
+    testAttitudeWithoutAccel();
     std::printf("%s\n", fails ? "FAIL" : "PASS");
     return fails ? 1 : 0;
 }

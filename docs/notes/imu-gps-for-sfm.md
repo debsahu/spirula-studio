@@ -180,6 +180,15 @@ rotation but not up; a hover also reads `GPS not usable` (no spread), which is
 the right answer. The `.LRF` proxy carries the same metadata at 30 fps; its
 second attitude batch (`3.3.2.2`) is not read.
 
+With no accelerometer nothing in the file says which way the attitude
+quaternion maps, or which way is up in its world. The hand-eye fit therefore
+tries both senses (the quaternion and its conjugate) and keeps the one that
+agrees with the poses. The vertical is declared by the reader: for
+`dvtm_AVATA360` the attitude world is z-down. That rests on one flight, where
+the up it gives came out 0.23 deg from the GPS-levelled model. A carrier with
+an accelerometer never takes either path, and an accelerometer-less attitude
+with no declared vertical gives no up vote.
+
 ### 2.4 What the reader does with all this
 
 `telemetry_read` picks the carrier by content, never by extension: the
