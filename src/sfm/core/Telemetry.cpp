@@ -16,6 +16,7 @@
 #include <functional>
 #include <map>
 #include <sstream>
+#include <tuple>
 
 namespace sfm {
 
@@ -1458,6 +1459,77 @@ VideoColor djmd_color(const uint8_t* sample, size_t n) {
              : out.code == 0  ? VideoColorMode::Normal
                               : VideoColorMode::OtherLog;
     return out;
+}
+
+// PanoDewarpParams entries 3 and 4 (native_refine_far slave, master); the
+// other 22 are empty on every clip read. Track by the measured fit of each set
+// to each track's frames: docs/notes/imu-gps-for-sfm.md §2.3.
+std::vector<LensCalibration> djmd_lenses(const uint8_t* sample, size_t n) {
+    std::vector<LensCalibration> out;
+    const auto top = pb_fields(sample, n);
+    const auto hdr = pb_sub(pb_find(pb_sub(pb_find(top, 1)), 1));
+    if (pb_string(pb_find(hdr, 1)) != "dvtm_AVATA360.proto") return out;
+    const auto pano = pb_sub(pb_find(pb_sub(pb_find(top, 2)), 5));
+    for (const auto& [entry, track, name] : {std::tuple{4u, 0, "master"}, std::tuple{3u, 1, "slave"}}) {
+        const auto d = pb_sub(pb_find(pano, entry));
+        auto f32 = [&](uint32_t num) {
+            const PbField* f = pb_find(d, num);
+            return f && f->wire == 5 ? f->f32() : 0.0;
+        };
+        // lens_model 8 is the form measured above; another code is another model.
+        if (f32(24) != 8.0) continue;
+        LensCalibration l;
+        l.track = track;
+        l.lens = name;
+        l.fx = f32(1); l.fy = f32(2); l.cx = f32(3); l.cy = f32(4);
+        for (int i = 0; i < 4; i++) l.k[i] = f32(5 + (uint32_t)i);
+        l.k[4] = f32(15);
+        l.width = (int)f32(10);
+        l.height = (int)f32(11);
+        const PbField* p = pb_find(d, 20);
+        if (p && p->wire == 2 && p->len == 8) {
+            l.p1 = (double)lef32(p->data);
+            l.p2 = (double)lef32(p->data + 4);
+        }
+        if (l.fx > 0 && l.fy > 0 && l.width > 0 && l.height > 0) out.push_back(l);
+    }
+    return out;
+}
+
+namespace {
+
+std::vector<LensCalibration> lenses_of(const Source& src) {
+    Movie mv;
+    bool is_mp4 = false;
+    std::string error;
+    if (!read_movie(src, mv, is_mp4, error)) return {};
+    std::vector<uint8_t> buf;
+    for (const Track& tk : mv.tracks) {
+        if (tk.sample_type != fourcc("djmd")) continue;
+        for (size_t i = 0; i < tk.samples.size() && i < 8; i++) {
+            const Sample& sm = tk.samples[i];
+            if (sm.size < 2 || sm.size > (16u << 20) || !src.readVec(sm.offset, sm.size, buf))
+                continue;
+            if (djmd_color(buf.data(), buf.size()).proto.empty()) continue;
+            return djmd_lenses(buf.data(), buf.size());
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
+std::vector<LensCalibration> video_lenses(const std::string& path) {
+    FileSource src;
+    if (!src.open(path)) return {};
+    return lenses_of(src);
+}
+
+std::vector<LensCalibration> video_lenses(const uint8_t* data, size_t size) {
+    MemorySource src;
+    src.p = data;
+    src.n = size;
+    return lenses_of(src);
 }
 
 VideoColor video_color(const std::string& path) {

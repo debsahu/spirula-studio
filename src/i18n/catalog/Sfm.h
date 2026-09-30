@@ -149,6 +149,128 @@ SS_MSG(run_cameras,
     RU("Объектив: {0}   Группировка камер: {1}"),
     TR("Objektif: {0}   Kamera gruplaması: {1}"));
 
+// A lens folder given the factory calibration its video carries
+// (sfm/core/LensCalibration.h): {0} the folder, {1} DJI's lens name, {2} the
+// file, {3} the camera model, {4}-{7} pixels, {8} the refit's worst pixel error.
+SS_MSG(lens_calib_used,
+    EN("{0}: factory calibration of the {1} lens from {2}, as {3}: fx {4} fy {5} cx {6} cy {7}, "
+       "its 5-term radial curve refitted to within {8} px"),
+    JA("{0}: {2} の {1} レンズの工場キャリブレーションを {3} として使用: fx {4} fy {5} cx {6} cy {7}、"
+       "5 項の放射曲線を最大 {8} px の誤差で再フィット"),
+    ZH_HANS("{0}: 使用 {2} 中 {1} 镜头的出厂标定，作为 {3}: fx {4} fy {5} cx {6} cy {7}，"
+            "5 项径向曲线重新拟合，误差不超过 {8} px"),
+    ZH_HANT("{0}: 使用 {2} 中 {1} 鏡頭的出廠校正，作為 {3}: fx {4} fy {5} cx {6} cy {7}，"
+            "5 項徑向曲線重新擬合，誤差不超過 {8} px"),
+    KO("{0}: {2} 의 {1} 렌즈 공장 보정을 {3} 로 사용: fx {4} fy {5} cx {6} cy {7}, "
+       "5항 방사 곡선을 최대 {8} px 오차로 다시 맞춤"),
+    DE("{0}: Werkskalibrierung des Objektivs {1} aus {2}, als {3}: fx {4} fy {5} cx {6} cy {7}, "
+       "die radiale Kurve mit 5 Termen auf höchstens {8} px neu angepasst"),
+    FR("{0} : calibration d'usine de l'objectif {1} tirée de {2}, en {3} : fx {4} fy {5} cx {6} cy {7}, "
+       "courbe radiale à 5 termes réajustée à {8} px près"),
+    ES("{0}: calibración de fábrica del objetivo {1} de {2}, como {3}: fx {4} fy {5} cx {6} cy {7}, "
+       "curva radial de 5 términos reajustada con {8} px como máximo"),
+    PT("{0}: calibração de fábrica da lente {1} de {2}, como {3}: fx {4} fy {5} cx {6} cy {7}, "
+       "curva radial de 5 termos reajustada com {8} px no máximo"),
+    IT("{0}: calibrazione di fabbrica dell'obiettivo {1} da {2}, come {3}: fx {4} fy {5} cx {6} cy {7}, "
+       "curva radiale a 5 termini riadattata entro {8} px"),
+    NL("{0}: fabriekskalibratie van lens {1} uit {2}, als {3}: fx {4} fy {5} cx {6} cy {7}, "
+       "radiale curve met 5 termen opnieuw gepast tot op {8} px"),
+    RU("{0}: заводская калибровка объектива {1} из {2}, как {3}: fx {4} fy {5} cx {6} cy {7}, "
+       "радиальная кривая из 5 членов переподогнана с ошибкой не более {8} px"),
+    TR("{0}: {2} içindeki {1} objektifinin fabrika kalibrasyonu, {3} olarak: fx {4} fy {5} cx {6} cy {7}, "
+       "5 terimli radyal eğri en çok {8} px hatayla yeniden oturtuldu"));
+
+// The same, not used; {3} is one of the lens_skip_* reasons below.
+SS_MSG(lens_calib_skipped,
+    EN("{0}: factory calibration of the {1} lens from {2} not used: {3}"),
+    JA("{0}: {2} の {1} レンズの工場キャリブレーションは使いません: {3}"),
+    ZH_HANS("{0}: 未使用 {2} 中 {1} 镜头的出厂标定: {3}"),
+    ZH_HANT("{0}: 未使用 {2} 中 {1} 鏡頭的出廠校正: {3}"),
+    KO("{0}: {2} 의 {1} 렌즈 공장 보정을 쓰지 않습니다: {3}"),
+    DE("{0}: Werkskalibrierung des Objektivs {1} aus {2} nicht verwendet: {3}"),
+    FR("{0} : calibration d'usine de l'objectif {1} tirée de {2} non utilisée : {3}"),
+    ES("{0}: no se usa la calibración de fábrica del objetivo {1} de {2}: {3}"),
+    PT("{0}: calibração de fábrica da lente {1} de {2} não usada: {3}"),
+    IT("{0}: calibrazione di fabbrica dell'obiettivo {1} da {2} non usata: {3}"),
+    NL("{0}: fabriekskalibratie van lens {1} uit {2} niet gebruikt: {3}"),
+    RU("{0}: заводская калибровка объектива {1} из {2} не используется: {3}"),
+    TR("{0}: {2} içindeki {1} objektifinin fabrika kalibrasyonu kullanılmadı: {3}"));
+
+SS_MSG(lens_skip_override,
+    EN("a camera setting given for it wins"),
+    JA("指定されたカメラ設定が優先されます"),
+    ZH_HANS("为它指定的相机设置优先"),
+    ZH_HANT("為它指定的相機設定優先"),
+    KO("지정한 카메라 설정이 우선합니다"),
+    DE("eine dafür angegebene Kameraeinstellung hat Vorrang"),
+    FR("un réglage de caméra donné pour lui l'emporte"),
+    ES("prevalece un ajuste de cámara indicado para él"),
+    PT("prevalece uma definição de câmera indicada para ela"),
+    IT("prevale un'impostazione della fotocamera indicata per esso"),
+    NL("een daarvoor opgegeven camera-instelling gaat voor"),
+    RU("приоритет у заданной для него настройки камеры"),
+    TR("onun için verilen kamera ayarı önceliklidir"));
+
+SS_MSG(lens_skip_dataset,
+    EN("a dataset-wide focal, distortion or calibration wins"),
+    JA("データセット全体の焦点距離、歪み、キャリブレーションが優先されます"),
+    ZH_HANS("整个数据集的焦距、畸变或标定优先"),
+    ZH_HANT("整個資料集的焦距、畸變或校正優先"),
+    KO("데이터셋 전체의 초점 거리, 왜곡 또는 보정이 우선합니다"),
+    DE("eine Brennweite, Verzeichnung oder Kalibrierung für den ganzen Datensatz hat Vorrang"),
+    FR("une focale, une distorsion ou une calibration pour tout le jeu de données l'emporte"),
+    ES("prevalece una focal, distorsión o calibración para todo el conjunto de datos"),
+    PT("prevalece uma focal, distorção ou calibração para todo o conjunto de dados"),
+    IT("prevale una focale, distorsione o calibrazione per l'intero dataset"),
+    NL("een brandpuntsafstand, vervorming of kalibratie voor de hele dataset gaat voor"),
+    RU("приоритет у фокусного расстояния, дисторсии или калибровки для всего набора данных"),
+    TR("tüm veri kümesi için odak uzaklığı, bozulma ya da kalibrasyon önceliklidir"));
+
+SS_MSG(lens_skip_model,
+    EN("{0} is not a fisheye model"),
+    JA("{0} は魚眼モデルではありません"),
+    ZH_HANS("{0} 不是鱼眼模型"),
+    ZH_HANT("{0} 不是魚眼模型"),
+    KO("{0} 은 어안 모델이 아닙니다"),
+    DE("{0} ist kein Fischaugenmodell"),
+    FR("{0} n'est pas un modèle fisheye"),
+    ES("{0} no es un modelo de ojo de pez"),
+    PT("{0} não é um modelo olho de peixe"),
+    IT("{0} non è un modello fisheye"),
+    NL("{0} is geen fisheyemodel"),
+    RU("{0} не модель «рыбий глаз»"),
+    TR("{0} bir balıkgözü modeli değil"));
+
+SS_MSG(lens_skip_size,
+    EN("its frames are {0}x{1}, the calibration is for {2}x{3}"),
+    JA("フレームは {0}x{1}、キャリブレーションは {2}x{3} 用です"),
+    ZH_HANS("其帧为 {0}x{1}，标定针对 {2}x{3}"),
+    ZH_HANT("其影格為 {0}x{1}，校正針對 {2}x{3}"),
+    KO("프레임은 {0}x{1}, 보정은 {2}x{3} 용입니다"),
+    DE("die Bilder sind {0}x{1}, die Kalibrierung gilt für {2}x{3}"),
+    FR("ses images font {0}x{1}, la calibration vaut pour {2}x{3}"),
+    ES("sus fotogramas son de {0}x{1} y la calibración es para {2}x{3}"),
+    PT("os quadros são {0}x{1} e a calibração é para {2}x{3}"),
+    IT("i fotogrammi sono {0}x{1}, la calibrazione è per {2}x{3}"),
+    NL("de beelden zijn {0}x{1}, de kalibratie geldt voor {2}x{3}"),
+    RU("кадры {0}x{1}, а калибровка для {2}x{3}"),
+    TR("kareleri {0}x{1}, kalibrasyon {2}x{3} için"));
+
+SS_MSG(lens_skip_images,
+    EN("no frame in its folder can be read"),
+    JA("フォルダー内に読めるフレームがありません"),
+    ZH_HANS("其文件夹中没有可读取的帧"),
+    ZH_HANT("其資料夾中沒有可讀取的影格"),
+    KO("폴더에 읽을 수 있는 프레임이 없습니다"),
+    DE("in seinem Ordner lässt sich kein Bild lesen"),
+    FR("aucune image de son dossier n'est lisible"),
+    ES("no se puede leer ningún fotograma de su carpeta"),
+    PT("nenhum quadro da pasta pode ser lido"),
+    IT("nessun fotogramma della sua cartella è leggibile"),
+    NL("geen enkel beeld in de map is leesbaar"),
+    RU("в его папке нет читаемых кадров"),
+    TR("klasöründe okunabilen kare yok"));
+
 // The images are EXRs and the transfer was left to them; {0} is the gamut in
 // force. Everything here converts to sRGB before it looks at a pixel.
 SS_MSG(run_exr_color,
