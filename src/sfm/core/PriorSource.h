@@ -57,6 +57,16 @@ public:
         metres = r.norm();
         return true;
     }
+    // The up the image states in its own camera frame (a horizon-levelled
+    // equirect: camera -Y), whatever the model's gauge.
+    virtual bool declaredUp(uint32_t img, Vec3& u) const {
+        (void)img;
+        (void)u;
+        return false;
+    }
+    // The mapper found the level declaration wrong for this capture: state no
+    // up factors and no level frame from here on.
+    virtual void disableLevel() {}
 };
 
 // A source over a database seen through a renumbering (map/Atoms.h): local
@@ -97,6 +107,7 @@ public:
         out.up_w = pr.up_w;
         out.huber = pr.huber;
         out.gps = pr.gps;
+        out.level = pr.level;
         for (PriorRotation r : pr.rotations)
             if (local(r.i) && local(r.j)) out.rotations.push_back(r);
         for (PriorUp u : pr.ups)
@@ -115,6 +126,10 @@ public:
                        double& metres) const override {
         return img < to_global_.size() && inner_.positionError(to_global_[img], pose, f, metres);
     }
+    bool declaredUp(uint32_t img, Vec3& u) const override {
+        return img < to_global_.size() && inner_.declaredUp(to_global_[img], u);
+    }
+    void disableLevel() override { inner_.disableLevel(); }
 
 private:
     PriorSource& inner_;

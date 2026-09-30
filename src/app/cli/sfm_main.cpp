@@ -911,7 +911,7 @@ static int cmdMap(int argc, char** argv) {
         calibrateSensorPriorsFromDatabase(*priors, db, feats, perImageCameras(cs, feats.size()),
                                           cfg.twoview, cfg.threads, opt.verbose);
     std::unique_ptr<ExifGpsPriors> exif_priors =
-        cfg.sensor_map && !priors ? makeExifGpsPriors(cfg, cfg.image_dir, db, opt.verbose)
+        cfg.sensor_map && !priors ? makeExifGpsPriors(cfg, cfg.image_dir, db, cs, opt.verbose)
                                   : nullptr;
     Mapper mapper(db, feats, opt, cs.ids, &rigs, &seqs,
                   priors ? static_cast<PriorSource*>(priors.get()) : exif_priors.get());

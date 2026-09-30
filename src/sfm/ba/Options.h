@@ -90,7 +90,7 @@ struct SolverOptions {
     double rtol = 1e-6;
     int patience = 10;
     // A step under rtol that still cuts the prior cost by prior_rtol shrinks the
-    // damping, up to prior_patience times, when absolute centres are present. Hickory:
+    // damping, up to prior_patience times, when absolute centres are present. Canopy drone capture:
     // at damping 3e-3 a step cut its GPS prior < 2e-5; 1e-6 is 2.5x f32 noise.
     double prior_rtol = 1e-6;
     int prior_patience = 15;

@@ -1110,7 +1110,8 @@ static std::map<std::string, std::string> imageStemMap(const std::string& imaged
 }
 
 std::unique_ptr<ExifGpsPriors> makeExifGpsPriors(const SfmConfig& cfg, const std::string& imagedir,
-                                                 const MatchesDatabase& db, bool verbose) {
+                                                 const MatchesDatabase& db, const CameraSetup& cams,
+                                                 bool verbose) {
     if (imagedir.empty() || !(cfg.sensor_map || cfg.sensor_pairs)) return nullptr;
     const std::map<std::string, std::string> stem2name = imageStemMap(imagedir);
     std::vector<std::optional<Geodetic>> fixes(db.images.size());
@@ -1129,7 +1130,13 @@ std::unique_ptr<ExifGpsPriors> makeExifGpsPriors(const SfmConfig& cfg, const std
     if (verbose)
         L::out(Tag::Match, M::metric_gps_read,
                {(long long)with, (long long)db.images.size(), (long long)no_alt});
-    return std::make_unique<ExifGpsPriors>(fixes, sensorPriorOptions(cfg));
+    std::vector<char> level(db.images.size(), 0);
+    if (cfg.level_erp)
+        for (size_t i = 0; i < level.size() && i < cams.ids.size(); i++) {
+            auto it = cams.cameras.find(cams.ids[i]);
+            level[i] = it != cams.cameras.end() && it->second.isSpherical();
+        }
+    return std::make_unique<ExifGpsPriors>(fixes, sensorPriorOptions(cfg), std::move(level));
 }
 
 // The unregistered list as a data file, when SS_UNREG_LOG names one: per
@@ -1814,7 +1821,7 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
         if (calib->sensors)
             calib->priors = makeSensorPriors(cfg, *calib->sensors, db, calib->cameras.ids);
         if (!calib->priors)
-            calib->exif_priors = makeExifGpsPriors(cfg, calib->image_dir, db, verbose);
+            calib->exif_priors = makeExifGpsPriors(cfg, calib->image_dir, db, calib->cameras, verbose);
     }
     TelemetryPriors* priors = calib ? calib->priors.get() : nullptr;
     const PriorSource* placed = calib ? calib->positionPriors() : nullptr;
@@ -2399,7 +2406,7 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
                         *calib.priors, db, feats, perImageCameras(calib.cameras, feats.size()),
                         cfg.twoview, cfg.threads, verbose);
                 else
-                    calib.exif_priors = makeExifGpsPriors(cfg, _imagedir, db, verbose);
+                    calib.exif_priors = makeExifGpsPriors(cfg, _imagedir, db, calib.cameras, verbose);
             }
         } catch (const std::exception& e) {
             L::warn(Tag::Match, M::match_reuse_failed, {e.what()});

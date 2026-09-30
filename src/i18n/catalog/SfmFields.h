@@ -4054,6 +4054,46 @@ SS_MSG(sensor_map_help,
     TR("Kayıtları ve demet ayarlamalarını sensörlere bağla: jiroskopun dönüşleri, yerçekimi, "
        "ivmeölçerin ölçeği ve GPS"));
 
+SS_MSG(level_erp_help,
+    EN("Needs EXIF GPS. Hold every equirect image level, camera -Y up: an up factor per image and a "
+       "tilt check on each registration, both dropped for a run whose images are not level to "
+       "about 1 deg"),
+    JA("EXIF GPS が必要です。正距円筒画像をすべて水平 (カメラ -Y が上) として扱います: 画像ごとの"
+       "上方向の因子と各登録の傾き検査を加えますが、画像が約 1 度以内で水平でない撮影では、"
+       "どちらも使いません"),
+    ZH_HANS("需要 EXIF GPS。将每张等距柱状投影图像视为水平（相机 -Y 朝上）：为每张图像加入向上因子"
+            "并检查每次注册的倾斜；图像未水平到约 1 度以内时，二者都不使用"),
+    ZH_HANT("需要 EXIF GPS。將每張等距柱狀影像視為水平（相機 -Y 朝上）：為每張影像加入向上因子"
+            "並檢查每次註冊的傾斜；影像未水平到約 1 度以內時，兩者都不使用"),
+    KO("EXIF GPS가 필요합니다. 모든 등장방형 이미지를 수평(카메라 -Y가 위)으로 취급합니다. "
+       "이미지별 위쪽 인자와 등록마다의 기울기 검사를 넣으며, 이미지가 약 1도 이내로 수평이 "
+       "아니면 둘 다 사용하지 않습니다"),
+    DE("Benötigt EXIF-GPS. Jedes äquirektanguläre Bild waagerecht halten, Kamera -Y oben: ein "
+       "Oben-Faktor je Bild und eine Neigungsprüfung bei jeder Registrierung, beide entfallen, wenn "
+       "die Bilder nicht auf etwa 1 Grad waagerecht sind"),
+    FR("Nécessite le GPS EXIF. Tenir chaque image équirectangulaire de niveau, caméra -Y vers le "
+       "haut : un facteur de verticale par image et un contrôle d'inclinaison à chaque "
+       "enregistrement, tous deux abandonnés quand les images ne sont pas de niveau à environ 1 "
+       "degré près"),
+    ES("Requiere GPS EXIF. Mantener cada imagen equirrectangular nivelada, cámara -Y arriba: un "
+       "factor de vertical por imagen y una comprobación de inclinación en cada registro, ambos "
+       "descartados cuando las imágenes no están niveladas a aproximadamente 1 grado"),
+    PT("Requer GPS EXIF. Manter cada imagem equirretangular nivelada, câmara -Y para cima: um fator "
+       "de vertical por imagem e uma verificação de inclinação em cada registo, ambos descartados "
+       "quando as imagens não estão niveladas a cerca de 1 grau"),
+    IT("Richiede il GPS EXIF. Tenere ogni immagine equirettangolare in piano, camera -Y in alto: "
+       "un fattore di verticale per immagine e un controllo dell'inclinazione a ogni "
+       "registrazione, entrambi scartati quando le immagini non sono in piano entro circa 1 grado"),
+    NL("Vereist EXIF-GPS. Elk equirectangulair beeld waterpas houden, camera -Y omhoog: een "
+       "opwaartse factor per beeld en een kantelcontrole bij elke registratie, beide vervallen "
+       "wanneer de beelden niet tot op ongeveer 1 graad waterpas zijn"),
+    RU("Требуется EXIF GPS. Держать каждое равнопромежуточное изображение по горизонту, камера -Y "
+       "вверх: фактор вертикали на изображение и проверка наклона при каждой регистрации; оба "
+       "отключаются, если изображения не горизонтальны примерно до 1 градуса"),
+    TR("EXIF GPS gerekir. Her eşdikdörtgen görüntüyü yatay tut, kamera -Y yukarı: görüntü başına "
+       "bir yukarı faktörü ve her kayıtta bir eğim denetimi; görüntüler yaklaşık 1 derece içinde "
+       "yatay değilse ikisi de bırakılır"));
+
 SS_MSG(sensor_pairs_help,
     EN("Match images the GPS puts within --sensor-pair-radius metres of each other"),
     JA("GPS 上で互いに --sensor-pair-radius メートル以内にある画像同士をマッチします"),

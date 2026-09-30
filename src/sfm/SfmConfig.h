@@ -187,6 +187,9 @@ struct SfmConfig {
     bool sensor_verify = true;
     bool sensor_map = true;
     bool sensor_pairs = true;
+    // An equirect camera declares camera -Y as up (a horizon-levelled stitch);
+    // refused per solve when the images disagree (ExifGpsPriors).
+    bool level_erp = true;
     double sensor_pair_radius = 20.0;
     double sensor_max_dt = 3.0;   // seconds a gyro rotation prior may span
     // Cameras farther from the metric fit than this fraction of the reference
@@ -470,6 +473,8 @@ struct SfmConfig {
       sensor_verify)                                                                               \
     F(sensor_map, "sensor-map", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 0, "",            \
       sensor_map)                                                                                  \
+    F(level_erp, "level-erp", CMD_AUTO | CMD_MAP, Tier::Advanced, "mapper", 0, 0, "",              \
+      level_erp)                                                                                   \
     F(sensor_pairs, "sensor-pairs", CMD_AUTO | CMD_MATCH, Tier::Advanced, "mapper", 0, 0, "",      \
       sensor_pairs)                                                                                \
     F(sensor_pair_radius, "sensor-pair-radius", CMD_AUTO | CMD_MATCH, Tier::Advanced, "mapper",    \
