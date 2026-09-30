@@ -146,6 +146,10 @@ static void test_params() {
     const double gp = lensParams(master(), CamModel::OpenCVFisheye, fp)
                           ? worstGap(master(), CamModel::OpenCVFisheye, fp.params) : 0;
     check(std::isfinite(gp) && gp > 2.5, "fixture: p moves the rim past the bound");
+    // The bearing check can fail: the lens's own k1..k4 without k5 turn over before the rim.
+    const LensCalibration m = master();
+    const std::vector<double> raw = {m.fx, m.fy, m.cx, m.cy, m.k[0], m.k[1], m.p1, m.p2, m.k[2], m.k[3], 0, 0};
+    check(worstBearing(m, raw) > 1, "fixture: a curve that turns over fails the bearing check");
 }
 
 // ---------------------------------------------------------------------------
