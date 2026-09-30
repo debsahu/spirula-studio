@@ -133,11 +133,16 @@ static int cmdReplay(int, char**) {
                 "spread %.2f deg | gps ok=%d rms %.3f | scale ok=%d triples %d\n",
                 pf.rotations.size(), pf.ups.size(), st.gps, vertical, st.up_ok, st.up_spread_deg,
                 st.gps_ok, st.gps_rms, st.scale_ok, st.triples);
-    for (const SensorGroupState& g : src.groups())
+    for (const SensorGroupState& g : src.groups()) {
         std::printf("  refit %s: ok=%d gravity=%d sig_rot %.3f sig_grav %.3f deg rot=%d grav=%d gap %.1f "
                     "sign %+.0f det %+.0f\n", g.name.c_str(), g.ok, g.gravity, g.fit.sig_rot_deg,
                     g.fit.sig_grav_deg, g.fit.rot_pairs, g.fit.grav_pairs, g.fit.gap, g.sign,
                     det3(g.X) > 0 ? 1.0 : -1.0);
+        // The hand-eye fit settles the sign of X by agreement with the up votes,
+        // so a declared vertical with the wrong sign does not move the up
+        // consensus: it mirrors X instead. det +1 is what catches it.
+        check(det3(g.X) > 0, "refit " + g.name + ": extrinsic is a proper rotation (declared vertical not flipped)");
+    }
     const double up_vs_z = st.up_ok ? angleDeg(pf.up_w, Vec3{0, 0, 1}) : 180.0;
     std::printf("up: consensus %.3f deg from the model's +Z\n", up_vs_z);
 

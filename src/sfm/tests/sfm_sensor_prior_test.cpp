@@ -326,6 +326,7 @@ static AttitudeRun runAttitude(const Scenario& sc, const Mat3& R_ci) {
     std::string err;
     check(tl.init(t, c, err), "attitude: timeline init: " + err);
     out.has_up = tl.hasUp();
+    check(tl.attitudeSenseOpen() == sc.no_accel, "attitude: sense open exactly when there is no accelerometer");
     Sim3 M;
     M.scale = 0.37;
     M.R = angleAxisToRotation(Vec3{1.1, 0.4, -0.9});
@@ -437,6 +438,9 @@ static void testAttitudeWithoutAccel() {
     SensorTimeline tlo;
     std::string err;
     check(tlo.init(to, co, err), "accel: timeline init: " + err);
+    // The accelerometer settled the sense, so the conjugate is not a hypothesis
+    // to test; the same stream without one leaves it open.
+    check(!tlo.attitudeSenseOpen(), "accel: attitude sense settled, not open");
     Mat3 R_wc;
     Vec3 p;
     poseAt(so, 30.0, R_wc, p);
