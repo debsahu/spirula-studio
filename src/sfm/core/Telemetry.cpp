@@ -885,6 +885,9 @@ struct DjiLayout {
     uint32_t gps = 2, gps_status = 3;
     bool coord_has_unit = true;   // false: degrees, no unit field
     uint32_t rel_alt = 0;         // f32 mm
+    // The attitude's world is z-down: 0.23 deg from the GPS-levelled +Z of a
+    // 2090-image model of an Avata 360 flight.
+    bool attitude_z_down = false;
     bool verified = false;
 };
 
@@ -902,6 +905,7 @@ DjiLayout dji_layout(const std::string& proto) {
         l.gps = 4; l.gps_status = 0;
         l.coord_has_unit = false;
         l.rel_alt = 5;
+        l.attitude_z_down = true;
         l.verified = true;
     }
     return l;
@@ -1040,6 +1044,7 @@ bool read_dji(const Source& src, const Track& tk, Telemetry& out, std::string& e
     out.serial = clip.serial;
     out.firmware = clip.firmware;
     if (clip.readout > 0) out.frame_readout = clip.readout;
+    if (layout.attitude_z_down && attitude_frames) out.attitude_world_up[2] = -1;
     out.notes.push_back("dvtm proto " + clip.proto + (layout.verified ? "" : " (layout not verified on a sample)"));
     if (clip.imu_rate > 0) {
         char s[96];

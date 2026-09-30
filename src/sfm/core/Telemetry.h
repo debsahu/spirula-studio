@@ -79,6 +79,9 @@ struct Telemetry {
     // The order of accel-frame components the attitude acts on. GoPro's CORI
     // takes (X, Z, Y) of the ORIN frame: measured, see the note it carries.
     std::string orientation_axes = "XYZ";
+    // Up in the frame the attitude maps sensor vectors into, when the carrier
+    // says so; zero when it does not. Only read with no accelerometer.
+    double attitude_world_up[3] = {0, 0, 0};
     std::vector<TelemetryGps> gps;
     std::vector<TelemetryExposure> exposure;  // not sensor data: empty() ignores it
     std::vector<std::string> notes;

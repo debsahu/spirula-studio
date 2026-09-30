@@ -341,6 +341,10 @@ static Bytes dji_sample(bool with_clip, uint64_t ts_us, float az) {
     return out;
 }
 
+static bool no_declared_up(const Telemetry& tm) {
+    return tm.attitude_world_up[0] == 0 && tm.attitude_world_up[1] == 0 && tm.attitude_world_up[2] == 0;
+}
+
 static void test_dji() {
     TrackSpec t{"djmd", "meta", "CAM meta", 30000, 1001, {}};
     t.samples.push_back(dji_sample(true, 19260701001ull, -1.0f));
@@ -361,6 +365,7 @@ static void test_dji() {
     }
     check(tm.gps.empty(), "dji: no gps");
     check(tm.exposure.empty(), "dji: no exposure on the Osmo");
+    check(no_declared_up(tm), "dji: no attitude vertical declared on the Osmo");
 }
 
 // An Avata 360 frame, numbered as the real ones read. 3.2.10 is Osmo-shaped
@@ -417,6 +422,8 @@ static void test_dji_avata() {
     check(!tm.gps.empty() && tm.gps[0].has_rel_alt && close_to(tm.gps[0].rel_alt, 36.7, 1e-9),
           "avata: rel alt at 3.4.5.1, f32 mm");
     check(tm.accel.empty(), "avata: 3.2.10 is not accel");
+    check(tm.attitude_world_up[0] == 0 && tm.attitude_world_up[1] == 0 && tm.attitude_world_up[2] == -1,
+          "avata: attitude world declared z-down");
     // Kills sensor fps read at 1.11 (every quaternion of a frame on one time).
     check(tm.orientation.size() == 6 &&
               close_to(tm.orientation[1].t - tm.orientation[0].t, 1.0 / (double)59.94f / 3, 1e-9),
@@ -466,6 +473,7 @@ static void test_dji_unknown_proto() {
                                        avata_sample("dvtm_wm169.proto", false, 200847283ull)}, "wm169: ");
     check(tm.gps.empty() && tm.exposure.empty(), "wm169: no Avata GPS or exposure on an unknown proto");
     check(has_note(tm, "(layout not verified on a sample)", false), "wm169: layout flagged unverified");
+    check(no_declared_up(tm), "wm169: no attitude vertical declared");
 }
 
 // ================
