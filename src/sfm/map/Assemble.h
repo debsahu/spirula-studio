@@ -134,6 +134,8 @@ struct AssembleStats {
     // price on a given capture.
     double t_audit = 0, t_split = 0, t_grow_tail = 0, t_reseed = 0, t_final_merge = 0, t_fold = 0;
     double t_weld = 0;
+    // SS_SFM_MAP_PROF only, and only when a seam was welded: every model as it was before.
+    std::vector<Reconstruction> pre_weld;
     double finishSecs() const {
         return t_audit + t_split + t_grow_tail + t_reseed + t_final_merge + t_fold + t_weld;
     }
@@ -693,13 +695,19 @@ inline std::vector<Reconstruction> finishModels(Mapper& mapper,
     // Last, on the models as written: the weld moves poses, and a pass after it that
     // re-solved without the fused points could reopen what it closed.
     t0 = clk();
+    std::vector<Reconstruction> pre;
     for (Reconstruction& m : models) {
+        if (MapProf::enabled()) pre.push_back(m);
         if (m.numRegistered() < 2) continue;
         Mapper::SeamStats ss;
         m = mapper.weldSeams(m, &ss);
         st.finish.seams_welded += ss.open.size();
     }
     st.t_weld = secs(t0, clk());
+    if (st.finish.seams_welded) {
+        sortModels(pre);
+        st.pre_weld = std::move(pre);
+    }
 
     sortModels(models);
     st.finish.models_after = models.size();

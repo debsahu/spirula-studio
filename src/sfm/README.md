@@ -944,12 +944,22 @@ The last assembly pass, before those, is the seam weld (`--seam-weld`, 0.25). Tw
 registration fronts that meet on thin support leave every point there twice, metres
 apart; no merge test accepts that union and the epipolar check cannot see an offset
 along the baseline. A verified pair of `seam_min_matches` (100) or more whose matches
-the model explains by a shared point below the bar has its duplicated points fused at
-the track-length-weighted mean, and the model is refined with the fused points spared
-the first round's filter and a retriangulation round forced after it. On Hickory's
-woods the seam read 0.015-0.15 against a p01 of 0.43 among the pairs of frames
-1240-1360; over the whole capture, loop revisits read as low (220-481 pairs under
-0.25), so the bar does not isolate the seam there. `[seam]` lines report what it found.
+the model explains by a shared point below the bar is a candidate. Loop revisits and
+weak woods pairs read as low as the seam (220-481 candidates per Hickory model), and
+what separates them is the neighbourhood: a seam link's two images share at most one
+third image that both see with `seam_covis_min` (20) points, a loop revisit dozens. A
+candidate is open when that count is at most 1 and either the pair's duplicated points
+sit a coherent 10 % of the scene depth apart, or -- in capture order, when the pair is
+at most 3 positions apart -- its rotation is 10x its neighbours' per-position rotation.
+With capture order every open pair must be 3 positions apart or fewer. Capture order
+is a declared `--sequence`, or with `--pairs sequential` each folder's images in file
+order; a photo folder has none, so only the offset branch runs. The open pairs'
+duplicated points are fused at the track-length-weighted mean and the model is
+refined with the fused points spared the first round's filter. On 27 saved models
+(Hickory, 0726power, the Osmo 0023 clip, Avata 0006), measured offline, the rule flags
+only links at Hickory's seam (at most 3 per model) and nothing on the other captures. `[seam]` lines report what it found; under
+`SS_SFM_MAP_PROF` the models as they were before a weld are written to
+`sparse/pre_weld/` (in the mapper's frame, not the gauge's).
 
 `--mapper flat|bottom-up` picks the schedule (see the stage graph; flat is the
 default for every capture, and there is no size-based switch);
