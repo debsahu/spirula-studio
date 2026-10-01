@@ -252,12 +252,12 @@ void guess_source_rigs(std::vector<PrepInput>& sources, bool force) {
 }
 
 
-std::string default_workspace(const std::vector<PrepInput>& sources) {
+namespace {
+
+std::string workspace_base(const std::vector<PrepInput>& sources, bool& exact) {
+    exact = false;
     if (sources.empty()) return {};
     std::string base;
-    // Normally a folder of its own, suffixed _2, _3, ... rather than pointing
-    // at something that already has content in it.
-    bool exact = false;
     if (sources.size() == 1) {
         const fs::path p(sources[0].path);
         if (sources[0].is_video) {
@@ -280,8 +280,30 @@ std::string default_workspace(const std::vector<PrepInput>& sources) {
         const fs::path dir = fs::path(sources[0].path).parent_path();
         base = (dir / (dir.filename().string() + "_dataset")).string();
     }
+    return base;
+}
+
+}  // namespace
+
+std::string default_workspace(const std::vector<PrepInput>& sources) {
+    // Normally a folder of its own, suffixed _2, _3, ... rather than pointing
+    // at something that already has content in it.
+    bool exact = false;
+    const std::string base = workspace_base(sources, exact);
     if (base.empty()) return {};
     return exact ? base : fresh_workspace(base);
+}
+
+bool workspace_named_by(const std::vector<PrepInput>& sources, const std::string& ws) {
+    bool exact = false;
+    const std::string base = workspace_base(sources, exact);
+    if (base.empty() || ws.empty()) return false;
+    if (ws == base) return true;
+    if (exact || ws.size() <= base.size() + 1 || ws.compare(0, base.size() + 1, base + "_") != 0)
+        return false;
+    for (size_t i = base.size() + 1; i < ws.size(); i++)
+        if (!std::isdigit((unsigned char)ws[i])) return false;
+    return true;
 }
 
 

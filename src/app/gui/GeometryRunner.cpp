@@ -234,6 +234,7 @@ bool run_geometry_step(const GeometryJob& job, const std::string& dataset,
         "--depth-units", job.depth_mm ? "mm" : "relative",
         "--ray-depth", kTri[std::clamp(job.ray_depth, 0, 2)],
         "--split", kTri[std::clamp(job.split, 0, 2)],
+        "--face-res", job.face_res == 1 ? "source" : "output",
     };
     if (job.want_depth) argv.push_back("--depth");
     if (!job.want_normal) argv.push_back("--no-normal");

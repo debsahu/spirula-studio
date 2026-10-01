@@ -745,10 +745,11 @@ clips at "2 fps" the one that walks briskly gets the denser frames and the one
 shot from a bench gets fewer. Each still keeps its own rate bounds. Rows
 measured by different models are NOT one budget -- see below.
 
-A workspace records what its frames were extracted with (`.spirula-frames`,
-`gui/ReconStamp.h`). A re-run whose answer differs -- a different rate, a
-different unwrap, another clip in the list -- goes back to the video instead of
-keeping them, and drops the features and matches that describe the old ones.
+A workspace records what its frames were extracted with
+(`.spirula-dataset.json`, docs/notes/dataset-rerun.md). A re-run whose answer
+differs -- a different rate, a different unwrap, another clip in the list --
+asks before it goes back to the video, and drops the features and matches that
+describe the old frames.
 
 ### Adaptive spacing
 

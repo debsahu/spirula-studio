@@ -3811,6 +3811,226 @@ SS_MSG(sfm_reusing_model,
     TR("{0} zaten bir yeniden kurma içeriyor; korunur ve yalnızca üzerine eklenir "
        "(değiştirmek için \"Yeniden kur\" seçeneğini işaretleyin)"));
 
+// What the plan decided for a step a run is about to reach (app/gui/
+// DatasetPlan.h). {0}, where there is one, is the settings that moved.
+SS_MSG(plan_frames_kept,
+    EN("the frames in the output folder were extracted with other settings "
+       "({0}); keeping them, as asked"),
+    JA("出力フォルダのフレームは別の設定で切り出されています（{0}）。"
+       "指示どおりそのまま使います"),
+    ZH_HANS("输出文件夹里的帧是用别的设置抽取的（{0}），按要求保留"),
+    ZH_HANT("輸出資料夾裡的影格是用別的設定擷取的（{0}），按要求保留"),
+    KO("출력 폴더의 프레임은 다른 설정으로 뽑은 것입니다({0}). 요청대로 그대로 "
+       "둡니다"),
+    DE("die Bilder im Ausgabeordner wurden mit anderen Einstellungen "
+       "herausgeholt ({0}); sie bleiben, wie verlangt"),
+    FR("les images du dossier de sortie ont été extraites avec d'autres "
+       "réglages ({0}) ; elles sont gardées, comme demandé"),
+    ES("los fotogramas de la carpeta de salida se extrajeron con otros ajustes "
+       "({0}); se conservan, como se pidió"),
+    PT("os fotogramas da pasta de saída foram extraídos com outras definições "
+       "({0}); ficam, como pedido"),
+    IT("i fotogrammi nella cartella di uscita sono stati estratti con altre "
+       "impostazioni ({0}); restano, come richiesto"),
+    NL("de beelden in de uitvoermap zijn met andere instellingen uitgehaald "
+       "({0}); ze blijven, zoals gevraagd"),
+    RU("кадры в папке вывода были извлечены с другими настройками ({0}); "
+       "они остаются, как просили"),
+    TR("çıktı klasöründeki kareler başka ayarlarla çıkarılmış ({0}); istendiği "
+       "gibi korunuyor"));
+
+SS_MSG(plan_masks_changed,
+    EN("the masks in the output folder were made with other settings ({0}); "
+       "making them again"),
+    JA("出力フォルダのマスクは別の設定で作られています（{0}）。作り直します"),
+    ZH_HANS("输出文件夹里的蒙版是用别的设置做的（{0}），将重新生成"),
+    ZH_HANT("輸出資料夾裡的遮罩是用別的設定做的（{0}），將重新產生"),
+    KO("출력 폴더의 마스크는 다른 설정으로 만든 것입니다({0}). 다시 만듭니다"),
+    DE("die Masken im Ausgabeordner wurden mit anderen Einstellungen gemacht "
+       "({0}); sie werden neu gemacht"),
+    FR("les masques du dossier de sortie ont été faits avec d'autres réglages "
+       "({0}) ; ils sont refaits"),
+    ES("las máscaras de la carpeta de salida se hicieron con otros ajustes "
+       "({0}); se rehacen"),
+    PT("as máscaras da pasta de saída foram feitas com outras definições "
+       "({0}); vão ser refeitas"),
+    IT("le maschere nella cartella di uscita sono state fatte con altre "
+       "impostazioni ({0}); vengono rifatte"),
+    NL("de maskers in de uitvoermap zijn met andere instellingen gemaakt "
+       "({0}); ze worden opnieuw gemaakt"),
+    RU("маски в папке вывода сделаны с другими настройками ({0}); они "
+       "делаются заново"),
+    TR("çıktı klasöründeki maskeler başka ayarlarla yapılmış ({0}); yeniden "
+       "yapılıyor"));
+
+SS_MSG(plan_masks_stale,
+    EN("the masks in the output folder were made from earlier frames; making "
+       "them again"),
+    JA("出力フォルダのマスクは以前のフレームから作られています。作り直します"),
+    ZH_HANS("输出文件夹里的蒙版是从之前的帧做出来的，将重新生成"),
+    ZH_HANT("輸出資料夾裡的遮罩是從之前的影格做出來的，將重新產生"),
+    KO("출력 폴더의 마스크는 예전 프레임으로 만든 것입니다. 다시 만듭니다"),
+    DE("die Masken im Ausgabeordner stammen von früheren Bildern; sie werden "
+       "neu gemacht"),
+    FR("les masques du dossier de sortie viennent d'images antérieures ; ils "
+       "sont refaits"),
+    ES("las máscaras de la carpeta de salida salen de fotogramas anteriores; "
+       "se rehacen"),
+    PT("as máscaras da pasta de saída vêm de fotogramas anteriores; vão ser "
+       "refeitas"),
+    IT("le maschere nella cartella di uscita vengono da fotogrammi precedenti; "
+       "vengono rifatte"),
+    NL("de maskers in de uitvoermap komen van eerdere beelden; ze worden "
+       "opnieuw gemaakt"),
+    RU("маски в папке вывода сделаны по прежним кадрам; они делаются заново"),
+    TR("çıktı klasöründeki maskeler önceki karelerden yapılmış; yeniden "
+       "yapılıyor"));
+
+SS_MSG(plan_model_masks_changed,
+    EN("the masks have changed since the reconstruction was built; it is kept "
+       "(tick \"Reconstruct again\" to build it with them)"),
+    JA("再構成を作ったあとでマスクが変わっています。再構成はそのまま残します"
+       "（マスクを使って作り直すには「再構成をやり直す」を有効にしてください）"),
+    ZH_HANS("重建做好之后蒙版变了，重建会保留（要用新蒙版重做请勾选"
+            "“重新重建”）"),
+    ZH_HANT("重建做好之後遮罩變了，重建會保留（要用新遮罩重做請勾選"
+            "「重新重建」）"),
+    KO("재구성을 만든 뒤로 마스크가 바뀌었습니다. 재구성은 그대로 둡니다"
+       "(새 마스크로 다시 만들려면 \"다시 재구성\" 을 켜세요)"),
+    DE("die Masken haben sich geändert, seit die Rekonstruktion gebaut wurde; "
+       "sie bleibt (\"Neu rekonstruieren\" baut sie mit ihnen neu)"),
+    FR("les masques ont changé depuis la construction de la reconstruction ; "
+       "elle est gardée (cochez « Reconstruire à nouveau » pour la refaire "
+       "avec eux)"),
+    ES("las máscaras han cambiado desde que se construyó la reconstrucción; se "
+       "conserva (marque «Reconstruir de nuevo» para rehacerla con ellas)"),
+    PT("as máscaras mudaram desde que a reconstrução foi construída; ela fica "
+       "(marque \"Reconstruir de novo\" para a refazer com elas)"),
+    IT("le maschere sono cambiate da quando è stata costruita la "
+       "ricostruzione; resta (spunta \"Ricostruisci di nuovo\" per rifarla con "
+       "esse)"),
+    NL("de maskers zijn veranderd sinds de reconstructie is gebouwd; die "
+       "blijft (vink \"Opnieuw reconstrueren\" aan om hem ermee te bouwen)"),
+    RU("маски изменились с тех пор, как была построена реконструкция; она "
+       "остаётся (чтобы построить её с ними, включите «Реконструировать "
+       "заново»)"),
+    TR("yeniden kurma yapıldığından beri maskeler değişti; korunuyor (onlarla "
+       "yeniden kurmak için \"Yeniden kur\" seçeneğini işaretleyin)"));
+
+SS_MSG(plan_model_kept,
+    EN("the reconstruction in the output folder was built with other settings "
+       "({0}); keeping it, as asked"),
+    JA("出力フォルダの再構成結果は別の設定で作られています（{0}）。"
+       "指示どおりそのまま使います"),
+    ZH_HANS("输出文件夹里的重建结果是用别的设置做的（{0}），按要求保留"),
+    ZH_HANT("輸出資料夾裡的重建結果是用別的設定做的（{0}），按要求保留"),
+    KO("출력 폴더의 재구성 결과는 다른 설정으로 만든 것입니다({0}). 요청대로 "
+       "그대로 둡니다"),
+    DE("die Rekonstruktion im Ausgabeordner wurde mit anderen Einstellungen "
+       "gebaut ({0}); sie bleibt, wie verlangt"),
+    FR("la reconstruction du dossier de sortie a été construite avec d'autres "
+       "réglages ({0}) ; elle est gardée, comme demandé"),
+    ES("la reconstrucción de la carpeta de salida se construyó con otros "
+       "ajustes ({0}); se conserva, como se pidió"),
+    PT("a reconstrução da pasta de saída foi construída com outras definições "
+       "({0}); fica, como pedido"),
+    IT("la ricostruzione nella cartella di uscita è stata costruita con altre "
+       "impostazioni ({0}); resta, come richiesto"),
+    NL("de reconstructie in de uitvoermap is met andere instellingen gebouwd "
+       "({0}); die blijft, zoals gevraagd"),
+    RU("реконструкция в папке вывода построена с другими настройками ({0}); "
+       "она остаётся, как просили"),
+    TR("çıktı klasöründeki yeniden kurma başka ayarlarla yapılmış ({0}); "
+       "istendiği gibi korunuyor"));
+
+SS_MSG(plan_model_stale,
+    EN("the frames have changed since the reconstruction was built; building "
+       "it again"),
+    JA("再構成を作ったあとでフレームが変わっています。作り直します"),
+    ZH_HANS("重建做好之后帧变了，将重新重建"),
+    ZH_HANT("重建做好之後影格變了，將重新重建"),
+    KO("재구성을 만든 뒤로 프레임이 바뀌었습니다. 다시 만듭니다"),
+    DE("die Bilder haben sich geändert, seit die Rekonstruktion gebaut wurde; "
+       "sie wird neu gebaut"),
+    FR("les images ont changé depuis la construction de la reconstruction ; "
+       "elle est refaite"),
+    ES("los fotogramas han cambiado desde que se construyó la reconstrucción; "
+       "se rehace"),
+    PT("os fotogramas mudaram desde que a reconstrução foi construída; vai ser "
+       "refeita"),
+    IT("i fotogrammi sono cambiati da quando è stata costruita la "
+       "ricostruzione; viene rifatta"),
+    NL("de beelden zijn veranderd sinds de reconstructie is gebouwd; die wordt "
+       "opnieuw gemaakt"),
+    RU("кадры изменились с тех пор, как была построена реконструкция; она "
+       "строится заново"),
+    TR("yeniden kurma yapıldığından beri kareler değişti; yeniden kuruluyor"));
+
+SS_MSG(plan_geometry_current,
+    EN("the depth and normal maps are up to date; nothing to estimate"),
+    JA("深度と法線のマップは最新です。推定するものはありません"),
+    ZH_HANS("深度图和法线图都是最新的，没有需要估计的"),
+    ZH_HANT("深度圖和法線圖都是最新的，沒有需要估計的"),
+    KO("깊이와 법선 맵이 최신입니다. 추정할 것이 없습니다"),
+    DE("die Tiefen- und Normalenkarten sind aktuell; nichts zu schätzen"),
+    FR("les cartes de profondeur et de normales sont à jour ; rien à estimer"),
+    ES("los mapas de profundidad y normales están al día; nada que estimar"),
+    PT("os mapas de profundidade e normais estão atualizados; nada a estimar"),
+    IT("le mappe di profondità e normali sono aggiornate; niente da stimare"),
+    NL("de diepte- en normaalkaarten zijn bijgewerkt; niets te schatten"),
+    RU("карты глубины и нормалей актуальны; оценивать нечего"),
+    TR("derinlik ve normal haritaları güncel; kestirilecek bir şey yok"));
+
+SS_MSG(plan_geometry_changed,
+    EN("the depth and normal maps were made with other settings ({0}); "
+       "estimating them again"),
+    JA("深度と法線のマップは別の設定で作られています（{0}）。推定し直します"),
+    ZH_HANS("深度图和法线图是用别的设置做的（{0}），将重新估计"),
+    ZH_HANT("深度圖和法線圖是用別的設定做的（{0}），將重新估計"),
+    KO("깊이와 법선 맵은 다른 설정으로 만든 것입니다({0}). 다시 추정합니다"),
+    DE("die Tiefen- und Normalenkarten wurden mit anderen Einstellungen "
+       "gemacht ({0}); sie werden neu geschätzt"),
+    FR("les cartes de profondeur et de normales ont été faites avec d'autres "
+       "réglages ({0}) ; elles sont réestimées"),
+    ES("los mapas de profundidad y normales se hicieron con otros ajustes "
+       "({0}); se vuelven a estimar"),
+    PT("os mapas de profundidade e normais foram feitos com outras definições "
+       "({0}); vão ser estimados de novo"),
+    IT("le mappe di profondità e normali sono state fatte con altre "
+       "impostazioni ({0}); vengono stimate di nuovo"),
+    NL("de diepte- en normaalkaarten zijn met andere instellingen gemaakt "
+       "({0}); ze worden opnieuw geschat"),
+    RU("карты глубины и нормалей сделаны с другими настройками ({0}); они "
+       "оцениваются заново"),
+    TR("derinlik ve normal haritaları başka ayarlarla yapılmış ({0}); yeniden "
+       "kestiriliyor"));
+
+SS_MSG(plan_geometry_stale,
+    EN("the frames or the reconstruction under the depth and normal maps have "
+       "changed; estimating them again"),
+    JA("深度と法線のマップのもとになったフレームか再構成が変わっています。"
+       "推定し直します"),
+    ZH_HANS("深度图和法线图所依据的帧或重建变了，将重新估计"),
+    ZH_HANT("深度圖和法線圖所依據的影格或重建變了，將重新估計"),
+    KO("깊이와 법선 맵의 바탕이 된 프레임이나 재구성이 바뀌었습니다. 다시 "
+       "추정합니다"),
+    DE("die Bilder oder die Rekonstruktion unter den Tiefen- und "
+       "Normalenkarten haben sich geändert; sie werden neu geschätzt"),
+    FR("les images ou la reconstruction sous les cartes de profondeur et de "
+       "normales ont changé ; elles sont réestimées"),
+    ES("han cambiado los fotogramas o la reconstrucción de los que salen los "
+       "mapas de profundidad y normales; se vuelven a estimar"),
+    PT("mudaram os fotogramas ou a reconstrução de que saem os mapas de "
+       "profundidade e normais; vão ser estimados de novo"),
+    IT("sono cambiati i fotogrammi o la ricostruzione da cui vengono le mappe "
+       "di profondità e normali; vengono stimate di nuovo"),
+    NL("de beelden of de reconstructie onder de diepte- en normaalkaarten zijn "
+       "veranderd; ze worden opnieuw geschat"),
+    RU("изменились кадры или реконструкция, по которым сделаны карты глубины "
+       "и нормалей; они оцениваются заново"),
+    TR("derinlik ve normal haritalarının dayandığı kareler ya da yeniden kurma "
+       "değişti; yeniden kestiriliyor"));
+
 SS_MSG(err_no_geometry_module,
     EN("This build cannot estimate depth and normals (-DSS_BUILD_SAM=OFF); use "
        "`spirula geometry` from a build that has it."),

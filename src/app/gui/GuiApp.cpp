@@ -62,6 +62,8 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <sstream>
 
 namespace fs = std::filesystem;
 namespace i18n = spirula::i18n;
@@ -699,6 +701,7 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("want_depth", cfg_str(_geometry.want_depth));
     line("want_normal", cfg_str(_geometry.want_normal));
     line("max_size", std::to_string(_geometry.max_size));
+    line("face_res", _geometry.face_res == 1 ? "source" : "output");
 
     // The training config, grouped the way the options editor groups it.
     for (int si = 0; si < kTrainNumSections; si++) {
@@ -955,9 +958,6 @@ void GuiApp::apply_dataset_settings(const DatasetSettings& in) {
     rescan_found_masks();
     _workspace = ws;
     _workspace_auto = ws_auto;
-    // These settings did not build whatever model is sitting in the output
-    // folder, so its stamp no longer describes the screen.
-    _built_workspace.clear();
 }
 
 void GuiApp::apply_dataset_preset(const DatasetPreset& p) {
@@ -1655,6 +1655,9 @@ bool GuiApp::launch_batch_dataset(BatchTask& task, const BatchRow& row) {
     _sources = sources;          // rescan_found_masks() re-derived the list
     _source_path_edits.clear();  // re-seeded from _sources by the next draw
     _redo_frames = _redo_masks = _redo_model = _redo_geometry = false;
+    _keep_built = false;
+    // The row's settings are the run's; the folder's record must not replace them.
+    _restored_ws = workspace;
     log(i18n::format(msg::batch_log_build,
                      {(long long)(_batch_current + 1), workspace}));
     follow_batch_screen(BatchStage::Dataset);
@@ -2179,9 +2182,12 @@ void GuiApp::refresh_sources() {
     normalize_source_lenses(_sources, _sfm_job.camera_model);
     normalize_source_fps(_sources, _sfm_job.prep.video_fps);
 
-    // The output folder follows the input until the user takes it over.
+    // The output folder follows the input until the user takes it over --
+    // and stays put while the inputs still name it: a run filling it does not
+    // make it somebody else's, and a fresh _2 would mean starting over.
     if (_workspace.empty() || _workspace == _workspace_auto) {
-        _workspace = default_workspace(_sources);
+        if (!workspace_named_by(_sources, _workspace))
+            _workspace = default_workspace(_sources);
         _workspace_auto = _workspace;
     }
 }
@@ -2284,6 +2290,7 @@ void GuiApp::replace_source(size_t input, const std::string& path) {
     if (input >= _source_path_edits.size())
         _source_path_edits.resize(input + 1);
     _source_path_edits[input] = _sources[input].path;
+    _restored_ws.clear();
     mark_source_metadata_dirty();
     apply_capture_defaults(_sources, _sfm_job, _colmap_job);
     reapply_dataset_builtin();
@@ -2318,9 +2325,8 @@ bool GuiApp::add_sources(const std::vector<std::string>& paths, bool replace) {
         _sources.clear();
         _source_path_edits.clear();
         _mask_preview_input = 0;
-        // apply_capture_defaults() is about to move settings the stamp is made
-        // of, so it no longer describes anything this panel built.
-        _built_workspace.clear();
+        // A capture dropped again is restored from again (restore_from_record).
+        _restored_ws.clear();
         // A different capture is a different job, and the geometry options
         // are remembered nowhere: a run must never quietly cost an hour of
         // inference nobody asked for. (Not mid-run: that would disable it.)
@@ -3390,6 +3396,10 @@ const WorkspaceState& GuiApp::workspace_state() {
         _ws_state_at = now;
         _ws_state = probe_workspace(_workspace, _sources);
         _ws_artifacts = workspace_artifacts(_workspace, _sources);
+        PrepJob job = _sfm_job.prep;
+        job.inputs = _sources;
+        job.workspace = _workspace;
+        _ws_record = read_plan_record(_workspace, job);
     }
     return _ws_state;
 }
@@ -3412,6 +3422,7 @@ void GuiApp::sync_dataset_jobs() {
     prep.sharp_window = _sfm_job.prep.sharp_window;
     prep.pano = _sfm_job.prep.pano;
     prep.max_frames = _sfm_job.prep.max_frames;
+    prep.auto_rotate = _sfm_job.prep.auto_rotate;
     prep.force_external_decode = _sfm_job.prep.force_external_decode;
     prep.sync_tracks = _sfm_job.prep.sync_tracks;
     prep.ffmpeg_exe = _ffmpeg_exe;
@@ -3474,16 +3485,16 @@ void GuiApp::sync_dataset_jobs() {
     _colmap_job.mask_detector_path = prep.mask_detector_path;
     _colmap_job.mask_detector_threshold = prep.mask_detector_threshold;
 
-    _sfm_job.prep.redo_frames = _colmap_job.redo_frames = _redo_frames;
-    _sfm_job.prep.redo_masks = _colmap_job.redo_masks = _redo_masks;
-    _sfm_job.redo_model = _colmap_job.redo_model = _redo_model;
+    PlanRequest req;
+    req.redo_frames = _redo_frames;
+    req.redo_masks = _redo_masks;
+    req.redo_model = _redo_model;
+    req.redo_geometry = _redo_geometry;
+    req.keep_built = _keep_built && _keep_built_for == _workspace;
+    _sfm_job.request = _colmap_job.request = req;
     _sfm_job.mask_features = _colmap_job.mask_features = _mask_features;
-    _sfm_job.settings_built_model = _colmap_job.settings_built_model =
-        !_workspace.empty() && _workspace == _built_workspace;
     // The same step either way: `spirula geometry` over the finished dataset.
     _sfm_job.geometry = _colmap_job.geometry = _geometry;
-    _sfm_job.geometry.overwrite = _colmap_job.geometry.overwrite =
-        _geometry.overwrite || _redo_geometry;
     // The frozen choice survives the copy above, so a later panel edit cannot
     // drop the UUID a run already committed to.
     _sfm_job.geometry.device_uuid = _colmap_job.geometry.device_uuid =
@@ -3514,20 +3525,15 @@ void GuiApp::update_dataset_job() {
     else                                           _colmap.update(_colmap_job);
 }
 
-// Masks the reconstruction being kept has never seen, with the panel asking
-// for masked feature points: the run can add them for training alone or spend
-// the reconstruction again on them, and only the user knows which.
-bool GuiApp::masks_miss_kept_model() {
-    if (!_mask_enable || !_mask_features || _redo_model) return false;
-    if (!workspace_state().model) return false;
-    // A model this panel built is one these settings built, masks included --
-    // and if they have moved since, the run replaces it anyway.
-    if (_workspace == _built_workspace) return false;
-    // An input that arrived with its own masks is not segmented, so the
-    // dataset gains nothing the model could have missed.
-    for (const PrepInput& s : _sources)
-        if (s.mask_dir.empty()) return true;
-    return false;
+const DatasetPlan& GuiApp::dataset_plan() {
+    sync_dataset_jobs();
+    const WorkspaceState& ws = workspace_state();
+    if (effective_engine() == Engine::BuiltIn)
+        _plan = plan_dataset(plan_job(_sfm_job), ws, _ws_record, _sfm_job.request);
+    else
+        _plan = plan_dataset(plan_job(_colmap_job, ColmapRunner::prep_job(_colmap_job)),
+                             ws, _ws_record, _colmap_job.request);
+    return _plan;
 }
 
 void GuiApp::start_dataset_job() {
@@ -3537,8 +3543,11 @@ void GuiApp::start_dataset_job() {
         log(dmsg::sensors_reading.get());
         return;
     }
-    if (masks_miss_kept_model()) {
-        _mask_recon_open = true;
+    _ws_state_at = -1.0;
+    const DatasetPlan& plan = dataset_plan();
+    if (plan.ask()) {
+        _rebuild_plan = plan;
+        _rebuild_open = true;
         return;
     }
     launch_dataset_job();
@@ -3553,12 +3562,16 @@ bool GuiApp::launch_dataset_job() {
     close_splat();
     if (!freeze_native_device()) return false;
     app::set_crash_note("building dataset " + _workspace);
-    // The stamp this run leaves behind describes the settings on the screen
-    // only when the run actually reconstructs; after one that keeps the model
-    // it goes on describing whoever built it.
-    if (_redo_model || !workspace_state().model) _built_workspace = _workspace;
     sync_dataset_jobs();
     save_run_stencils();
+    {
+        const DatasetPlan& plan = dataset_plan();
+        bool made[kNumSteps];
+        for (int k = 0; k < kNumSteps; k++) made[k] = makes(plan[(Step)k].act);
+        write_record_settings(_workspace, dataset_settings_json(capture_dataset_settings()),
+                              encode_record_inputs({_sources, _mask.clicks}), made);
+    }
+    _restored_ws = _workspace;
     const std::string stamp = run_log_stamp();
     const fs::path prep_log_file =
         open_run_log(_prep_log,
@@ -3901,16 +3914,20 @@ void GuiApp::draw_dataset_source() {
     if (prior.resumable()) {
         ui::Checkbox(dmsg::resume_previous, &_resume);
         ui::help_on_hover(dmsg::resume_previous_help);
-        ImGui::SameLine();
-        ui::TextDisabled(dmsg::unfinished_run_detected);
+        // A finished run keeps features/ too; only its record can say the
+        // folder holds a step that never finished.
+        bool unfinished = !_ws_record.present;
+        for (const StepRecord& r : _ws_record.steps)
+            unfinished = unfinished || (r.present && !r.complete);
+        if (unfinished) {
+            ImGui::SameLine();
+            ui::TextDisabled(dmsg::unfinished_run_detected);
+        }
     }
-    // A finished dataset in the output folder is REUSED, which is what lets a
-    // capture somebody else reconstructed be given masks, depth and normals
-    // without an hour of rebuilding it.
+    // A finished dataset in the output folder is reused unless its settings
+    // differ, so a capture somebody else reconstructed can be given masks,
+    // depth and normals. draw_dataset_plan lists what a run will do with it.
     if (prior.model) {
-        ui::TextColoredWrapped(_redo_model ? kWarn : kOk,
-                               _redo_model ? dmsg::model_will_be_replaced
-                                           : dmsg::model_found_reuse);
         ui::Checkbox(dmsg::reconstruct_again, &_redo_model);
         ui::help_on_hover(dmsg::reconstruct_again_help);
     }
@@ -3991,12 +4008,11 @@ void GuiApp::draw_dataset_basics() {
     const bool builtin = effective_engine() == Engine::BuiltIn;
 
     // A model in the output folder is reused, so these settings reach it only
-    // through a rebuild -- which a mismatch against the stamp THIS panel wrote
-    // forces (ReconStamp.h). One it did not build is kept regardless.
+    // through a rebuild -- which a difference from the record it was built
+    // with forces (DatasetPlan.h). One with no record is kept regardless.
     const WorkspaceState& prior = workspace_state();
     const bool reusing = !dataset_busy() && prior.model && !_redo_model;
-    const bool inert =
-        reusing && !(prior.recon_stamp && _workspace == _built_workspace);
+    const bool inert = reusing && !_ws_record.step(Step::Model).present;
     if (reusing)
         ui::TextColoredWrapped(inert ? kWarn : kDim,
                                inert ? dmsg::recon_reuse_locked
@@ -5189,6 +5205,11 @@ void GuiApp::draw_geometry_options() {
         ImGui::SetNextItemWidth(px(220.0f));
         ui::ComboRaw(ui::detail::label(dmsg::geom_split), &_geometry.split, kTri, 3);
         ui::help_on_hover(gmsg::opt_split);
+        static const char* kFaceRes[] = {"output", "source"};
+        ImGui::SetNextItemWidth(px(220.0f));
+        ui::ComboRaw(ui::detail::label(dmsg::geom_face_res), &_geometry.face_res,
+                     kFaceRes, 2);
+        ui::help_on_hover(gmsg::opt_face_res);
         ImGui::SetNextItemWidth(px(220.0f));
         ui::ComboRaw(ui::detail::label(dmsg::geom_ray_depth), &_geometry.ray_depth,
                      kTri, 3);
@@ -5785,6 +5806,7 @@ void GuiApp::reset_recon_options() {
     apply_capture_defaults(_sources, _sfm_job, _colmap_job);
     normalize_source_lenses(_sources, _sfm_job.camera_model);
     _redo_frames = _redo_masks = _redo_model = _redo_geometry = false;
+    _keep_built = false;
     _resume = true;
     log(dmsg::reset_options_done.get());
 }
@@ -5891,49 +5913,243 @@ void GuiApp::draw_drop_intermediate_modal() {
     ImGui::EndPopup();
 }
 
-// Masks the reconstruction being kept has never seen. Adding them is minutes
-// and rebuilding with the masked feature points is the whole hour again; both
-// are what somebody means by the button, so it asks rather than choosing.
-void GuiApp::draw_mask_recon_modal() {
-    if (_mask_recon_open) {
-        ui::OpenPopup(dmsg::mask_recon_title);
-        _mask_recon_open = false;
-        _mask_recon_shown = true;
+// ---------------------------------------------------------------------------
+// What the run will reuse and redo
+// ---------------------------------------------------------------------------
+
+namespace {
+
+const Msg& plan_step_name(Step s) {
+    switch (s) {
+        case Step::Frames:   return dmsg::step_frames;
+        case Step::Masks:    return dmsg::step_masks;
+        case Step::Model:    return dmsg::plan_step_model;
+        case Step::Geometry: return dmsg::view_geometry;
     }
-    if (!_mask_recon_shown) return;
-    if (!ui::BeginPopupModal(dmsg::mask_recon_title, nullptr,
+    return dmsg::step_frames;
+}
+
+const Msg& plan_state(const StepPlan& s) {
+    switch (s.act) {
+        case Act::None:  break;
+        case Act::Run:
+            if (s.why == Why::Resume) return dmsg::plan_finish;
+            return s.adds || s.why == Why::Unrecorded ? dmsg::plan_add : dmsg::plan_run;
+        case Act::Reuse:
+            if (s.why == Why::InDataset) return dmsg::plan_in_dataset;
+            if (s.why == Why::Unrecorded) return dmsg::plan_unrecorded;
+            return s.masks_changed ? dmsg::plan_reuse_masks_changed : dmsg::plan_reuse;
+        case Act::Keep:  return dmsg::plan_keep;
+        case Act::Redo:
+            switch (s.why) {
+                case Why::Requested: return dmsg::plan_redo_requested;
+                case Why::Frames:    return dmsg::plan_redo_frames;
+                case Why::Model:     return dmsg::plan_redo_model;
+                case Why::Stale:     return dmsg::plan_redo_stale;
+                default:             return dmsg::plan_redo_settings;
+            }
+    }
+    return dmsg::plan_reuse;
+}
+
+ImVec4 plan_color(const StepPlan& s) {
+    if (s.act == Act::Redo || s.act == Act::Keep) return kWarn;
+    if (s.act == Act::Run) return kOk;
+    return kDim;
+}
+
+// The panel's own label for a setting where it has one; the identifier
+// otherwise, which is what the record spells.
+std::string plan_key_label(const std::string& key) {
+    static const std::pair<const char*, const Msg*> labels[] = {
+        {"quality", &dmsg::quality}, {"lens", &dmsg::camera_lens},
+        {"camera_mode", &dmsg::camera_sharing}, {"pairs", &dmsg::image_matching},
+        {"data_type", &dmsg::capture_type}, {"features", &dmsg::features},
+        {"mapper", &dmsg::mapper_schedule}, {"loop_closure", &dmsg::loop_closure},
+        {"prefilter_sequential", &dmsg::prefilter_sequential},
+        {"overlap", &dmsg::sequential_overlap}, {"focal_px", &dmsg::initial_focal_px},
+        {"distortion_refine", &dmsg::sfm_distortion_refinement},
+        {"final_free_rig", &dmsg::sfm_final_free_rig},
+        {"max_features", &dmsg::max_features_auto},
+        {"max_image_size", &dmsg::max_image_size_auto},
+        {"sensor_gauge", &dmsg::sfm_sensor_gauge}, {"metric_gps", &dmsg::sfm_metric_gps},
+        {"exif_attitude", &dmsg::sfm_exif_attitude},
+        {"masks_for_features", &dmsg::mask_for_features},
+        {"decoder", &dmsg::use_ffmpeg}, {"adaptive_fps", &dmsg::adaptive_fps},
+        {"adaptive_range", &dmsg::adaptive_range},
+        {"sharp_window", &dmsg::sharpness_window}, {"sync_tracks", &dmsg::sync_lenses},
+        {"pano_size", &dmsg::pano360_size}, {"mask_max_size", &dmsg::mask_max_size},
+        {"mask_nms", &dmsg::mask_nms}, {"mask_detect_every", &dmsg::mask_detect_every},
+        {"mask_memory_frames", &dmsg::mask_memory_frames},
+        {"mask_prompt", &dmsg::mask_what_to_remove},
+        {"mask_negative_prompt", &dmsg::mask_but_keep},
+        {"feature_prompt", &dmsg::mask_features_only},
+        {"mask_threshold", &dmsg::mask_threshold}, {"geometry_model", &dmsg::geom_model},
+        {"geometry_max_size", &dmsg::geom_max_size},
+        {"geometry_tokens", &dmsg::geom_num_tokens},
+        {"jpeg_quality", &dmsg::geom_jpeg_quality},
+    };
+    for (const auto& [k, m] : labels)
+        if (key == k) return m->get();
+    return key;
+}
+
+std::string plan_change_text(const FieldChange& c) {
+    auto shown = [](const std::string& v) {
+        if (v.empty()) return std::string("-");
+        return v[0] == '#' ? std::string("#") : v;
+    };
+    std::string out = plan_key_label(c.key);
+    if (!c.scope.empty() && c.scope != ".") out += " (" + c.scope + ")";
+    return out + ": " + shown(c.was) + " → " + shown(c.now);
+}
+
+void plan_changes_tooltip(const StepPlan& s) {
+    if (s.changes.empty() || !ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort) ||
+        !ImGui::BeginTooltip())
+        return;
+    for (const FieldChange& c : s.changes) ui::TextRaw(plan_change_text(c));
+    ImGui::EndTooltip();
+}
+
+}  // namespace
+
+void GuiApp::draw_dataset_plan(const DatasetPlan& plan) {
+    float label_w = 0.0f;
+    for (int k = 0; k < kNumSteps; k++)
+        label_w = std::max(label_w, ImGui::CalcTextSize(plan_step_name((Step)k).get()).x);
+    bool differs = false;
+    for (int k = 0; k < kNumSteps; k++) {
+        const Step step = (Step)k;
+        const StepPlan& sp = plan[step];
+        if (sp.act == Act::None) continue;
+        ImGui::PushID(k);
+        ui::TextDisabled(plan_step_name(step));
+        ImGui::SameLine(label_w + ImGui::GetStyle().ItemSpacing.x * 3.0f);
+        ui::TextColored(plan_color(sp), plan_state(sp));
+        plan_changes_tooltip(sp);
+        if (!sp.changes.empty()) {
+            differs = true;
+            std::string first = plan_change_text(sp.changes[0]);
+            if (sp.changes.size() > 1)
+                first += "  (+" + std::to_string(sp.changes.size() - 1) + ")";
+            ImGui::SameLine();
+            ui::TextDisabledRaw(first);
+            plan_changes_tooltip(sp);
+        }
+        ImGui::PopID();
+    }
+    const bool keeping = _keep_built && _keep_built_for == _workspace;
+    if (plan.ask() || keeping) {
+        bool keep = keeping;
+        if (ui::Checkbox(dmsg::plan_keep_built, &keep)) {
+            _keep_built = keep;
+            _keep_built_for = _workspace;
+        }
+        ui::help_on_hover(dmsg::plan_keep_built_help);
+    }
+    if (differs && _ws_record.settings.is_object()) {
+        if (ui::SmallButton(dmsg::plan_use_record)) restore_from_record(true);
+        ui::help_on_hover(dmsg::plan_use_record_help);
+    }
+}
+
+// Making again what the user did not ask to: the frames, or the hour the
+// reconstruction took. Named step by step, with what changed, before it starts.
+void GuiApp::draw_rebuild_confirm_modal() {
+    if (_rebuild_open) {
+        ui::OpenPopup(dmsg::rebuild_title);
+        _rebuild_open = false;
+        _rebuild_shown = true;
+    }
+    if (!_rebuild_shown) return;
+    if (!ui::BeginPopupModal(dmsg::rebuild_title, nullptr,
                              ImGuiWindowFlags_AlwaysAutoResize)) {
-        _mask_recon_shown = false;
+        _rebuild_shown = false;
         return;
     }
-    ImGui::PushTextWrapPos(px(460.0f));
-    ui::Text(dmsg::mask_recon_confirm, {_workspace});
+    ImGui::PushTextWrapPos(px(520.0f));
+    ui::Text(dmsg::rebuild_confirm, {_workspace});
+    ImGui::Spacing();
+    for (int k = 0; k < kNumSteps; k++) {
+        const StepPlan& sp = _rebuild_plan[(Step)k];
+        if (!sp.ask) continue;
+        ui::TextColored(kWarn, plan_step_name((Step)k));
+        ImGui::Indent();
+        ui::Text(plan_state(sp));
+        for (size_t c = 0; c < sp.changes.size() && c < 12; c++)
+            ui::TextDisabledRaw(plan_change_text(sp.changes[c]));
+        if (sp.changes.size() > 12) ui::TextDisabledRaw("...");
+        ImGui::Unindent();
+    }
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
 
     bool go = false;
-    if (ui::Button(dmsg::mask_recon_rebuild, ImVec2(px(220.0f), 0))) {
-        _redo_model = go = true;
-    }
+    if (ui::Button(dmsg::rebuild_go, ImVec2(px(170.0f), 0))) go = true;
     ImGui::SameLine();
-    if (ui::Button(dmsg::mask_recon_masks_only, ImVec2(px(220.0f), 0))) {
-        // Answered for good rather than per run: the checkbox now shows what
-        // was decided here, and the question does not come back.
-        _mask_features = false;
+    if (ui::Button(dmsg::rebuild_keep, ImVec2(px(240.0f), 0))) {
+        _keep_built = true;
+        _keep_built_for = _workspace;
         go = true;
     }
-    ui::help_on_hover(dmsg::mask_recon_masks_only_help);
+    ui::help_on_hover(dmsg::plan_keep_built_help);
     ImGui::SameLine();
     if (ui::Button(dmsg::cancel, ImVec2(px(120.0f), 0))) {
-        _mask_recon_shown = false;
+        _rebuild_shown = false;
         ImGui::CloseCurrentPopup();
     }
     if (go) {
-        _mask_recon_shown = false;
+        _rebuild_shown = false;
         ImGui::CloseCurrentPopup();
         launch_dataset_job();
     }
     ImGui::EndPopup();
+}
+
+void GuiApp::restore_from_record(bool announce) {
+    if (_workspace.empty() || native_work_busy()) return;
+    DatasetRecord rec = read_dataset_record(_workspace);
+    DatasetSettings s = capture_dataset_settings();
+    if (rec.settings.is_object()) {
+        read_dataset_settings_json(rec.settings, s);
+    } else {
+        // A folder from before the record: what its stamps still say.
+        rec = read_legacy_settings(_workspace, s.sfm, s.colmap_engine);
+        if (!rec.present) return;
+    }
+    apply_dataset_settings(s);
+    restore_record_rows(rec);
+    // What the picker last applied no longer describes the panel, and a
+    // built-in left armed would be put back over it by the next probe.
+    _ds_presets.file.clear();
+    _ds_presets.builtin.clear();
+    _ds_presets.display.clear();
+    _ds_presets.desc.clear();
+    _ds_presets.msg_err = false;
+    _ds_presets.msg = i18n::format(dmsg::log_settings_restored, {_workspace});
+    _keep_built = false;
+    _ws_state_at = -1.0;
+    if (announce) log(_ds_presets.msg);
+}
+
+void GuiApp::restore_record_rows(const DatasetRecord& rec) {
+    PrepJob job = _sfm_job.prep;
+    job.inputs = _sources;
+    job.workspace = _workspace;
+    job.photo_import = _photo_import;
+    job.mask_clicks = _mask.clicks;
+    restore_record_inputs(rec, job, _sfm_job.camera_model);
+    _sources = job.inputs;
+    if (!job.mask_clicks.empty()) {
+        _mask.clicks = job.mask_clicks;
+        int objects = 1;
+        for (const MaskClick& c : _mask.clicks) objects = std::max(objects, c.object + 1);
+        _mask.object_count = objects;
+        _mask.current_object = 0;
+    }
+    normalize_source_lenses(_sources, _sfm_job.camera_model);
+    normalize_source_fps(_sources, _sfm_job.prep.video_fps);
 }
 
 // ---------------------------------------------------------------------------
@@ -6333,6 +6549,14 @@ void GuiApp::draw_tool_locations() {
 // The form, and under it the button that acts on it. One column of the screen
 // when a run has something to show beside it, the whole of it otherwise.
 void GuiApp::draw_dataset_form(float height, bool running) {
+    // The panel arrives at an output folder -- dropped, picked or typed -- and
+    // takes the settings that folder's record says built it, once.
+    if (!running && _workspace != _restored_ws && _source_probes_ready) {
+        _restored_ws = _workspace;
+        restore_from_record(/*announce=*/true);
+    }
+    if (_keep_built && _keep_built_for != _workspace) _keep_built = false;
+
     // The action band's height is measured from the last frame, because how
     // tall it is depends on what it is saying.
     ImGui::BeginChild("##dsform", ImVec2(0, height - _ds_action_h));
@@ -6424,6 +6648,7 @@ void GuiApp::draw_dataset_form(float height, bool running) {
         const bool need_feat_model = feature_model_missing();
         const bool need_geom_model = geometry_model_missing();
         const bool need_model = need_mask_model || need_feat_model || need_geom_model;
+        if (ready) draw_dataset_plan(dataset_plan());
         // The button names what pressing it does: a folder that already holds
         // a reconstruction is added to, not built.
         const bool adding = workspace_state().model && !_redo_model;
@@ -6608,7 +6833,7 @@ void GuiApp::draw_new_dataset() {
     draw_partition_queue_modal();
     draw_clear_project_modal();
     draw_drop_intermediate_modal();
-    draw_mask_recon_modal();
+    draw_rebuild_confirm_modal();
 }
 
 // ---------------------------------------------------------------------------

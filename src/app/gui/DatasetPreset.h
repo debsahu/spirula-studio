@@ -59,6 +59,11 @@ bool is_dataset_preset_name(const std::string& name);
 // leaves `s` alone.
 bool dataset_apply_preset(DatasetSettings& s, const std::string& name);
 
+// The settings alone, as the JSON object a preset file nests them in -- what a
+// dataset's own record keeps (DatasetRecord.h). Reading sanitizes.
+std::string dataset_settings_json(const DatasetSettings& s);
+void read_dataset_settings_json(const JsonValue& fields, DatasetSettings& s);
+
 // Throws std::runtime_error when the file cannot be written / read.
 void save_dataset_preset(const DatasetPreset& p, const std::string& path);
 DatasetPreset load_dataset_preset(const std::string& path);

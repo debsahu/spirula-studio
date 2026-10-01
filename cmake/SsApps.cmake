@@ -374,20 +374,10 @@ add_executable(frame_mask_test
     ${SS_SRC}/app/FrameLook.cpp)
 ss_configure_app(frame_mask_test)
 
-# The GUI files with no GUI in them: the stamp that decides whether a finished
-# reconstruction is kept or built again, and the preset serializers. Named
-# rather than globbed -- each such test names its own sources.
+# The GUI files with no GUI in them: the plan that decides which steps of a
+# dataset run are kept or redone, and the preset serializers. Named rather
+# than globbed -- each such test names its own sources.
 if(SS_BUILD_GUI)
-    add_executable(recon_stamp_test
-        ${SS_SRC}/app/gui/tests/recon_stamp_test.cpp
-        ${SS_SRC}/app/gui/ReconStamp.cpp)
-    ss_configure_app(recon_stamp_test)
-
-    add_executable(frames_stamp_test
-        ${SS_SRC}/app/gui/tests/frames_stamp_test.cpp
-        ${SS_SRC}/app/gui/ReconStamp.cpp)
-    ss_configure_app(frames_stamp_test)
-
     add_executable(command_argv_test
         ${SS_SRC}/app/gui/tests/command_argv_test.cpp
         ${SS_SRC}/app/gui/Subprocess.cpp)
@@ -471,7 +461,7 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/FrameSharpness.cpp
         ${SS_SRC}/app/FfmpegVideo.cpp
         ${SS_SRC}/app/gui/PrepProgress.cpp
-        ${SS_SRC}/app/gui/ReconStamp.cpp
+        ${SS_SRC}/app/gui/DatasetRecord.cpp
         ${SS_SRC}/app/gui/Subprocess.cpp
         ${SS_SRC}/app/gui/mask/MaskLayer.cpp
         ${SS_SRC}/app/FrameMask.cpp
@@ -480,4 +470,25 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/FrameMotion.cpp
         ${SS_SRC}/app/Pano360.cpp)
     ss_configure_app(dataset_prep_test)
+
+    # Which steps a dataset run reuses and which it redoes, against records
+    # written to a scratch workspace. The same sources as above, no model.
+    add_executable(dataset_plan_test
+        ${SS_SRC}/app/gui/tests/dataset_plan_test.cpp
+        ${SS_SRC}/app/gui/DatasetPlan.cpp
+        ${SS_SRC}/app/gui/DatasetRecord.cpp
+        ${SS_SRC}/app/gui/DatasetPrep.cpp
+        ${SS_SRC}/app/gui/HeifPhoto.cpp
+        ${SS_SRC}/app/gui/FrameSelect.cpp
+        ${SS_SRC}/app/FrameSharpness.cpp
+        ${SS_SRC}/app/FfmpegVideo.cpp
+        ${SS_SRC}/app/gui/PrepProgress.cpp
+        ${SS_SRC}/app/gui/Subprocess.cpp
+        ${SS_SRC}/app/gui/mask/MaskLayer.cpp
+        ${SS_SRC}/app/FrameMask.cpp
+        ${SS_SRC}/app/FrameMaskSvg.cpp
+        ${SS_SRC}/app/FrameLook.cpp
+        ${SS_SRC}/app/FrameMotion.cpp
+        ${SS_SRC}/app/Pano360.cpp)
+    ss_configure_app(dataset_plan_test)
 endif()
