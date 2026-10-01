@@ -618,6 +618,24 @@ static int body(int argc, char** argv) {
     check(r5.st.gps_refused == 0 && r5.st.gps_ba == 1, "refuse: never a drifting run");
     check(r5.registered == (uint32_t)M, "refuse: the drifting run registers");
 
+    // A wrong frame refuses for good: every third image a kilometre off. Past a
+    // fifth of the checked images (and ten), the model drops it and takes them.
+    ScriptedGps wrong(script(n, {}));
+    for (uint32_t i = 0; i < M; i += 3) wrong.always[i] = 1000.0;
+    const Run r6 = runWith(sc, opt, wrong);
+    std::printf("every third image 1 km off: refused %u, dropped %u, %u/%d registered\n",
+                r6.st.gps_refused, r6.st.gps_latched, r6.registered, M);
+    check(r6.st.gps_latched == 1 && r6.st.gps_refused >= 10 && r6.registered == (uint32_t)M,
+          "latch: a frame refusing a fifth is dropped, and every image registers");
+
+    ScriptedGps few(script(n, {}));
+    for (uint32_t i = 6; i < M; i += 8) few.always[i] = 1000.0;
+    const Run r7 = runWith(sc, opt, few);
+    std::printf("five images 1 km off: refused %u, dropped %u, %u/%d registered\n",
+                r7.st.gps_refused, r7.st.gps_latched, r7.registered, M);
+    check(r7.st.gps_latched == 0 && r7.registered == (uint32_t)M - 5,
+          "latch: under ten standing refusals the frame stays and refuses them");
+
     testAssembly(sc, full, opt);
     testFinalCap(sc, full, opt);
     testRig(opt);

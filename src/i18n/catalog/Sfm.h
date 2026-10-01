@@ -3027,6 +3027,32 @@ SS_MSG(metric_fail_collinear,
     TR("kameralar bir doğruya fazla yakın: enine yayılım bütünün {0}% kadarı ve en az {1}% "
        "olmalı, yani bu referans yönelim hatasını {2} kat büyütür"));
 
+SS_MSG(metric_fail_tilted,
+    EN("the level fit's scale {0} is {1}x the {2} the 3D distances give: the up it was "
+       "levelled about tips the camera path"),
+    JA("水平の当てはめの縮尺 {0} は 3D 距離から得た {2} の {1} 倍です。水平を取った上方向が"
+       "カメラの軌跡を傾けています"),
+    ZH_HANS("水平拟合的缩放 {0} 是三维距离给出的 {2} 的 {1} 倍: 用来摆正的向上方向让相机轨迹倾斜了"),
+    ZH_HANT("水平擬合的縮放 {0} 是三維距離給出的 {2} 的 {1} 倍: 用來擺正的向上方向讓相機軌跡傾斜了"),
+    KO("수평 맞춤의 축척 {0} 이(가) 3D 거리로 얻은 {2} 의 {1} 배입니다. 수평을 잡은 위쪽 방향이 "
+       "카메라 경로를 기울이고 있습니다"),
+    DE("der Maßstab der waagrechten Anpassung, {0}, ist das {1}-fache der {2} aus den "
+       "3D-Abständen: die Aufwärtsrichtung, nach der sie ausgerichtet wurde, kippt den Kamerapfad"),
+    FR("l'échelle de l'ajustement horizontal, {0}, vaut {1} fois les {2} des distances 3D : "
+       "le haut qui l'a mis d'aplomb incline la trajectoire des caméras"),
+    ES("la escala del ajuste horizontal, {0}, es {1} veces la de {2} que dan las distancias 3D: "
+       "el arriba con que se niveló inclina la trayectoria de las cámaras"),
+    PT("a escala do ajuste horizontal, {0}, é {1} vezes a de {2} que as distâncias 3D dão: o "
+       "cima com que foi nivelado inclina a trajetória das câmeras"),
+    IT("la scala della stima orizzontale, {0}, è {1} volte quella di {2} data dalle distanze 3D: "
+       "l'alto con cui è stata raddrizzata inclina il percorso delle fotocamere"),
+    NL("de schaal van de waterpas-fit, {0}, is {1}x de {2} die de 3D-afstanden geven: de "
+       "omhoog-richting waarlangs hij is genivelleerd kantelt het camerapad"),
+    RU("масштаб горизонтальной подгонки {0} в {1} раз больше {2}, который дают 3D-расстояния: "
+       "направление вверх, по которому её выровняли, наклоняет путь камер"),
+    TR("yatay uyumun ölçeği {0}, 3B uzaklıkların verdiği {2} değerinin {1} katı: hizalamada "
+       "kullanılan yukarı yönü kamera yolunu eğiyor"));
+
 SS_MSG(metric_matched,
     EN("Positions file: matched {0}/{1} cameras (names not in the model: {2})"),
     JA("位置ファイル: {0}/{1} 台のカメラと対応しました (モデルにない名前: {2})"),

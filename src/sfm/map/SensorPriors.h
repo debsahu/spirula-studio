@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -46,6 +47,9 @@ struct SensorPriorOptions {
     int calib_min_frames = 20;   // posed frames a group needs for the gravity refit
     double gps_max_error = 5.0;  // metres, the fit's inlier radius
     double gps_max_error_frac = 0.03;
+    // Centre factors, and the frame registrations are checked through; off under
+    // --metric-gps none. Positions still propose pairs (gps).
+    bool gps_centres = true;
     // A source with no IMU up fits its GPS level-only about the cameras' mean up
     // (--metric-gps horizontal, D75); a telemetry source's IMU up comes first.
     bool gps_flat = false;
@@ -98,6 +102,7 @@ inline const char* metricFailName(MetricFail r) {
         case MetricFail::Spread: return "spread";
         case MetricFail::Inliers: return "inliers";
         case MetricFail::Collinear: return "collinear";
+        case MetricFail::Tilted: return "tilted";
     }
     return "?";
 }
@@ -105,17 +110,27 @@ inline const char* metricFailName(MetricFail r) {
 // One diag line per GPS fit, refused ones included: a straight seed stretch
 // otherwise leaves every BA silent about why it held no GPS factor.
 inline void logGpsFit(const char* label, int posed, const MetricFit& fit, int factors, int beyond,
-                      double sigma) {
+                      const GpsFrame& frame, bool level) {
+    char lv[160] = "";
+    if (level)
+        std::snprintf(lv, sizeof lv, ", level: 3D scale %.4f, altitude sigma %.2f m, vertical %s",
+                      fit.scale_3d, fit.vertical_sigma, frame.flat ? "dropped" : "kept");
     if (fit.ok)
         slog::diag(slog::Tag::Map,
                    "[prior] %s over %d posed image(s): fit, %d inlier(s) within %.2f m, RMS %.3f "
-                   "m, scale %.4f -> %d centre factor(s), %d beyond the radius, sigma %.2f m\n",
+                   "m, scale %.4f -> %d centre factor(s), %d beyond the radius, sigma %.2f m%s",
                    label, posed, fit.inliers, fit.max_error, fit.rms, fit.T.scale, factors,
-                   beyond, sigma);
+                   beyond, frame.sigma_h, lv);
+    else if (fit.reason == MetricFail::Tilted)
+        slog::diag(slog::Tag::Map,
+                   "[prior] %s over %d posed image(s): no fit (tilted: level scale %.4f against "
+                   "3D %.4f, spread %.1f m, %d inlier(s) within %.2f m), 0 centre factor(s)",
+                   label, posed, fit.T.scale, fit.scale_3d, fit.spread, fit.inliers,
+                   fit.max_error);
     else
         slog::diag(slog::Tag::Map,
                    "[prior] %s over %d posed image(s): no fit (%s, perp %.3f against %.2f, spread "
-                   "%.1f m, %d inlier(s) within %.2f m), 0 centre factor(s)\n",
+                   "%.1f m, %d inlier(s) within %.2f m), 0 centre factor(s)",
                    label, posed, metricFailName(fit.reason), fit.perp_frac,
                    kMetricMinPerpFraction, fit.spread, fit.inliers, fit.max_error);
 }
@@ -131,9 +146,9 @@ inline double gpsLevelSigma(const MetricFit& fit) {
 constexpr double kTrustedGpsSigma = 1.0;
 constexpr double kTrustedGpsCauchy = 7.815;
 
-// A similarity fitted on the inliers, then a centre factor for EVERY positioned
-// image: an inlier mask drops exactly the frames that drifted off between two solves.
-// Level with an up axis (D75), vertical dropped unless trusted; else full, vertical 3x.
+// A similarity fitted on the inliers, then a centre factor for EVERY positioned image: an
+// inlier mask drops exactly the frames that drifted off between two solves. Level with an up
+// (D75): vertical only trusted, and only where altitude agrees within the radius; else 3x.
 inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_error,
                                   double max_error_frac, PosePriors& out, bool trusted = false) {
     MetricFit fit;
@@ -144,7 +159,8 @@ inline MetricFit gpsCentreFactors(MetricRef ref, const Vec3* up_w, double max_er
                          max_error_frac);
     if (!fit.ok) return fit;
     const double sh = trusted ? kTrustedGpsSigma : gpsLevelSigma(fit);
-    const double sv = trusted ? kTrustedGpsSigma : up_w ? 0.0 : 3.0 * sh;
+    const bool vertical = trusted ? !up_w || fit.vertical_sigma <= fit.max_error : !up_w;
+    const double sv = !vertical ? 0.0 : trusted ? kTrustedGpsSigma : 3.0 * sh;
     const Mat3 A = mat3Scale(mul(fit.T.R, R_up), fit.T.scale);
     for (size_t i = 0; i < ref.centres.size(); i++) {
         PriorCentre f;
@@ -484,7 +500,7 @@ private:
         if (opt_.scale && up.ok) scaleFactors(frames, by_group, up.up, out);
         const Vec3* gps_up = up.ok ? &up.up : nullptr;
         if (!gps_up && opt_.gps_flat && mean_up.norm() > 0) gps_up = &mean_up;
-        if (opt_.gps) gpsFactors(frames, gps_up, out);
+        if (opt_.gps && opt_.gps_centres) gpsFactors(frames, gps_up, out);
         return out;
     }
 
@@ -710,8 +726,7 @@ private:
             stats_.gps = (int)(out.centres.size() - before);
         }
         if (opt_.verbose && posed >= 5)
-            logGpsFit("GPS", posed, fit, stats_.gps, stats_.gps_out,
-                      fit.ok ? out.gps.sigma_h : 0.0);
+            logGpsFit("GPS", posed, fit, stats_.gps, stats_.gps_out, out.gps, up_w != nullptr);
     }
 
     std::vector<SensorCapture> caps_;
@@ -782,6 +797,20 @@ public:
         st.level_ok = lv.ok;
         st.level_spread_deg = lv.spread_deg;
         st.ups = (int)out.ups.size();
+        if (opt_.gps_centres) gpsFactors(imgs, lv, out, st);
+        if (opt_.verbose && lv.votes >= kLevelMinVotes)
+            slog::diag(slog::Tag::Map,
+                       "[prior] level up over %d posed image(s): spread %.3f deg against %.1f -> "
+                       "%d up factor(s)",
+                       lv.votes, lv.spread_deg, kLevelMaxSpreadDeg, st.ups);
+        std::lock_guard<std::mutex> lk(mu_);
+        stats_ = st;
+        return out;
+    }
+
+private:
+    void gpsFactors(const std::vector<PosedImage>& imgs, const LevelFit& lv, PosePriors& out,
+                    SensorFactorStats& st) const {
         MetricRef ref;
         for (const PosedImage& p : imgs) {
             Vec3 x;
@@ -808,19 +837,9 @@ public:
         st.gps_reason = fit.reason;
         st.gps_perp_frac = fit.perp_frac;
         if (opt_.verbose && st.frames >= 5)
-            logGpsFit("EXIF GPS", st.frames, fit, st.gps, st.gps_out,
-                      fit.ok ? out.gps.sigma_h : 0.0);
-        if (opt_.verbose && lv.votes >= kLevelMinVotes)
-            slog::diag(slog::Tag::Map,
-                       "[prior] level up over %d posed image(s): spread %.3f deg against %.1f -> "
-                       "%d up factor(s)\n",
-                       lv.votes, lv.spread_deg, kLevelMaxSpreadDeg, st.ups);
-        std::lock_guard<std::mutex> lk(mu_);
-        stats_ = st;
-        return out;
+            logGpsFit("EXIF GPS", st.frames, fit, st.gps, st.gps_out, out.gps, gps_up != nullptr);
     }
 
-private:
     SensorPriorOptions opt_;
     std::vector<char> level_;
     std::atomic<bool> level_off_{false};

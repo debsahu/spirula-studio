@@ -241,6 +241,38 @@ static void testTrustedFactors() {
     for (const PriorCentre& f : hz.centres) flat_n += f.sigma.z == 0.0 && f.cauchy == 0.0;
     check(!hz.centres.empty() && flat_n == (int)hz.centres.size() && hz.gps.flat,
           "untrusted under an up axis: level only, as before (D75)");
+
+    // An altitude drifting 0.4 m per metre east sits further off the level fit
+    // than its radius: the trusted factor drops the vertical instead of tipping.
+    MetricRef drift = ref;
+    for (Vec3& t : drift.targets) t.z += 0.4 * t.x;
+    PosePriors dr;
+    const MetricFit dfit = gpsCentreFactors(drift, &up, 5.0, 0.03, dr, true);
+    int vert = 0;
+    for (const PriorCentre& f : dr.centres) vert += f.sigma.z != 0.0;
+    std::printf("trusted + up, drifting altitude: sigma %.2f m against %.2f, %d vertical(s), "
+                "level scale over 3D %.3f\n", dfit.vertical_sigma, dfit.max_error, vert,
+                dfit.T.scale / dfit.scale_3d);
+    check(dfit.ok && dr.gps.flat && vert == 0 && !dr.centres.empty() &&
+              dfit.vertical_sigma > dfit.max_error,
+          "trusted under an up axis: an altitude off the fit drops the vertical");
+}
+
+// --metric-gps none: positions and the pairs they propose, but no centre
+// factor and no frame a registration could be checked through.
+static void testNoCentres() {
+    const Loop L = makeLoop(0.0);
+    SensorPriorOptions po;
+    po.gps_centres = false;
+    ExifGpsPriors src(L.fixes, po);
+    const PosePriors pf = src.factors(L.imgs);
+    Vec3 p;
+    double d;
+    check(pf.centres.empty() && !pf.gps.ok, "none: no centre factor and no GPS frame");
+    check(src.position(0, p) && !gpsProximityPairs(src, 40, 15.0, 20).empty(),
+          "none: positions still propose pairs");
+    check(!src.positionError(0, L.imgs[0].pose, pf.gps, d),
+          "none: nothing to check a registration against");
 }
 
 // Six images 15 m off their fixes, three gates: the fit is the other 33's,
@@ -794,6 +826,12 @@ static void testAutoFromCapture() {
     std::unique_ptr<TelemetryPriors> tw = makeSensorPriors(whole, dji, db, {1});
     check(tp && tp->options().gps_flat && tw && !tw->options().gps_flat,
           "builder: --metric-gps horizontal fits the telemetry's GPS level");
+    SfmConfig off;
+    off.metric_gps = "none";
+    std::unique_ptr<TelemetryPriors> tn = makeSensorPriors(off, dji, db, {1});
+    check(tn && !tn->options().gps_centres && tp->options().gps_centres &&
+              tw->options().gps_centres,
+          "builder: --metric-gps none states no GPS centre factor");
     fs::remove_all(dir);
 }
 
@@ -802,6 +840,7 @@ static int run(int, char**) {
     testFactors();
     testFoldedFactors();
     testTrustedFactors();
+    testNoCentres();
     testPositionError();
     testLevelCheck();
     testLevelUps();

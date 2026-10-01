@@ -28,7 +28,9 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "sfm/core/Progress.h"
@@ -395,6 +397,7 @@ public:
         uint32_t gps_refused = 0;  // registrations refused as far off the GPS
         uint32_t gps_out = 0;      // registrations beyond the GPS fit's radius
         uint32_t gps_ba = 0;       // global BAs a run of those asked for
+        uint32_t gps_latched = 0;  // models that dropped their GPS frame (latchGps)
         uint32_t level_checked = 0; // registrations measured against the level frame
         uint32_t level_refused = 0; // ... refused as tilted past its tolerance
         double level_tol = 0;       // degrees, that tolerance at the last check
@@ -1774,7 +1777,7 @@ public:
         prior_stats_.level_refused++;
         level_refused_imgs_.insert(img);
         if (opt_.verbose)
-            slog::diag(slog::Tag::Map, "[prior] level: %s refused, tilted %.2f deg (tol %.1f)\n",
+            slog::diag(slog::Tag::Map, "[prior] level: %s refused, tilted %.2f deg (tol %.1f)",
                        db_.images[img].name.c_str(), tilt, level_frame_.tol_deg);
         const size_t seen = level_checked_imgs_.size(), bad = level_refused_imgs_.size();
         if (seen >= kLevelLatchMinImages && (double)bad > kLevelLatchFrac * (double)seen) {
@@ -1784,7 +1787,7 @@ public:
             priors_->disableLevel();
             slog::diag(slog::Tag::Map,
                        "[prior] level: %zu of %zu checked images tilted past %.1f deg; the level "
-                       "prior is off for this run\n",
+                       "prior is off for this run",
                        bad, seen, prior_stats_.level_tol);
         }
         return false;
@@ -1798,17 +1801,21 @@ public:
         if (!priors_ || !gps_frame_.ok || !priors_->positionError(img, pose, gps_frame_, d))
             return true;
         prior_stats_.gps_checked++;
+        gps_checked_imgs_.insert(img);
         if (measured) *measured = true;
         const double gate = gps_frame_.gate;
         prior_stats_.gps_gate = gate;
         if (d > kGpsRefuseGates * gate && gps_out_run_ == 0) {
             reg_fail_.gps_far++;
             prior_stats_.gps_refused++;
+            gps_refused_imgs_[img]++;
             if (opt_.verbose)
-                slog::diag(slog::Tag::Map, "[prior] GPS: %s refused, %.1f m off the fit\n",
+                slog::diag(slog::Tag::Map, "[prior] GPS: %s refused, %.1f m off the fit",
                            db_.images[img].name.c_str(), d);
+            latchGps();
             return false;
         }
+        gps_refused_imgs_.erase(img);
         if (d <= gate) {
             gps_out_run_ = 0;
             return true;
@@ -1819,10 +1826,29 @@ public:
             if (opt_.verbose)
                 slog::diag(slog::Tag::Map,
                            "[prior] GPS: %s is %.1f m off the fit, %u in a row beyond %.1f m; "
-                           "bundle adjusting now\n",
+                           "bundle adjusting now",
                            db_.images[img].name.c_str(), d, gps_out_run_, gate);
         }
         return true;
+    }
+
+    // A wrong-place PnP is refused once and placed later; images that stay refused
+    // past kGpsLatchFrac of those checked mean the frame is wrong. The model drops it,
+    // its centre factors, and the trials the refusals took, and ranks again.
+    void latchGps() {
+        const size_t bad = gps_refused_imgs_.size(), seen = gps_checked_imgs_.size();
+        if (bad < kGpsLatchMinImages || (double)bad <= kGpsLatchFrac * (double)seen) return;
+        gps_latched_ = true;
+        gps_latch_rerank_ = true;
+        gps_frame_ = GpsFrame{};
+        prior_stats_.gps_latched++;
+        for (const auto& [img, n] : gps_refused_imgs_)
+            reg_trials_[img] = std::max(0, reg_trials_[img] - n);
+        gps_refused_imgs_.clear();
+        slog::diag(slog::Tag::Map,
+                   "[prior] GPS: %zu of %zu checked images refused beyond %.0f m; this model "
+                   "drops its GPS frame, and applies none of the GPS fits stated below",
+                   bad, seen, kGpsRefuseGates * prior_stats_.gps_gate);
     }
 
     // A length to measure pose differences against, since a reconstruction has
@@ -2056,14 +2082,15 @@ private:
                 slog::diag(slog::Tag::Map,
                            "[prior] GPS check: %u registrations checked, %u registrations "
                            "refused beyond %.0f m, %u bundle adjustments triggered by %u "
-                           "registrations beyond %.0f m\n",
+                           "registrations beyond %.0f m, %u model(s) dropped the frame",
                            prior_stats_.gps_checked, prior_stats_.gps_refused,
                            kGpsRefuseGates * prior_stats_.gps_gate,
-                           prior_stats_.gps_ba, prior_stats_.gps_out, prior_stats_.gps_gate);
+                           prior_stats_.gps_ba, prior_stats_.gps_out, prior_stats_.gps_gate,
+                           prior_stats_.gps_latched);
             if (priors_ && opt_.verbose && prior_stats_.level_checked)
                 slog::diag(slog::Tag::Map,
                            "[prior] level check: %u registrations checked, %u refused tilted "
-                           "past %.1f deg\n",
+                           "past %.1f deg",
                            prior_stats_.level_checked, prior_stats_.level_refused,
                            prior_stats_.level_tol);
             if (covered.size() < db_.images.size())
@@ -2287,6 +2314,9 @@ private:
                     break;
                 }
             }
+            // A GPS frame dropped mid-ranking gave back the trials it refused.
+            const bool rerank = std::exchange(gps_latch_rerank_, false);
+            if (!registered && rerank) continue;
             if (!registered) break;  // nothing in the ranking can be registered
             const bool due = rec_.numRegistered() >= next_ba;
             if (due || ba_requested_) {
@@ -2633,6 +2663,9 @@ private:
     void resetModel() {
         scale_cache_ = 0;
         gps_frame_ = GpsFrame{};
+        gps_latched_ = gps_latch_rerank_ = false;
+        gps_checked_imgs_.clear();
+        gps_refused_imgs_.clear();
         level_frame_ = LevelFrame{};
         rig_refined_at_ = 0;
         rec_.points3D.clear();
@@ -4621,6 +4654,7 @@ private:
             PosePriors pf;
             if (priors_) {
                 pf = priorFactors(rec_);
+                if (gps_latched_) pf.dropAbsoluteCentres();
                 gps_frame_ = pf.gps;
                 setLevelFrame(pf.level);
                 bo.priors = &pf;
@@ -5303,6 +5337,14 @@ private:
     // A registration four fit radii off the GPS with its predecessor inside
     // one is refused; a drifting run is never refused, or its chain stalls.
     static constexpr double kGpsRefuseGates = 4.0;
+    // Healthy: 9 of 2909 drone images, 0 of 755 checks on four outdoor videos. An
+    // Avata clip levelled about an up 90 deg off: ~100 of 142 refused, all for good.
+    static constexpr double kGpsLatchFrac = 0.2;
+    static constexpr size_t kGpsLatchMinImages = 10;
+    bool gps_latched_ = false;          // this model holds no GPS frame or centre factor
+    bool gps_latch_rerank_ = false;     // ... newly, so a ranking that failed is retried
+    std::unordered_set<uint32_t> gps_checked_imgs_;
+    std::unordered_map<uint32_t, int> gps_refused_imgs_;   // standing refusals, by count
     GpsFrame gps_frame_;               // the last global solve's, on this model
     LevelFrame level_frame_;           // ... and its level images' up
     // Level captures refused 1-3 of ~1800 images; an honest tail refuses 0.2%.

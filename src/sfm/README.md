@@ -546,9 +546,12 @@ radius, so a street walked end to end — which `full` refuses — fits.
 The fit is refused rather than approximated, and **what refuses it is geometry,
 not a noise model**. Fewer than three positioned cameras, reference positions
 that do not spread wider than the inlier radius, under half the cameras inlying,
-or (full only) cameras lying so close to a line that the reference amplifies
-orientation error more than 20x — each reports its own reason with the numbers
-behind it; the model is then still written, in the ordinary orient gauge, and
+(full only) cameras lying so close to a line that the reference amplifies
+orientation error more than 20x, or (horizontal only) a level scale more than
+1.25x the median ratio of GPS to model distance between inliers far apart —
+the up it was levelled about tips the camera path, as an Avata 360's IMU up
+90 deg off did on a straight flight (35x) — each reports its own reason with
+the numbers behind it; the model is then still written, in the ordinary orient gauge, and
 the exit status is 4.
 
 `merge` accepts a single model when a metric reference is given: there is
@@ -621,14 +624,19 @@ future sensor implements the same way (`core/PriorSource.h`;
   re-solved with the rotation fixed (`ransacPnPKnownRotation`, and the rig
   form for a whole frame) and refused when that finds fewer than the
   registration's own inlier floor; the seed pair takes the gyro's rotation
-  when it agrees; the audit does not unseat a pose the gyro vouches for.
+  when it agrees; the audit does not unseat a pose the gyro vouches for. A
+  PnP pose four GPS-fit radii off right after one inside the radius is
+  refused as a wrong-place PnP; when more than a fifth of the images checked
+  (and at least 10) stand refused, the frame is what is wrong, and the model
+  drops it and its GPS factors and retries what it refused.
 - **Bundle adjustment** (`--sensor-map`): every solve, growth and joint alike,
   takes camera-side factors evaluated on the host and added to whichever
   linear system the solver builds (`ba/Priors.h`, `ba/README.md`): the gyro's
   relative rotation between consecutive frames of each lens, gravity in each
   frame against a world up refitted per solve, the accelerometer's metric
   scale as one velocity-free triple constraint per three consecutive frames,
-  and GPS positions through a similarity refitted per solve. Every gauge
+  and GPS positions through a similarity refitted per solve, none under
+  `--metric-gps none`, which leaves the GPS to pairing alone. Every gauge
   quantity is re-estimated from the poses before each solve and frozen inside
   the factors, so the solver carries no global parameter and the model stays
   in its own gauge; the finishing gauge fit above then runs as before.
@@ -649,7 +657,8 @@ takes no up factor and the GPS fit is what it was without them. Refused images
 never vote, so when more than 5% of the 20 or more images checked are refused
 the mapper drops the prior for the rest of the run and logs it once. Under
 `--metric-gps full` a GPS fit levelled by any up source keeps its vertical
-factor; `horizontal` drops it.
+factor while the altitudes agree with the fit to within its inlier radius
+(their robust sigma about it); `horizontal` drops it.
 
 `--sensor-max-dt` (3 s) bounds the gap a gyro rotation may span. The mapper
 ends with how many registrations the gyro re-solved or refused and how many
