@@ -1193,7 +1193,7 @@ void printAssembly(const AssembleStats& ast, size_t models, Tag tag) {
            {format_duration(ast.finishSecs()), (long long)f.splits,
             (long long)f.duplicate_splits, (long long)f.reseeded_models,
             (long long)f.dropped_redundant, (long long)f.audited_repaired,
-            (long long)f.audited_out});
+            (long long)f.audited_out, (long long)f.seams_welded});
 }
 
 // Flat or bottom-up, per --mapper; flat is the default and what the
@@ -2457,6 +2457,7 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
     // measurement is what stops small components inventing their own
     // intrinsics (D45/D46).
     MapperOptions& mapopt = cfg.mapper;
+    mapopt.seam_order_by_name = cfg.pairs == "sequential";
     const CameraSetup& cs = calib.cameras;
     mapopt.initial_cameras = cs.cameras;
     mapopt.known_focal_cameras = cs.focal_known;
@@ -2507,6 +2508,11 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
     const size_t n_cameras = models.empty() ? 0 : models.front().cameras.size();
     splitCamerasBySize(models, feats);
     writeModels(models, sparsedir, verbose, gauge, &rigs);
+    // In the mapper's frame, not the gauge's: a scorer that aligns by Sim3 reads both alike.
+    if (!ast.pre_weld.empty()) {
+        resolveImageNames(ast.pre_weld, _imagedir);
+        writeModels(ast.pre_weld, sparsedir / "pre_weld", verbose, {}, &rigs);
+    }
 
     // The mapper reports its own breakdown when `run()` returns; the passes
     // that assemble its models accumulate into the same counters.

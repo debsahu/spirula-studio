@@ -1674,31 +1674,36 @@ SS_MSG(map_assembled,
 
 SS_MSG(map_finishing,
     EN("Finishing passes ({0}): split {1}, folds cut {2}, reseeded {3}, dropped {4}, "
-       "repaired by the audit {5}, dropped by the audit {6}"),
+       "repaired by the audit {5}, dropped by the audit {6}, seams welded {7}"),
     JA("仕上げ処理（{0}）: 分割 {1}、折り返しの切断 {2}、再シード {3}、除外 {4}、"
-       "監査で修復 {5}、監査で除外 {6}"),
+       "監査で修復 {5}、監査で除外 {6}、継ぎ目の結合 {7}"),
     ZH_HANS("收尾处理（{0}）: 拆分 {1}，切开折叠 {2}，重新播种 {3}，丢弃 {4}，"
-            "审查修复 {5}，审查丢弃 {6}"),
+            "审查修复 {5}，审查丢弃 {6}，接缝合并 {7}"),
     ZH_HANT("收尾處理（{0}）: 拆分 {1}，切開折疊 {2}，重新播種 {3}，丟棄 {4}，"
-            "稽核修復 {5}，稽核丟棄 {6}"),
+            "稽核修復 {5}，稽核丟棄 {6}，接縫合併 {7}"),
     KO("마무리 단계({0}): 분할 {1}, 접힘 절단 {2}, 재시드 {3}, 제외 {4}, "
-       "감사로 복구 {5}, 감사로 제외 {6}"),
+       "감사로 복구 {5}, 감사로 제외 {6}, 이음매 결합 {7}"),
     DE("Abschlussdurchgänge ({0}): geteilt {1}, Faltungen getrennt {2}, neu gesät {3}, "
-       "verworfen {4}, von der Prüfung repariert {5}, von der Prüfung verworfen {6}"),
+       "verworfen {4}, von der Prüfung repariert {5}, von der Prüfung verworfen {6}, "
+       "Nähte verschweißt {7}"),
     FR("Passes finales ({0}) : scindés {1}, plis coupés {2}, réamorcés {3}, écartés {4}, "
-       "réparés par l'audit {5}, écartés par l'audit {6}"),
+       "réparés par l'audit {5}, écartés par l'audit {6}, coutures soudées {7}"),
     ES("Pasadas finales ({0}): divididos {1}, pliegues cortados {2}, resembrados {3}, "
-       "descartados {4}, reparados por la auditoría {5}, descartados por la auditoría {6}"),
+       "descartados {4}, reparados por la auditoría {5}, descartados por la auditoría {6}, "
+       "costuras soldadas {7}"),
     PT("Passagens finais ({0}): divididos {1}, dobras cortadas {2}, ressemeados {3}, "
-       "descartados {4}, reparados pela auditoria {5}, descartados pela auditoria {6}"),
+       "descartados {4}, reparados pela auditoria {5}, descartados pela auditoria {6}, "
+       "costuras soldadas {7}"),
     IT("Passate finali ({0}): divisi {1}, pieghe tagliate {2}, riseminati {3}, scartati {4}, "
-       "riparati dall'audit {5}, scartati dall'audit {6}"),
+       "riparati dall'audit {5}, scartati dall'audit {6}, cuciture saldate {7}"),
     NL("Afrondende rondes ({0}): gesplitst {1}, vouwen doorgesneden {2}, opnieuw gezaaid {3}, "
-       "afgevallen {4}, hersteld door de controle {5}, afgevallen door de controle {6}"),
+       "afgevallen {4}, hersteld door de controle {5}, afgevallen door de controle {6}, "
+       "naden gelast {7}"),
     RU("Завершающие проходы ({0}): разделено {1}, складок разрезано {2}, пересеяно {3}, "
-       "отброшено {4}, исправлено проверкой {5}, отброшено проверкой {6}"),
+       "отброшено {4}, исправлено проверкой {5}, отброшено проверкой {6}, "
+       "сварено швов {7}"),
     TR("Bitirme geçişleri ({0}): bölünen {1}, kesilen katlanma {2}, yeniden tohumlanan {3}, "
-       "elenen {4}, denetimle onarılan {5}, denetimle elenen {6}"));
+       "elenen {4}, denetimle onarılan {5}, denetimle elenen {6}, kaynatılan dikiş {7}"));
 
 
 // ===========================================================================

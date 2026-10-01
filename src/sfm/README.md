@@ -983,6 +983,30 @@ it.
   twelve intrinsics columns of the reduced system — so on anything but a small
   capture `--ba-solver auto` lands on CG.
 
+The last assembly pass, before those, is the seam weld (`--seam-weld`, 0.25). Two
+registration fronts that meet on thin support leave every point there twice, metres
+apart; no merge test accepts that union and the epipolar check cannot see an offset
+along the baseline. A verified pair of `seam_min_matches` (100) or more whose matches
+the model explains by a shared point below the bar is a candidate. Loop revisits and
+weak woods pairs read as low as the seam (220-481 candidates per canopy-capture model), and
+what separates them is the neighbourhood: a seam link's two images share at most one
+third image that both see with `seam_covis_min` (20) points, a loop revisit dozens. A
+candidate is open when that count is at most 1 and either the pair's duplicated points
+sit a coherent 10 % of the scene depth apart, or -- in capture order, when the pair is
+at most 3 positions apart -- its rotation is 10x its neighbours' per-position rotation.
+With capture order every open pair must be 3 positions apart or fewer. Capture order
+is a declared `--sequence`, or with `--pairs sequential` each folder's images in file
+order; a photo folder has none, so only the offset branch runs. The open pairs'
+duplicated points are fused at the track-length-weighted mean and the model is
+refined with the fused points spared the first round's filter, then forced through a
+second round without retriangulation -- one round rarely closes a large kink before
+the ordinary stopping test exits it (a canopy drone capture: 2.95->1.19 deg and 3.20->0.78 deg).
+On 27 saved models
+(a canopy drone capture, a power-corridor capture, the Osmo 0023 clip, Avata 0006), measured offline, the rule flags
+only links at the canopy capture's seam (at most 3 per model) and nothing on the other captures. `[seam]` lines report what it found; under
+`SS_SFM_MAP_PROF` the models as they were before a weld are written to
+`sparse/pre_weld/` (in the mapper's frame, not the gauge's).
+
 `--mapper flat|bottom-up` picks the schedule (see the stage graph; flat is the
 default for every capture, and there is no size-based switch);
 `--bup-atom-size` and `--bup-overlap` size the atoms and the overlap the
@@ -1016,6 +1040,7 @@ PASS/FAIL and returns 0/1 — the same convention as `src/backend/tests/`.
 | `sfm_mask_test` | mask uv sampling, decode, file discovery | no |
 | `sfm_telemetry_test` | the four telemetry carriers on synthetic files, and the sanity checks; `sfm_telemetry_test FILE` prints what a video carries | no |
 | `sfm_sequence_test` | the sequence table and its window pairs (`--no-gpu` stops there); a synthetic walk past a duplicated room through the mapper | yes |
+| `sfm_seam_weld_test` | the open-seam detector and weld on a two-front track, with and without capped GPS solves | yes |
 | `sfm_prior_test` | pose priors in bundle adjustment: Jacobians against central differences, device against host, a gauge recovered from priors alone (`--no-gpu` keeps to the host) | yes |
 | `sfm_sensor_prior_test` | the fixed-rotation two-view and PnP estimators on scenes with equipment and outliers; the telemetry source's calibration, rotations and factors on the synthetic walk | no |
 

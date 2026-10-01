@@ -542,6 +542,12 @@ static bool collectModelDirs(const std::string& input, std::vector<fs::path>& ou
     return true;
 }
 
+static bool pairsContain(const std::vector<Mapper::SeamPair>& v, const Mapper::SeamPair& p) {
+    for (const Mapper::SeamPair& q : v)
+        if (q.pair == p.pair) return true;
+    return false;
+}
+
 static bool readModels(const std::string& dir, std::vector<Reconstruction>& models, bool verbose) {
     std::vector<fs::path> dirs;
     if (!collectModelDirs(dir, dirs)) return false;
@@ -805,6 +811,7 @@ static int cmdMap(int argc, char** argv) {
 
     MapperOptions& opt = cfg.mapper;
     ManagerOptions& mgopt = cfg.manager;
+    opt.seam_order_by_name = cfg.pairs == "sequential";
     const std::string& featdir = cfg.feature_dir;
 
     MatchesDatabase db = readMatches(matchesPath);
@@ -973,6 +980,18 @@ static int cmdMap(int argc, char** argv) {
                 if (ss.dropped_images) printf(" (%zu images dropped)", ss.dropped_images);
             }
             printf("\n");
+            size_t strong = 0;
+            std::vector<Mapper::SeamPair> cand;
+            const std::vector<Mapper::SeamPair> open = mapper.openSeams(models[i], &strong, &cand);
+            printf("    open seams: %zu of %zu strong pairs (%zu explained under %.2f)\n",
+                   open.size(), strong, cand.size(), opt.seam_weld_frac);
+            // SS_SFM_MAP_PROF lists every candidate, so an offline scorer can check each term.
+            for (const Mapper::SeamPair& sp : MapProf::enabled() ? cand : open)
+                printf("    seam %s %s-%s explained %zu/%zu, shared neighbours %d, offset %.4f, "
+                       "gap %d, kink ratio %.2f\n",
+                       pairsContain(open, sp) ? "open" : "candidate",
+                       db.images[sp.a].name.c_str(), db.images[sp.b].name.c_str(), sp.explained,
+                       sp.matches, sp.nbr_common, sp.off_depth, sp.gap, sp.kink_ratio);
             DuplicateReport dr =
                 findDuplicateStructure(models[i], mgopt.duplicate, mapper.matchedPredicate());
             printf("    duplicate structure: %zu of %zu co-located pairs share no points "
@@ -1047,6 +1066,10 @@ static int cmdMap(int argc, char** argv) {
     recolorPoints(models, cfg);
     splitCamerasBySize(models, feats);
     if (!output.empty()) writeModels(models, output, opt.verbose, map_gauge, &rigs);
+    if (!output.empty() && !ast.pre_weld.empty()) {
+        resolveImageNames(ast.pre_weld, cfg.image_dir);
+        writeModels(ast.pre_weld, fs::path(output) / "pre_weld", opt.verbose, {}, &rigs);
+    }
     return map_metric ? 0 : 4;
 }
 
