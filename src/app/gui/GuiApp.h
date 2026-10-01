@@ -377,15 +377,19 @@ private:
     // Turning "keep intermediate files" OFF is the one option here that
     // destroys work: it is what makes a cancelled run resumable.
     void draw_drop_intermediate_modal();
-    // Masks that the kept reconstruction was not built with: the one question
-    // "Update dataset" cannot answer by itself (see masks_miss_kept_model).
-    void draw_mask_recon_modal();
-    // Is this run about to write masks the reconstruction it is keeping has
-    // never seen, with the panel asking for masked feature points? Then
-    // pressing the button means one of two runs, and it has to be asked which.
-    bool masks_miss_kept_model();
-    // Everything start_dataset_job does once that question is settled. False
-    // when the run did not start (busy, or the device could not be frozen).
+    // What pressing the button will reuse and redo (DatasetPlan.h), from the
+    // panel as it stands; the runner asks the same question of the same job.
+    const DatasetPlan& dataset_plan();
+    void draw_dataset_plan(const DatasetPlan& plan);
+    // A rebuild nobody asked for -- the frames or the reconstruction differ
+    // from the panel -- is confirmed first, with the option to keep them.
+    void draw_rebuild_confirm_modal();
+    // The settings the output folder's record says built it, onto the panel:
+    // when the folder changes, and from the plan's own button.
+    void restore_from_record(bool announce);
+    void restore_record_rows(const DatasetRecord& rec);
+    // Everything start_dataset_job does once the confirmation is settled.
+    // False when the run did not start (busy, or the device could not be frozen).
     bool launch_dataset_job();
     // An existing dataset as an input: its images/ become the source and the
     // folder itself the output, so the run adds to it instead of building a
@@ -741,10 +745,11 @@ private:
     // The output folder this screen derived from the inputs. Kept so a folder
     // the user typed is never overwritten when the input list changes.
     std::string _workspace_auto;
-    // The output folder this panel has reconstructed into, so its stamp
-    // describes the settings still on the screen (SfmJob::settings_built_model).
-    // Cleared when the input list is replaced, which resets settings of its own.
-    std::string _built_workspace;
+    // Frames and a reconstruction whose settings differ from the panel's are
+    // kept rather than rebuilt (PlanRequest::keep_built). Forgotten when the
+    // output folder or the inputs change.
+    bool _keep_built = false;
+    std::string _keep_built_for;
     bool _resume = true;
     bool _mask_enable = false;
     // Hide what the masks cover from feature detection too, not only from
@@ -973,13 +978,20 @@ private:
     bool _clear_open = false, _clear_shown = false;
     std::vector<std::string> _clear_targets;
     bool _drop_intermediate_open = false, _drop_intermediate_shown = false;
-    bool _mask_recon_open = false, _mask_recon_shown = false;
+    bool _rebuild_open = false, _rebuild_shown = false;
+    DatasetPlan _rebuild_plan;   // what the confirmation lists
 
     // workspace_state()'s cache: what it was asked about and when.
     WorkspaceState _ws_state;
     std::string _ws_state_key;
     std::vector<std::string> _ws_artifacts;
     double _ws_state_at = -1.0;
+    // ... the record it holds, read on the same clock, and the plan.
+    DatasetRecord _ws_record;
+    DatasetPlan _plan;
+    // The output folder whose record last reached the panel, so a folder is
+    // restored from once, when the panel arrives at it.
+    std::string _restored_ws;
 
     // VRAM readout on the status strip, polled from the backend at ~2 Hz.
     backend::MemoryUsage _vram;

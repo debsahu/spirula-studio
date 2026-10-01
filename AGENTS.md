@@ -658,6 +658,13 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   `MeshJob` and not added there saves, loads, and quietly runs at its default.
   `preset_roundtrip_test` is the guard: it moves every field the table
   names off its default and compares after a round trip.
+- **What a dataset run reuses is decided in one place, from fields you have to
+  list.** `app/gui/DatasetPlan.h` compares, per step, the settings its output
+  was made with (`frames_fields`, `masks_fields`, `model_fields`,
+  `geometry_fields`) against the workspace's `.spirula-dataset.json`; a setting
+  that changes a step's output and is not in its list is silently reused
+  across. The panel and both runners ask the same function -- never decide
+  "rerun this?" anywhere else. docs/notes/dataset-rerun.md.
 - **A mesh format lives in four places and reads back in two.** `kMeshFormats`
   (`app/gui/MeshJob.h`) is the GUI's list, `parse_one_mesh_format` and
   `write_mesh` (`mesh/MeshExport.cpp`) are the writer, `check_export_support`

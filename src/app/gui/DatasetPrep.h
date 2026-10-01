@@ -18,7 +18,6 @@
 #include "app/Pano360.h"
 #include "app/gui/FilmReel.h"
 #include "app/gui/PrepProgress.h"
-#include "app/gui/ReconStamp.h"
 
 #include <algorithm>
 #include <atomic>
@@ -230,6 +229,9 @@ struct PrepJob {
     // cost the extraction as well.
     bool redo_frames = false;
     bool redo_masks = false;
+    // The masks on disk are current (DatasetPlan.h): neither segmentation nor
+    // the stencil pass runs, so not one mask file is rewritten.
+    bool keep_masks = false;
     // The masks that came with the photos mark what to REMOVE, not what to
     // keep. Applied where those files are read, so everything this run writes
     // is in the one convention every reader uses (sfm/core/Mask.h).
@@ -413,39 +415,6 @@ struct PrepResult {
     bool frames_rebuilt = false;
 };
 
-// Everything that decides which pictures land in images/, and nothing that
-// decides what becomes of them: masking and the reconstruction stamp their own
-// settings, and folding those in would re-extract a video over a prompt.
-inline ReconStamp frames_stamp(const PrepJob& job) {
-    auto num = [](double v) {
-        char b[32];
-        std::snprintf(b, sizeof b, "%g", v);
-        return std::string(b);
-    };
-    ReconStamp st;
-    st.present = true;
-    st.engine = job.force_external_decode ? "ffmpeg" : "builtin";
-    st.args = {"--fps",         num(job.video_fps),
-               "--adaptive",    job.adaptive_fps ? "1" : "0",
-               "--range",       num(job.adaptive_range),
-               "--sharp",       num(job.sharp_window),
-               "--sync",        job.sync_tracks ? "1" : "0",
-               "--max-frames",  num(job.max_frames),
-               "--rotate",      job.auto_rotate ? "1" : "0",
-               "--photos",      num((int)job.photo_import),
-               "--360",         num((int)job.pano.mode),
-               "--360-size",    num(job.pano.size),
-               "--360-orient",  num(job.pano.yaw) + "," + num(job.pano.pitch) +
-                                    "," + num(job.pano.roll)};
-    for (const PrepInput& in : job.inputs) {
-        st.args.push_back("--input");
-        st.args.push_back(in.path);
-        st.args.push_back(in.subdir);
-        st.args.push_back(num(in.fps));
-    }
-    return st;
-}
-
 // What this build can do in-process. `*_reason` names the missing option or
 // device feature, for a log or a tooltip; the screen says what happens instead
 // (`video_note`, dataset::mask_objects_need_segmentation).
@@ -536,6 +505,12 @@ int probe_video_tracks(const std::string& ffmpeg_exe, const std::string& path,
 // dual-fisheye file or per view of a 360 plan, none for a single lens.
 std::vector<std::string> lens_dirs(const PrepJob& job, const PrepInput& in);
 
+// The frame sequences an input is, as folders under images/: a video's lens
+// folders, or a folder shot in order -- one per top-level camera folder when
+// they nest (a/cam0, a/cam1, b), as a dataset made from several videos does.
+std::vector<std::vector<std::string>> input_sequences(const PrepJob& job,
+                                                      const PrepInput& in);
+
 // What a picked folder of photos actually means, by the layout conventions the
 // rest of the project already uses -- `spirula sfm auto`'s own probing and the
 // dataparsers' `mask_dir = "masks"`:
@@ -601,10 +576,8 @@ struct WorkspaceState {
     // dataset that arrived finished. A run pointed at one ADDS to it.
     bool model = false;
     bool geometry = false;  // normals/ or depths/, which a run adds to
-    // Were the flags that built that model written down beside it
-    // (ReconStamp.h)? Without them a run cannot tell whether reusing it still
-    // answers what the panel is asking for, and reuses it regardless.
-    bool recon_stamp = false;
+    // The folder says what built it (DatasetRecord.h).
+    bool record = false;
     // Something a resumed run can pick up instead of redoing.
     bool resumable() const { return frames || features || masks; }
 };
@@ -664,14 +637,15 @@ public:
         : _prog(progress), _films(films), _cancel(cancel) {}
 
     // Called once, immediately before masking starts, and free to replace the
-    // job's mask_* fields with whatever the screen says by then -- which is
-    // what lets the masking options stay editable while frames are extracted.
-    // Anything else it touches has already been acted on.
+    // job's mask_* fields with the screen's -- so masking stays editable while
+    // frames are extracted -- and to decide redo_masks / keep_masks.
     using RefreshFn = std::function<void(PrepJob&)>;
+    // Called as the frames, then the masks, are finished.
+    using DoneFn = std::function<void(Stage, const PrepJob&)>;
 
     // False with `error` set on failure ("cancelled" when the token was set).
     bool run(const PrepJob& job, PrepResult& out, std::string& error,
-             const RefreshFn& refresh_masks = {});
+             const RefreshFn& refresh_masks = {}, const DoneFn& done = {});
 
     // Recursive, matching what COLMAP's feature_extractor indexes. `skip` is a
     // sub-folder not to descend into: a masks/ nested under the images is full
@@ -691,12 +665,10 @@ private:
     void log(const std::string& s, bool detail = true);
     void enter(Stage s, const std::string& text);
 
-    // One input's frames. `images` / `masks` are that input's own folders
-    // (images/<subdir>, masks/<subdir>); `masked` comes back true only when a
-    // resumed run found masks already sitting beside them.
+    // One input's frames into `images` (images/<subdir>).
     bool extract_video(const PrepJob& job, const PrepInput& in,
-                       const std::string& images, const std::string& masks,
-                       PrepResult& out, bool& masked, std::string& error);
+                       const std::string& images, PrepResult& out,
+                       std::string& error);
     bool extract_video_builtin(const PrepJob& job, const PrepInput& in,
                                const std::string& images,
                                PrepResult& out, std::string& error);
@@ -750,17 +722,9 @@ private:
     // the one reading the file.
     bool plan_group(const PrepJob& job, size_t at, std::string& error);
 
-    // Whether the settings the frames on disk were extracted with still read
-    // the same (ReconStamp.h). A run that changes how a video is unwrapped has
-    // to go back to the video, and `resume` cannot see that by itself.
-    bool frames_stale(const PrepJob& job) const {
-        return job.redo_frames || _frames_stale;
-    }
-
     RunProgress* _prog;
     RunFilms _films;
     const std::atomic<bool>& _cancel;
-    bool _frames_stale = false;
     // The spacing chosen per input, and which of them have one: an adaptive
     // plan covers a whole rate group, so it is made before any of the group is
     // extracted rather than per video.

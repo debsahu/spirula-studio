@@ -7126,132 +7126,6 @@ SS_MSG(mask_for_features_help,
        "tamamını görür -- maskelenen şey yerinde duruyorsa ve özneden daha "
        "ince ayrıntı taşıyorsa buna değer, çünkü kameralar ona yakınsar."));
 
-SS_MSG(mask_recon_title,
-    EN("Masks for a reconstruction that is already here"),
-    JA("すでにある再構成結果とマスク"),
-    ZH_HANS("蒙版与已经在这里的重建结果"),
-    ZH_HANT("遮罩與已經在這裡的重建結果"),
-    KO("이미 있는 재구성 결과와 마스크"),
-    DE("Masken für eine schon vorhandene Rekonstruktion"),
-    FR("Des masques pour une reconstruction déjà présente"),
-    ES("Máscaras para una reconstrucción que ya está aquí"),
-    PT("Máscaras para uma reconstrução que já está aqui"),
-    IT("Maschere per una ricostruzione già presente"),
-    NL("Maskers voor een reconstructie die er al is"),
-    RU("Маски для уже готовой реконструкции"),
-    TR("Zaten burada olan bir yeniden kurma için maskeler"));
-
-// {0} is the output folder.
-SS_MSG(mask_recon_confirm,
-    EN("The reconstruction in {0} is kept, and it was built without these "
-       "masks. Building it again with the masked areas left out of feature "
-       "detection costs the whole reconstruction; adding the masks only is a "
-       "few minutes and they still reach training."),
-    JA("{0} の再構成結果はそのまま残りますが、これらのマスクなしで作られたもの"
-       "です。マスクした部分を特徴点から外して作り直すと、再構成をまるごとやり"
-       "直すことになります。マスクを足すだけなら数分で済み、学習にはどちらでも"
-       "渡ります。"),
-    ZH_HANS("{0} 里的重建结果会保留，而它是在没有这些蒙版的情况下做出来的。"
-            "把被蒙住的区域从特征点里去掉再做一遍，等于重做整个重建；只补蒙版"
-            "只要几分钟，而且它们照样会交给训练。"),
-    ZH_HANT("{0} 裡的重建結果會保留，而它是在沒有這些遮罩的情況下做出來的。"
-            "把被遮住的區域從特徵點裡去掉再做一遍，等於重做整個重建；只補遮罩"
-            "只要幾分鐘，而且它們照樣會交給訓練。"),
-    KO("{0} 의 재구성 결과는 그대로 두는데, 이 마스크 없이 만든 것입니다. 가린 "
-       "부분을 특징점에서 빼고 다시 만들면 재구성 전체를 다시 하는 셈이고, "
-       "마스크만 더하면 몇 분이면 되며 어느 쪽이든 학습에는 넘어갑니다."),
-    DE("Die Rekonstruktion in {0} bleibt erhalten, und sie wurde ohne diese "
-       "Masken gebaut. Sie mit den maskierten Bereichen aus der "
-       "Merkmalssuche noch einmal zu bauen kostet die ganze Rekonstruktion; "
-       "nur die Masken hinzuzufügen dauert Minuten, und ans Training kommen "
-       "sie so wie so."),
-    FR("La reconstruction de {0} est conservée, et elle a été construite sans "
-       "ces masques. La refaire en excluant les zones masquées de la détection "
-       "de points coûte toute la reconstruction ; n'ajouter que les masques "
-       "prend quelques minutes, et ils vont à l'entraînement dans les deux "
-       "cas."),
-    ES("La reconstrucción de {0} se conserva, y se construyó sin estas "
-       "máscaras. Rehacerla dejando las zonas enmascaradas fuera de la "
-       "detección de puntos cuesta toda la reconstrucción; añadir solo las "
-       "máscaras son unos minutos, y al entrenamiento llegan igual."),
-    PT("A reconstrução em {0} fica como está, e foi construída sem estas "
-       "máscaras. Refazê-la deixando as áreas mascaradas fora da detecção de "
-       "pontos custa a reconstrução inteira; acrescentar só as máscaras leva "
-       "minutos, e elas chegam ao treino de qualquer jeito."),
-    IT("La ricostruzione in {0} viene mantenuta ed è stata costruita senza "
-       "queste maschere. Rifarla escludendo le zone mascherate dalla ricerca "
-       "dei punti costa l'intera ricostruzione; aggiungere solo le maschere "
-       "sono pochi minuti, e all'addestramento arrivano comunque."),
-    NL("De reconstructie in {0} blijft behouden, en is zonder deze maskers "
-       "gebouwd. Hem opnieuw bouwen met de gemaskeerde gebieden buiten de "
-       "kenmerkdetectie kost de hele reconstructie; alleen de maskers "
-       "toevoegen duurt minuten, en bij de training komen ze hoe dan ook."),
-    RU("Реконструкция в {0} остаётся, а построена она была без этих масок. "
-       "Построить её заново, убрав закрытые маской участки из поиска точек, "
-       "стоит всей реконструкции; добавить одни маски — несколько минут, и до "
-       "обучения они доходят в обоих случаях."),
-    TR("{0} içindeki yeniden kurma korunur ve bu maskeler olmadan yapılmıştı. "
-       "Maskelenen alanları öznitelik aramasının dışında bırakarak yeniden "
-       "yapmak bütün yeniden kurmaya mal olur; yalnızca maskeleri eklemek "
-       "birkaç dakika sürer ve eğitime iki durumda da ulaşırlar."));
-
-SS_MSG(mask_recon_rebuild,
-    EN("Reconstruct again with them"),
-    JA("マスクを使って作り直す"),
-    ZH_HANS("用蒙版重新重建"),
-    ZH_HANT("用遮罩重新重建"),
-    KO("마스크를 써서 다시 재구성"),
-    DE("Damit neu rekonstruieren"),
-    FR("Reconstruire à nouveau avec eux"),
-    ES("Reconstruir de nuevo con ellas"),
-    PT("Reconstruir de novo com elas"),
-    IT("Ricostruire di nuovo con esse"),
-    NL("Opnieuw reconstrueren met de maskers"),
-    RU("Реконструировать заново с ними"),
-    TR("Onlarla yeniden kur"));
-
-SS_MSG(mask_recon_masks_only,
-    EN("Add the masks only"),
-    JA("マスクだけ足す"),
-    ZH_HANS("只补蒙版"),
-    ZH_HANT("只補遮罩"),
-    KO("마스크만 더하기"),
-    DE("Nur die Masken hinzufügen"),
-    FR("N'ajouter que les masques"),
-    ES("Añadir solo las máscaras"),
-    PT("Acrescentar só as máscaras"),
-    IT("Aggiungere solo le maschere"),
-    NL("Alleen de maskers toevoegen"),
-    RU("Добавить только маски"),
-    TR("Yalnızca maskeleri ekle"));
-
-SS_MSG(mask_recon_masks_only_help,
-    EN("Turns \"Hide masked areas from the reconstruction too\" off, so this "
-       "question is settled rather than asked again on the next run."),
-    JA("「マスクした部分を再構成からも隠す」をオフにします。次の実行でまた"
-       "聞かれることはありません。"),
-    ZH_HANS("会把“重建时也避开被蒙住的区域”关掉，这样下次运行不会再问。"),
-    ZH_HANT("會把「重建時也避開被遮住的區域」關掉，這樣下次執行不會再問。"),
-    KO("'가린 부분을 재구성에서도 빼기'를 끕니다. 다음 실행에서 다시 묻지 "
-       "않습니다."),
-    DE("Schaltet „Maskierte Bereiche auch vor der Rekonstruktion verbergen“ "
-       "aus, damit die Frage beim nächsten Lauf nicht wiederkommt."),
-    FR("Désactive « Cacher aussi les zones masquées à la reconstruction », "
-       "pour que la question ne revienne pas au prochain lancement."),
-    ES("Desactiva «Ocultar también a la reconstrucción las zonas "
-       "enmascaradas», para que la pregunta no vuelva en la próxima "
-       "ejecución."),
-    PT("Desliga \"Esconder as áreas mascaradas também da reconstrução\", para "
-       "que a pergunta não volte na próxima execução."),
-    IT("Spegne \"Nascondere le zone mascherate anche alla ricostruzione\", "
-       "così la domanda non torna alla prossima esecuzione."),
-    NL("Zet \"Gemaskeerde gebieden ook voor de reconstructie verbergen\" uit, "
-       "zodat de vraag bij de volgende run niet terugkomt."),
-    RU("Выключает «Скрывать закрытые маской участки и от реконструкции», чтобы "
-       "вопрос не повторился при следующем запуске."),
-    TR("\"Maskelenen alanları yeniden kurmadan da gizle\" seçeneğini kapatır, "
-       "böylece bu soru bir sonraki çalıştırmada yeniden sorulmaz."));
-
 // {0} is the object number under the cursor.
 SS_MSG(click_tooltip,
     EN("Left-click: this is object {0}.  Right-click: not this."),
@@ -12538,49 +12412,6 @@ SS_MSG(view_geometry,
     NL("Diepte en normalen"), RU("Глубина и нормали"),
     TR("Derinlik ve normaller"));
 
-SS_MSG(model_found_reuse,
-    EN("This folder already holds a reconstruction. It is kept as it is, and "
-       "only the steps below are run over it."),
-    JA("このフォルダにはすでに再構成結果があります。そのまま残し、下の工程だけを"
-       "その上で実行します。"),
-    ZH_HANS("这个文件夹里已经有一份重建结果。它会原样保留，只在其之上运行下面的"
-            "步骤。"),
-    ZH_HANT("這個資料夾裡已經有一份重建結果。它會原樣保留，只在其之上執行下面的"
-            "步驟。"),
-    KO("이 폴더에는 이미 재구성 결과가 있습니다. 그대로 두고, 그 위에서 아래 "
-       "단계만 실행합니다."),
-    DE("In diesem Ordner liegt bereits eine Rekonstruktion. Sie bleibt, wie sie "
-       "ist; darüber laufen nur die Schritte unten."),
-    FR("Ce dossier contient déjà une reconstruction. Elle est conservée telle "
-       "quelle, et seules les étapes ci-dessous s'exécutent par-dessus."),
-    ES("Esta carpeta ya contiene una reconstrucción. Se conserva tal cual y "
-       "solo se ejecutan sobre ella los pasos de abajo."),
-    PT("Esta pasta já contém uma reconstrução. Fica como está, e só os passos "
-       "abaixo correm sobre ela."),
-    IT("Questa cartella contiene già una ricostruzione. Resta com'è, e sopra di "
-       "essa girano solo i passi qui sotto."),
-    NL("Deze map bevat al een reconstructie. Die blijft zoals hij is; alleen de "
-       "stappen hieronder draaien eroverheen."),
-    RU("В этой папке уже есть реконструкция. Она остаётся как есть, поверх неё "
-       "выполняются только шаги ниже."),
-    TR("Bu klasörde zaten bir yeniden kurma var. Olduğu gibi kalır ve üzerinde "
-       "yalnızca aşağıdaki adımlar çalışır."));
-
-SS_MSG(model_will_be_replaced,
-    EN("The reconstruction in this folder will be replaced by a new one."),
-    JA("このフォルダの再構成結果は、新しいものに置き換えられます。"),
-    ZH_HANS("这个文件夹里的重建结果会被新的替换掉。"),
-    ZH_HANT("這個資料夾裡的重建結果會被新的取代。"),
-    KO("이 폴더의 재구성 결과는 새것으로 바뀝니다."),
-    DE("Die Rekonstruktion in diesem Ordner wird durch eine neue ersetzt."),
-    FR("La reconstruction de ce dossier sera remplacée par une nouvelle."),
-    ES("La reconstrucción de esta carpeta será sustituida por una nueva."),
-    PT("A reconstrução desta pasta será substituída por uma nova."),
-    IT("La ricostruzione in questa cartella sarà sostituita da una nuova."),
-    NL("De reconstructie in deze map wordt door een nieuwe vervangen."),
-    RU("Реконструкция в этой папке будет заменена новой."),
-    TR("Bu klasördeki yeniden kurma yenisiyle değiştirilecek."));
-
 SS_MSG(recon_reuse_rebuild,
     EN("A reconstruction is already in the output folder. Change any of these "
        "and the run builds it again; leave them and it is kept."),
@@ -12718,6 +12549,390 @@ SS_MSG(update_dataset,
     PT("Atualizar o conjunto de dados"), IT("Aggiorna il set di dati"),
     NL("Dataset bijwerken"), RU("Дополнить набор данных"),
     TR("Veri kümesini güncelle"));
+
+// ---------------------------------------------------------------------------
+// What a run will reuse and redo, listed above the button (DatasetPlan.h).
+// Each state is a short verb phrase beside the step's own name.
+// ---------------------------------------------------------------------------
+
+SS_MSG(plan_step_model,
+    EN("Reconstruction"),
+    JA("再構成"),        ZH_HANS("重建"),      ZH_HANT("重建"),
+    KO("재구성"),         DE("Rekonstruktion"), FR("Reconstruction"),
+    ES("Reconstrucción"), PT("Reconstrução"), IT("Ricostruzione"),
+    NL("Reconstructie"), RU("Реконструкция"), TR("Yeniden kurma"));
+
+SS_MSG(plan_run,
+    EN("Run"),
+    JA("実行する"),      ZH_HANS("运行"),      ZH_HANT("執行"),
+    KO("실행"),           DE("Ausführen"),    FR("Exécuter"),
+    ES("Ejecutar"),      PT("Executar"),     IT("Eseguire"),
+    NL("Uitvoeren"),     RU("Выполнить"),    TR("Çalıştır"));
+
+SS_MSG(plan_finish,
+    EN("Finish the interrupted run"),
+    JA("中断した実行の続きをする"),
+    ZH_HANS("接着做完中断的运行"),
+    ZH_HANT("接著做完中斷的執行"),
+    KO("중단된 실행 마저 하기"),
+    DE("Den abgebrochenen Lauf zu Ende führen"),
+    FR("Terminer l'exécution interrompue"),
+    ES("Terminar la ejecución interrumpida"),
+    PT("Terminar a execução interrompida"),
+    IT("Finire l'esecuzione interrotta"),
+    NL("De onderbroken run afmaken"),
+    RU("Завершить прерванный запуск"),
+    TR("Yarıda kalan çalıştırmayı bitir"));
+
+SS_MSG(plan_add,
+    EN("Add what is missing"),
+    JA("足りない分を足す"),
+    ZH_HANS("补上缺少的部分"),
+    ZH_HANT("補上缺少的部分"),
+    KO("빠진 것 채우기"),
+    DE("Fehlendes ergänzen"),
+    FR("Ajouter ce qui manque"),
+    ES("Añadir lo que falta"),
+    PT("Acrescentar o que falta"),
+    IT("Aggiungere ciò che manca"),
+    NL("Aanvullen wat ontbreekt"),
+    RU("Добавить недостающее"),
+    TR("Eksik olanı ekle"));
+
+SS_MSG(plan_reuse,
+    EN("Reuse"),
+    JA("そのまま使う"),   ZH_HANS("沿用"),      ZH_HANT("沿用"),
+    KO("그대로 사용"),     DE("Weiterverwenden"), FR("Réutiliser"),
+    ES("Reutilizar"),    PT("Reutilizar"),   IT("Riutilizzare"),
+    NL("Hergebruiken"),  RU("Использовать как есть"), TR("Yeniden kullan"));
+
+SS_MSG(plan_reuse_masks_changed,
+    EN("Reuse (built before the current masks)"),
+    JA("そのまま使う（いまのマスクより前に作られたもの）"),
+    ZH_HANS("沿用（是在当前蒙版之前做的）"),
+    ZH_HANT("沿用（是在目前遮罩之前做的）"),
+    KO("그대로 사용 (지금 마스크보다 먼저 만든 것)"),
+    DE("Weiterverwenden (vor den jetzigen Masken gebaut)"),
+    FR("Réutiliser (construite avant les masques actuels)"),
+    ES("Reutilizar (construida antes de las máscaras actuales)"),
+    PT("Reutilizar (construída antes das máscaras atuais)"),
+    IT("Riutilizzare (costruita prima delle maschere attuali)"),
+    NL("Hergebruiken (gebouwd vóór de huidige maskers)"),
+    RU("Использовать как есть (построена до нынешних масок)"),
+    TR("Yeniden kullan (şimdiki maskelerden önce yapıldı)"));
+
+SS_MSG(plan_in_dataset,
+    EN("Already in the dataset"),
+    JA("すでにデータセットにある"),
+    ZH_HANS("已经在数据集里"),
+    ZH_HANT("已經在資料集裡"),
+    KO("이미 데이터셋에 있음"),
+    DE("Schon im Datensatz"),
+    FR("Déjà dans le jeu de données"),
+    ES("Ya está en el conjunto de datos"),
+    PT("Já está no conjunto de dados"),
+    IT("Già nel set di dati"),
+    NL("Staat al in de dataset"),
+    RU("Уже в наборе данных"),
+    TR("Zaten veri kümesinde"));
+
+SS_MSG(plan_unrecorded,
+    EN("Keep (no record of how it was made)"),
+    JA("残す（どう作られたかの記録がない）"),
+    ZH_HANS("保留（没有它是怎么做出来的记录）"),
+    ZH_HANT("保留（沒有它是怎麼做出來的紀錄）"),
+    KO("남겨 둠 (어떻게 만들었는지 기록이 없음)"),
+    DE("Behalten (kein Protokoll, wie es entstand)"),
+    FR("Garder (aucune trace de sa fabrication)"),
+    ES("Conservar (no consta cómo se hizo)"),
+    PT("Manter (não há registo de como foi feito)"),
+    IT("Tenere (nessuna traccia di come è stato fatto)"),
+    NL("Behouden (niet vastgelegd hoe het gemaakt is)"),
+    RU("Оставить (нет записи о том, как сделано)"),
+    TR("Koru (nasıl yapıldığına dair kayıt yok)"));
+
+SS_MSG(plan_keep,
+    EN("Keep, though made with other settings"),
+    JA("残す（別の設定で作られたもの）"),
+    ZH_HANS("保留（虽然是用别的设置做的）"),
+    ZH_HANT("保留（雖然是用別的設定做的）"),
+    KO("남겨 둠 (다른 설정으로 만든 것)"),
+    DE("Behalten, obwohl mit anderen Einstellungen gemacht"),
+    FR("Garder, bien que fait avec d'autres réglages"),
+    ES("Conservar, aunque se hizo con otros ajustes"),
+    PT("Manter, embora feito com outras definições"),
+    IT("Tenere, anche se fatto con altre impostazioni"),
+    NL("Behouden, al is het met andere instellingen gemaakt"),
+    RU("Оставить, хотя сделано с другими настройками"),
+    TR("Koru, başka ayarlarla yapılmış olsa da"));
+
+SS_MSG(plan_redo_requested,
+    EN("Redo, as asked"),
+    JA("指示どおりやり直す"),
+    ZH_HANS("按要求重做"),
+    ZH_HANT("按要求重做"),
+    KO("요청대로 다시 하기"),
+    DE("Neu machen, wie verlangt"),
+    FR("Refaire, comme demandé"),
+    ES("Rehacer, como se pidió"),
+    PT("Refazer, como pedido"),
+    IT("Rifare, come richiesto"),
+    NL("Opnieuw doen, zoals gevraagd"),
+    RU("Переделать, как просили"),
+    TR("İstendiği gibi yeniden yap"));
+
+SS_MSG(plan_redo_settings,
+    EN("Redo: made with other settings"),
+    JA("やり直す：別の設定で作られている"),
+    ZH_HANS("重做：是用别的设置做的"),
+    ZH_HANT("重做：是用別的設定做的"),
+    KO("다시 하기: 다른 설정으로 만든 것"),
+    DE("Neu machen: mit anderen Einstellungen gemacht"),
+    FR("Refaire : fait avec d'autres réglages"),
+    ES("Rehacer: se hizo con otros ajustes"),
+    PT("Refazer: feito com outras definições"),
+    IT("Rifare: fatto con altre impostazioni"),
+    NL("Opnieuw doen: met andere instellingen gemaakt"),
+    RU("Переделать: сделано с другими настройками"),
+    TR("Yeniden yap: başka ayarlarla yapılmış"));
+
+SS_MSG(plan_redo_frames,
+    EN("Redo: the frames change"),
+    JA("やり直す：フレームが変わる"),
+    ZH_HANS("重做：帧会变"),
+    ZH_HANT("重做：影格會變"),
+    KO("다시 하기: 프레임이 바뀜"),
+    DE("Neu machen: die Bilder ändern sich"),
+    FR("Refaire : les images changent"),
+    ES("Rehacer: cambian los fotogramas"),
+    PT("Refazer: os quadros mudam"),
+    IT("Rifare: cambiano i fotogrammi"),
+    NL("Opnieuw doen: de beelden veranderen"),
+    RU("Переделать: меняются кадры"),
+    TR("Yeniden yap: kareler değişiyor"));
+
+SS_MSG(plan_redo_model,
+    EN("Redo: the reconstruction changes"),
+    JA("やり直す：再構成が変わる"),
+    ZH_HANS("重做：重建会变"),
+    ZH_HANT("重做：重建會變"),
+    KO("다시 하기: 재구성이 바뀜"),
+    DE("Neu machen: die Rekonstruktion ändert sich"),
+    FR("Refaire : la reconstruction change"),
+    ES("Rehacer: cambia la reconstrucción"),
+    PT("Refazer: a reconstrução muda"),
+    IT("Rifare: cambia la ricostruzione"),
+    NL("Opnieuw doen: de reconstructie verandert"),
+    RU("Переделать: меняется реконструкция"),
+    TR("Yeniden yap: yeniden kurma değişiyor"));
+
+SS_MSG(plan_redo_stale,
+    EN("Redo: made from older results"),
+    JA("やり直す：古い結果から作られている"),
+    ZH_HANS("重做：是从旧的结果做出来的"),
+    ZH_HANT("重做：是從舊的結果做出來的"),
+    KO("다시 하기: 예전 결과로 만든 것"),
+    DE("Neu machen: aus älteren Ergebnissen gemacht"),
+    FR("Refaire : fait à partir de résultats plus anciens"),
+    ES("Rehacer: se hizo a partir de resultados anteriores"),
+    PT("Refazer: feito a partir de resultados anteriores"),
+    IT("Rifare: fatto da risultati precedenti"),
+    NL("Opnieuw doen: gemaakt uit oudere resultaten"),
+    RU("Переделать: сделано по более старым результатам"),
+    TR("Yeniden yap: daha eski sonuçlardan yapılmış"));
+
+SS_MSG(plan_keep_built,
+    EN("Keep the existing frames and reconstruction"),
+    JA("いまあるフレームと再構成を残す"),
+    ZH_HANS("保留现有的帧和重建"),
+    ZH_HANT("保留現有的影格和重建"),
+    KO("지금 있는 프레임과 재구성 남겨 두기"),
+    DE("Vorhandene Bilder und Rekonstruktion behalten"),
+    FR("Garder les images et la reconstruction existantes"),
+    ES("Conservar los fotogramas y la reconstrucción existentes"),
+    PT("Manter os quadros e a reconstrução existentes"),
+    IT("Tenere i fotogrammi e la ricostruzione esistenti"),
+    NL("Bestaande beelden en reconstructie behouden"),
+    RU("Оставить имеющиеся кадры и реконструкцию"),
+    TR("Mevcut kareleri ve yeniden kurmayı koru"));
+
+SS_MSG(plan_keep_built_help,
+    EN("They were made with settings that differ from the ones on screen. "
+       "Kept, they stay exactly as they are and the run only adds masks, depth "
+       "and normals; otherwise they are made again from these settings, which "
+       "for the reconstruction is most of the run's time."),
+    JA("これらは画面の設定と違う設定で作られています。残すとそのまま使い、"
+       "実行はマスクと深度・法線を足すだけになります。残さなければこの設定で"
+       "作り直します。再構成のやり直しは実行時間の大半を占めます。"),
+    ZH_HANS("它们是用和屏幕上不同的设置做出来的。保留的话原样不动，这次运行只补"
+            "蒙版和深度、法线；否则会按这些设置重做，而重建要花掉大部分时间。"),
+    ZH_HANT("它們是用和螢幕上不同的設定做出來的。保留的話原樣不動，這次執行只補"
+            "遮罩和深度、法線；否則會按這些設定重做，而重建要花掉大部分時間。"),
+    KO("화면의 설정과 다른 설정으로 만든 것입니다. 남겨 두면 그대로 쓰고 이번 "
+       "실행은 마스크와 깊이·법선만 더합니다. 그렇지 않으면 이 설정으로 다시 "
+       "만드는데, 재구성이 실행 시간의 대부분을 차지합니다."),
+    DE("Sie wurden mit anderen Einstellungen gemacht als den angezeigten. "
+       "Behalten bleiben sie genau, wie sie sind, und der Lauf ergänzt nur "
+       "Masken, Tiefe und Normalen; sonst werden sie mit diesen Einstellungen "
+       "neu gemacht, was bei der Rekonstruktion den Großteil der Laufzeit "
+       "ausmacht."),
+    FR("Ils ont été faits avec des réglages différents de ceux affichés. "
+       "Gardés, ils restent tels quels et l'exécution n'ajoute que masques, "
+       "profondeur et normales ; sinon ils sont refaits avec ces réglages, ce "
+       "qui pour la reconstruction est l'essentiel du temps d'exécution."),
+    ES("Se hicieron con ajustes distintos de los que se ven en pantalla. Si se "
+       "conservan, quedan tal cual y la ejecución solo añade máscaras, "
+       "profundidad y normales; si no, se rehacen con estos ajustes, y la "
+       "reconstrucción es la mayor parte del tiempo."),
+    PT("Foram feitos com definições diferentes das que estão no ecrã. "
+       "Mantidos, ficam exatamente como estão e a execução só acrescenta "
+       "máscaras, profundidade e normais; caso contrário são refeitos com "
+       "estas definições, e a reconstrução é a maior parte do tempo."),
+    IT("Sono stati fatti con impostazioni diverse da quelle a schermo. Se li "
+       "tieni restano come sono e l'esecuzione aggiunge solo maschere, "
+       "profondità e normali; altrimenti vengono rifatti con queste "
+       "impostazioni, e la ricostruzione è la maggior parte del tempo."),
+    NL("Ze zijn gemaakt met andere instellingen dan die op het scherm. "
+       "Behouden blijven ze precies zoals ze zijn en voegt de run alleen "
+       "maskers, diepte en normalen toe; anders worden ze met deze "
+       "instellingen opnieuw gemaakt, en de reconstructie is het grootste deel "
+       "van de looptijd."),
+    RU("Они сделаны с настройками, отличными от тех, что на экране. Если их "
+       "оставить, они останутся как есть, а запуск лишь добавит маски, глубину "
+       "и нормали; иначе их сделают заново с этими настройками, и "
+       "реконструкция займёт большую часть времени."),
+    TR("Ekrandakilerden farklı ayarlarla yapıldılar. Korunursa oldukları gibi "
+       "kalırlar ve çalıştırma yalnızca maske, derinlik ve normalleri ekler; "
+       "aksi halde bu ayarlarla yeniden yapılırlar ve yeniden kurma sürenin "
+       "çoğunu alır."));
+
+SS_MSG(plan_use_record,
+    EN("Use the settings this dataset was made with"),
+    JA("このデータセットを作ったときの設定に戻す"),
+    ZH_HANS("改回做这个数据集时的设置"),
+    ZH_HANT("改回做這個資料集時的設定"),
+    KO("이 데이터셋을 만들 때의 설정으로 되돌리기"),
+    DE("Einstellungen verwenden, mit denen dieser Datensatz gemacht wurde"),
+    FR("Reprendre les réglages qui ont fait ce jeu de données"),
+    ES("Usar los ajustes con que se hizo este conjunto de datos"),
+    PT("Usar as definições com que este conjunto de dados foi feito"),
+    IT("Usare le impostazioni con cui è stato fatto questo set di dati"),
+    NL("De instellingen gebruiken waarmee deze dataset gemaakt is"),
+    RU("Вернуть настройки, с которыми сделан этот набор"),
+    TR("Bu veri kümesinin yapıldığı ayarları kullan"));
+
+SS_MSG(plan_use_record_help,
+    EN("Put back every setting the last run in this folder started with, so "
+       "nothing on screen differs from what is on disk."),
+    JA("このフォルダで最後に実行したときの設定をすべて戻し、画面とディスクの"
+       "中身を一致させます。"),
+    ZH_HANS("把这个文件夹上一次运行开始时的设置全部改回来，让屏幕上的设置和磁盘"
+            "上的内容一致。"),
+    ZH_HANT("把這個資料夾上一次執行開始時的設定全部改回來，讓螢幕上的設定和磁碟"
+            "上的內容一致。"),
+    KO("이 폴더에서 마지막으로 실행할 때의 설정을 모두 되돌려, 화면과 디스크의 "
+       "내용이 같아지게 합니다."),
+    DE("Stellt jede Einstellung wieder her, mit der der letzte Lauf in diesem "
+       "Ordner begann, sodass nichts auf dem Bildschirm vom Inhalt der "
+       "Festplatte abweicht."),
+    FR("Remet chaque réglage avec lequel la dernière exécution dans ce dossier "
+       "a commencé, pour que rien à l'écran ne diffère de ce qui est sur le "
+       "disque."),
+    ES("Restablece cada ajuste con el que empezó la última ejecución en esta "
+       "carpeta, para que nada en pantalla difiera de lo que hay en disco."),
+    PT("Repõe cada definição com que começou a última execução nesta pasta, "
+       "para que nada no ecrã difira do que está no disco."),
+    IT("Rimette ogni impostazione con cui è partita l'ultima esecuzione in "
+       "questa cartella, così nulla a schermo differisce da ciò che è su "
+       "disco."),
+    NL("Zet elke instelling terug waarmee de laatste run in deze map begon, "
+       "zodat niets op het scherm afwijkt van wat er op schijf staat."),
+    RU("Возвращает все настройки, с которыми начался последний запуск в этой "
+       "папке, чтобы на экране ничто не расходилось с тем, что на диске."),
+    TR("Bu klasördeki son çalıştırmanın başladığı her ayarı geri koyar; "
+       "böylece ekrandaki hiçbir şey diskteki içerikten farklı olmaz."));
+
+SS_MSG(rebuild_title,
+    EN("Redo finished steps?"),
+    JA("終わった工程をやり直しますか？"),
+    ZH_HANS("要重做已经完成的步骤吗？"),
+    ZH_HANT("要重做已經完成的步驟嗎？"),
+    KO("끝난 단계를 다시 할까요?"),
+    DE("Fertige Schritte neu machen?"),
+    FR("Refaire des étapes terminées ?"),
+    ES("¿Rehacer pasos ya terminados?"),
+    PT("Refazer passos já concluídos?"),
+    IT("Rifare passi già conclusi?"),
+    NL("Afgeronde stappen opnieuw doen?"),
+    RU("Переделать завершённые шаги?"),
+    TR("Biten adımlar yeniden yapılsın mı?"));
+
+// {0} is the output folder.
+SS_MSG(rebuild_confirm,
+    EN("Some of what is already in {0} was made with settings that differ from "
+       "the ones on screen, so this run would make it again:"),
+    JA("{0} にすでにあるものの一部は画面と違う設定で作られているため、この実行で"
+       "作り直すことになります。"),
+    ZH_HANS("{0} 里已有的部分内容是用和屏幕上不同的设置做出来的，所以这次运行会"
+            "重新做："),
+    ZH_HANT("{0} 裡已有的部分內容是用和螢幕上不同的設定做出來的，所以這次執行會"
+            "重新做："),
+    KO("{0} 에 이미 있는 것 가운데 일부는 화면과 다른 설정으로 만들어져서, 이번 "
+       "실행에서 다시 만듭니다:"),
+    DE("Manches, was schon in {0} liegt, wurde mit anderen Einstellungen als den "
+       "angezeigten gemacht; dieser Lauf würde es neu machen:"),
+    FR("Une partie de ce qui se trouve déjà dans {0} a été faite avec des "
+       "réglages différents de ceux affichés ; cette exécution la referait :"),
+    ES("Parte de lo que ya está en {0} se hizo con ajustes distintos de los de "
+       "la pantalla, así que esta ejecución lo rehará:"),
+    PT("Parte do que já está em {0} foi feito com definições diferentes das do "
+       "ecrã, por isso esta execução vai refazê-lo:"),
+    IT("Una parte di ciò che è già in {0} è stata fatta con impostazioni diverse "
+       "da quelle a schermo, quindi questa esecuzione la rifarebbe:"),
+    NL("Een deel van wat al in {0} staat is gemaakt met andere instellingen dan "
+       "die op het scherm, dus deze run zou het opnieuw maken:"),
+    RU("Часть того, что уже лежит в {0}, сделана с настройками, отличными от "
+       "тех, что на экране, поэтому этот запуск сделает это заново:"),
+    TR("{0} içinde zaten olanların bir kısmı ekrandakilerden farklı ayarlarla "
+       "yapıldı, bu yüzden bu çalıştırma onları yeniden yapacak:"));
+
+SS_MSG(rebuild_go,
+    EN("Redo them"),
+    JA("やり直す"),       ZH_HANS("重做"),      ZH_HANT("重做"),
+    KO("다시 하기"),       DE("Neu machen"),   FR("Les refaire"),
+    ES("Rehacerlos"),    PT("Refazê-los"),   IT("Rifarli"),
+    NL("Opnieuw doen"),  RU("Переделать"),   TR("Yeniden yap"));
+
+SS_MSG(rebuild_keep,
+    EN("Keep them, run the rest"),
+    JA("残して、残りだけ実行"),
+    ZH_HANS("保留它们，只跑其余的"),
+    ZH_HANT("保留它們，只跑其餘的"),
+    KO("남겨 두고 나머지만 실행"),
+    DE("Behalten, den Rest ausführen"),
+    FR("Les garder, exécuter le reste"),
+    ES("Conservarlos y ejecutar el resto"),
+    PT("Mantê-los e executar o resto"),
+    IT("Tenerli, eseguire il resto"),
+    NL("Behouden, de rest uitvoeren"),
+    RU("Оставить, выполнить остальное"),
+    TR("Koru, gerisini çalıştır"));
+
+// {0} is the output folder.
+SS_MSG(log_settings_restored,
+    EN("Settings restored from the dataset in {0}"),
+    JA("{0} のデータセットから設定を戻しました"),
+    ZH_HANS("已从 {0} 的数据集恢复设置"),
+    ZH_HANT("已從 {0} 的資料集恢復設定"),
+    KO("{0} 의 데이터셋에서 설정을 되돌렸습니다"),
+    DE("Einstellungen aus dem Datensatz in {0} übernommen"),
+    FR("Réglages repris du jeu de données de {0}"),
+    ES("Ajustes recuperados del conjunto de datos de {0}"),
+    PT("Definições recuperadas do conjunto de dados em {0}"),
+    IT("Impostazioni riprese dal set di dati in {0}"),
+    NL("Instellingen overgenomen van de dataset in {0}"),
+    RU("Настройки восстановлены из набора данных в {0}"),
+    TR("Ayarlar {0} içindeki veri kümesinden geri yüklendi"));
 
 SS_MSG(rerun_geometry,
     EN("Depth and normals again"),
@@ -13227,6 +13442,14 @@ SS_MSG(geom_split,
     PT("Dividir quadros largos"), IT("Dividi i fotogrammi ampi"),
     NL("Brede beelden splitsen"), RU("Разбивать широкие кадры"),
     TR("Geniş kareleri böl"));
+
+SS_MSG(geom_face_res,
+    EN("Face resolution"),
+    JA("面の解像度"),      ZH_HANS("拆分面分辨率"), ZH_HANT("拆分面解析度"),
+    KO("면 해상도"),       DE("Flächenauflösung"),
+    FR("Résolution des faces"), ES("Resolución de las caras"),
+    PT("Resolução das faces"), IT("Risoluzione delle facce"),
+    NL("Vlakresolutie"),   RU("Разрешение граней"), TR("Yüz çözünürlüğü"));
 
 SS_MSG(geom_ray_depth,
     EN("Store ray depth"),

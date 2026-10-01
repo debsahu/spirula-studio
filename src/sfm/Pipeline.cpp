@@ -191,6 +191,11 @@ std::string metricReason(const MetricFit& f) {
                 M::metric_fail_collinear,
                 {L::num(100.0 * f.perp_frac, 2), L::num(100.0 * kMetricMinPerpFraction, 1),
                  L::num(f.perp_frac > 0 ? 1.0 / f.perp_frac : 0.0, 0)});
+        case MetricFail::Tilted:
+            return spirula::i18n::format(
+                M::metric_fail_tilted,
+                {L::num(f.T.scale, 4), L::num(f.scale_3d > 0 ? f.T.scale / f.scale_3d : 0.0, 1),
+                 L::num(f.scale_3d, 4)});
         case MetricFail::None: break;
     }
     return {};
@@ -384,11 +389,13 @@ std::vector<Camera> perImageCameras(const CameraSetup& cs, size_t num_images) {
     return percam;
 }
 
-// --metric-gps never turns the GPS centre factors off (gps stays true): it sets
-// their radius, whether "full" trusts them, the EXIF flat fit and the written gauge.
+// --metric-gps none states no GPS centre factor, so no registration is checked
+// against the GPS; positions still propose pairs. Otherwise it sets the factors'
+// radius, whether "full" trusts them, and the flat fit.
 static SensorPriorOptions sensorPriorOptions(const SfmConfig& cfg) {
     SensorPriorOptions po;
     po.max_dt = cfg.sensor_max_dt;
+    po.gps_centres = cfg.metricGps();
     po.gps_max_error = cfg.metricGps() && cfg.metric_max_error > 0 ? cfg.metric_max_error : 5.0;
     po.gps_max_error_frac = cfg.metric_max_error_frac;
     po.trusted_position = cfg.metric_gps == "full";

@@ -238,11 +238,24 @@ a global parameter block and the priors stay in the model's own gauge.
 Each timed frame's position from the log (interpolated between distinct
 fixes) in a local east-north-up frame; a similarity from the model onto
 them by `fitMetricGauge` (`map/MetricGauge.h`), horizontal when an up axis
-exists (D75), full otherwise; then one centre factor per inlier frame with
-`A = s R`, `b = p - t`, sigma twice the fit's RMS with a 3 m floor on the
-level axes and the vertical dropped (or three times looser on a full fit).
-The inflation is D74's finding that a receiver's error is correlated and
-the residuals under-state it.
+exists (D75), full otherwise; then one centre factor per positioned frame,
+inliers or not, with `A = s R`, `b = p - t`, sigma twice the fit's RMS with
+a 3 m floor on the level axes and the vertical dropped (or three times
+looser on a full fit). The inflation is D74's finding that a receiver's
+error is correlated and the residuals under-state it. `--metric-gps full`
+states COLMAP's isotropic 1 m under a Cauchy loss instead, and keeps the
+vertical of a level fit only while the altitudes sit within the inlier
+radius of it (their robust sigma); `none` states no centre factor at all.
+
+A level fit is refused when its scale is more than 1.25x the median ratio
+of GPS to model distance between inliers far apart: the up it was levelled
+about tips the camera path. An Avata 360 clip whose attitude gave an up
+about 90 deg off read 35x; unrefused, that fit had `Mapper::gpsCheck` turn
+away every later registration as ~1300 m off. The check refuses a PnP pose
+four inlier radii off right after one inside the radius (a wrong-place
+PnP); when more than a fifth of the images it checked, and at least ten,
+stand refused, the frame is what is wrong, and the model drops it and its
+GPS factors and retries the images it turned away.
 
 `position()` serves the pair list: `gpsProximityPairs`
 (`feature/GpsPairs.h`) adds every positioned image's twenty nearest others

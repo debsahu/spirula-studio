@@ -1047,6 +1047,16 @@ void intersect_with_file(std::vector<uint8_t>& px, int w, int h,
     }
 }
 
+// The mask already at `path` reads as these pixels. Rewriting it anyway would
+// only move its modification time, which is what `spirula sfm` checks feature
+// files against.
+bool mask_file_holds(const std::string& path, const std::vector<uint8_t>& px,
+                     int w, int h) {
+    int mw = 0, mh = 0;
+    std::vector<uint8_t> m;
+    return load_stencil(path, mw, mh, m) && mw == w && mh == h && m == px;
+}
+
 }  // namespace
 
 std::map<std::string, std::vector<std::string>> group_frames_by_camera(
@@ -1164,6 +1174,13 @@ int64_t apply_frame_stencil(const FrameStencilRun& run,
                 const Item& it = items[merges[(size_t)k]];
                 std::vector<uint8_t> px = cache.at({it.w, it.h, it.key_turn}).px;
                 intersect_with_file(px, it.w, it.h, it.src, run.flip_merge);
+                if (mask_file_holds(it.dst, px, it.w, it.h)) {
+                    if (sinks.progress) {
+                        std::lock_guard<std::mutex> lk(sink_mu);
+                        sinks.progress(seen + (++done), total);
+                    }
+                    continue;
+                }
                 // Masks gathered next to the images are HARD LINKS to the ones
                 // the photos came with; writing over one would edit the user's
                 // file. Unlink first, so this only ever adds a file.

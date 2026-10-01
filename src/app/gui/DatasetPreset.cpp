@@ -71,6 +71,7 @@ namespace {
     X("geometry_depth_mm",          sfm.geometry.depth_mm)                    \
     X("geometry_ray_depth",         sfm.geometry.ray_depth)                   \
     X("geometry_split",             sfm.geometry.split)                       \
+    X("geometry_face_res",          sfm.geometry.face_res)                    \
     X("geometry_overwrite",         sfm.geometry.overwrite)                   \
     /* ---- the built-in reconstruction ---- */                               \
     X("sfm_quality",                sfm.quality)                              \
@@ -228,6 +229,7 @@ void sanitize_dataset_settings(DatasetSettings& s) {
     clamp_to(g.jpeg_quality, 1, 100);
     clamp_to(g.ray_depth, 0, 2);
     clamp_to(g.split, 0, 2);
+    clamp_to(g.face_res, 0, 1);
 
     SfmJob& j = s.sfm;
     clamp_to(j.quality, 0, 3);
@@ -269,6 +271,25 @@ void sanitize_dataset_settings(DatasetSettings& s) {
     c.abs_pose_max_error = std::max(0.0f, c.abs_pose_max_error);
 }
 
+
+std::string dataset_settings_json(const DatasetSettings& s) {
+    JsonWriter w;
+    w.object();
+#define SS_DS_EMIT(key, member) w.field_raw(key, json_field::emit(s.member));
+    SS_DATASET_PRESET_FIELDS(SS_DS_EMIT)
+#undef SS_DS_EMIT
+    w.end();
+    return w.str();
+}
+
+void read_dataset_settings_json(const JsonValue& fields, DatasetSettings& s) {
+    if (!fields.is_object()) return;
+#define SS_DS_LOAD(key, member)                                               \
+    if (const JsonValue* v = fields.find(key)) json_field::assign(s.member, *v);
+    SS_DATASET_PRESET_FIELDS(SS_DS_LOAD)
+#undef SS_DS_LOAD
+    sanitize_dataset_settings(s);
+}
 
 void save_dataset_preset(const DatasetPreset& p, const std::string& path) {
     PresetHeader head{p.name, p.description, path};

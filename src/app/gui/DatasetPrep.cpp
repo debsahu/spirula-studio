@@ -2,7 +2,7 @@
 
 #include "app/gui/DatasetPrep.h"
 
-#include "app/gui/ReconStamp.h"
+#include "app/gui/DatasetRecord.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "sfm/core/Resume.h"
 
@@ -693,6 +693,36 @@ std::vector<std::string> lens_dirs(const PrepJob& job, const PrepInput& in) {
     return out;
 }
 
+std::vector<std::vector<std::string>> input_sequences(const PrepJob& job,
+                                                      const PrepInput& in) {
+    auto join = [](const std::string& a, const std::string& b) {
+        return a.empty() ? b : b.empty() ? a : a + "/" + b;
+    };
+    std::vector<std::vector<std::string>> out;
+    if (!in.is_video && !in.sequential) return out;
+    if (in.subcameras.empty()) {
+        out.emplace_back();
+        for (const std::string& lens : lens_dirs(job, in))
+            out.back().push_back(join(in.subdir, lens));
+        if (out.back().empty()) out.back().push_back(in.subdir);
+        return out;
+    }
+    bool nested = false;
+    for (const SubCamera& sc : in.subcameras)
+        nested = nested || sc.rel.find('/') != std::string::npos;
+    std::vector<std::string> tops;
+    for (const SubCamera& sc : in.subcameras) {
+        const std::string top = nested ? sc.rel.substr(0, sc.rel.find('/')) : std::string();
+        const size_t at = (size_t)(std::find(tops.begin(), tops.end(), top) - tops.begin());
+        if (at == tops.size()) {
+            tops.push_back(top);
+            out.emplace_back();
+        }
+        out[at].push_back(join(in.subdir, sc.rel));
+    }
+    return out;
+}
+
 Pano360Probe probe_pano360(const std::string& ffmpeg_exe,
                            const std::string& path,
                            const std::atomic<bool>& cancel) {
@@ -910,7 +940,7 @@ WorkspaceState probe_workspace(const std::string& workspace,
                fs::exists(ws / "transforms.json", ec) ||
                colmap_model_here(ws) || metashape_export_here(ws);
     st.geometry = has_content(ws / "normals") || has_content(ws / "depths");
-    st.recon_stamp = fs::exists(ws / kReconStampFile, ec);
+    st.record = fs::exists(ws / kDatasetRecordFile, ec);
     return st;
 }
 
@@ -931,7 +961,8 @@ std::vector<std::string> workspace_artifacts(const std::string& workspace,
     for (const char* name : {kFeatureMaskDirName, "features", "sparse", "colmap",
                              "normals", "depths",
                              ".progress", sfm::resume::kDir, "matches.bin",
-                             "database.db", kReconStampFile})
+                             "database.db", kDatasetRecordFile,
+                             ".spirula-recon", ".spirula-frames"})
         add(name);
     return out;
 }
@@ -1075,7 +1106,7 @@ int DatasetPrep::exec(
 int64_t DatasetPrep::estimate_frames(const PrepJob& job, const PrepInput& in,
                                      const std::string& images) {
     // What a resumed run keeps is exactly what is there already.
-    if (job.resume && !frames_stale(job)) {
+    if (job.resume && !job.redo_frames) {
         const int have = count_images(images);
         if (have > 0) return have;
     }
@@ -1119,7 +1150,7 @@ int64_t DatasetPrep::estimate_frames(const PrepJob& job, const PrepInput& in,
 // ---------------------------------------------------------------------------
 
 bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error,
-                      const RefreshFn& refresh_masks) {
+                      const RefreshFn& refresh_masks, const DoneFn& done) {
     PrepJob job = job_in;
 #ifdef SS_BUILD_SAM
     // Hand the GPU back on any exit: a ~2 GB SAM 3 pool would outlive the run.
@@ -1156,19 +1187,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
         return false;
 #endif
 
-    // Frames already there were extracted with settings the workspace records;
-    // a run asking for others has to go back to the video (ReconStamp.h).
-    const ReconStamp frames_now = frames_stamp(job);
-    {
-        const std::string moved =
-            recon_stamp_change(read_recon_stamp(ws.string(), kFramesStampFile),
-                               frames_now);
-        if (!moved.empty()) {
-            _frames_stale = true;
-            out.frames_rebuilt = true;
-            log(fmt(lmsg::frames_settings_changed, {moved}), /*detail=*/false);
-        }
-    }
+    out.frames_rebuilt = job.redo_frames;
 
     // Where each input's images and masks ended up, so the masking pass below
     // can run per input (see generate_masks) instead of over one flat tree.
@@ -1278,12 +1297,11 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
             Prepared& p = per[i];
             if (in.is_video) {
                 const bool keeping =
-                    job.resume && !frames_stale(job) && count_images(p.images) > 0;
+                    job.resume && !job.redo_frames && count_images(p.images) > 0;
                 if (!keeping && !job.force_external_decode &&
                     native_decode_reason().empty() && !plan_group(job, i, error))
                     return false;
-                if (!extract_video(job, in, p.images, p.masks, out, p.have_masks,
-                                   error))
+                if (!extract_video(job, in, p.images, out, error))
                     return false;
             } else if (!gather_photos(job, in, p.images, p.masks, p.have_masks,
                                       error)) {
@@ -1305,9 +1323,9 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
             out.per_folder_cameras = true;
     }
 
-    // Written once the images are there, so an interrupted extraction is not
+    // Only once the images are there, so an interrupted extraction is not
     // recorded as having produced what it was asked for.
-    write_recon_stamp(ws.string(), frames_now, kFramesStampFile);
+    if (done) done(Stage::Frames, job);
 
     out.n_images = count_images(out.image_dir, skip_dir);
     log(fmt(lmsg::found_images, {(long long)out.n_images, out.image_dir}),
@@ -1334,8 +1352,12 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
             per[i].feature_masks =
                 under((ws / kFeatureMaskDirName).string(), job.inputs[i].subdir).string();
 
+    // Masks kept whole skip both passes below and only name their folders.
+    const bool segment = job.mask_enable && !job.keep_masks;
+    if (job.keep_masks)
+        log(fmt(lmsg::resume_keep_masks, {(ws / "masks").string()}), /*detail=*/false);
     std::vector<int64_t> mask_planned(job.inputs.size(), 0);
-    if (job.mask_enable) {
+    if (segment) {
         if (!subject && job.mask_prompt.empty() && job.mask_clicks.empty() &&
             !want_features) {
             error = lmsg::err_mask_no_target.get();
@@ -1365,9 +1387,9 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     // The step's bar covers the stencil pass as well as segmentation, so both
     // are planned before either runs. A stencil the built-in masker folds in
     // is not a pass: planned and dropped afterwards, it doubled the total.
-    const bool folds = job.mask_enable && backends().builtin_masking;
+    const bool folds = segment && backends().builtin_masking;
     std::vector<int64_t> stencil_planned(job.inputs.size(), 0);
-    for (size_t i = 0; i < job.inputs.size(); i++) {
+    for (size_t i = 0; i < job.inputs.size() && !job.keep_masks; i++) {
         if (folds && !per[i].have_masks && !job.inputs[i].stencil.empty())
             continue;
         if (!job.inputs[i].stencil.empty() || !per[i].merge_from.empty()) {
@@ -1376,7 +1398,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
         }
     }
 
-    if (job.mask_enable) {
+    if (segment) {
         for (size_t i = 0; i < job.inputs.size(); i++) {
             // A re-done masking pass writes one mask per frame that exists
             // now; anything else in there described a frame set that no longer
@@ -1400,6 +1422,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
     for (size_t i = 0; i < job.inputs.size(); i++) {
         if (job.inputs[i].stencil.empty() && per[i].merge_from.empty()) continue;
         want_masks = true;
+        if (job.keep_masks) continue;
         // Segmentation intersected it as it went, so the pass planned for it
         // is not going to run.
         if (per[i].stencil_folded) {
@@ -1435,6 +1458,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
         if (n > 0) log(fmt(mmsg::log_recomposited, {(long long)n}), /*detail=*/false);
         if (!rerr.empty()) log(fmt(mmsg::log_recomposite_failed, {rerr}), /*detail=*/false);
     }
+    if (done) done(Stage::Masks, job);
     return true;
 }
 
@@ -1452,13 +1476,12 @@ static bool lockstep_extraction(const PrepJob& job, const PrepInput& in, bool bu
 }
 
 bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
-                                const std::string& images,
-                                const std::string& masks, PrepResult& out,
-                                bool& masked, std::string& error) {
+                                const std::string& images, PrepResult& out,
+                                std::string& error) {
     // Resume: frames are moved into place in one batch after selection, so a
     // non-empty folder means a previous extraction of THIS input finished.
-    if (frames_stale(job)) clear_generated(images, job.workspace);
-    if (job.resume && !frames_stale(job)) {
+    if (job.redo_frames) clear_generated(images, job.workspace);
+    if (job.resume && !job.redo_frames) {
         const int have = count_images(images);
         if (have > 0) {
             log(fmt(lmsg::resume_keep_frames, {(long long)have, images}),
@@ -1473,17 +1496,7 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
                 {in.subdir, in.path, 0.0,
                  lockstep_extraction(job, in, !job.force_external_decode &&
                                                   native_decode_reason().empty())});
-            if (!split_packed_frames(in, images, out, error)) return false;
-            // Masks a previous run left. Not when this one is re-doing them:
-            // `masked` is what makes run() skip the masking pass entirely.
-            if (job.mask_enable && !job.redo_masks) {
-                std::error_code mec;
-                if (fs::is_directory(masks, mec) && !fs::is_empty(masks, mec)) {
-                    log(fmt(lmsg::resume_keep_masks, {masks}), /*detail=*/false);
-                    masked = true;
-                }
-            }
-            return true;
+            return split_packed_frames(in, images, out, error);
         }
     }
 
@@ -1734,7 +1747,7 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
         const fs::path out_dir = streams > 1
             ? fs::path(images) / ("cam" + std::to_string(tr))
             : fs::path(images);
-        if (job.resume && !frames_stale(job) &&
+        if (job.resume && !job.redo_frames &&
             count_images(out_dir.string()) > 0) {
             log(fmt(lmsg::resume_keep_frames_dir, {out_dir.string()}),
                 /*detail=*/false);

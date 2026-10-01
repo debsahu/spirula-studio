@@ -80,6 +80,12 @@ struct PosePriors {
         return std::any_of(centres.begin(), centres.end(),
                            [](const PriorCentre& c) { return c.absolute(); });
     }
+    void dropAbsoluteCentres() {
+        centres.erase(std::remove_if(centres.begin(), centres.end(),
+                                     [](const PriorCentre& c) { return c.absolute(); }),
+                      centres.end());
+        gps = GpsFrame{};
+    }
     size_t size() const { return rotations.size() + ups.size() + centres.size(); }
 };
 
