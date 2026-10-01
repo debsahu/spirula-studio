@@ -45,6 +45,7 @@
 #include "sfm/core/Cancel.h"
 #include "sfm/core/Events.h"
 #include "sfm/core/Log.h"
+#include "sfm/map/BlockScale.h"
 #include "sfm/map/Bundle.h"
 #include "i18n/catalog/Sfm.h"
 #include "sfm/map/CorrespondenceGraph.h"
@@ -269,6 +270,10 @@ struct MapperOptions {
     // Image ids are a capture order within a folder (what --pairs sequential assumes);
     // a declared sequence is one regardless. Without either, openSeams uses no order.
     bool seam_order_by_name = false;
+    // The block scale check (map/BlockScale.h): a chain that shrinks or stretches by a few
+    // percent stays inside gpsCheck's gate (a canopy drone capture's west chain, 6.7 % over 100 frames), so
+    // it is read against the GPS over 60-150 m; past threshold it asks for a BA (gpsScaleCheck).
+    double gps_scale_band = 1.0;
     // Auditing an assembled model (D44). An image is put back only when the
     // structure it did *not* bring supports a competing pose: one that clears
     // the registration gates, explains `audit_alternative_factor` times as
@@ -409,10 +414,23 @@ public:
         uint32_t gps_refused = 0;  // registrations refused as far off the GPS
         uint32_t gps_out = 0;      // registrations beyond the GPS fit's radius
         uint32_t gps_ba = 0;       // global BAs a run of those asked for
+        uint32_t gps_scale_ba = 0; // ... of which the block scale check asked for
+        uint32_t gps_scale_end = 0; // ... of which the end-of-growth test asked for
         uint32_t level_checked = 0; // registrations measured against the level frame
         uint32_t level_refused = 0; // ... refused as tilted past its tolerance
         double level_tol = 0;       // degrees, that tolerance at the last check
         bool level_latched = false; // level prior switched off for the run
+        // `post` is filled only on the flat path (checkedRefine -> bssAfterBa). A request
+        // growByPnP raises during assembly stays NaN: that model's BA is the caller's later
+        // joint solve, not one this struct's owner ever runs.
+        struct ScaleRequest {
+            uint32_t check = 0, img = 0;
+            bool end = false;
+            int side = 0, l = 0;
+            double x[3] = {NAN, NAN, NAN};      // the firing side, at the request
+            double post[3] = {NAN, NAN, NAN};   // ... after the bundle adjustment that follows
+        };
+        std::vector<ScaleRequest> scale_requests;
         double gps_gate = 0;       // metres, the radius at the last check
     };
     PriorStats priorStats() const {
@@ -2142,6 +2160,185 @@ public:
         return true;
     }
 
+    // The scale half of gpsCheck: whether growth has left the GPS's scale, over 60-150 m of
+    // walked track. Detection only -- a no-op rescale and an inverted one both recover to the
+    // live arm's tail (nulls b/d), so the requested BA is what sets the block's scale.
+    void gpsScaleCheck(uint32_t img) {
+        if (opt_.gps_scale_band <= 0 || !priors_ || !gps_frame_.ok) return;
+        bss_checks_++;
+        const std::vector<bss::Frame> f = bssFrames();
+        const size_t k = bssIndex(f, img);
+        if (k == f.size()) return;  // a rig-mate of a position already held, or no fix
+        if (bss_all_ <= 0) bss_all_ = bss::globalRatio(f);
+        const bss::Reading r = bss::read(f, k, bss_all_);
+        if (scale_dump_) bssDump(img, r);
+        bss_stored_.push_back({bss_checks_, img, r});
+        if (bss_stored_.size() > bss::kEndChecks) bss_stored_.erase(bss_stored_.begin());
+        if (ba_requested_ || gps_regs_since_ba_ < 10) return;
+        const bss::Pick p = bss::pickOver(r, bss::kTauRun);
+        if (!p.ok) return;
+        bssRequest(f[k].img, p, r, false);
+        prior_stats_.gps_scale_ba++;
+        ba_requested_ = true;
+    }
+
+    // After growth, once: the strongest of the last checks since the last BA, against lower
+    // thresholds, with any seam-crossing window masked first -- it reads like a scale error and
+    // would otherwise win the pick (a canopy drone capture chose a seam step, 1.046, over 0.958).
+    void gpsScaleEnd() {
+        if (opt_.gps_scale_band <= 0 || !priors_ || !gps_frame_.ok) return;
+        const std::vector<bss::Frame> f = bssFrames();
+        std::vector<bss::Reading> rs;
+        std::vector<uint32_t> imgs;
+        for (const BssStored& st : bss_stored_)
+            if (st.check > bss_last_ba_) {
+                const size_t sk = bssIndex(f, st.img);
+                if (sk == f.size()) continue;
+                rs.push_back(bss::maskSeamJumps(f, sk, st.r, bss::kSeamJump));
+                imgs.push_back(st.img);
+            }
+        if (rs.empty()) return;
+        size_t w;
+        const bss::Pick p = bss::pickEnd(rs, w);
+        if (opt_.verbose)
+            slog::diag(slog::Tag::Map,
+                       "[prior] GPS scale after growth: strongest of %zu check(s) %s reads %.3f "
+                       "over %.0f m (%s side), threshold %.3f%s\n",
+                       rs.size(), db_.images[imgs[w]].name.c_str(), std::exp(p.x),
+                       bss::kLength[p.l], p.side ? "later" : "earlier", bss::kTauEnd[p.l],
+                       p.ok ? "; bundle adjusting" : "");
+        if (!p.ok) return;
+        const size_t k = bssIndex(f, imgs[w]);
+        if (k == f.size()) return;
+        bssRequest(f[k].img, p, rs[w], true);
+        prior_stats_.gps_scale_end++;
+    }
+
+    struct BssStored {
+        uint32_t check = 0, img = 0;
+        bss::Reading r;
+    };
+
+    std::pair<int64_t, int64_t> bssKey(uint32_t i) const {
+        const int64_t sq = seq_ ? seq_->sequenceOf(i) : 0;
+        const int64_t ps = seq_ && seq_->has(i) ? seq_->pos[i] : (int64_t)i;
+        return {sq, ps};
+    }
+
+    // Growth starts from a solved model: whatever is registered counts as before any BA.
+    void bssStart() {
+        bss_stamp_.assign(db_.images.size(), kBssUnseen);
+        for (const auto& kv : rec_.images)
+            if (kv.second.registered && kv.first < bss_stamp_.size()) bss_stamp_[kv.first] = 0;
+        bss_checks_ = bss_last_ba_ = 0;
+        bss_all_ = -1;
+        bss_stored_.clear();
+        bss_pending_ = -1;
+        if (!bss_fix_.empty() || !priors_) return;
+        for (uint32_t i = 0; i < db_.images.size(); i++) {
+            Vec3 p;
+            if (priors_->position(i, p)) bss_fix_.emplace(bssKey(i), p);
+        }
+    }
+
+    void bssStamp() {
+        for (const auto& kv : rec_.images) {
+            if (kv.first >= bss_stamp_.size()) continue;
+            uint32_t& st = bss_stamp_[kv.first];
+            if (!kv.second.registered) st = kBssUnseen;
+            else if (st == kBssUnseen) st = bss_checks_;
+        }
+    }
+
+    std::vector<bss::Frame> bssFrames() {
+        bssStamp();
+        std::vector<bss::Frame> all;
+        for (const auto& kv : rec_.images) {
+            Vec3 p;
+            if (!kv.second.registered || kv.first >= bss_stamp_.size() ||
+                !priors_->position(kv.first, p))
+                continue;
+            bss::Frame fr;
+            fr.img = kv.first;
+            const auto key = bssKey(kv.first);
+            fr.seq = key.first;
+            fr.pos = key.second;
+            fr.stamp = bss_stamp_[kv.first];
+            auto pred = bss_fix_.find({key.first, key.second - 1});
+            fr.fresh = pred == bss_fix_.end() || pred->second.x != p.x ||
+                       pred->second.y != p.y || pred->second.z != p.z;
+            fr.c = mul(gps_frame_.A, cameraCenter(kv.second.pose)) + gps_frame_.t;
+            fr.g = p;
+            if (gps_frame_.flat) fr.c.z = fr.g.z = 0;
+            all.push_back(fr);
+        }
+        return bss::collapse(std::move(all));
+    }
+
+    static size_t bssIndex(const std::vector<bss::Frame>& f, uint32_t img) {
+        for (size_t i = 0; i < f.size(); i++)
+            if (f[i].img == img) return i;
+        return f.size();
+    }
+
+    static void bssSide(const bss::Reading& r, int side, double (&x)[3]) {
+        for (int l = 0; l < bss::kLengths; l++) x[l] = r.have[side][l] ? r.x[side][l] : NAN;
+    }
+
+    // Record a scale-detection request for `img` and ask the caller for a BA: no rescale, see
+    // gpsScaleCheck.
+    void bssRequest(uint32_t img, const bss::Pick& p, const bss::Reading& r, bool end) {
+        PriorStats::ScaleRequest q;
+        q.check = bss_checks_;
+        q.img = img;
+        q.end = end;
+        q.side = p.side;
+        q.l = p.l;
+        bssSide(r, p.side, q.x);
+        if (opt_.verbose) {
+            const auto nm = [&](uint32_t i) { return db_.images[i].name.c_str(); };
+            slog::diag(slog::Tag::Map,
+                       "[prior] GPS scale%s: %s reads %.3f/%.3f/%.3f over 60/100/150 m (%s "
+                       "side); bundle adjusting\n",
+                       end ? " after growth" : "", nm(q.img), std::exp(q.x[0]),
+                       std::exp(q.x[1]), std::exp(q.x[2]), p.side ? "later" : "earlier");
+        }
+        bss_pending_ = (long)prior_stats_.scale_requests.size();
+        prior_stats_.scale_requests.push_back(q);
+    }
+
+    // Every BA: what registered before it is solved; a pending request reads its window again.
+    void bssAfterBa() {
+        if (bss_stamp_.empty()) return;
+        bssStamp();
+        bss_last_ba_ = bss_checks_;
+        bss_all_ = -1;
+        if (bss_pending_ < 0 || !priors_ || !gps_frame_.ok) return;
+        PriorStats::ScaleRequest& q = prior_stats_.scale_requests[(size_t)bss_pending_];
+        bss_pending_ = -1;
+        const std::vector<bss::Frame> f = bssFrames();
+        const size_t k = bssIndex(f, q.img);
+        if (k == f.size()) return;
+        bss_all_ = bss::globalRatio(f);
+        bssSide(bss::read(f, k, bss_all_), q.side, q.post);
+        if (opt_.verbose)
+            slog::diag(slog::Tag::Map,
+                       "[prior] GPS scale: after the bundle adjustment %s reads %.3f/%.3f/%.3f "
+                       "(at the request %.3f/%.3f/%.3f)\n",
+                       db_.images[q.img].name.c_str(), std::exp(q.post[0]), std::exp(q.post[1]),
+                       std::exp(q.post[2]), std::exp(q.x[0]), std::exp(q.x[1]), std::exp(q.x[2]));
+    }
+
+    // SS_SFM_SCALE_DUMP=1: check, image, registered, last BA's check, the six ratios
+    // (earlier then later side, 60/100/150 m; 0 = too short) and the whole model's ratio.
+    void bssDump(uint32_t img, const bss::Reading& r) const {
+        double v[6];
+        for (int i = 0; i < 6; i++) v[i] = r.have[i / 3][i % 3] ? std::exp(r.x[i / 3][i % 3]) : 0;
+        slog::diag(slog::Tag::Map, "[scale] %u %s %u %u %.5f %.5f %.5f %.5f %.5f %.5f %.6f\n",
+                   bss_checks_, db_.images[img].name.c_str(), rec_.numRegistered(), bss_last_ba_,
+                   v[0], v[1], v[2], v[3], v[4], v[5], bss_all_);
+    }
+
     // A length to measure pose differences against, since a reconstruction has
     // no units: the RMS distance of the registered camera centers from their
     // centroid. Cached per adopted model -- the audit asks for it once per
@@ -2450,6 +2647,10 @@ private:
                            "past %.1f deg\n",
                            prior_stats_.level_checked, prior_stats_.level_refused,
                            prior_stats_.level_tol);
+            if (priors_ && opt_.verbose && opt_.gps_scale_band > 0)
+                slog::diag(slog::Tag::Map,
+                           "[prior] GPS scale: %u request(s) during growth, %u after it\n",
+                           prior_stats_.gps_scale_ba, prior_stats_.gps_scale_end);
             if (covered.size() < db_.images.size())
                 slog::diag(slog::Tag::Map,
                            "[map] registration attempts that failed: %u too few candidates, "
@@ -2616,6 +2817,7 @@ private:
         gps_regs_since_ba_ = 0;
         gps_out_run_ = 0;
         ba_requested_ = false;
+        bssStart();
         rebuildScores();
         // The overlap budget is spent by *this* pass. A continuation of a model
         // that already shares images with another (a merge just gave it some)
@@ -2666,6 +2868,7 @@ private:
                     }
                     recent_regs_.push_back(img);
                     gps_regs_since_ba_++;
+                    gpsScaleCheck(img);
                     registered_here += completeFrameOf(img) + frame_regs_;
                     frame_regs_ = 0;
                     break;
@@ -2693,6 +2896,7 @@ private:
                 next_ba = std::ceil(rec_.numRegistered() * opt_.ba_growth_ratio);
             }
         }
+        if (!max_reg && !stop_at_ba) gpsScaleEnd();
         return registered_here;
     }
 
@@ -2778,6 +2982,7 @@ private:
             resetOrphanCameras();
         }
         recent_regs_.clear();
+        bssAfterBa();
     }
 
     // ---- helpers ----
@@ -3016,6 +3221,9 @@ private:
     // from the same state setup() left behind.
     void resetModel() {
         scale_cache_ = 0;
+        bss_stamp_.clear();
+        bss_stored_.clear();
+        bss_pending_ = -1;
         gps_frame_ = GpsFrame{};
         level_frame_ = LevelFrame{};
         rig_refined_at_ = 0;
@@ -5718,6 +5926,14 @@ private:
     std::unordered_set<uint32_t> level_checked_imgs_, level_refused_imgs_;
     uint32_t gps_out_run_ = 0;         // consecutive registrations beyond its radius
     uint32_t gps_regs_since_ba_ = 0;   // registrations since a BA gpsCheck asked for
+    static constexpr uint32_t kBssUnseen = UINT32_MAX;
+    std::vector<uint32_t> bss_stamp_;  // per image, the check that first saw it registered
+    uint32_t bss_checks_ = 0, bss_last_ba_ = 0;  // checks this growth; ... at the last BA
+    double bss_all_ = -1;              // the whole model's chord ratio, per BA; <= 0 = stale
+    std::vector<BssStored> bss_stored_;  // the last kEndChecks readings
+    long bss_pending_ = -1;            // the scale request whose BA has not run yet
+    std::map<std::pair<int64_t, int64_t>, Vec3> bss_fix_;  // the fix at each capture position
+    const bool scale_dump_ = spirula::env("SFM_SCALE_DUMP") != nullptr;
     bool ba_requested_ = false;
     std::unordered_set<uint64_t> welded_;  // fused by fuseSeams; the next globalRefine spares them
     int refine_rounds_ = 0;                // BA rounds the last globalRefine ran

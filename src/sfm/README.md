@@ -656,6 +656,16 @@ ends with how many registrations the gyro re-solved or refused and how many
 factors the last solve held; `SS_SFM_PRIOR_DUMP=1` prints each one. With no
 telemetry none of it runs and the pipeline is the one before it existed.
 
+During growth with GPS (`--gps-scale-band`, on) each registration reads the chain it
+extends against the GPS: model over GPS chord sums between nodes 5 m apart on the model's own
+path, over 60, 100 and 150 m, against the whole model's ratio (`map/BlockScale.h`). Past
+5 / 4 / 3 % a bundle adjustment is requested for the frames registered since the last BA
+(detection only -- nothing is rescaled); once growth ends, the strongest of the last 20
+readings is held to 4 / 3 / 2.5 %. `SS_SFM_SCALE_DUMP=1` prints every reading. On the
+bottom-up/atoms path (`map/Assemble.h`'s `growModels`) a request `growByPnP` raises is
+recorded but its `post` reading is never filled -- that model's BA is the caller's later
+joint solve, not one this check runs itself.
+
 The sources run in order -- the video's sensors, the recorded attitude, a
 metric reference, the fallback -- and read each other: `gauge.txt`'s two bits
 are the state as well as the record, so a reference is not fitted over a model
@@ -1041,6 +1051,8 @@ PASS/FAIL and returns 0/1 — the same convention as `src/backend/tests/`.
 | `sfm_telemetry_test` | the four telemetry carriers on synthetic files, and the sanity checks; `sfm_telemetry_test FILE` prints what a video carries | no |
 | `sfm_sequence_test` | the sequence table and its window pairs (`--no-gpu` stops there); a synthetic walk past a duplicated room through the mapper | yes |
 | `sfm_seam_weld_test` | the open-seam detector and weld on a two-front track, with and without capped GPS solves | yes |
+| `sfm_block_scale_test` | the block scale statistic on synthetic tracks: a hover, a loop, a stalled receiver, a rig, two fronts, the seam-jump mask over a model-space discontinuity | no |
+| `sfm_gps_scale_test` | the block scale check during growth (`--gps-scale-band`) on a corridor with a hover and a loop, true scale and with its GPS tail stretched | yes |
 | `sfm_prior_test` | pose priors in bundle adjustment: Jacobians against central differences, device against host, a gauge recovered from priors alone (`--no-gpu` keeps to the host) | yes |
 | `sfm_sensor_prior_test` | the fixed-rotation two-view and PnP estimators on scenes with equipment and outliers; the telemetry source's calibration, rotations and factors on the synthetic walk | no |
 
