@@ -1012,7 +1012,7 @@ refined with the fused points spared the first round's filter, then forced throu
 second round without retriangulation -- one round rarely closes a large kink before
 the ordinary stopping test exits it (a canopy drone capture: 2.95->1.19 deg and 3.20->0.78 deg).
 On 27 saved models
-(a canopy drone capture, a power-corridor capture, the Osmo 0023 clip, Avata 0006), measured offline, the rule flags
+(a canopy drone capture, a power-corridor capture, a no-GPS Osmo 360 clip, an Avata 360 flight), measured offline, the rule flags
 only links at the canopy capture's seam (at most 3 per model) and nothing on the other captures. `[seam]` lines report what it found; under
 `SS_SFM_MAP_PROF` the models as they were before a weld are written to
 `sparse/pre_weld/` (in the mapper's frame, not the gauge's).

@@ -5909,8 +5909,8 @@ private:
     // A registration four fit radii off the GPS with its predecessor inside
     // one is refused; a drifting run is never refused, or its chain stalls.
     static constexpr double kGpsRefuseGates = 4.0;
-    // openSeams' rule, set on 27 models (canopy, power-corridor, Osmo 0023, Avata 0006): a seam link
-    // shares 0-1 covisible images (any other candidate 27+), its offset is 0.12-0.26 of depth
+    // openSeams' rule, set on 27 models (canopy, power-corridor, a no-GPS Osmo 360 clip, an Avata 360
+    // flight): a seam link shares 0-1 covisible images (any other candidate 27+), its offset is 0.12-0.26 of depth
     // (loop pairs <= 0.033) and its kink ratio 31-138 (other pairs 3 apart or fewer <= 8.3).
     static constexpr int kSeamMaxCommon = 1;
     static constexpr double kSeamMinOffset = 0.10;
