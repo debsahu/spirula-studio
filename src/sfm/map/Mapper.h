@@ -884,6 +884,9 @@ public:
         size_t points = 0, observations = 0;
         double reproj_before = 0, reproj_after = 0;
         int rounds = 0;                 // BA rounds the weld's refine ran
+        uint32_t images_before = 0, images_after = 0;
+        double held = 0;                // of the ties fusing added, the share the refine kept
+        const char* undone = nullptr;   // why the weld was undone (weldFailure), else null
     };
 
     // A candidate (explained under seam_weld_frac) is open when its two images share at most
@@ -900,6 +903,7 @@ public:
             auto ia = m.images.find(p.image1), ib = m.images.find(p.image2);
             if (ia == m.images.end() || ib == m.images.end()) continue;
             if (!ia->second.registered || !ib->second.registered) continue;
+            if (rigMates(p.image1, p.image2)) continue;
             SeamPair sp{k, p.image1, p.image2, explainedMatches(m, p), p.matches.size()};
             judged++;
             if (sp.frac() < opt_.seam_weld_frac) cand.push_back(sp);
@@ -915,7 +919,7 @@ public:
                 const bool ordered = ord.gap(sp.a, sp.b, sp.gap);
                 if (ordered && sp.gap <= kSeamMaxGap) sp.kink_ratio = ord.kinkRatio(m, sp.a, sp.b);
                 const bool offset = sp.off_depth >= kSeamMinOffset;
-                bool is = sp.nbr_common <= kSeamMaxCommon;
+                bool is = sp.nbr_common <= kSeamMaxCommon && sp.off_depth <= kSeamMaxOffset;
                 if (ordered)
                     is = is && sp.gap <= kSeamMaxGap && (offset || sp.kink_ratio >= kSeamMinKink);
                 else
@@ -1089,8 +1093,8 @@ public:
     }
 
     // Fuse the points an open seam holds twice, then refine: the fused points are spared the
-    // filter in the first round, which is what lets them pull the two sides together. A model
-    // with no open seam is returned as is.
+    // filter in the first round, which is what lets them pull the two sides together. `m`
+    // comes back as it was with no open seam, or when the weld does not hold (weldFailure).
     Reconstruction weldSeams(const Reconstruction& m, SeamStats* out = nullptr) {
         SeamStats st;
         std::vector<SeamPair> cand;
@@ -1129,7 +1133,12 @@ public:
         adopt(m);
         rebuildScores();
         st.reproj_before = meanReprojPx();
+        st.images_before = rec_.numRegistered();
+        size_t ties_before = 0, ties_fused = 0, ties_after = 0;
+        for (const SeamPair& sp : st.open) ties_before += sp.explained;
         fuseSeams(st);
+        for (const SeamPair& sp : st.open)
+            ties_fused += explainedMatches(rec_, db_.pairs[sp.pair]);
         // One round rarely closes a large kink (a canopy drone capture: 2.95->1.19 deg, 3.20->0.78 deg,
         // both over the 0.3 deg bar) before the ordinary stopping test exits it. A forced
         // second round, without retriangulation (44a78445 dropped that deliberately), pulls it.
@@ -1139,16 +1148,23 @@ public:
         final_ = FinalRelease{};
         st.rounds = refine_rounds_;
         st.reproj_after = meanReprojPx();
+        st.images_after = rec_.numRegistered();
         Reconstruction r = snapshotModel();
         for (SeamPair sp : st.open) {
             sp.explained = explainedMatches(r, db_.pairs[sp.pair]);
+            ties_after += sp.explained;
             st.after.push_back(sp);
         }
+        if (ties_fused > ties_before)
+            st.held = ((double)ties_after - (double)ties_before) / (double)(ties_fused - ties_before);
+        st.undone = weldFailure(st);
         if (opt_.verbose) {
             slog::diag(slog::Tag::Map,
-                       "[seam] welded: %zu point(s) fused (%zu observation(s)); reprojection "
-                       "%.3f -> %.3f px", st.points, st.observations, st.reproj_before,
-                       st.reproj_after);
+                       "[seam] %s%s: %zu point(s) fused (%zu observation(s)), %.0f%% of their "
+                       "ties held; images %u -> %u, reprojection %.3f -> %.3f px",
+                       st.undone ? "weld undone, " : "welded", st.undone ? st.undone : "",
+                       st.points, st.observations, 100.0 * st.held, st.images_before,
+                       st.images_after, st.reproj_before, st.reproj_after);
             if (MapProf::enabled())
                 for (size_t i = 0; i < st.open.size(); i++)
                     slog::diag(slog::Tag::Map,
@@ -1159,12 +1175,48 @@ public:
                                turn_before[i], pairTurnDeg(r, st.after[i]));
         }
         if (out) *out = st;
-        return r;
+        return st.undone ? m : r;
     }
 
+    // A seam's duplicates are one point seen twice, so the refine keeps the ties fusing made;
+    // repeated structure, junk or a misplaced image cannot, short of dragging the model. Null
+    // when the weld holds: no image dropped, no open pair less tied, the reprojection no worse.
+    static const char* weldFailure(const SeamStats& st) {
+        if (st.images_after < st.images_before) return "an image was dropped";
+        for (size_t i = 0; i < st.open.size() && i < st.after.size(); i++)
+            if (st.after[i].explained < st.open[i].explained) return "an open pair lost ties";
+        if (st.held < kSeamMinHeld) return "the fused points did not hold";
+        if (st.reproj_after > kSeamMaxReprojGrowth * st.reproj_before)
+            return "the reprojection grew";
+        return nullptr;
+    }
+
+    // NaN when the refine dropped either image.
     static double pairTurnDeg(const Reconstruction& m, const SeamPair& sp) {
-        return rotationAngleDeg(
-            mul(m.images.at(sp.b).pose.R, transpose(m.images.at(sp.a).pose.R)));
+        auto a = m.images.find(sp.a), b = m.images.find(sp.b);
+        if (a == m.images.end() || b == m.images.end()) return NAN;
+        return rotationAngleDeg(mul(b->second.pose.R, transpose(a->second.pose.R)));
+    }
+
+    // 0 when either image is not in `m`: a refine can drop one, and a snapshot omits it.
+    size_t explainedMatches(const Reconstruction& m, const TwoViewMatches& p) const {
+        auto ia = m.images.find(p.image1), ib = m.images.find(p.image2);
+        if (ia == m.images.end() || ib == m.images.end()) return 0;
+        const std::vector<uint64_t>& A = ia->second.point3D_ids;
+        const std::vector<uint64_t>& B = ib->second.point3D_ids;
+        size_t n = 0;
+        for (const FeatureMatch& fm : p.matches)
+            if (fm.idx1 < A.size() && fm.idx2 < B.size() && A[fm.idx1] != kInvalidPoint3D &&
+                A[fm.idx1] == B[fm.idx2])
+                n++;
+        return n;
+    }
+
+    // Two lenses of one rig frame overlap only at their rims: a weak pair the rig explains.
+    bool rigMates(uint32_t a, uint32_t b) const {
+        if (!rigs_) return false;
+        const RigSlot x = rigs_->slot(a), y = rigs_->slot(b);
+        return x.valid() && y.valid() && x.rig == y.rig && x.frame == y.frame;
     }
 
     // One more global bundle adjustment on a *finished* model, with what the
@@ -2200,8 +2252,11 @@ public:
         if (scale_dump_) bssDump(img, r);
         bss_stored_.push_back({bss_checks_, img, r});
         if (bss_stored_.size() > bss::kEndChecks) bss_stored_.erase(bss_stored_.begin());
+        bss::addReading(r, bss_hist_);
         if (ba_requested_ || gps_regs_since_ba_ < 10) return;
-        const bss::Pick p = bss::pickOver(r, bss::kTauRun);
+        if (!bss::pickOver(r, bss::kTauRun).ok) return;
+        const bss::Pick p =
+            bss::pickOver(bss::maskNoise(r, bss::noiseOf(bss_hist_), bss::kTauRun), bss::kTauRun);
         if (!p.ok) return;
         bssRequest(f[k].img, p, r, false);
         prior_stats_.gps_scale_ba++;
@@ -2213,6 +2268,7 @@ public:
     // would otherwise win the pick (a canopy drone capture chose a seam step, 1.046, over 0.958).
     void gpsScaleEnd() {
         if (opt_.gps_scale_band <= 0 || !priors_ || !gps_frame_.ok) return;
+        const bss::Noise z = bss::noiseOf(bss_hist_);
         const std::vector<bss::Frame> f = bssFrames();
         std::vector<bss::Reading> rs;
         std::vector<uint32_t> imgs;
@@ -2220,10 +2276,19 @@ public:
             if (st.check > bss_last_ba_) {
                 const size_t sk = bssIndex(f, st.img);
                 if (sk == f.size()) continue;
-                rs.push_back(bss::maskSeamJumps(f, sk, st.r, bss::kSeamJump));
+                rs.push_back(bss::maskNoise(bss::maskSeamJumps(f, sk, st.r, bss::kSeamJump), z,
+                                            bss::kTauEnd));
                 imgs.push_back(st.img);
             }
         if (rs.empty()) return;
+        if (!bss::anyReadable(z, bss::kTauEnd)) {
+            if (opt_.verbose)
+                slog::diag(slog::Tag::Map,
+                           "[prior] GPS scale after growth: no length readable, the readings "
+                           "spread %.3f/%.3f/%.3f over 60/100/150 m", z.sigma[0], z.sigma[1],
+                           z.sigma[2]);
+            return;
+        }
         size_t w;
         const bss::Pick p = bss::pickEnd(rs, w);
         if (opt_.verbose)
@@ -2251,7 +2316,9 @@ public:
         return {sq, ps};
     }
 
-    // Growth starts from a solved model: whatever is registered counts as before any BA.
+    // Growth starts from a solved model: whatever is registered counts as before any BA, and
+    // its frames' readings seed the noise gate, so an adopted model is judged from its first
+    // registration on (a drift 20 registrations in would otherwise read before the gate opens).
     void bssStart() {
         bss_stamp_.assign(db_.images.size(), kBssUnseen);
         for (const auto& kv : rec_.images)
@@ -2259,12 +2326,19 @@ public:
         bss_checks_ = bss_last_ba_ = 0;
         bss_all_ = -1;
         bss_stored_.clear();
+        for (auto& h : bss_hist_) h.clear();
         bss_pending_ = -1;
-        if (!bss_fix_.empty() || !priors_) return;
-        for (uint32_t i = 0; i < db_.images.size(); i++) {
-            Vec3 p;
-            if (priors_->position(i, p)) bss_fix_.emplace(bssKey(i), p);
-        }
+        if (!priors_) return;
+        if (bss_fix_.empty())
+            for (uint32_t i = 0; i < db_.images.size(); i++) {
+                Vec3 p;
+                if (priors_->position(i, p)) bss_fix_.emplace(bssKey(i), p);
+            }
+        if (opt_.gps_scale_band <= 0 || !gps_frame_.ok) return;
+        const std::vector<bss::Frame> f = bssFrames();
+        const double all = bss::globalRatio(f);
+        for (size_t k = 0; k < f.size() && all > 0; k++)
+            bss::addReading(bss::read(f, k, all), bss_hist_);
     }
 
     void bssStamp() {
@@ -2459,17 +2533,6 @@ public:
     MapperOptions& options() { return opt_; }
 
 private:
-    size_t explainedMatches(const Reconstruction& m, const TwoViewMatches& p) const {
-        const std::vector<uint64_t>& A = m.images.at(p.image1).point3D_ids;
-        const std::vector<uint64_t>& B = m.images.at(p.image2).point3D_ids;
-        size_t n = 0;
-        for (const FeatureMatch& fm : p.matches)
-            if (fm.idx1 < A.size() && fm.idx2 < B.size() && A[fm.idx1] != kInvalidPoint3D &&
-                A[fm.idx1] == B[fm.idx2])
-                n++;
-        return n;
-    }
-
     // mergeOne's union without its reprojection and triangulation tests: across an open
     // seam the two halves are metres apart, which is exactly what those tests refuse.
     void fuseSeams(SeamStats& st) {
@@ -3253,6 +3316,7 @@ private:
         scale_cache_ = 0;
         bss_stamp_.clear();
         bss_stored_.clear();
+        for (auto& h : bss_hist_) h.clear();
         bss_pending_ = -1;
         gps_frame_ = GpsFrame{};
         gps_latched_ = gps_latch_rerank_ = false;
@@ -5956,6 +6020,12 @@ private:
     // (loop pairs <= 0.033) and its kink ratio 31-138 (other pairs 3 apart or fewer <= 8.3).
     static constexpr int kSeamMaxCommon = 1;
     static constexpr double kSeamMinOffset = 0.10;
+    // Seam links read 0.12-0.26 of depth; past 0.5 the duplicates are other structure (four
+    // identical gates read 1-9, a phone burst around one misplaced frame 0.5-1.3).
+    static constexpr double kSeamMaxOffset = 0.5;
+    // weldFailure's bars.
+    static constexpr double kSeamMinHeld = 0.5;
+    static constexpr double kSeamMaxReprojGrowth = 1.1;
     static constexpr int kSeamMaxGap = 3;
     static constexpr double kSeamMinKink = 10.0;
     static constexpr int64_t kSeamKinkWindow = 10;
@@ -5973,6 +6043,7 @@ private:
     uint32_t bss_checks_ = 0, bss_last_ba_ = 0;  // checks this growth; ... at the last BA
     double bss_all_ = -1;              // the whole model's chord ratio, per BA; <= 0 = stale
     std::vector<BssStored> bss_stored_;  // the last kEndChecks readings
+    std::vector<double> bss_hist_[bss::kLengths];  // every reading since growth began (noiseOf)
     long bss_pending_ = -1;            // the scale request whose BA has not run yet
     std::map<std::pair<int64_t, int64_t>, Vec3> bss_fix_;  // the fix at each capture position
     const bool scale_dump_ = spirula::env("SFM_SCALE_DUMP") != nullptr;

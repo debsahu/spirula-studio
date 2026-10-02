@@ -153,6 +153,49 @@ struct Pick {
     double x = 0;
 };
 
+// A length is read only where its threshold clears kNoiseSigmas times the spread of the readings
+// taken so far: GPS wander and model noise together, robust to a drifted block that is a third
+// of them. The fit's RMS will not do -- a stretched tail alone lifted it from 0.12 to 2.0 m.
+constexpr double kNoiseSigmas = 3.0;
+constexpr size_t kNoiseMinReadings = 20;
+struct Noise {
+    double sigma[kLengths] = {};
+    size_t n[kLengths] = {};
+};
+// Per length over every reading kept, both sides: the lower quartile of |x| over 0.3186, a
+// Gaussian's sigma. A median read a stretched tail's readings as noise once they were a third.
+inline Noise noiseOf(const std::vector<double> (&hist)[kLengths]) {
+    Noise z;
+    for (int l = 0; l < kLengths; l++) {
+        std::vector<double> a;
+        a.reserve(hist[l].size());
+        for (double x : hist[l]) a.push_back(std::fabs(x));
+        z.n[l] = a.size();
+        if (a.empty()) continue;
+        std::nth_element(a.begin(), a.begin() + (long)(a.size() / 4), a.end());
+        z.sigma[l] = a[a.size() / 4] / 0.3186;
+    }
+    return z;
+}
+inline bool readable(const Noise& z, int l, double tau) {
+    return z.n[l] >= kNoiseMinReadings && kNoiseSigmas * z.sigma[l] <= tau;
+}
+inline bool anyReadable(const Noise& z, const double (&tau)[kLengths]) {
+    for (int l = 0; l < kLengths; l++)
+        if (readable(z, l, tau[l])) return true;
+    return false;
+}
+inline Reading maskNoise(Reading r, const Noise& z, const double (&tau)[kLengths]) {
+    for (int l = 0; l < kLengths; l++)
+        if (!readable(z, l, tau[l])) r.have[0][l] = r.have[1][l] = false;
+    return r;
+}
+inline void addReading(const Reading& r, std::vector<double> (&hist)[kLengths]) {
+    for (int side = 0; side < 2; side++)
+        for (int l = 0; l < kLengths; l++)
+            if (r.have[side][l]) hist[l].push_back(r.x[side][l]);
+}
+
 // The reading past its threshold that is most sigmas out, if any.
 inline Pick pickOver(const Reading& r, const double (&tau)[kLengths]) {
     Pick best;

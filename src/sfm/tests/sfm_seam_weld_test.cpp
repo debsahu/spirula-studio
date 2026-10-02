@@ -1,7 +1,8 @@
 // The open-seam detector (Mapper::openSeams) and weld (Mapper::weldSeams). A straight track
 // whose halves were built as two fronts, so every point both halves see is held twice: the
 // east half sits a rigid 2 m / 1.5 deg off (offset seam) or turns 1.5 deg about the join
-// (turn seam). Plus a loop revisit, which reads as low as a seam but shares its neighbours.
+// (turn seam). Plus a loop revisit, which reads as low as a seam but shares its neighbours,
+// and an east half that sees its own perturbed copy: duplicates that are not one point.
 // The weld's BA is real (GPU).
 //
 //   sfm_seam_weld_test [--device N] [--verbose] [--gps-cap N]
@@ -45,13 +46,14 @@ struct Spec {
     std::function<double(int)> yaw_deg = [](int c) { return 0.1 * c; };
     bool dilute = false;
     std::vector<int> revisits;  // cameras seen again, as extra images after the track
+    double east_copy = 0;       // metres: the east half sees each point moved this much at random
 };
 
 struct Scene {
     Spec spec;
     MatchesDatabase db;
     std::vector<FeatureSet> feats;
-    std::vector<Vec3> pts, centres;
+    std::vector<Vec3> pts, east_pts, centres;
     std::vector<Mat3> rots;  // world -> camera
     std::vector<std::vector<char>> vis;
     Camera K;
@@ -71,6 +73,10 @@ static Scene makeScene(const Spec& spec) {
     std::normal_distribution<double> noise(0.0, 0.3);
     s.pts.resize(npts);
     for (auto& p : s.pts) p = {ux(rng), uy(rng), uz(rng)};
+    s.east_pts = s.pts;
+    std::normal_distribution<double> copy(0.0, std::max(spec.east_copy, 1.0));
+    if (spec.east_copy > 0)
+        for (auto& p : s.east_pts) p = p + Vec3{copy(rng), copy(rng), copy(rng)};
     for (int c = 0; c < spec.cams; c++) {
         s.centres.push_back({1.0 * c, 0.3 * std::sin(0.4 * c), 1.5 * std::sin(0.2 * c)});
         s.rots.push_back(yawRot(spec.yaw_deg(c)));
@@ -86,8 +92,9 @@ static Scene makeScene(const Spec& spec) {
         s.feats[c].width = kW;
         s.feats[c].height = kH;
         s.feats[c].keypoints.resize(npts);
+        const bool east = c >= spec.cams / 2 && c < spec.cams;
         for (int p = 0; p < npts; p++) {
-            const Vec3 pc = mul(s.rots[c], s.pts[p] - s.centres[c]);
+            const Vec3 pc = mul(s.rots[c], (east ? s.east_pts[p] : s.pts[p]) - s.centres[c]);
             const Vec2 px = s.K.project(pc);
             if (pc.z > 0.1 && px.x > 0 && px.x < kW && px.y > 0 && px.y < kH) {
                 const float x = (float)(px.x + noise(rng)), y = (float)(px.y + noise(rng));
@@ -141,12 +148,12 @@ struct Piece {
 
 // Revisit images hold 10 % of what they see on the track's own points and the rest on a copy
 // 1.5 m off: a loop the mapper never closed, but tied into the same neighbourhood.
-static Reconstruction makeModel(const Scene& s, Seam seam) {
+static Reconstruction makeModel(const Scene& s, Seam seam, double shift = 2.0) {
     const int J = s.join(), cams = s.spec.cams;
     Piece east;
     east.o.x = J - 0.5;
     if (seam != Seam::None) east.Q = angleAxisToRotation({0, 1.5 * M_PI / 180.0, 0});
-    if (seam == Seam::Offset) east.d = {2.0, 0, 0};
+    if (seam == Seam::Offset) east.d = {shift, 0, 0};
     Reconstruction m;
     m.cameras[1] = s.K;
     for (int c = 0; c < s.images(); c++) {
@@ -185,7 +192,7 @@ static Reconstruction makeModel(const Scene& s, Seam seam) {
             (seam != Seam::None && c < (uint32_t)J ? west : rest).push_back({c, p});
         }
         add(s.pts[p], west);
-        add(seam != Seam::None ? east.apply(s.pts[p]) : s.pts[p], rest);
+        add(seam != Seam::None ? east.apply(s.east_pts[p]) : s.pts[p], rest);
         add(s.pts[p] + Vec3{1.5, 0, 0}, copy);
     }
     return m;
@@ -311,6 +318,98 @@ static void offsetSeamDetector(const Scene& sc, const Reconstruction& seam,
     check(pairsOf(open_ord) == within3, "file order: exactly the pairs across the join 3 apart or fewer");
 }
 
+// What the weld must leave alone: a join whose duplicates sit too far apart to be a seam, and
+// a join across two lenses of one rig frame.
+static void notSeams(const Scene& sc, const Reconstruction& seam, const MapperOptions& opt) {
+    Mapper m(sc.db, sc.feats, opt);
+    std::vector<Mapper::SeamPair> judged;
+    const Reconstruction distant = makeModel(sc, Seam::Offset, 8.0);
+    const auto open_far = m.openSeams(distant, nullptr, &judged);
+    const Mapper::SeamPair* link = find(judged, sc.join() - 1, sc.join());
+    std::printf("8 m offset: %zu open, join link offset %.3f of depth\n", open_far.size(),
+                link ? link->off_depth : -1.0);
+    check(link && link->off_depth > 0.5 && link->nbr_common == 0,
+          "fixture: at 8 m the join link is a weak, unshared pair half the depth off");
+    check(open_far.empty(), "duplicates further apart than a seam's: nothing is open");
+
+    const auto open = m.openSeams(seam);
+    if (open.empty()) {
+        check(false, "fixture: the 2 m seam has open pairs");
+        return;
+    }
+    const uint32_t a = open.front().a, b = open.front().b;
+    RigTable rigs;
+    RigSpec rig;
+    rig.name = "pair";
+    rig.members.resize(2);
+    rig.frames = {{a, b}};
+    rigs.rigs.push_back(rig);
+    rigs.index(sc.db.images.size());
+    Mapper mr(sc.db, sc.feats, opt, {}, &rigs);
+    const auto open_rig = mr.openSeams(seam);
+    std::printf("one open pair made a rig frame: %zu open (was %zu)\n", open_rig.size(),
+                open.size());
+    check(!pairsOf(open_rig).count({std::min(a, b), std::max(a, b)}) &&
+              open_rig.size() + 1 == open.size(),
+          "rig mates: two lenses of one frame are never a seam, and nothing else changes");
+}
+
+// The weld undone: the east half sees a copy of the scene moved 0.6 m per point at random, so
+// the join still opens (a coherent 2 m apart) but no fused point can satisfy both sides.
+static void undoneWeld(const MapperOptions& opt) {
+    Spec spec;
+    spec.east_copy = 0.6;
+    const Scene sc = makeScene(spec);
+    const Reconstruction seam = makeModel(sc, Seam::Offset);
+    Mapper m(sc.db, sc.feats, opt);
+    Mapper::SeamStats st;
+    const Reconstruction out = m.weldSeams(seam, &st);
+    std::printf("perturbed copy: %zu open, %zu point(s) fused, %.0f%% of the ties held, images "
+                "%u -> %u, reproj %.3f -> %.3f px, undone: %s\n", st.open.size(), st.points,
+                100.0 * st.held, st.images_before, st.images_after, st.reproj_before,
+                st.reproj_after, st.undone ? st.undone : "no");
+    check(!st.open.empty() && st.points > 0, "fixture: the perturbed copy opens and is fused");
+    check(st.undone != nullptr, "perturbed copy: the weld does not hold and is undone");
+    check(sameModel(out, seam), "perturbed copy: the model comes back exactly as it went in");
+
+    Mapper::SeamStats ok;
+    ok.open.resize(2);
+    ok.after.resize(2);
+    ok.open[0].explained = 3;
+    ok.after[0].explained = 40;
+    ok.open[1].explained = 0;
+    ok.after[1].explained = 25;
+    ok.images_before = ok.images_after = 24;
+    ok.held = 0.8;
+    ok.reproj_before = ok.reproj_after = 0.5;
+    check(Mapper::weldFailure(ok) == nullptr, "weldFailure: a weld that holds is kept");
+    Mapper::SeamStats bad = ok;
+    bad.images_after = 23;
+    check(Mapper::weldFailure(bad) != nullptr, "weldFailure: a dropped image undoes it");
+    bad = ok;
+    bad.after[1].explained = 0;
+    bad.open[1].explained = 9;
+    check(Mapper::weldFailure(bad) != nullptr, "weldFailure: a pair left less tied undoes it");
+    bad = ok;
+    bad.held = 0.3;
+    check(Mapper::weldFailure(bad) != nullptr, "weldFailure: fused points that do not hold undo it");
+    bad = ok;
+    bad.reproj_after = 0.6;
+    check(Mapper::weldFailure(bad) != nullptr, "weldFailure: a reprojection 20 % worse undoes it");
+
+    // The bookkeeping after a refine that dropped an image must not throw.
+    Reconstruction gone = seam;
+    const TwoViewMatches* pr = nullptr;
+    for (const TwoViewMatches& p : sc.db.pairs)
+        if (p.image1 == 0) pr = &p;
+    if (pr) gone.images.erase(pr->image2);
+    Mapper::SeamPair sp;
+    sp.a = 0;
+    sp.b = pr ? pr->image2 : 1;
+    check(pr && m.explainedMatches(gone, *pr) == 0 && std::isnan(Mapper::pairTurnDeg(gone, sp)),
+          "a pair whose image the refine dropped reads 0 ties and no turn, without throwing");
+}
+
 static void loopDetector(const MapperOptions& opt) {
     Spec spec;
     spec.revisits = {(int)kLoopOf, (int)kLoopOf + 1};
@@ -409,6 +508,7 @@ static int body(int argc, char** argv) {
     check(Mapper::medianOf({10, 1, 3, 2}) == 2.5 && Mapper::medianOf({5, 1, 3}) == 3,
           "the offset's and the kink's median average the middle two of an even count");
     offsetSeamDetector(sc, seam, opt);
+    notSeams(sc, seam, opt);
     loopDetector(opt);
     turnSeamDetector(opt);
     {
@@ -435,6 +535,10 @@ static int body(int argc, char** argv) {
         // +0.086 px): a forced second round pulls a large kink further than one round does.
         check(st.rounds == 2, "weld: the refine always runs a forced second round");
         check(worst < 0.5, "weld: the forced second round does not retriangulate");
+        std::printf("weld holds: %.0f%% of the ties, images %u -> %u, undone: %s\n",
+                    100.0 * st.held, st.images_before, st.images_after,
+                    st.undone ? st.undone : "no");
+        check(!st.undone && st.held >= 0.9, "weld: the fused points hold, and the weld is kept");
     }
     {
         // --metric-gps full at the true centres, each round capped at a few LM iterations, as
@@ -459,6 +563,7 @@ static int body(int argc, char** argv) {
         check(st.rounds == 2,
               "weld, capped under GPS: a real few-iteration round still forces a second");
     }
+    undoneWeld(opt);
     {
         MapperOptions off = opt;
         off.seam_weld_frac = 0;

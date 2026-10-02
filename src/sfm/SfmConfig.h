@@ -186,7 +186,7 @@ struct SfmConfig {
     // held to the sensors, pairs within `sensor_pair_radius` metres of GPS.
     bool sensor_verify = true;
     bool sensor_map = true;
-    bool sensor_pairs = true;
+    bool sensor_pairs = false;   // on request only: extra matching, see src/sfm/README.md
     // An equirect camera declares camera -Y as up (a horizon-levelled stitch);
     // refused per solve when the images disagree (ExifGpsPriors).
     bool level_erp = true;

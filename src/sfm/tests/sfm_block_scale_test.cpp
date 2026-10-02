@@ -6,6 +6,7 @@
 // Prints FAIL lines and returns the count.
 #include <cmath>
 #include <cstdio>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -335,6 +336,48 @@ static void testSeamMask() {
           "seam mask: a window clear of the jump is not excluded");
 }
 
+// The noise gate: a length is read once 20 readings say its spread clears the threshold three
+// times over. Drone-grade spread (kSigma) reads every length; a wandering receiver's 4 % none.
+static void testNoiseGate() {
+    std::vector<double> calm[bss::kLengths], wander[bss::kLengths], few[bss::kLengths];
+    std::mt19937 rng(5);
+    for (int l = 0; l < bss::kLengths; l++) {
+        std::normal_distribution<double> c(0.0, bss::kSigma[l]), w(0.0, 0.04);
+        for (int i = 0; i < 200; i++) {
+            calm[l].push_back(c(rng));
+            wander[l].push_back(w(rng));
+        }
+        // A drifted block: a third of the readings 6 % off, which a median would read as noise.
+        for (int i = 0; i < 100; i++) calm[l].push_back(0.06);
+        for (int i = 0; i < 10; i++) few[l].push_back(c(rng));
+    }
+    const bss::Noise zc = bss::noiseOf(calm), zw = bss::noiseOf(wander), zf = bss::noiseOf(few);
+    bool all = true;
+    for (int l = 0; l < bss::kLengths; l++)
+        all = all && bss::readable(zc, l, bss::kTauRun[l]) && bss::readable(zc, l, bss::kTauEnd[l]);
+    std::printf("noise gate: spread %.4f/%.4f/%.4f (drone-grade, a third drifted), "
+                "%.4f/%.4f/%.4f (wandering)\n", zc.sigma[0], zc.sigma[1], zc.sigma[2],
+                zw.sigma[0], zw.sigma[1], zw.sigma[2]);
+    check(all, "noise gate: drone-grade readings, a third of them drifted, read every length");
+    check(!bss::anyReadable(zw, bss::kTauRun) && !bss::anyReadable(zw, bss::kTauEnd),
+          "noise gate: a receiver wandering 4 % reads no length");
+    check(!bss::anyReadable(zf, bss::kTauRun), "noise gate: ten readings are too few to judge");
+    bss::Reading r;
+    for (int side = 0; side < 2; side++)
+        for (int l = 0; l < bss::kLengths; l++) {
+            r.have[side][l] = true;
+            r.x[side][l] = 0.2;
+        }
+    check(bss::pickOver(r, bss::kTauRun).ok, "fixture: an unmasked 22% reading fires");
+    check(!bss::pickOver(bss::maskNoise(r, zw, bss::kTauRun), bss::kTauRun).ok,
+          "noise gate: masked under a wandering receiver, the same reading does not");
+    check(bss::pickOver(bss::maskNoise(r, zc, bss::kTauRun), bss::kTauRun).ok,
+          "noise gate: drone-grade spread masks nothing");
+    std::vector<double> hist[bss::kLengths];
+    bss::addReading(r, hist);
+    check(hist[0].size() == 2 && hist[2].size() == 2, "addReading: both sides, every length");
+}
+
 static int body(int argc, char** argv) {
     for (int i = 0; i < argc; i++)
         if (std::string(argv[i]) == "--verbose") verbose = true;
@@ -348,6 +391,7 @@ static int body(int argc, char** argv) {
     testEnd();
     testSeamJump();
     testSeamMask();
+    testNoiseGate();
     std::printf("%s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");
     return fails;
 }

@@ -640,7 +640,7 @@ future sensor implements the same way (`core/PriorSource.h`;
   quantity is re-estimated from the poses before each solve and frozen inside
   the factors, so the solver carries no global parameter and the model stays
   in its own gauge; the finishing gauge fit above then runs as before.
-- **Pairing** (`--sensor-pairs`, on): images the GPS puts within
+- **Pairing** (`--sensor-pairs`, off): images the GPS puts within
   `--sensor-pair-radius` metres (20) of each other are matched whatever the
   shortlist thought.
 
@@ -670,7 +670,13 @@ extends against the GPS: model over GPS chord sums between nodes 5 m apart on th
 path, over 60, 100 and 150 m, against the whole model's ratio (`map/BlockScale.h`). Past
 5 / 4 / 3 % a bundle adjustment is requested for the frames registered since the last BA
 (detection only -- nothing is rescaled); once growth ends, the strongest of the last 20
-readings is held to 4 / 3 / 2.5 %. `SS_SFM_SCALE_DUMP=1` prints every reading. On the
+readings is held to 4 / 3 / 2.5 %. A length is read only where its threshold clears three
+times the spread of the readings taken so far (the lower quartile of |x| over 0.3186, from 20
+readings, seeded from the model growth started with): GPS wander shows there and a drifted
+block, up to a third of the readings, does not. Four Insta360 tracks' readings spread 4.5 / 2.8 / 2.1 % (drone-grade GPS: 0.8 /
+0.6 / 0.45) and had asked for 28 BAs that moved none of them; the fit's own RMS would not do,
+since a stretched tail alone lifts it.
+`SS_SFM_SCALE_DUMP=1` prints every reading. On the
 bottom-up/atoms path (`map/Assemble.h`'s `growModels`) a request `growByPnP` raises is
 recorded but its `post` reading is never filled -- that model's BA is the caller's later
 joint solve, not one this check runs itself.
@@ -1010,9 +1016,12 @@ the model explains by a shared point below the bar is a candidate. Loop revisits
 weak woods pairs read as low as the seam (220-481 candidates per canopy-capture model), and
 what separates them is the neighbourhood: a seam link's two images share at most one
 third image that both see with `seam_covis_min` (20) points, a loop revisit dozens. A
-candidate is open when that count is at most 1 and either the pair's duplicated points
-sit a coherent 10 % of the scene depth apart, or -- in capture order, when the pair is
-at most 3 positions apart -- its rotation is 10x its neighbours' per-position rotation.
+candidate is open when that count is at most 1, the pair is not two lenses of one rig
+frame (back-to-back fisheyes share only their rims), its duplicated points sit no more
+than half the scene depth apart, and either they sit a coherent 10 % of it apart, or --
+in capture order, when the pair is at most 3 positions apart -- its rotation is 10x its
+neighbours' per-position rotation. Past half the depth the duplicates are other
+structure: four identical gates filmed from both sides read 1-9.
 With capture order every open pair must be 3 positions apart or fewer. Capture order
 is a declared `--sequence`, or with `--pairs sequential` each folder's images in file
 order; a photo folder has none, so only the offset branch runs. The open pairs'
@@ -1020,6 +1029,13 @@ duplicated points are fused at the track-length-weighted mean and the model is
 refined with the fused points spared the first round's filter, then forced through a
 second round without retriangulation -- one round rarely closes a large kink before
 the ordinary stopping test exits it (a canopy drone capture: 2.95->1.19 deg and 3.20->0.78 deg).
+The weld is then judged and undone -- the model returned exactly as it came -- unless it
+held: no image dropped, no open pair left less tied than before, at least half of the ties
+fusing added still there, and the reprojection no more than 10 % worse. A seam's duplicates
+are one point seen twice and keep their ties (100 % in `sfm_seam_weld_test`); repeated
+structure, junk or a misplaced image cannot, short of dragging the model (a phone burst around
+one misplaced frame: -1 %, while the refine moved cameras by 8 % of the model; the gates as
+an unordered folder: 30 %, where the unguarded weld lost every image).
 On 27 saved models
 (a canopy drone capture, a power-corridor capture, a no-GPS Osmo 360 clip, an Avata 360 flight), measured offline, the rule flags
 only links at the canopy capture's seam (at most 3 per model) and nothing on the other captures. `[seam]` lines report what it found; under
@@ -1059,8 +1075,8 @@ PASS/FAIL and returns 0/1 — the same convention as `src/backend/tests/`.
 | `sfm_mask_test` | mask uv sampling, decode, file discovery | no |
 | `sfm_telemetry_test` | the four telemetry carriers on synthetic files, and the sanity checks; `sfm_telemetry_test FILE` prints what a video carries | no |
 | `sfm_sequence_test` | the sequence table and its window pairs (`--no-gpu` stops there); a synthetic walk past a duplicated room through the mapper | yes |
-| `sfm_seam_weld_test` | the open-seam detector and weld on a two-front track, with and without capped GPS solves | yes |
-| `sfm_block_scale_test` | the block scale statistic on synthetic tracks: a hover, a loop, a stalled receiver, a rig, two fronts, the seam-jump mask over a model-space discontinuity | no |
+| `sfm_seam_weld_test` | the open-seam detector and weld on a two-front track, with and without capped GPS solves; what it leaves alone (duplicates too far apart, rig mates) and a weld it undoes (a perturbed copy) | yes |
+| `sfm_block_scale_test` | the block scale statistic on synthetic tracks: a hover, a loop, a stalled receiver, a rig, two fronts, the seam-jump mask over a model-space discontinuity, the noise gate | no |
 | `sfm_gps_scale_test` | the block scale check during growth (`--gps-scale-band`) on a corridor with a hover and a loop, true scale and with its GPS tail stretched | yes |
 | `sfm_prior_test` | pose priors in bundle adjustment: Jacobians against central differences, device against host, a gauge recovered from priors alone (`--no-gpu` keeps to the host) | yes |
 | `sfm_sensor_prior_test` | the fixed-rotation two-view and PnP estimators on scenes with equipment and outliers; the telemetry source's calibration, rotations and factors on the synthetic walk | no |

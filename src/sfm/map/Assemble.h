@@ -701,7 +701,7 @@ inline std::vector<Reconstruction> finishModels(Mapper& mapper,
         if (m.numRegistered() < 2) continue;
         Mapper::SeamStats ss;
         m = mapper.weldSeams(m, &ss);
-        st.finish.seams_welded += ss.open.size();
+        if (!ss.undone) st.finish.seams_welded += ss.open.size();
     }
     st.t_weld = secs(t0, clk());
     if (st.finish.seams_welded) {

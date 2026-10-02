@@ -331,8 +331,8 @@ trials than the seven-point one. With no telemetry none of it runs.
 
 ## 6. Options
 
-`--sensor-verify`, `--sensor-map`, `--sensor-pairs` (all on, inert without
-`--telemetry` or a manifest's `captures:`), `--sensor-pair-radius` (20 m),
+`--sensor-verify`, `--sensor-map` (both on, inert without `--telemetry` or a
+manifest's `captures:`), `--sensor-pairs` (off), `--sensor-pair-radius` (20 m),
 `--sensor-max-dt` (3 s). `SS_SFM_PRIOR_DUMP=1` prints every registration the
 gyro overruled. The run reports the calibration per group, the verification
 tally and, at the end of mapping, how many registrations were re-solved or
