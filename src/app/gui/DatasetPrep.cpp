@@ -3,7 +3,6 @@
 #include "app/gui/DatasetPrep.h"
 
 #include "app/gui/DatasetRecord.h"
-#include "data/DatasetParser.h"
 #include "app/gui/mask/MaskLayer.h"
 #include "sfm/core/Resume.h"
 
@@ -942,29 +941,9 @@ WorkspaceState probe_workspace(const std::string& workspace,
     st.model = has_content(ws / "sparse") || has_content(ws / "colmap") ||
                fs::exists(ws / "transforms.json", ec) ||
                colmap_model_here(ws) || metashape_export_here(ws);
-    st.dense_model = colmap_model_here(ws / kDenseModelDir);
-    if (st.model) {
-        const std::string m = find_colmap_poses(workspace);
-        st.keepable = !m.empty() && fs::exists(fs::path(m) / "cameras.bin", ec) &&
-                      fs::exists(fs::path(m) / "images.bin", ec);
-    }
     st.geometry = has_content(ws / "normals") || has_content(ws / "depths");
     st.record = fs::exists(ws / kDatasetRecordFile, ec);
     return st;
-}
-
-bool dense_model_current(const std::string& dataset_dir, bool* stale) {
-    if (stale) *stale = false;
-    std::error_code ec;
-    const fs::path dense = fs::path(dataset_dir) / kDenseModelDir;
-    if (!fs::exists(dense / "images.bin", ec)) return false;
-    const std::string src = find_colmap_poses(dataset_dir);
-    fs::file_time_type newest{};
-    for (const char* f : {"cameras.bin", "images.bin"})
-        if (!src.empty()) newest = std::max(newest, fs::last_write_time(fs::path(src) / f, ec));
-    const bool current = fs::last_write_time(dense / "images.bin", ec) >= newest;
-    if (stale) *stale = !current;
-    return current;
 }
 
 std::vector<std::string> workspace_artifacts(const std::string& workspace,
@@ -982,7 +961,7 @@ std::vector<std::string> workspace_artifacts(const std::string& workspace,
     if (!is_input_folder(ws / "images", inputs, false)) add("images");
     if (!is_input_folder(ws / "masks", inputs, true)) add("masks");
     for (const char* name : {kFeatureMaskDirName, "features", "sparse", "colmap",
-                             kDenseDirName, "normals", "depths",
+                             "normals", "depths",
                              ".progress", sfm::resume::kDir, "matches.bin",
                              "database.db", kDatasetRecordFile,
                              ".spirula-recon", ".spirula-frames"})

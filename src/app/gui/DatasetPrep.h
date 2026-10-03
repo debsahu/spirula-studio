@@ -576,9 +576,6 @@ struct WorkspaceState {
     // the transforms.json, root-level COLMAP files or Metashape export of a
     // dataset that arrived finished. A run pointed at one ADDS to it.
     bool model = false;
-    bool dense_model = false;  // kDenseModelDir: points for the imported cameras
-    // A binary COLMAP model where the trainer looks, whose cameras a run can keep.
-    bool keepable = false;
     bool geometry = false;  // normals/ or depths/, which a run adds to
     // The folder says what built it (DatasetRecord.h).
     bool record = false;
@@ -605,15 +602,6 @@ bool is_mask_edits_folder(const std::string& path);
 
 // Where PrepJob::mask_feature_prompt's masks go, beside masks/ and mirroring it.
 inline constexpr const char* kFeatureMaskDirName = "feature_masks";
-
-// Where "Keep the imported cameras" reconstructs, inside the dataset, so the
-// imported model is never written to (docs/notes/fixed-poses.md).
-inline constexpr const char* kDenseDirName = "dense";
-inline constexpr const char* kDenseModelDir = "dense/sparse/0";
-
-// Whether a dataset's kDenseModelDir is what it trains on: there, and newer than
-// the model it was made from. `stale` says it is there but older.
-bool dense_model_current(const std::string& dataset_dir, bool* stale = nullptr);
 bool is_feature_mask_folder(const std::string& path);
 
 // One counter for a whole step, rather than one per input: a job with three

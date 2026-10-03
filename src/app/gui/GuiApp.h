@@ -17,6 +17,7 @@
 #include "app/gui/FilmReel.h"
 #include "app/gui/GeometryPanel.h"
 #include "app/gui/PartitionPanel.h"
+#include "app/gui/RecomputePanel.h"
 #include "app/gui/RoiEditor.h"
 #include "app/gui/ImageCompare.h"
 #include "app/gui/MatchMatrix.h"
@@ -161,7 +162,6 @@ private:
     void open_dataset(std::string dir, std::string image_dir = "",
                       std::string mask_dir = "", bool mask_flipped = false,
                       bool keep_log = false);
-    void pick_dense_model(const std::string& dir);
     // Route for user-initiated opens: confirms first when training.
     void request_open_dataset(std::string dir);
 
@@ -773,9 +773,6 @@ private:
     // Hide what the masks cover from feature detection too, not only from
     // training (SfmJob::mask_features).
     bool _mask_features = true;
-    // SfmJob::keep_cameras as asked for; a run gets it only while the output
-    // folder holds a model to keep (WorkspaceState::keepable).
-    bool _keep_cameras = false;
     // PrepJob::mask_memory. Off by default: a prompt that matches a crowd pays
     // one model pass per object per frame for it. The two below only apply
     // with it on, and are kept here rather than in MaskSettings because the
@@ -820,6 +817,10 @@ private:
     void draw_roi_row(bool busy);
     std::vector<std::string> _roi_files;
     std::string _roi_files_for;
+    // "Recompute Sparse Point Cloud" under the region row.
+    RecomputePanel _recompute;
+    void draw_recompute_row(bool busy);
+    void take_recomputed();
     // Queueing a partition's parts: the modal with the run's settings, the
     // "clear what is still pending?" question, and the rows it finally adds.
     struct PartitionQueue {

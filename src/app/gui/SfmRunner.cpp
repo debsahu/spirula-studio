@@ -14,7 +14,6 @@
 #include "app/AppPaths.h"
 #include "app/gui/Subprocess.h"
 #include "core/ModelMirror.h"
-#include "data/DatasetParser.h"
 #ifdef SS_TOOL_SFM
 // The stage tags the child prints and the manifest it reads; a build without the
 // module has no child to run (see availability()).
@@ -122,6 +121,9 @@ bool has_model(const fs::path& sparse) {
 }
 
 }  // namespace
+
+bool sfm_child_line_is_notable(const std::string& l) { return child_line_is_notable(l); }
+void sfm_sweep_intermediates(const std::string& ws) { sweep_sfm_intermediates(ws); }
 
 std::vector<PendingDownload> sfm_feature_downloads(int features, int matcher) {
     std::vector<PendingDownload> out;
@@ -642,27 +644,19 @@ std::vector<sfm::RigDef> SfmRunner::build_rigs(const PrepJob& prep, const PrepRe
 
 // Flags that describe the model rather than the execution device, which is
 // appended at launch. The manifest comes as its TEXT, written to a file there.
-std::vector<std::string> SfmRunner::recon_args(const SfmJob& job, const PrepResult& prep,
-                                               const std::string& poses) {
-    // Kept cameras leave out everything that would move one, or that only the
-    // mapper and the gauge fix read: `--poses` refuses those flags.
-    const bool keep = !poses.empty();
+std::vector<std::string> SfmRunner::recon_args(const SfmJob& job,
+                                               const PrepResult& prep) {
     std::vector<std::string> argv = {
         "--quality", sfm_pick(kSfmQuality, job.quality, 2),
         "--data-type", sfm_pick(kSfmDataType, job.data_type),
+        "--camera-model", job.camera_model,
+        "--camera-mode", sfm_pick(kSfmCameraMode, job.camera_mode, 1),
+        "--mapper", sfm_pick(kSfmMapper, job.mapper),
         "--features", sfm_pick(kSfmFeatures, job.features),
         // A learned matcher only exists for the learned descriptors; asking
         // for one with SIFT selected is a usage error.
         "--matcher", sfm_matcher_for(job.features, job.matcher),
     };
-    if (keep) {
-        argv.insert(argv.end(), {"--poses", poses});
-    } else {
-        argv.insert(argv.end(),
-                    {"--camera-model", job.camera_model,
-                     "--camera-mode", sfm_pick(kSfmCameraMode, job.camera_mode, 1),
-                     "--mapper", sfm_pick(kSfmMapper, job.mapper)});
-    }
     if (job.pairs > 0) {
         argv.push_back("--pairs");
         argv.push_back(sfm_pick(kSfmPairs, job.pairs));
@@ -677,35 +671,33 @@ std::vector<std::string> SfmRunner::recon_args(const SfmJob& job, const PrepResu
     // is a no-op under the other pair modes.
     if (!job.loop_closure) argv.push_back("--no-loop-closure");
     if (!job.prefilter_sequential) argv.push_back("--no-prefilter-sequential");
-    if (!keep && job.init_focal_px > 0) {
+    if (job.init_focal_px > 0) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "%g", job.init_focal_px);
         argv.push_back("--focal");
         argv.push_back(buf);
     }
-    if (!keep && !job.init_distortion.empty()) {
+    if (!job.init_distortion.empty()) {
         argv.push_back("--distortion");
         argv.push_back(job.init_distortion);
     }
-    if (!keep) {
-        // Two flags, three states: hold during mapping, and hold in the
-        // finishing pass as well.
-        if (job.distortion_refine >= 1) argv.push_back("--no-refine-extra-params");
-        if (job.distortion_refine >= 2) argv.push_back("--no-final-extra-params");
-        if (job.final_per_image_intrinsics)
-            argv.push_back("--final-per-image-intrinsics");
-        if (job.final_free_rig) argv.push_back("--final-free-rig");
-        if (job.ba_cpu) {
-            argv.push_back("--ba-real");
-            argv.push_back("cpu");
-            argv.push_back("--ba-real-coarse");
-            argv.push_back("cpu");
-        }
+    // Two flags, three states: hold during mapping, and hold in the finishing
+    // pass as well.
+    if (job.distortion_refine >= 1) argv.push_back("--no-refine-extra-params");
+    if (job.distortion_refine >= 2) argv.push_back("--no-final-extra-params");
+    if (job.final_per_image_intrinsics)
+        argv.push_back("--final-per-image-intrinsics");
+    if (job.final_free_rig) argv.push_back("--final-free-rig");
+    if (job.ba_cpu) {
+        argv.push_back("--ba-real");
+        argv.push_back("cpu");
+        argv.push_back("--ba-real-coarse");
+        argv.push_back("cpu");
     }
     // Not flags any more: per-folder lenses, rigs and sequences go in the
     // manifest.
 #ifdef SS_TOOL_SFM
-    const std::string manifest = keep ? "" : sfm::manifest_write(build_manifest(job, prep));
+    const std::string manifest = sfm::manifest_write(build_manifest(job, prep));
     if (!manifest.empty()) {
         argv.push_back("--manifest");
         argv.push_back(manifest);
@@ -724,15 +716,13 @@ std::vector<std::string> SfmRunner::recon_args(const SfmJob& job, const PrepResu
         argv.push_back("--max-image-size");
         argv.push_back(std::to_string(job.max_image_size));
     }
-    if (!keep) {
-        argv.push_back("--metric-gps");
-        argv.push_back(sfm_pick(kSfmMetricGps, job.metric_gps, 3));
-    }
-    if (!keep && job.sensor_gauge != 2) {
+    argv.push_back("--metric-gps");
+    argv.push_back(sfm_pick(kSfmMetricGps, job.metric_gps, 3));
+    if (job.sensor_gauge != 2) {
         argv.push_back("--sensor-gauge");
         argv.push_back(sfm_pick(kSfmSensorGauge, job.sensor_gauge, 2));
     }
-    if (!keep && job.exif_attitude != 2) {
+    if (job.exif_attitude != 2) {
         argv.push_back("--exif-attitude");
         argv.push_back(sfm_pick(kSfmExifAttitude, job.exif_attitude, 2));
     }
@@ -782,9 +772,6 @@ void SfmRunner::run(SfmJob job) {
 
     try {
         const fs::path ws = job.prep.workspace;
-        // Where the reconstruction writes: the dataset itself, or a folder
-        // inside it when the dataset's own model is the one being kept.
-        const fs::path sfm_ws = job.keep_cameras ? ws / kDenseDirName : ws;
         std::error_code ec;
         fs::create_directories(ws, ec);
 
@@ -819,9 +806,9 @@ void SfmRunner::run(SfmJob job) {
         // screen is already watching when the first one lands.
         {
             std::lock_guard<std::mutex> lk(_mu);
-            _progress_dir = (sfm_ws / ".progress").string();
-            _features_dir = (sfm_ws / "features").string();
-            _matches_path = (sfm_ws / "matches.bin").string();
+            _progress_dir = (ws / ".progress").string();
+            _features_dir = (ws / "features").string();
+            _matches_path = (ws / "matches.bin").string();
         }
 
         // ---- 1. frames and masks ------------------------------------------
@@ -856,10 +843,10 @@ void SfmRunner::run(SfmJob job) {
         // Frames this run replaced: features/ and matches.bin describe the old
         // ones, and the resume signature is made of settings and cannot see it.
         if (prep.frames_rebuilt) {
-            remove_tree(sfm_ws / "features");
-            remove_tree(sfm_ws / sfm::resume::kDir);
+            remove_tree(ws / "features");
+            remove_tree(ws / sfm::resume::kDir);
             std::error_code fec;
-            fs::remove(sfm_ws / "matches.bin", fec);
+            fs::remove(ws / "matches.bin", fec);
         }
         if (prep.per_folder_cameras && job.camera_mode == 0) {
             log(lmsg::one_camera_per_folder.get());
@@ -872,30 +859,24 @@ void SfmRunner::run(SfmJob job) {
         say(Step::Model);
         const bool reuse_model = !makes(plan[Step::Model].act);
         if (!reuse_model) {
-            std::string poses;
-            if (job.keep_cameras) {
-                poses = find_colmap_poses(ws.string());
-                if (poses.empty() || !fs::exists(fs::path(poses) / "images.bin", ec))
-                    return fail(fmt(lmsg::err_no_model_to_keep, {ws.string()}));
-            }
-            const std::vector<std::string> now = recon_args(job, prep, poses);
+            const std::vector<std::string> now = recon_args(job, prep);
             record.begin(Step::Model, model_fields(job));
             set_stage(Stage::Features, lmsg::stage_reconstructing_features.get());
             // What features/ and matches.bin are still worth is the run's own
             // decision, per stage and per file (sfm/core/Resume.h). The
             // snapshots are not: they describe the run that wrote them.
-            remove_tree(sfm_ws / ".progress");
+            remove_tree(ws / ".progress");
             // From here the intermediates are this run's, however it ends: a
             // cancelled run leaves the same ones a finished one does, and the
             // screen goes on reading both until it is done with them.
             {
                 std::lock_guard<std::mutex> lk(_mu);
-                _sweep_dir = job.keep_intermediate ? "" : sfm_ws.string();
+                _sweep_dir = job.keep_intermediate ? "" : ws.string();
             }
             // What the run is asked for, the same list either way.
             std::vector<std::string> settings = {
-                prep.image_dir, "-o", sfm_ws.string(),
-                "--progress-dir", (sfm_ws / ".progress").string(),
+                prep.image_dir, "-o", ws.string(),
+                "--progress-dir", (ws / ".progress").string(),
             };
             for (size_t k = 0; k < now.size(); k++) {
                 settings.push_back(now[k]);
@@ -980,7 +961,7 @@ void SfmRunner::run(SfmJob job) {
 
         // Only for a run that reconstructed: a reused model may be a
         // transforms.json or a Metashape export, which has no sparse/ at all.
-        if (!reuse_model && !has_model(sfm_ws / "sparse"))
+        if (!reuse_model && !has_model(ws / "sparse"))
             return fail(lmsg::err_no_reconstruction.get());
         if (!reuse_model) record.finish(Step::Model);
 
@@ -1004,7 +985,7 @@ void SfmRunner::run(SfmJob job) {
         // after the run ends. Only ones this run produced.
         {
             std::lock_guard<std::mutex> lk(_mu);
-            _sweep_dir = job.keep_intermediate || reuse_model ? "" : sfm_ws.string();
+            _sweep_dir = job.keep_intermediate || reuse_model ? "" : ws.string();
         }
 
         if (reads_photos_in_place(job.prep.inputs, job.prep.photo_import))
