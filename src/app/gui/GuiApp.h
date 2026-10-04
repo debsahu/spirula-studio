@@ -817,7 +817,7 @@ private:
     void draw_roi_row(bool busy);
     std::vector<std::string> _roi_files;
     std::string _roi_files_for;
-    // "Recompute Sparse Pointcloud (LoMa)", between Change... and the region row.
+    // "Recompute Sparse Pointcloud", between Change... and the region row.
     RecomputePanel _recompute;
     void draw_recompute_row(bool busy);
     void take_recomputed();

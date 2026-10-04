@@ -11,12 +11,12 @@ namespace msg {
 namespace recompute {
 
 SS_MSG(button,
-    EN("Recompute Sparse Pointcloud (LoMa)"), JA("スパース点群を再計算 (LoMa)"),
-    ZH_HANS("重新计算稀疏点云 (LoMa)"), ZH_HANT("重新計算稀疏點雲 (LoMa)"), KO("희소 포인트 클라우드 재계산 (LoMa)"),
-    DE("Dünne Punktwolke neu berechnen (LoMa)"), FR("Recalculer le nuage de points épars (LoMa)"),
-    ES("Recalcular la nube de puntos dispersa (LoMa)"), PT("Recalcular a nuvem de pontos esparsa (LoMa)"),
-    IT("Ricalcola la nuvola di punti sparsa (LoMa)"), NL("Dunne puntenwolk opnieuw berekenen (LoMa)"),
-    RU("Пересчитать разреженное облако точек (LoMa)"), TR("Seyrek nokta bulutunu yeniden hesapla (LoMa)"));
+    EN("Recompute Sparse Pointcloud"), JA("スパース点群を再計算"),
+    ZH_HANS("重新计算稀疏点云"), ZH_HANT("重新計算稀疏點雲"), KO("희소 포인트 클라우드 재계산"),
+    DE("Dünne Punktwolke neu berechnen"), FR("Recalculer le nuage de points épars"),
+    ES("Recalcular la nube de puntos dispersa"), PT("Recalcular a nuvem de pontos esparsa"),
+    IT("Ricalcola la nuvola di punti sparsa"), NL("Dunne puntenwolk opnieuw berekenen"),
+    RU("Пересчитать разреженное облако точек"), TR("Seyrek nokta bulutunu yeniden hesapla"));
 
 SS_MSG(button_help,
     EN("New points from the images for the cameras this dataset already has, such as a "
