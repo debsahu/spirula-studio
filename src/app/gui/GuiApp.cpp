@@ -9280,8 +9280,8 @@ void GuiApp::draw_train_settings() {
     }
     ImGui::EndDisabled();
     if (!_batch_active) {
-        draw_roi_row(busy);
         draw_recompute_row(busy);
+        draw_roi_row(busy);
     }
 
     // Vulkan builds share the native picker with every built-in workflow.

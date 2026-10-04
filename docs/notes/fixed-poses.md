@@ -80,8 +80,8 @@ but get no pose and no points; the run says how many.
 
 ## In the GUI
 
-The training screen has "Recompute Sparse Point Cloud" under the region of
-interest row when the open dataset holds a binary COLMAP model where the
+The training screen has "Recompute Sparse Pointcloud (LoMa)" between Change...
+and the region of interest row when the open dataset holds a binary COLMAP model where the
 trainer would look for one (`find_colmap_poses`). It opens a short list of
 settings (quality, features, the two counts, and the dataset's masks when it has
 some) and runs `spirula sfm auto --poses` on that model as a child, with

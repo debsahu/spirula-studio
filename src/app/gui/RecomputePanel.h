@@ -26,7 +26,7 @@ public:
     };
     ~RecomputePanel();
 
-    // Under the region row. `busy`: training owns the dataset. `start` asks
+    // Above the region row. `busy`: training owns the dataset. `start` asks
     // the app for the device to run on, "" for automatic, or false to refuse.
     void draw(const Source& src, bool busy, const std::function<bool(std::string&)>& start);
     bool running() const { return _running.load(); }
