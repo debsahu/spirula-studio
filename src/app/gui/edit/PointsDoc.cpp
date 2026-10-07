@@ -2,7 +2,12 @@
 
 #include "app/gui/edit/PointsDoc.h"
 
+#include "i18n/Locale.h"
 #include "i18n/catalog/Edit.h"
+#ifdef SS_TOOL_DENSIFY
+#include "roma/DensifyEdit.h"
+#include "roma/Publish.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -41,6 +46,9 @@ PointsDoc::PointsDoc(ParsedDataset ds, PostSplitCameras post,
     : _ds(std::move(ds)), _post(std::move(post)), _dataset_dir(dataset_dir),
       _show(std::move(show)) {
     if (!_dataset_dir.empty()) _fmt = spirula::sparse_format_of(_dataset_dir);
+#ifdef SS_TOOL_DENSIFY
+    _dense = _fmt == spirula::SparseFormat::Colmap && roma::editProblem(_dataset_dir).empty();
+#endif
 
     // The preview draws in the normalized frame, so the selection has to
     // project there too: train_to_normalized is stored the other way round.
@@ -260,6 +268,11 @@ void PointsDoc::revert_display() {
 
 std::vector<SaveTarget> PointsDoc::save_targets() const {
     std::vector<SaveTarget> t;
+    if (_dense) {
+        t.push_back({&msg::target_dense_edit, "", false, false});
+        t.push_back({&msg::target_points_ply, ".ply", false});
+        return t;
+    }
     switch (_fmt) {
         case spirula::SparseFormat::Colmap:
             t.push_back({&msg::target_colmap, "", true});
@@ -275,9 +288,16 @@ std::vector<SaveTarget> PointsDoc::save_targets() const {
     return t;
 }
 
+const spirula::i18n::Msg* PointsDoc::save_note(int target) const {
+    return _dense && target == 0 ? &msg::dense_save_note : nullptr;
+}
+
 std::string PointsDoc::default_save_path(int target) const {
     const std::vector<SaveTarget> t = save_targets();
     if (target < 0 || target >= (int)t.size()) return {};
+#ifdef SS_TOOL_DENSIFY
+    if (_dense && target == 0) return roma::editedSiblingDir(_dataset_dir);
+#endif
     if (t[(size_t)target].folder) return _dataset_dir;
     // A dataset's source is its folder, which a PLY cannot be written over.
     return source_path() == _dataset_dir ? std::string() : source_path();
@@ -287,6 +307,33 @@ void PointsDoc::save(int target, const std::string& path,
                      std::atomic<int>* progress) {
     const std::vector<SaveTarget> t = save_targets();
     if (target < 0 || target >= (int)t.size()) return;
+    if (_dense && target == 0) {
+#ifdef SS_TOOL_DENSIFY
+        // A dense model keeps its cameras and its poses to the bit; only points go.
+        if (!file_placement().is_identity()) throw std::runtime_error(msg::dense_moved.get());
+        if (layer_count() > kCameras) {
+            const std::vector<uint8_t>& ck = alive_of(kCameras);
+            if (std::find(ck.begin(), ck.end(), (uint8_t)0) != ck.end())
+                throw std::runtime_error(msg::dense_cameras.get());
+        }
+        const std::vector<uint8_t>& pk = alive_of(kPoints);
+        if (std::find(pk.begin(), pk.end(), (uint8_t)0) == pk.end())
+            throw std::runtime_error(msg::dense_nothing.get());
+        const std::string out = roma::editedSiblingDir(_dataset_dir);
+        std::error_code ec;
+        const bool in_place = fs::equivalent(out, _dataset_dir, ec);
+        if (!in_place && !_dense_saved && fs::exists(out, ec))
+            throw std::runtime_error(spirula::i18n::format(msg::dense_exists, {out}));
+        try {
+            roma::writeEditedSibling(_dataset_dir, pk, /*replace=*/_dense_saved);
+        } catch (const roma::WriterBusy& b) {
+            throw std::runtime_error(spirula::i18n::format(msg::dense_busy, {b.lock, (long long)b.pid}));
+        }
+        _dense_saved = true;
+#endif
+        if (progress) (*progress)++;
+        return;
+    }
     if (t[(size_t)target].folder) {
         spirula::SparseKeep keep;
         keep.points = alive_of(kPoints);

@@ -45,15 +45,16 @@ struct DensifyJob {
 // The arguments after `spirula --lang <x>`. `masks` empty means no mask folder.
 std::vector<std::string> densify_args(const DensifyJob& job, const std::string& dataset,
                                       const std::string& images, const std::string& masks,
-                                      bool masks_flipped, bool preset_supported);
+                                      bool masks_flipped, bool preset_supported,
+                                      const std::string& progress_dir = {});
 
-// Auto as the CLI resolves it: hybrid when the dataset has depth maps, else roma.
-// A fixed source resolves to itself.
-int densify_resolved_source(int source, bool have_depth_maps);
+// Auto as the CLI resolves it: roma, whatever depth maps the dataset holds (hybrid
+// only when asked for). A fixed source resolves to itself.
+int densify_resolved_source(int source);
 // Does `depths/` of this dataset hold anything?
 bool densify_has_depth_maps(const std::string& dataset);
-// RoMa and its licences are needed by every source but moge; auto is roma or
-// hybrid, so it needs them whatever the dataset holds.
+// RoMa and its licences are needed by every source but moge; auto is roma, so
+// it needs them whatever the dataset holds.
 bool densify_needs_roma(const DensifyJob& job);
 
 // What a new settings block does to the model the screen is on. A preset leaves
@@ -76,9 +77,13 @@ const std::vector<std::string>& densify_license_families();
 bool densify_model_cached();
 std::vector<PendingDownload> densify_model_downloads();
 
+// `progress_dir`: where the child may write model.bin snapshots of the growing
+// cloud, for the screen's model view. After the child exits the cloud it wrote
+// is checked against the checksums densify.json recorded.
 bool run_densify_step(const DensifyJob& job, const std::string& dataset,
                       const std::string& images, const std::string& masks,
                       bool masks_flipped, RunProgress& prog,
-                      const std::atomic<bool>& cancel, std::string& error);
+                      const std::atomic<bool>& cancel, std::string& error,
+                      const std::string& progress_dir = {});
 
 }  // namespace gui

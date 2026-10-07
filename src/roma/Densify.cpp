@@ -2,6 +2,7 @@
 #include "roma/Densify.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numeric>
 #include <random>
@@ -30,6 +31,7 @@ void DensifyStats::add(const DensifyStats& o) {
     depth_local += o.depth_local; depth_left_to_matches += o.depth_left_to_matches; depth_kept += o.depth_kept;
     depth_edge += o.depth_edge; depth_normal += o.depth_normal; depth_local_normal += o.depth_local_normal;
     depth_vote_close += o.depth_vote_close; fill_near_matches += o.fill_near_matches;
+    far_beyond += o.far_beyond; far_isolated += o.far_isolated;
     for (size_t i = 0; i < normal_agree_hist.size(); i++) {
         normal_agree_hist[i] += o.normal_agree_hist[i];
         normal_null_hist[i] += o.normal_null_hist[i];
@@ -674,11 +676,88 @@ std::vector<size_t> voxelSelect(const std::vector<DensePoint>& pts, double voxel
     return sel;
 }
 
+// ===========================================================================
+// Far isolated points
+// ===========================================================================
+
+FarFilter resolveFarFilter(const std::vector<Vec3>& sparse, bool metric, double spacing) {
+    FarFilter f;
+    if (sparse.size() < 100 || !(spacing > 0)) return f;
+    // numpy.percentile's linear interpolation, so the box is the one the evaluation measured.
+    auto pct = [&](double Vec3::*axis, double q) {
+        std::vector<double> v;
+        v.reserve(sparse.size());
+        for (const Vec3& p : sparse) v.push_back(p.*axis);
+        std::sort(v.begin(), v.end());
+        const double at = q / 100.0 * (double)(v.size() - 1);
+        const size_t i = (size_t)std::floor(at);
+        return v[i] + (v[std::min(i + 1, v.size() - 1)] - v[i]) * (at - (double)i);
+    };
+    f.lo = {pct(&Vec3::x, 0.5), pct(&Vec3::y, 0.5), pct(&Vec3::z, 0.5)};
+    f.hi = {pct(&Vec3::x, 99.5), pct(&Vec3::y, 99.5), pct(&Vec3::z, 99.5)};
+    f.margin = metric ? 2.0 : 0.2 * (f.hi - f.lo).norm();
+    f.radius = 8.0 * spacing;
+    return f;
+}
+
+int64_t dropFarIsolated(std::vector<DensePoint>& pts, const FarFilter& f, int64_t* beyond) {
+    if (beyond) *beyond = 0;
+    if (!(f.margin > 0) || !(f.radius > 0) || pts.empty()) return 0;
+    auto excess = [&](const Vec3& p) {   // max-norm distance outside the box
+        return std::max({f.lo.x - p.x, p.x - f.hi.x, f.lo.y - p.y, p.y - f.hi.y, f.lo.z - p.z, p.z - f.hi.z, 0.0});
+    };
+    // A neighbour of a far point is within `radius`, so beyond margin - radius; with a
+    // margin under the radius that is every point.
+    const double reach = f.margin - f.radius;
+    struct H { size_t operator()(const std::array<int64_t, 3>& k) const {
+        return (size_t)(k[0] * 73856093LL) ^ (size_t)(k[1] * 19349663LL) ^ (size_t)(k[2] * 83492791LL); } };
+    auto key = [&](const Vec3& p) {
+        return std::array<int64_t, 3>{(int64_t)std::floor(p.x / f.radius), (int64_t)std::floor(p.y / f.radius),
+                                      (int64_t)std::floor(p.z / f.radius)};
+    };
+    std::unordered_map<std::array<int64_t, 3>, std::vector<uint32_t>, H> grid;
+    std::vector<uint32_t> far_ids;
+    for (size_t i = 0; i < pts.size(); i++) {
+        const Vec3& p = pts[i].xyz;
+        if (!std::isfinite(p.x + p.y + p.z)) continue;
+        const double e = excess(p);
+        if (e > reach) grid[key(p)].push_back((uint32_t)i);
+        if (e > f.margin) far_ids.push_back((uint32_t)i);
+    }
+    if (beyond) *beyond = (int64_t)far_ids.size();
+    const double r2 = f.radius * f.radius;
+    std::vector<char> drop(pts.size(), 0);
+    int64_t n = 0;
+    for (uint32_t i : far_ids) {
+        const Vec3& p = pts[i].xyz;
+        const auto k = key(p);
+        int found = 0;
+        for (int a = -1; a <= 1 && found <= f.max_neighbours; a++)
+            for (int b = -1; b <= 1 && found <= f.max_neighbours; b++)
+                for (int c = -1; c <= 1 && found <= f.max_neighbours; c++) {
+                    auto it = grid.find({k[0] + a, k[1] + b, k[2] + c});
+                    if (it == grid.end()) continue;
+                    for (uint32_t j : it->second) {
+                        if (j == i) continue;
+                        const Vec3 d = pts[j].xyz - p;
+                        if (d.dot(d) <= r2 && ++found > f.max_neighbours) break;
+                    }
+                }
+        if (found <= f.max_neighbours) { drop[i] = 1; n++; }
+    }
+    if (n == 0) return 0;
+    size_t w = 0;
+    for (size_t i = 0; i < pts.size(); i++)
+        if (!drop[i]) { if (w != i) pts[w] = std::move(pts[i]); w++; }
+    pts.resize(w);
+    return n;
+}
+
 std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_track,
                                        double voxel, int64_t max_points,
                                        const DensifyOptions& opt, DensifyStats& st,
                                        const std::function<bool(const DensePoint&)>& veto,
-                                       int64_t max_fill) {
+                                       int64_t max_fill, const FarFilter* far_filter) {
     const bool by_images = !opt.plugin_exact;
     std::vector<DensePoint> kept;
     kept.reserve(pts.size());
@@ -752,7 +831,15 @@ std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_trac
     // The plugin caps before the voxel select; ours dedups first so the cap
     // spends its budget on distinct surface.
     if (opt.plugin_exact) { cap(kept); vox(kept); }
-    else { vox(kept); cap(kept); }
+    else {
+        vox(kept);
+        if (far_filter && opt.far_isolated) {
+            int64_t beyond = 0;
+            st.far_isolated += dropFarIsolated(kept, *far_filter, &beyond);
+            st.far_beyond += beyond;
+        }
+        cap(kept);
+    }
     for (const DensePoint& p : kept) st.track_hist[trackLen(p, by_images)]++;
     return kept;
 }

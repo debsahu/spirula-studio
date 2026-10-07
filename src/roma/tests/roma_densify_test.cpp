@@ -1053,6 +1053,201 @@ void hybrid_fills_only_uncovered() {
     fs::remove_all(d);
 }
 
+
+// Mutant: auto resolving to hybrid whenever depth maps exist (the default until C-4,
+// docs/notes/densify.md); or to roma when no matcher can run and maps are all there is.
+void auto_source_is_roma_unless_no_matcher() {
+    const fs::path d = tempDir("autosource");
+    writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
+    writeStairDepths(stairScene(), d.string(), SyntheticDepth{});
+    auto files = stairDepths(d);
+    const Scene scene = stairScene();
+    struct Size : Matcher {
+        int inputSize() const override { return 128; }
+        Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+        std::string describe() const override { return ""; }
+    } sizer;
+    auto job_of = [&](DensifySource src, bool matcher, bool depth) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+        if (depth) job.depth = files.get();
+        if (matcher) job.matcher = &sizer;
+        job.opt.refs = 4;
+        job.opt.matches_per_ref = 3000;
+        job.opt.source = src;
+        return job;
+    };
+    auto source = [&](DensifySource src, bool m, bool dp) { return planDensify(job_of(src, m, dp)).source; };
+    check(source(DensifySource::Auto, true, true) == DensifySource::Roma, "auto with a matcher and maps is not roma");
+    check(source(DensifySource::Auto, true, false) == DensifySource::Roma, "auto with a matcher only is not roma");
+    check(source(DensifySource::Auto, false, true) == DensifySource::Depth, "auto with maps and no matcher is not moge");
+    check(source(DensifySource::Hybrid, true, true) == DensifySource::Hybrid, "an explicit hybrid was changed");
+    check(source(DensifySource::Roma, true, true) == DensifySource::Roma, "an explicit roma was changed");
+    auto run = [&](DensifySource src) {
+        DensifyJob job = job_of(src, true, true);
+        const DensifyPlan pl = planDensify(job);
+        OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 128, 0.0, 0.0, 1);
+        job.matcher = &om;
+        return runDensify(job, pl, nullptr);
+    };
+    const DensifyResult a = run(DensifySource::Auto), r = run(DensifySource::Roma), h = run(DensifySource::Hybrid);
+    int from_depth = 0;
+    for (const DensePoint& p : a.cloud) from_depth += p.from_depth;
+    // The hybrid is what the old default produced; it must differ, or this checks nothing.
+    check(h.stats.depth_kept > 0, "the hybrid arm made no depth points, so auto = roma proves nothing");
+    check(a.stats.depth_samples == 0 && from_depth == 0, "auto drew depth points: " + std::to_string(a.stats.depth_samples));
+    check(a.cloud.size() == r.cloud.size() && a.points == r.points, "auto and roma clouds differ in size");
+    fs::remove_all(d);
+}
+
+// A far-isolated fixture the wrong rule cannot pass: the groups and the verdict each is built to force.
+struct FarGroups {
+    std::vector<DensePoint> pts;
+    std::vector<int> group;           // per point
+    std::vector<char> dropped;        // the verdict the rule must give
+    int64_t beyond = 0;               // points more than the margin outside
+};
+FarGroups farFixture() {
+    FarGroups g;
+    auto add = [&](int id, Vec3 p, bool drop, bool beyond) {
+        DensePoint d;
+        d.xyz = p;
+        d.error = id;
+        d.distinct_images = 2;
+        d.track.resize(2);
+        g.pts.push_back(d);
+        g.group.push_back(id);
+        g.dropped.push_back(drop);
+        g.beyond += beyond;
+    };
+    // Box [0,10]^3, margin 2, radius 0.9, at most 2 neighbours.
+    for (int i = 0; i < 20; i++) add(0, {0.5 * i, 5, 5}, false, false);                 // inside, dense
+    for (int i = 0; i < 3; i++) add(1, {2.0 + 3 * i, 8, 8}, false, false);              // inside, isolated
+    for (int i = 0; i < 5; i++) add(2, {11.0, 3.0 + 1.5 * i, 2}, false, false);         // 1 outside: within the margin
+    add(3, {11.5, 11.5, 5}, false, false);                                              // 1.5 on two axes: max-norm 1.5, 2-norm 2.1
+    for (int k = 0; k < 50; k++) add(4, {16, 3.0 * (k % 10), 3.0 * (k / 10)}, true, true);   // 6 outside, isolated
+    for (int a = 0; a < 5; a++)
+        for (int b = 0; b < 10; b++) add(5, {-6, 100 + 0.5 * a, 100 + 0.5 * b}, false, true); // 6 outside, a coherent grid
+    for (int i = 0; i < 3; i++) add(6, {16, 200 + 0.4 * i, 0}, true, true);              // 2 neighbours each: isolated
+    for (int i = 0; i < 4; i++) add(7, {16, 300 + 0.25 * i, 0}, false, true);            // 3 neighbours each: not
+    add(8, {12.5, 5, 5}, false, true);                                                  // far, with 3 neighbours that are not
+    for (double dy : {-0.3, 0.3, 0.6}) add(9, {11.9, 5 + dy, 5}, false, false);         // ... within the margin
+    // Squares of 0.2 straddling a cell corner (cell = radius = 0.9), 3 neighbours each, all across a cell boundary.
+    for (double dx : {-0.1, 0.1}) for (double dy : {-0.1, 0.1}) add(10, {-9.0 + dx, 500.4 + dy, 100}, false, true);
+    for (double dy : {-0.1, 0.1}) for (double dz : {-0.1, 0.1}) add(11, {-20, 540 + dy, 540 + dz}, false, true);
+    return g;
+}
+
+// Mutants: isolation ignored (everything far goes); the margin ignored or the 2-norm used; neighbours counted
+// among the far points only; at-most-2 turned into fewer-than-2 or at-most-3; the order of the rest changed.
+void far_isolated_drops_only_isolated_far_points() {
+    const FarGroups g = farFixture();
+    FarFilter f;
+    f.lo = {0, 0, 0};
+    f.hi = {10, 10, 10};
+    f.margin = 2;
+    f.radius = 0.9;
+    f.max_neighbours = 2;
+    std::vector<DensePoint> pts = g.pts;
+    int64_t beyond = 0;
+    const int64_t n = dropFarIsolated(pts, f, &beyond);
+    int expect_dropped = 0;
+    std::vector<DensePoint> expect;
+    for (size_t i = 0; i < g.pts.size(); i++) {
+        if (g.dropped[i]) expect_dropped++;
+        else expect.push_back(g.pts[i]);
+    }
+    check(expect_dropped == 53 && g.beyond == 116, "fixture drifted: " + std::to_string(expect_dropped) + " " + std::to_string(g.beyond));
+    check(n == expect_dropped, "removed " + std::to_string(n) + ", expected " + std::to_string(expect_dropped));
+    check(beyond == g.beyond, "far points " + std::to_string(beyond) + ", expected " + std::to_string(g.beyond));
+    bool same = pts.size() == expect.size();
+    for (size_t i = 0; same && i < pts.size(); i++) same = pts[i].xyz.x == expect[i].xyz.x && pts[i].xyz.y == expect[i].xyz.y && pts[i].xyz.z == expect[i].xyz.z;
+    check(same, "the survivors are not the input minus the isolated far groups, in order");
+    int per_group[12] = {};
+    for (const DensePoint& p : pts) per_group[(int)p.error]++;
+    const int want[12] = {20, 3, 5, 1, 0, 50, 0, 4, 1, 3, 4, 4};
+    for (int k = 0; k < 12; k++) check(per_group[k] == want[k], "group " + std::to_string(k) + " kept " + std::to_string(per_group[k]));
+    std::vector<DensePoint> none = g.pts;
+    FarFilter off = f;
+    off.margin = 0;
+    check(dropFarIsolated(none, off) == 0 && none.size() == g.pts.size(), "a margin of 0 is off");
+}
+
+// The same fixture through finalizePoints: after the voxel select, before the cap, and only in the default mode.
+void far_isolated_runs_before_the_cap() {
+    const FarGroups g = farFixture();
+    FarFilter f;
+    f.lo = {0, 0, 0};
+    f.hi = {10, 10, 10};
+    f.margin = 2;
+    f.radius = 0.9;
+    DensifyOptions opt;
+    DensifyStats st;
+    const int64_t kept = (int64_t)g.pts.size() - 53;
+    // A cap of exactly the survivors: filtered first, the cap removes nothing; capped first, it would draw
+    // 53 points at random and the filter would then take the isolated ones among what is left.
+    const std::vector<DensePoint> out = finalizePoints(g.pts, 1, 0, kept, opt, st, {}, -1, &f);
+    check((int64_t)out.size() == kept && st.capped == 0, "kept " + std::to_string(out.size()) + ", capped " + std::to_string(st.capped));
+    check(st.far_isolated == 53 && st.far_beyond == 116, "stats " + std::to_string(st.far_isolated) + "/" + std::to_string(st.far_beyond));
+    DensifyOptions no = opt;
+    no.far_isolated = false;
+    DensifyStats s2;
+    check(finalizePoints(g.pts, 1, 0, 0, no, s2, {}, -1, &f).size() == g.pts.size() && s2.far_isolated == 0, "--far-isolated off still filtered");
+    DensifyOptions px = opt;
+    px.plugin_exact = true;
+    DensifyStats s3;
+    check(finalizePoints(g.pts, 1, 0, 0, px, s3, {}, -1, &f).size() == g.pts.size() && s3.far_isolated == 0, "plugin_exact filtered");
+    DensifyStats s4;
+    check(finalizePoints(g.pts, 1, 0, 0, opt, s4).size() == g.pts.size(), "no filter given, yet points were dropped");
+}
+
+// Mutants: the box from the extremes, not p0.5-p99.5; the margin the same on a metric and a scale-free model; a
+// box diagonal other than 0.2 x; the radius not 8 x the spacing; a filter on a model of under 100 points.
+void far_filter_is_scale_free() {
+    std::vector<Vec3> sp;
+    for (int i = 0; i <= 1000; i++) sp.push_back({(double)i, (double)((i * 3) % 1001), (double)((i * 5) % 1001)});
+    const FarFilter m = resolveFarFilter(sp, true, 0.5), u = resolveFarFilter(sp, false, 0.5);
+    check(m.lo.x == 5 && m.lo.y == 5 && m.lo.z == 5 && m.hi.x == 995 && m.hi.y == 995 && m.hi.z == 995,
+          "the box is not p0.5-p99.5: " + std::to_string(m.lo.x) + " " + std::to_string(m.hi.x));
+    check(m.margin == 2.0, "a metric model's margin " + std::to_string(m.margin));
+    check(std::fabs(u.margin - 0.2 * 990 * std::sqrt(3.0)) < 1e-9, "a scale-free model's margin " + std::to_string(u.margin));
+    check(m.radius == 4.0 && u.radius == 4.0 && m.max_neighbours == 2, "radius " + std::to_string(m.radius));
+    std::vector<Vec3> outl = sp;
+    outl.push_back({5000, 5000, 5000});
+    outl.push_back({-5000, -5000, -5000});
+    check(resolveFarFilter(outl, true, 0.5).hi.x < 1100 && resolveFarFilter(outl, true, 0.5).lo.x > -100, "two outliers moved the box");
+    sp.resize(99);
+    check(resolveFarFilter(sp, true, 0.5).margin == 0, "a filter on a 99-point model");
+    check(resolveFarFilter(outl, true, 0).margin == 0, "a filter with no spacing");
+}
+
+// The plan's verdict: off by flag, off in plugin-exact, off on a tiny model, and the margin from gauge.txt.
+void far_isolated_plan_states() {
+    const fs::path d = tempDir("farplan");
+    writeStairDataset(stairScene(), d.string(), 96, 192, 300);
+    auto plan = [&](bool far_on, bool exact) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.opt.far_isolated = far_on;
+        job.opt.plugin_exact = exact;
+        return planDensify(job);
+    };
+    using FS = DensifyPlan::FarState;
+    check(plan(false, false).far_state == FS::Off, "--far-isolated off is not Off");
+    check(plan(true, true).far_state == FS::PluginExact, "plugin-exact runs the filter");
+    const DensifyPlan on = plan(true, false);
+    check(on.far_state == FS::On || on.sparse_points < 100, "default mode: state " + std::to_string((int)on.far_state));
+    if (on.far_state == FS::On) {
+        check(on.far_filter.radius == 8 * on.sparse_spacing, "radius " + std::to_string(on.far_filter.radius));
+        const double diag = (on.far_filter.hi - on.far_filter.lo).norm();
+        check(std::fabs(on.far_filter.margin - 0.2 * diag) < 1e-9, "scale-free margin " + std::to_string(on.far_filter.margin));
+        { std::ofstream((d / "sparse" / "0" / "gauge.txt")) << "metric 1\n"; }
+        check(plan(true, false).far_filter.margin == 2.0, "a metric gauge did not give a 2 m margin");
+    }
+    fs::remove_all(d);
+}
+
 // Mutant: a hybrid's fill sharing the cap (matches alone fill it, so no fill
 // survives), or the fill's own budget ignored.
 void hybrid_fill_has_its_own_budget() {
@@ -1254,6 +1449,7 @@ void hybrid_fill_budget_is_a_quarter() {
     job.model_dir = (d / "sparse" / "0").string();
     job.depth = files.get();
     job.matcher = &sizer;
+    job.opt.source = DensifySource::Hybrid;
     const DensifyPlan a = planDensify(job);
     check(a.source == DensifySource::Hybrid && a.max_fill == a.max_points / 4,
           "auto cap " + std::to_string(a.max_points) + ", fill " + std::to_string(a.max_fill));
@@ -1352,9 +1548,13 @@ void stale_depth_maps_refused() {
     run(&sh, DensifySource::Depth, false, &err);
     check(err.find("usable depth map") != std::string::npos, "shifted maps used by --source moge: '" + err + "'");
     err.clear();
+    // Auto with a matcher never reads the maps; with none it is the moge source, share gate included.
     const DensifyResult fb = run(&sh, DensifySource::Auto, true, &err);
-    check(err.empty() && !fb.depth_dropped.empty() && fb.stats.depth_kept == 0,
-          "auto with shifted maps: '" + err + "', depth points " + std::to_string(fb.stats.depth_kept));
+    check(err.empty() && fb.stats.depth_samples == 0 && fb.depth_share < 0,
+          "auto with a matcher and shifted maps read them: '" + err + "', share " + std::to_string(fb.depth_share));
+    err.clear();
+    run(&sh, DensifySource::Auto, false, &err);
+    check(err.find("usable depth map") != std::string::npos, "auto with no matcher and shifted maps: '" + err + "'");
     // With geometry's record, every shifted map is named for another image.
     recordStairDepths(d);
     for (size_t i = 0; i < names.size(); i++) {
@@ -2432,6 +2632,11 @@ static int body(int argc, char** argv) {
         {"depth_fit_recovers_affine", depth_fit_recovers_affine},
         {"depth_agreement_drops_copies", depth_agreement_drops_copies},
         {"hybrid_fills_only_uncovered", hybrid_fills_only_uncovered},
+        {"auto_source_is_roma_unless_no_matcher", auto_source_is_roma_unless_no_matcher},
+        {"far_isolated_drops_only_isolated_far_points", far_isolated_drops_only_isolated_far_points},
+        {"far_isolated_runs_before_the_cap", far_isolated_runs_before_the_cap},
+        {"far_filter_is_scale_free", far_filter_is_scale_free},
+        {"far_isolated_plan_states", far_isolated_plan_states},
         {"normals_face_their_own_ray", normals_face_their_own_ray},
         {"file_normals_used_when_present", file_normals_used_when_present},
         {"depth_reuse_computes_only_missing", depth_reuse_computes_only_missing},

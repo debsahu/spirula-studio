@@ -38,6 +38,9 @@ struct DensifyJob {
     std::function<void(const SourceImage&, const DepthField&)> on_depth_fit;
     // Called once if the warps come back coarser than the matcher's input.
     std::function<void(int warp_size, int input_size)> on_warp_scale;
+    // The cloud as it grows, after each reference view (`filtered` false), and
+    // once more as written (true). Called on the run's own thread: keep it short.
+    std::function<void(const std::vector<DensePoint>& cloud, bool filtered)> on_cloud;
 };
 
 // What the run will do, every automatic choice resolved, and why.
@@ -56,6 +59,9 @@ struct DensifyPlan {
     int64_t sparse_points = 0;
     double sparse_spacing = 0;                   // median nearest-neighbour distance
     bool metric = false;
+    enum class FarState { Off, PluginExact, TooFewPoints, On };
+    FarState far_state = FarState::Off;          // the far-isolated filter, and why it is not On
+    FarFilter far_filter;                        // resolved when far_state is On
     double max_baseline = 0;
     int min_track = 0;
     double voxel = 0;
@@ -78,7 +84,6 @@ struct DensifyResult {
     int64_t reverse_matches = 0;                 // B -> A warps the cycle check asked for
     double depth_tol = 0;                        // the depth agreement tolerance used
     double depth_share = -1;                     // usable maps among the matched images, -1 unused
-    std::string depth_dropped;                   // auto: why the depth source was not used
     std::string out_dir;
     std::vector<DensePoint> cloud;               // what points3D.bin holds
 };
@@ -139,7 +144,8 @@ struct ReprojStats {
 ReprojStats reprojectWritten(const std::string& model_dir);
 
 // Throws, writing nothing, for an empty cloud: a sibling sorts after its
-// source, so a trainer could pick it. densify.json gains "reprojection".
+// source, so a trainer could pick it. densify.json gains "reprojection" and
+// the cloud's SHA-256s. Holds the writer lock and publishes by publishDir.
 ReprojStats writeSibling(const std::string& model_dir, const std::string& out_dir,
                          const DensifyPlan& plan, const std::vector<DensePoint>& cloud,
                          const std::string& settings_json);

@@ -9,7 +9,8 @@ namespace gui {
 
 std::vector<std::string> densify_args(const DensifyJob& job, const std::string& dataset,
                                       const std::string& images, const std::string& masks,
-                                      bool masks_flipped, bool preset_supported) {
+                                      bool masks_flipped, bool preset_supported,
+                                      const std::string& progress_dir) {
     std::vector<std::string> a = {"densify", dataset,
                                   "--image-dir", images.empty() ? std::string("images") : images};
     if (masks.empty() || !job.use_masks) {
@@ -46,6 +47,10 @@ std::vector<std::string> densify_args(const DensifyJob& job, const std::string& 
     num("--matches-per-ref", job.matches_per_ref);
     num("--max-points", job.max_points);
     num("--min-track", job.min_track);
+    if (!progress_dir.empty()) {
+        a.push_back("--progress-dir");
+        a.push_back(progress_dir);
+    }
     if (job.overwrite) a.push_back("--overwrite");
     if (!job.device_uuid.empty()) {
         a.push_back("--device");
@@ -61,10 +66,9 @@ DensifyJob densify_after_settings(const DensifyJob& current, const DensifyJob& i
     return out;
 }
 
-int densify_resolved_source(int source, bool have_depth_maps) {
+int densify_resolved_source(int source) {
     source = std::clamp(source, 0, kNumDensifySources - 1);
-    if (source != kSourceAuto) return source;
-    return have_depth_maps ? kSourceHybrid : kSourceRoma;
+    return source == kSourceAuto ? kSourceRoma : source;
 }
 
 bool densify_has_depth_maps(const std::string& dataset) {

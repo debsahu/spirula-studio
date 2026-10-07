@@ -5,6 +5,8 @@
 #include "app/gui/DensifyRunner.h"
 #include "app/gui/ReconModels.h"
 
+#include "core/Sha256.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -140,12 +142,12 @@ int main() {
         hybrid.source = kSourceHybrid;
         expect(!densify_needs_roma(moge), "MoGe depth needs no RoMa checkpoint or licence");
         expect(densify_needs_roma(roma) && densify_needs_roma(hybrid) && densify_needs_roma(autoj),
-               "RoMa, hybrid and auto (roma or hybrid) all do");
-        expect(densify_resolved_source(kSourceAuto, true) == kSourceHybrid &&
-                   densify_resolved_source(kSourceAuto, false) == kSourceRoma &&
-                   densify_resolved_source(kSourceMoge, false) == kSourceMoge &&
-                   densify_resolved_source(kSourceRoma, true) == kSourceRoma,
-               "auto is hybrid with depth maps and roma without; a chosen source stays");
+               "RoMa, hybrid and auto (roma) all do");
+        expect(densify_resolved_source(kSourceAuto) == kSourceRoma &&
+                   densify_resolved_source(kSourceMoge) == kSourceMoge &&
+                   densify_resolved_source(kSourceHybrid) == kSourceHybrid &&
+                   densify_resolved_source(kSourceRoma) == kSourceRoma,
+               "auto is roma, with or without depth maps; hybrid is never auto; a chosen source stays");
         const fs::path ds = fs::temp_directory_path() / "spirula_densify_gui_source";
         fs::remove_all(ds);
         fs::create_directories(ds / "depths");
@@ -209,6 +211,54 @@ int main() {
                    recon_point_count((ds / "nowhere").string()) == -1,
                "the count of a model, and of one that is not there");
         fs::remove_all(ds);
+    }
+
+    // ---- the edit sibling, folders mid-write, the checksums ---------------------
+    {
+        const fs::path ds = fs::temp_directory_path() / "spirula_densify_gui_test_edit";
+        fs::remove_all(ds);
+        model(ds / "sparse" / "0", 120, 4000);
+        model(ds / "sparse" / "0-roma", 120, 2500);
+        model(ds / "sparse" / "0-roma-edit", 120, 2000);
+        model(ds / "sparse" / "0-roma.partial", 120, 10);
+        model(ds / "sparse" / "0-roma-edit.old", 120, 2500);
+        const auto m = list_recon_models(ds.string());
+        expect(m.size() == 3 && m[0].rel == "sparse/0" && m[1].rel == "sparse/0-roma" && m[2].rel == "sparse/0-roma-edit",
+               "listing: a folder mid-write (.partial) or left by a crash (.old) is no model");
+        expect(is_dense_model("sparse/0-roma-edit") && !is_dense_model("sparse/0-edit") && !is_dense_model("-roma-edit"),
+               "an edit of a dense model is a dense model, and nothing else is");
+
+        const fs::path dense = ds / "sparse" / "0-roma";
+        expect(cloud_check(dense.string()) == CloudCheck::None, "no densify.json, no record");
+        int pad = 0;
+        auto record = [&](const std::string& a, const std::string& b) {
+            std::ofstream(dense / "densify.json") << "{\"points3D_sha256\": \"" << a << "\", \"tracks_sha256\": \"" << b
+                                                  << "\"" << std::string((size_t)++pad, ' ') << "}\n";
+        };
+        std::ofstream(dense / "points3D_tracks.bin", std::ios::binary) << "tracks";
+        const std::string pa = spirula::sha256_file((dense / "points3D.bin").string());
+        const std::string tb = spirula::sha256_file((dense / "points3D_tracks.bin").string());
+        record(pa, tb);
+        expect(cloud_check(dense.string()) == CloudCheck::Ok, "checksums that match the files: Ok");
+        record(std::string(64, '0'), tb);
+        expect(cloud_check(dense.string()) == CloudCheck::Mismatch,
+               "a wrong cloud checksum: Mismatch, not the Ok cached for the record before it");
+        record(pa, std::string(64, '0'));
+        expect(cloud_check(dense.string()) == CloudCheck::Mismatch, "a wrong tracks checksum: Mismatch");
+        record(pa, tb);
+        std::ofstream(dense / "points3D.bin", std::ios::binary | std::ios::app) << "x";
+        expect(cloud_check(dense.string()) == CloudCheck::Mismatch,
+               "a cloud changed after it was recorded: Mismatch, not served from the cache of the good one");
+        fs::remove_all(ds);
+    }
+
+    // ---- the progress dir ----------------------------------------------------------
+    {
+        const DensifyJob stock;
+        const auto without = densify_args(stock, "/ds", "/ds/images", "", false, true);
+        expect(!has(without, "--progress-dir"), "no progress dir unless one is given");
+        const auto with = densify_args(stock, "/ds", "/ds/images", "", false, true, "/ws/.progress");
+        expect(value_of(with, "--progress-dir") == "/ws/.progress", "the progress dir reaches the child");
     }
 
     std::printf(g_failures ? "\nFAILED: %d\n" : "\nall passed\n", g_failures);
