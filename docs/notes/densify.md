@@ -463,6 +463,62 @@ of the threshold, a far point whose neighbours lie inside the margin, a point 1.
 2-norm would drop), `far_isolated_runs_before_the_cap`, `far_filter_is_scale_free`,
 `far_isolated_plan_states`. S-1 has no far points, so "removes 0 on S-1" proves nothing and is not a check.
 
+## Cycle check and precision refinement (2026-10-07; both off by default)
+
+Ported as designs from spirula-studio#154 (D1odeKing; `LICENSES/NOTICE-spirula-studio-PR154.txt`).
+
+- **`--cycle auto|<px>|measure|off`.** This runs per neighbour, before Sampson. A's pixel goes through
+  A -> B and back through B -> A (bilinear, align_corners=false), and the miss is measured in match pixels of A.
+  `measure` drops nothing. It bins the miss (0.05 px) separately for samples that went on to be candidates
+  and for samples a geometric filter rejected; `densify.json` "cycle" holds both histograms. A
+  missing reverse refuses. B -> A comes from `RomaMatcher::matchBoth` only at two-scale presets,
+  where it is cheaper: on the M5 Pro, one basement pair, AB+BA costs 1.38x AB at `high` and 2.01x at
+  `base`. Elsewhere it takes a second `match()`, which the warp cache can serve. Each direction is its own cache entry.
+- **`--refine auto|<sigmas>|off`.** This needs `Warp::precision`, RoMa's 2x2 information (p00, p01, p11)
+  in 1/px² of the warp. It runs after the largest-consistent-set fusion and before every per-point filter,
+  which then judge the refined point exactly as they judged the mean:
+  - one observation per source image;
+  - the point moves only along the reference ray, because the warp is defined at the reference pixel;
+  - Huber IRLS by Gauss-Newton;
+  - the threshold is in sigmas of the view's own residuals, median Mahalanobis at the mean / sqrt(2 ln 2).
+
+  With no precision (encodings 0/1 dumps), the point stays at the mean and is counted.
+- **`--dump-matches <dir>`** writes every warp matched, encoding 2 with precision. A pair matched
+  both ways keeps its forward warp; reverses are written without precision.
+
+**The gate.** Pre-registered in `docs/superpowers/plans/2026-10-07-integrate-pr154.md` §11, geometry only.
+- Inputs: basement, 2,056 pairs, every 8th panorama held out. All arms read the same dumps, regenerated on the M5 Pro with precision and B -> A.
+- Budget: `--max-points 1000000`, seeds 0/1/2. The floor is the baseline's sd.
+- Harness and scorer: `tools/roma/eval_equal_budget.py` with WS-4's scorer.
+- The run below is on the build with the far-isolated filter; one on the build before it gave the same verdicts.
+- The cycle threshold: the pre-registered rule (99 % of geometric-pass candidates below T) **found no threshold**, since 6.85 % of them miss by more than 3.15 px. 1.3 px is post hoc, the Youden optimum against the geometric rejects, flat from 1.0 to 1.5 px.
+
+| metric (mean of 3) | base (sd) | cycle 1.3 px | refine 1.345 | both |
+|---|---|---|---|---|
+| ROI free-space violations | 0.00360 (0.00022) | 0.00365 (+0.2 sd) | 0.00391 (+1.4) | 0.00399 (+1.8) |
+| stairs-only violations | 0.00421 (0.00014) | 0.00408 (-1.0) | 0.00435 (+1.0) | 0.00444 (+1.6) |
+| written reprojection p95, px | 5.207 (0.006) | 5.080 (**-19.8**) | 5.400 (+30.1) | 5.298 (+14.1) |
+| local-plane bias p50, mm (void: +1 cm moves it -6 %) | 6.88 | 7.29 | 6.93 | 7.24 |
+| local-plane thickness p50, mm | 9.03 (0.20) | 8.37 (-3.3) | 8.25 (-3.9) | 8.07 (-4.9) |
+| ROI points | 40,706 (420) | 38,272 (**-5.8**) | 39,688 (-2.4) | 36,667 (-9.7) |
+| ROI anchors within 5 cm, ROI-matched, delta | | +0.0005 | -0.010 | -0.016 |
+| anchors seen by >= 2 held-out panoramas, c5 | 0.900 | 0.902 | 0.895 | 0.873 |
+| outside-box share | 0.0141 | 0.0103 | 0.0113 | 0.0083 |
+
+Nulls: 1 % floaters add 2.3 pp of violations, and shuffled depth reads 19.7x, so the violation rows stand. Plane bias is void, as WS-4 predicted.
+S-1:
+- Oracle: passes at every setting.
+- Real RoMa (native dumps of the staircase), points beyond 5 cm / riser cover: base 47 / 0.955, cycle 9 / 0.951, refine 41 / 0.945, both 9 / 0.943.
+
+**Verdict: both off by default.** The operator's rule needs violations and accuracy to improve beyond the floor without losing coverage.
+- Neither feature moves violations.
+- The cycle check improves the reprojection p95 and cuts S-1's far points 81 %. It costs 6 % of the ROI points and 0.004 of riser cover.
+- Refinement worsens the reprojection p95, because it minimises precision-weighted residuals, not pixels. It also drops 19 % of fused points, through the track and depth-precision filters judging the refined point.
+
+Two findings for whoever revisits this:
+- Round trips on the basement are broad: candidate median about 0.4 px, and 27 % of candidates exceed 1 px. On the rendered staircase 97.7 % of candidates fall under 1.3 px.
+- RoMa's precision is about 1.7-1.9x conservative in sigma here: the calibrated scale is 0.52 to 0.59.
+
 ## Checks
 
 - `roma_densify_test`: the stage on inputs whose answer is known, each test naming the
@@ -472,6 +528,19 @@ of the threshold, a far point whose neighbours lie inside the margin, a point 1.
   the same matches (`reference/python/roma_plugin_parity.py` writes the fixture).
 - `densify_autopick_test`: gate H-3.
 - `warp_cache_test`: the cache (`WarpCache.h`). Each test names the mutation it catches.
+- p23 mutation run, 2026-10-07 (each fails the test named; WS-4e's 41 re-run alongside, each still
+  failing its test): cycle miss in camera pixels or over them, missing reverse passing, align_corners
+  sampling, axes swapped, auto read as on, histogram before the filters or in camera pixels, reverse read
+  at the reference pixel (`cycle_*`); precision as covariance, p00/p11 swapped, one observation per view,
+  threshold in raw units, no Huber, identity precision when absent, track errors at the mean, refinement
+  not moving, derivative sign, residuals in the view's own pixels (`refine_*`; the last is equivalent
+  while views share one size, which only `refine_residuals_in_match_pixels` breaks); encoding 2 without
+  precision, a reverse overwriting a forward dump, matchBoth ignored, the reverse from match(A, B), auto
+  or explicit settings resolved wrongly (`dump_matches_reproduce_the_run`, `warp_files_round_trip`);
+  precision from the logit or left empty (`warp_precision`), BA's precision from AB
+  (`matcher_adapter_precision`); cache precision not stored, version not raised, matchBoth bypassing the
+  cache or running both for one missing direction or keying B -> A as A -> B, NaN or short precision
+  (`warp_cache_test`).
 - Freeze mutation run, 2026-10-07 (each fails the test named; run by hand on the working tree, the rest
   of the suite passing): auto = hybrid with maps and auto never falling back to moge
   (`auto_source_is_roma_unless_no_matcher`; the GUI's auto = hybrid, `densify_gui_test`); far filter:
