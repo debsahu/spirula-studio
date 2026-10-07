@@ -20,7 +20,9 @@
 #include "core/ImageFile.h"
 #include "external/stb_image.h"
 #include "external/stb_image_write.h"
+#include "core/Sha256.h"
 #include "roma/DepthSource.h"
+#include "roma/Publish.h"
 #include "roma/Sample.h"
 #include "sfm/core/FixedPoses.h"
 #include "sfm/core/Model.h"
@@ -764,6 +766,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         }
         for (DensePoint& p : pts) all.push_back(std::move(p));
         if (progress) progress(++done, (int)pl.ref_views.size(), (int64_t)all.size());
+        if (job.on_cloud) job.on_cloud(all, false);
     }
     // Radius: 4 voxels, twice the sparse spacing (a choice, docs/notes/densify.md).
     if (use_matches && use_depth && pl.voxel > 0) res.stats.fill_near_matches = dropFillNearMatches(all, 4 * pl.voxel);
@@ -787,6 +790,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         p.normal[1] = (float)n.y;
         p.normal[2] = (float)n.z;
     }
+    if (job.on_cloud) job.on_cloud(res.cloud, true);
     res.depth_tol = res_depth_tol;
     res.points = (int64_t)res.cloud.size();
     res.seconds_match = match_s;
@@ -1060,11 +1064,12 @@ ReprojStats writeSibling(const std::string& model_dir, const std::string& out_di
     ReprojStats rs;
     const std::string problem = outDirProblem("", model_dir, out_dir);
     if (!problem.empty()) throw std::runtime_error(problem);
+    WriterLock lock(out_dir);
     const sfm::FixedPoses fp = sfm::readFixedPoses(model_dir);
     const std::string source_images = slurp(src / "images.bin");
     std::vector<size_t> id_at;
     const std::string images_bin = detachPoints(source_images, &id_at);
-    const fs::path tmp = out.string() + ".partial";
+    const fs::path tmp = partialDir(out.string());
     std::error_code ec;
     fs::remove_all(tmp, ec);
     fs::create_directories(tmp);
@@ -1118,7 +1123,10 @@ ReprojStats writeSibling(const std::string& model_dir, const std::string& out_di
             const bool empty = js.find_first_not_of(" \n\t", open + 1) == close;
             js.insert(close, std::string(empty ? "" : ",\n  ") + "\"reprojection\": {\"observations\": " +
                                  std::to_string(rs.observations) + ", \"invalid\": " + std::to_string(rs.invalid) +
-                                 ", \"mean_px\": " + jn(rs.mean_px) + ", \"p95_px\": " + jn(rs.p95_px) + "}\n");
+                                 ", \"mean_px\": " + jn(rs.mean_px) + ", \"p95_px\": " + jn(rs.p95_px) + "},\n  " +
+                                 "\"points3D_sha256\": \"" + spirula::sha256_file((tmp / "points3D.bin").string()) +
+                                 "\", \"tracks_sha256\": \"" + spirula::sha256_file((tmp / "points3D_tracks.bin").string()) +
+                                 "\"\n");
         }
         put("densify.json", js);
         const std::string bad = sfm::checkFixedModel(tmp.string(), fp);
@@ -1134,8 +1142,7 @@ ReprojStats writeSibling(const std::string& model_dir, const std::string& out_di
         }
         if (back != want || slurp(tmp / "cameras.bin") != slurp(src / "cameras.bin"))
             throw std::runtime_error("the copied model differs from its source beyond its point ids");
-        fs::remove_all(out, ec);
-        fs::rename(tmp, out);
+        publishDir(tmp.string(), out.string());
     } catch (...) {
         fs::remove_all(tmp, ec);
         throw;

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "data/DatasetParser.h"
+#include "roma/DensifyEdit.h"
 #include "roma/DensifyRun.h"
 #include "roma/Synthetic.h"
 
@@ -46,6 +47,18 @@ int main() {
         // And it is reachable when asked for by name.
         const std::string named = find_colmap_model(d.string(), fs::path(out).lexically_relative(d).string());
         check(fs::equivalent(named, out), "--colmap-recon-dir reaches the sibling: " + named);
+        // The edit of the sibling is no more the pick than the sibling is.
+        std::vector<uint8_t> keep(cloud.size(), 1);
+        for (size_t i = 0; i < keep.size(); i += 4) keep[i] = 0;
+        const roma::EditResult er = roma::writeEditedSibling(out, keep);
+        check(fs::path(er.out_dir).filename() == "0-roma-edit", "the edit is <model>-roma-edit");
+        check(read_points3D_binary(er.out_dir).num() == er.kept && er.kept < (int64_t)cloud.size(),
+              "the dataset parser reads the kept points of the edit");
+        const std::string with_edit = find_colmap_poses(d.string());
+        check(fs::equivalent(with_edit, src), "with the edit present the pick is still the source: " + with_edit);
+        check(fs::equivalent(find_colmap_model(d.string(), ""), src), "the seeding pick is still the source with the edit present");
+        check(fs::equivalent(find_colmap_model(d.string(), fs::path(er.out_dir).lexically_relative(d).string()), er.out_dir),
+              "--colmap-recon-dir reaches the edit by name");
         fs::remove_all(d, ec);
     } catch (const std::exception& e) {
         std::printf("FAIL: %s\n", e.what());
