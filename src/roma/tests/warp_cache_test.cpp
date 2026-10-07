@@ -420,6 +420,7 @@ void decoder_refuses_valid_looking_garbage() {
     cases.push_back({"certainty count off", resign(put64(good, 72, (uint64_t)w.width * w.height - 1))});
     cases.push_back({"precision count off", resign(put64(good, 80, 3ull * w.width * w.height - 3))});
     { Warp x = w; x.precision[4] = std::nanf(""); cases.push_back({"NaN precision", encodeEntry(key, x, 0.5)}); }
+    { Warp x = w; x.precision.resize(x.precision.size() - 3); cases.push_back({"precision one pixel short, length to match", encodeEntry(key, x, 0.5)}); }
     {
         std::vector<uint8_t> longer = good, shorter = good;
         longer.insert(longer.end() - 8, 4, 0);
