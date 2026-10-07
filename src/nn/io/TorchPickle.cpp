@@ -18,6 +18,10 @@ namespace {
 // (a 48 KB deflated pickle of `N` opcodes otherwise reaches 5.6 GB).
 constexpr uint64_t kMaxPickleBytes = 32ull << 20;
 constexpr uint64_t kMaxObjects = 250000;
+// Items held by all containers together: each costs a pointer-sized slot, and 80
+// tuples of 200k BINGETs stay under every per-object cap yet hold 128 MB. The
+// real checkpoint holds ~14k.
+constexpr uint64_t kMaxItems = kMaxObjects;
 // Memo entries and stack slots are not mk() objects (BINGET re-pushes an existing
 // one, LONG_BINPUT mints a map node per distinct key), so they get their own
 // bound: 6M five-byte opcodes fit under the pickle cap and cost ~300 MB unbounded.
@@ -149,7 +153,7 @@ private:
     const std::string& path_;
     std::vector<P> st_;
     std::map<uint64_t, P> memo_;
-    uint64_t nobj_ = 0;
+    uint64_t nobj_ = 0, nitems_ = 0;
 
     P mk(Obj::Kind k) {
         NN_CHECK(++nobj_ <= kMaxObjects, "%s: the pickle builds more than %llu objects",
@@ -157,6 +161,11 @@ private:
         auto o = std::make_shared<Obj>();
         o->kind = k;
         return o;
+    }
+    void charge(size_t n) {
+        nitems_ += n;
+        NN_CHECK(nitems_ <= kMaxItems, "%s: the pickle's containers hold more than %llu items (limit)",
+                 path_.c_str(), (unsigned long long)kMaxItems);
     }
     // Containers record how deep they nest, so a pickle of a million nested
     // tuples is refused instead of freed recursively.
@@ -264,12 +273,14 @@ private:
     P collect(Obj::Kind k) {
         P o = mk(k);
         o->items = above_mark();
+        charge(o->items.size());
         for (const P& c : o->items) adopt(*o, c);
         return o;
     }
     P take(size_t n) {
         NN_CHECK(st_.size() >= n, "%s: pickle stack underflow", path_.c_str());
         P o = mk(Obj::Tuple);
+        charge(n);
         o->items.assign(st_.end() - (long)n, st_.end());
         st_.resize(st_.size() - n);
         for (const P& c : o->items) adopt(*o, c);
@@ -340,6 +351,7 @@ private:
     void setitem() {
         P v = pop(), k = pop(), d = top();
         NN_CHECK(d->kind == Obj::Dict, "%s: SETITEM on a non-dict", path_.c_str());
+        charge(2);
         adopt(*d, k);
         adopt(*d, v);
         d->items.push_back(k);
@@ -350,12 +362,14 @@ private:
         P d = top();
         NN_CHECK(d->kind == Obj::Dict && kv.size() % 2 == 0, "%s: malformed SETITEMS",
                  path_.c_str());
+        charge(kv.size());
         for (const P& c : kv) adopt(*d, c);
         d->items.insert(d->items.end(), kv.begin(), kv.end());
     }
     void append() {
         P v = pop(), l = top();
         NN_CHECK(l->kind == Obj::List, "%s: APPEND to a non-list", path_.c_str());
+        charge(1);
         adopt(*l, v);
         l->items.push_back(v);
     }
@@ -363,6 +377,7 @@ private:
         std::vector<P> v = above_mark();
         P l = top();
         NN_CHECK(l->kind == Obj::List, "%s: APPENDS to a non-list", path_.c_str());
+        charge(v.size());
         for (const P& c : v) adopt(*l, c);
         l->items.insert(l->items.end(), v.begin(), v.end());
     }

@@ -130,15 +130,18 @@ _zip("amp.pt", b"\x80\x02" + b"N" * 50_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
 # 3M `N`: under the pickle cap, over the object cap.
 _zip("many_objects.pt", b"\x80\x02" + b"N" * 3_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
 
-# Memo / stack amplification, none of it counted by the mk() object cap. Each is
-# ~30 MB of pickle (under the 32 MiB cap), a few KB deflated.
-# 6M MEMOIZE: each one a new distinct memo key, one std::map node apiece, 1 byte each
-# (LONG_BINPUT with distinct keys is the same defect at 5 bytes, but does not deflate).
+# Memo / stack amplification, none of it counted by the mk() object cap: ~30 MB
+# of pickle each (under the 32 MiB cap), a few KB deflated.
+# 6M MEMOIZE: a new memo key, one std::map node apiece (LONG_BINPUT does not deflate).
 _zip("memo_keys.pt", b"\x80\x02N" + b"\x94" * 6_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
 # 15M BINGET of one memo entry: a stack slot each, no new object.
 _zip("binget_stack.pt", b"\x80\x02Nq\x00" + b"h\x00" * 15_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
 # 6M LONG_BINGET of one memo entry.
 _zip("long_binget_stack.pt", b"\x80\x02Nq\x00" + b"j\x00\x00\x00\x00" * 6_000_000 + b".",
+     {}, zipfile.ZIP_DEFLATED)
+# 80 tuples of 200k BINGETs: the stack, the object count and each tuple stay under
+# their caps, but the 16M items held are 128 MB of vector storage.
+_zip("container_items.pt", b"\x80\x02]\x94" + (b"(" + b"h\x00" * 200_000 + b"t") * 80 + b".",
      {}, zipfile.ZIP_DEFLATED)
 
 
