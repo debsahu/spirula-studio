@@ -27,6 +27,8 @@ struct DensifyJob {
     std::string export_dir;             // write the views and pairs.txt, match nothing
     Matcher* matcher = nullptr;
     DensifyOptions opt;
+    // Called once if the warps come back coarser than the matcher's input.
+    std::function<void(int warp_size, int input_size)> on_warp_scale;
 };
 
 // What the run will do, every automatic choice resolved, and why.
@@ -49,6 +51,8 @@ struct DensifyPlan {
     int min_track = 0;
     double voxel = 0;
     int64_t max_points = 0;
+    double median_pair_angle_deg = 0;            // ref-neighbour, at their shared points
+    double match_focal = 0;                      // median view focal, match pixels
     double mask_keep = -1;                       // mean keep fraction of sampled masks, -1 none
     int masks_sampled = 0;
     DensifyOptions opt;                          // with every auto resolved
@@ -72,9 +76,17 @@ std::string siblingDir(const std::string& model_dir);
 DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& plan,
                          const std::function<void(int, int, int64_t)>& progress);
 
-// The source's cameras/images.bin and its gauge and rig files copied as bytes;
-// points3D.bin with empty tracks (images.bin is untouched), the tracks in
-// points3D_tracks.bin, densify.json. Throws, writing nothing, unless verified.
+// cameras.bin and the gauge and rig files copied as bytes; images.bin copied
+// with every point3D_id invalid (detachPoints); points3D.bin with empty
+// tracks, the tracks in points3D_tracks.bin. Throws, writing nothing, unless verified.
+std::string detachPoints(const std::string& images_bin, std::vector<size_t>* id_offsets);
+
+// Why `out_dir` must not be written for `model_dir`, or "": the source itself,
+// a folder holding it or inside it, or (with `dataset_dir`) a model folder
+// that sorts first and so would become the trainer's automatic pick.
+std::string outDirProblem(const std::string& dataset_dir, const std::string& model_dir,
+                          const std::string& out_dir);
+
 void writeSibling(const std::string& model_dir, const std::string& out_dir,
                   const DensifyPlan& plan, const std::vector<DensePoint>& cloud,
                   const std::string& settings_json);

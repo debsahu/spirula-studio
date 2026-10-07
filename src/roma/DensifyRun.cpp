@@ -1,3 +1,4 @@
+// Ported in part from Lichtfeld-Densification-Plugin (GPL-3.0-or-later), Copyright (c) 2025 Shady Gmira and contributors; densify.py, core/pipeline.py@ab0b04e.
 #include "roma/DensifyRun.h"
 
 #include <algorithm>
@@ -289,7 +290,7 @@ DensifyPlan planDensify(const DensifyJob& job) {
     auto choose = [&](int r, double max_baseline) {
         std::vector<int> n;
         if (o.neighbour_rule == NeighbourRule::Covis && !rec.points3D.empty())
-            n = neighboursByCovis(pl.images, rec, allowed, r, k, o.min_parallax_deg, max_baseline);
+            n = neighboursByCovis(pl.images, rec, allowed, r, k, o.covis_min_angle_deg, max_baseline);
         if ((int)n.size() < k)
             for (int q : neighboursByPose(pl.images, allowed, r, (int)allowed.size()))
                 if ((int)n.size() < k && std::find(n.begin(), n.end(), q) == n.end() &&
@@ -327,12 +328,52 @@ DensifyPlan planDensify(const DensifyJob& job) {
         }
     }
 
-    pl.min_track = o.min_track > 0 ? o.min_track : (k >= 3 ? 3 : 2);
+    pl.min_track = o.min_track > 0 ? o.min_track : (k >= 2 ? 0 : 2);
+    {
+        std::vector<double> ang;
+        for (size_t i = 0; i < pl.refs.size(); i++) {
+            const SourceImage& r = pl.images[(size_t)pl.refs[i]];
+            for (int q : pl.nbrs[i]) {
+                const SourceImage& b = pl.images[(size_t)q];
+                std::vector<uint64_t> both;
+                std::set_intersection(r.points.begin(), r.points.end(), b.points.begin(),
+                                      b.points.end(), std::back_inserter(both));
+                Vec3 g{0, 0, 0};
+                int64_t n = 0;
+                for (uint64_t p : both) {
+                    auto it = rec.points3D.find(p);
+                    if (it == rec.points3D.end()) continue;
+                    g = g + it->second.xyz;
+                    n++;
+                }
+                if (n) ang.push_back(sfm::triangulationAngle(g * (1.0 / (double)n), r.centre, b.centre));
+            }
+        }
+        if (!ang.empty()) {
+            std::nth_element(ang.begin(), ang.begin() + (long)(ang.size() / 2), ang.end());
+            pl.median_pair_angle_deg = ang[ang.size() / 2] * 57.29577951308232;
+        }
+        std::vector<double> fm;
+        for (const View& v : pl.views) fm.push_back(0.5 * (v.cam.fx + v.cam.fy) * pl.match_size / std::max(v.cam.width, v.cam.height));
+        std::nth_element(fm.begin(), fm.begin() + (long)(fm.size() / 2), fm.end());
+        pl.match_focal = fm[fm.size() / 2];
+    }
+    if (o.max_depth_error == 0) {
+        // 2%, or what a pair at half the capture's median parallax gets from one
+        // match pixel, whichever is looser: an aerial orbit at 5.7 degrees passes.
+        double bar = 0.02;
+        if (pl.median_pair_angle_deg > 0)
+            bar = std::max(bar, 1.0 / (pl.match_focal * std::sin(0.5 * pl.median_pair_angle_deg / 57.29577951308232)));
+        o.max_depth_error = bar;
+    }
     pl.voxel = o.voxel > 0 ? o.voxel : o.voxel < 0 ? 0 : 0.5 * pl.sparse_spacing;
     pl.max_points = o.max_points > 0 ? o.max_points : o.max_points < 0 ? 0
                     : std::clamp<int64_t>(4 * pl.sparse_points, 1000000, 8000000);
     if (o.matches_per_ref <= 0) {
-        const int64_t per = pl.max_points / std::max<int64_t>(1, (int64_t)pl.ref_views.size());
+        // 16%: points written per sample on the basement (200,229 of 1,219,543).
+        constexpr double kYield = 0.16;
+        const int64_t per = (int64_t)((double)pl.max_points /
+                                      (kYield * (double)std::max<size_t>(1, pl.ref_views.size())));
         o.matches_per_ref = (int)std::clamp<int64_t>(per, 2000, 50000);
     }
 
@@ -477,6 +518,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
     if (!job.matcher) throw std::runtime_error("no matcher");
 
     std::vector<DensePoint> all;
+    bool warned = false;
     double match_s = 0;
     int done = 0;
     for (const auto& rv : pl.ref_views) {
@@ -508,6 +550,17 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
             m.nbrs.push_back(b);
         }
         if (m.nbrs.empty()) continue;
+        // Thresholds are in pixels of the matcher's input; a coarser warp
+        // (RoMa's stride-4 coarse match) gets them in its own pixels.
+        DensifyOptions ro = o;
+        if (m.w != pl.match_size && !o.plugin_exact) {
+            const double k = (double)m.w / pl.match_size;
+            ro.reproj_px *= k;
+            ro.sampson_px2 *= k * k;
+            if (ro.max_depth_error > 0) ro.max_depth_error /= k;
+            if (!warned && job.on_warp_scale) job.on_warp_scale(m.w, pl.match_size);
+            warned = true;
+        }
         if (o.plugin_exact) {
             // The plugin's colour reads the match-resolution, masked reference.
             m.rgb_match = rgbA;
@@ -531,7 +584,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         so.no_filter = o.no_filter;
         so.seed = o.seed * 1000003ull + (uint64_t)rv.view;
         const std::vector<int64_t> samples = sampleWithCoverage(best, m.w, m.h, so);
-        std::vector<DensePoint> pts = triangulateRef(m, pl.views, samples, o, res.stats);
+        std::vector<DensePoint> pts = triangulateRef(m, pl.views, samples, ro, res.stats);
         for (DensePoint& p : pts) all.push_back(std::move(p));
         if (progress) progress(++done, (int)pl.ref_views.size(), (int64_t)all.size());
     }
@@ -552,14 +605,72 @@ std::string siblingDir(const std::string& model_dir) {
     return (base.parent_path() / (base.filename().string() + "-roma")).string();
 }
 
+// images.bin with every 2-D point's point3D_id set to COLMAP's invalid id, and
+// the byte offsets of those ids. The sibling's points3D.bin is a different
+// set of points, so the source's ids would alias unrelated dense points.
+std::string detachPoints(const std::string& bin, std::vector<size_t>* id_at) {
+    std::string out = bin;
+    auto need = [&](size_t at, size_t n) {
+        if (at + n > out.size()) throw std::runtime_error("images.bin is truncated");
+    };
+    size_t at = 0;
+    need(at, 8);
+    uint64_t n;
+    std::memcpy(&n, out.data(), 8);
+    at = 8;
+    const uint64_t invalid = ~0ull;
+    for (uint64_t i = 0; i < n; i++) {
+        at += 4 + 7 * 8 + 4;
+        const size_t end = out.find('\0', at);
+        if (end == std::string::npos) throw std::runtime_error("images.bin is truncated");
+        at = end + 1;
+        need(at, 8);
+        uint64_t np;
+        std::memcpy(&np, out.data() + at, 8);
+        at += 8;
+        need(at, (size_t)np * 24);
+        for (uint64_t k = 0; k < np; k++) {
+            std::memcpy(&out[at + 16], &invalid, 8);
+            if (id_at) id_at->push_back(at + 16);
+            at += 24;
+        }
+    }
+    if (at != out.size()) throw std::runtime_error("images.bin has trailing bytes");
+    return out;
+}
+
+std::string outDirProblem(const std::string& dataset_dir, const std::string& model_dir,
+                          const std::string& out_dir) {
+    const fs::path src = fs::weakly_canonical(model_dir), out = fs::weakly_canonical(out_dir);
+    const std::string s = src.generic_string() + "/", o = out.generic_string() + "/";
+    if (s == o) return "the output model would replace its source";
+    if (s.rfind(o, 0) == 0) return "the output folder contains the source model";
+    if (o.rfind(s, 0) == 0) return "the output folder is inside the source model";
+    if (dataset_dir.empty()) return {};
+    // The parser picks by image count, then by path under the dataset; the
+    // counts tie, so the sibling must sort after the source.
+    const fs::path ds = fs::weakly_canonical(dataset_dir);
+    const std::string rs = src.lexically_relative(ds).generic_string();
+    const std::string ro = out.lexically_relative(ds).generic_string();
+    auto picked = [](const std::string& r) {
+        const fs::path p(r);
+        return p.parent_path() == "sparse" || p.parent_path() == "colmap/sparse";
+    };
+    if (picked(ro) && picked(rs) && ro < rs)
+        return "'" + ro + "' sorts before '" + rs + "', so the trainer would pick it by itself";
+    return {};
+}
+
 void writeSibling(const std::string& model_dir, const std::string& out_dir,
                   const DensifyPlan& pl, const std::vector<DensePoint>& cloud,
                   const std::string& settings_json) {
     const fs::path src(model_dir), out(out_dir);
-    if (fs::weakly_canonical(src) == fs::weakly_canonical(out))
-        throw std::runtime_error("the output model would replace its source");
+    const std::string problem = outDirProblem("", model_dir, out_dir);
+    if (!problem.empty()) throw std::runtime_error(problem);
     const sfm::FixedPoses fp = sfm::readFixedPoses(model_dir);
-    const std::string images_bin = slurp(src / "images.bin");
+    const std::string source_images = slurp(src / "images.bin");
+    std::vector<size_t> id_at;
+    const std::string images_bin = detachPoints(source_images, &id_at);
     const fs::path tmp = out.string() + ".partial";
     std::error_code ec;
     fs::remove_all(tmp, ec);
@@ -605,8 +716,17 @@ void writeSibling(const std::string& model_dir, const std::string& out_dir,
         put("densify.json", settings_json);
         const std::string bad = sfm::checkFixedModel(tmp.string(), fp);
         if (!bad.empty()) throw std::runtime_error("the copied model differs from its source: " + bad);
-        if (slurp(tmp / "images.bin") != images_bin || slurp(tmp / "cameras.bin") != slurp(src / "cameras.bin"))
-            throw std::runtime_error("the copied model differs from its source: not byte-identical");
+        // Byte for byte but for the point3D ids, which detachPoints cleared.
+        std::string back = slurp(tmp / "images.bin"), want = source_images;
+        if (back.size() != want.size()) throw std::runtime_error("the copied images.bin changed size");
+        for (size_t at : id_at) {
+            if (back.compare(at, 8, std::string(8, '\xff')) != 0)
+                throw std::runtime_error("the copied images.bin still points at source points");
+            std::memset(&back[at], 0, 8);
+            std::memset(&want[at], 0, 8);
+        }
+        if (back != want || slurp(tmp / "cameras.bin") != slurp(src / "cameras.bin"))
+            throw std::runtime_error("the copied model differs from its source beyond its point ids");
         fs::remove_all(out, ec);
         fs::rename(tmp, out);
     } catch (...) {

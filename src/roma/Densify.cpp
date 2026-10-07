@@ -22,7 +22,8 @@ void DensifyStats::add(const DensifyStats& o) {
     sampson += o.sampson; nonfinite += o.nonfinite; reproj += o.reproj;
     cheirality += o.cheirality; parallax += o.parallax; candidates += o.candidates;
     ref_reproj += o.ref_reproj; inconsistent += o.inconsistent; uncertain += o.uncertain; fused += o.fused; short_track += o.short_track;
-    lone_kept += o.lone_kept; voxel_merged += o.voxel_merged; capped += o.capped;
+    two_image_kept += o.two_image_kept;
+    if (o.two_image_bar >= 0) two_image_bar = o.two_image_bar; voxel_merged += o.voxel_merged; capped += o.capped;
     for (const auto& kv : o.track_hist) track_hist[kv.first] += kv.second;
 }
 
@@ -83,6 +84,8 @@ sfm::Mat34 projection(const View& v, bool with_k) {
     for (int r = 0; r < 3; r++)
         for (int c = 0; c < 4; c++)
             for (int k = 0; k < 3; k++) Q[r * 4 + c] += K[r * 3 + k] * P[k * 4 + c];
+    // The plugin's K @ [R|t] is a float32 product.
+    for (double& q : Q) q = (float)q;
     return Q;
 }
 
@@ -98,7 +101,7 @@ double reprojPlugin(const sfm::Mat34& P, const Vec3& X, double u, double v) {
 
 // Default mode: through the view's camera model, in match-resolution pixels;
 // +inf behind the camera.
-double reprojMatch(const View& v, const Vec3& X, double u, double vv, double scale) {
+double reprojMatch(const View& v, const Vec3& X, double u, double vv, double sx, double sy) {
     const Vec3 Xc = toView(v, X);
     if (isPinhole(v.cam) || !v.cam.wideFov()) {
         if (!(Xc.z > 0)) return INFINITY;
@@ -107,7 +110,7 @@ double reprojMatch(const View& v, const Vec3& X, double u, double vv, double sca
         if (!(Xc.dot(b) > 0)) return INFINITY;
     }
     const Vec2 p = v.cam.project(Xc);
-    return std::hypot(p.x - u, p.y - vv) / scale;
+    return std::hypot((p.x - u) / sx, (p.y - vv) / sy);
 }
 
 bool cheiral(const View& v, const Vec3& X, const Vec3& bearing) {
@@ -274,8 +277,8 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
             if (exact)
                 err = std::max(reprojPlugin(PA, X, xa[s], ya[s]), reprojPlugin(PB, X, xb, yb));
             else
-                err = std::max(reprojMatch(A, X, xa[s], ya[s], sxA),
-                               reprojMatch(B, X, xb, yb, sxB));
+                err = std::max(reprojMatch(A, X, xa[s], ya[s], sxA, syA),
+                               reprojMatch(B, X, xb, yb, sxB, syB));
             const double par = finite ? sfm::triangulationAngle(X, CA, CB) * kRadToDeg : 0.0;
             if (!finite) { st.nonfinite++; continue; }
             if (!std::isfinite(err)) {
@@ -302,7 +305,7 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
 
     auto reproj = [&](const View& v, const Vec3& X, double x, double y) {
         if (exact) return reprojPlugin(projection(v, true), X, x, y);
-        return reprojMatch(v, X, x, y, (double)v.cam.width / W);
+        return reprojMatch(v, X, x, y, (double)v.cam.width / W, (double)v.cam.height / H);
     };
 
     std::vector<DensePoint> out;
@@ -316,12 +319,13 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
             int best_n = -1;
             std::vector<std::vector<char>> ok(cs.size(), std::vector<char>(cs.size(), 0));
             for (size_t i = 0; i < cs.size(); i++) {
-                int n = 0;
+                std::set<int> agree;   // source images, so two faces of one count once
                 for (size_t j = 0; j < cs.size(); j++) {
                     ok[i][j] = i == j || reproj(views[(size_t)cs[j].view], cs[i].X, cs[j].xb,
                                                 cs[j].yb) <= opt.reproj_px;
-                    n += ok[i][j];
+                    if (ok[i][j]) agree.insert(views[(size_t)cs[j].view].image);
                 }
+                const int n = (int)agree.size();
                 if (n > best_n || (n == best_n && cs[i].err < cs[best].err)) { best = i; best_n = n; }
             }
             std::vector<Candidate> keep;
@@ -442,20 +446,29 @@ std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_trac
     const bool by_images = !opt.plugin_exact;
     std::vector<DensePoint> kept;
     kept.reserve(pts.size());
-    if (opt.plugin_exact || !(voxel > 0)) {
+    if (min_track > 0 || opt.plugin_exact) {
         for (DensePoint& p : pts) {
             if (trackLen(p, by_images) >= min_track) kept.push_back(std::move(p));
             else st.short_track++;
         }
     } else {
-        std::unordered_map<VoxelKey, int, VoxelHash> occupancy;
-        for (const DensePoint& p : pts) occupancy[keyOf(p.xyz, voxel)]++;
+        // Auto: three images or more, and a two-image point only as consistent
+        // as the median of the run's own longer tracks.
+        std::vector<double> e3;
+        for (const DensePoint& p : pts)
+            if (trackLen(p, by_images) >= 3) e3.push_back(p.error);
+        double bar = -1;
+        if (!e3.empty()) {
+            std::nth_element(e3.begin(), e3.begin() + (long)(e3.size() / 2), e3.end());
+            bar = e3[e3.size() / 2];
+        }
+        st.two_image_bar = bar;
         for (DensePoint& p : pts) {
-            if (trackLen(p, by_images) >= min_track) {
+            const int tl = trackLen(p, by_images);
+            if (tl >= 3) {
                 kept.push_back(std::move(p));
-            } else if (occupancy[keyOf(p.xyz, voxel)] == 1 &&
-                       p.parallax_deg >= opt.lone_parallax_deg) {
-                st.lone_kept++;
+            } else if (tl == 2 && p.error <= bar) {
+                st.two_image_kept++;
                 kept.push_back(std::move(p));
             } else {
                 st.short_track++;
