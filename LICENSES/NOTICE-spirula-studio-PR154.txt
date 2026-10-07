@@ -40,6 +40,16 @@ What was taken, and from where. "Design" means the idea only; no line was copied
       file defeats. Storage, eviction and verification are our own. Design
       only.
 
+  src/app/gui/edit/PointsDoc.{h,cpp}, src/app/gui/DensifyArgs.cpp, src/app/gui/DensifyRunner.{h,cpp},
+  src/app/gui/ReconModels.{h,cpp}, and the dense-points parts of src/app/gui/GuiApp.cpp
+      The GUI side of the edit and the preview: the point editor opens a dense
+      sibling and saves the result as a `-roma-edit` sibling, the dataset
+      screen's step passes --progress-dir to the child and draws its snapshots in
+      the model view the screen already has, and the model list marks and
+      checks dense models (the pull request's dense edit and preview panels).
+      Ported as features onto this tree's own editor and model view; no line was
+      copied. Feature only.
+
 Items of the pull request that were not taken: its RoMa model and pipeline, its
 dense output tree and CLI, its training changes. See
 docs/superpowers/plans/2026-10-07-integrate-pr154.md for what was decided and why.
