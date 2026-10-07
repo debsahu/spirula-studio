@@ -62,6 +62,8 @@ int body(int argc, char** argv) {
             for (int i = 0; i < 9; i++) v.R[(size_t)i] = R[i];
             v.t = {t[0], t[1], t[2]};
             v.centre = sfm::mul(sfm::transpose(v.R), v.t) * -1.0;
+            // The plugin's C = -R^T t, float32 like the rest of its CameraRecord.
+            v.centre = {(float)v.centre.x, (float)v.centre.y, (float)v.centre.z};
             index[name] = (int)views.size();
             views.push_back(v);
         }

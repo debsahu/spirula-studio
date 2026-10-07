@@ -12,6 +12,9 @@ what they came from:
   src/roma/Densify.{h,cpp}    core/pipeline.py, core/geometry.py, densify.py
                               (collect, triangulation, filters, fusion, support,
                               track filter, voxel select, point cap)
+  src/roma/DensifyRun.cpp     densify.py, core/pipeline.py (the reference loop:
+                              which views are matched against which, masks
+                              applied before matching, the run's sample budget)
 
 The plugin's vendored RoMaV2 tree, its GUI panels and its COLMAP writer were not
 ported. Spirula Studio is distributed under the GNU General Public License

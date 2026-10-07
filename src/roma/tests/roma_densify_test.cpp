@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "data/CameraMath.h"
+#include "external/stb_image_write.h"
 #include "roma/Densify.h"
 #include "roma/DensifyRun.h"
 #include "roma/DumpMatcher.h"
@@ -483,30 +484,227 @@ void support_counts_distinct_images() {
     }
 }
 
-// Mutant: shortest track kept, or the error tie-break reversed; the lone
-// exception granted to points that share their voxel.
-void voxel_select_and_lone_rule() {
-    auto pt = [](double x, int images, double err, double par) {
+// Mutant: agreement counted in candidates rather than source images, so two
+// faces of one neighbour, wrong together, outvote a third image.
+void consistency_counts_images_not_faces() {
+    const Scene truth = planeScene();
+    Scene wrong = planeScene();
+    wrong.quads[0].o.x = 3.3;
+    const std::vector<View> views = {
+        pinView("a", 0, {0, 0, 0}, {3, 0, 0}, 640, 640, 320),
+        pinView("b1", 1, {0, 0.6, 0}, {3, 0, 0}, 640, 640, 320),
+        pinView("b2", 1, {0, 0.6, 0}, {3, 0.2, 0.1}, 640, 640, 320),
+        pinView("c", 2, {0, -0.6, 0.2}, {3, 0, 0}, 640, 640, 320)};
+    DensifyOptions opt;
+    opt.max_depth_error = 0;
+    opt.min_parallax_deg = 0;
+    const RefMatches bad = oracleMatches(wrong, views, 0, {1, 2}, 320, 0.0, opt);
+    const RefMatches good = oracleMatches(truth, views, 0, {3}, 320, 0.0, opt);
+    RefMatches m = bad;
+    m.nbrs.push_back(3);
+    m.warp.push_back(good.warp[0]);
+    m.cert.push_back(good.cert[0]);
+    std::vector<int64_t> centre;   // where all three neighbours see the plane
+    for (int y = 120; y < 200; y += 4)
+        for (int x = 120; x < 200; x += 4) centre.push_back((int64_t)y * 320 + x);
+    DensifyStats st;
+    const std::vector<DensePoint> pts = triangulateRef(m, views, centre, opt, st);
+    double worst = 0;
+    for (const DensePoint& p : pts) {
+        const Vec3 d = (p.xyz - views[0].centre).normalized();
+        worst = std::max(worst, (views[0].centre + d * truth.hit(views[0].centre, d) - p.xyz).norm());
+    }
+    check(worst < 1e-3, "two faces of one image outvoted the third: a point " + std::to_string(worst) + " m off");
+    check(st.inconsistent > 0, "nothing was found inconsistent");
+}
+
+// Mutant: thresholds left in input pixels when the warp is coarser (RoMa's
+// stride-4 coarse match): 0.8 warp px of noise is 3.2 input px.
+void coarse_warp_thresholds_scale() {
+    const fs::path d = tempDir("coarse");
+    writeStairDataset(stairScene(), d.string(), 96, 192, 400);
+    const Scene scene = stairScene();
+    struct Coarse : Matcher {
+        OracleMatcher* inner = nullptr;
+        int inputSize() const override { return 256; }
+        Warp match(const MatchImage& a, const MatchImage& b) override { return inner->match(a, b); }
+        std::string describe() const override { return "coarse"; }
+    } coarse;
+    DensifyJob job;
+    job.model_dir = (d / "sparse" / "0").string();
+    job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+    job.opt.refs = 4;
+    job.opt.max_depth_error = -1;
+    job.opt.sampson_px2 = 0;
+    job.matcher = &coarse;
+    int seen_warp = 0, seen_input = 0;
+    job.on_warp_scale = [&](int w, int i) { seen_warp = w; seen_input = i; };
+    const DensifyPlan pl = planDensify(job);
+    OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 64, 0.8, 0.0, 2);
+    coarse.inner = &om;
+    const DensifyResult r = runDensify(job, pl, nullptr);
+    check(seen_warp == 64 && seen_input == 256, "no warning of the coarse warp");
+    const double rejected = (double)r.stats.reproj / (double)std::max<int64_t>(1, r.stats.reproj + r.stats.candidates);
+    check(rejected > 0.5, "0.8 warp px of noise passed a 1 px (0.25 warp px) bar: rejected " + std::to_string(rejected));
+    fs::remove_all(d);
+}
+
+// Mutant: shortest track kept, or the error tie-break reversed.
+void voxel_select_keeps_longest_then_best() {
+    auto pt = [](double x, int images, double err) {
         DensePoint p;
         p.xyz = {x, 0.05, 0.05};
         p.distinct_images = images;
         p.track.resize((size_t)images);
         p.error = err;
-        p.parallax_deg = par;
         return p;
     };
-    const std::vector<DensePoint> v = {pt(0.01, 2, 0.1, 5), pt(0.02, 3, 0.5, 5), pt(0.03, 3, 0.2, 5),
-                                       pt(1.05, 1, 0.1, 5)};
-    const std::vector<size_t> s = voxelSelect(v, 0.1, true);
-    check(s == std::vector<size_t>({2, 3}), "voxel select picked the wrong points");
+    const std::vector<DensePoint> v = {pt(0.01, 2, 0.1), pt(0.02, 3, 0.5), pt(0.03, 3, 0.2), pt(1.05, 1, 0.1)};
+    check(voxelSelect(v, 0.1, true) == std::vector<size_t>({2, 3}), "voxel select picked the wrong points");
+}
+
+// Mutants: two-image points always or never admitted, the bar taken as the
+// mean (0.5 here) rather than the median (0.3), one-image points admitted.
+void auto_min_track_admits_consistent_pairs() {
+    auto pt = [](double x, int images, double err) {
+        DensePoint p;
+        p.xyz = {x, 0, 0};
+        p.distinct_images = images;
+        p.track.resize((size_t)images);
+        p.error = err;
+        return p;
+    };
+    std::vector<DensePoint> in;
+    for (double e : {0.1, 0.2, 0.3, 0.4, 1.5}) in.push_back(pt(in.size() * 1.0, 3, e));
+    in.push_back(pt(10, 2, 0.25));   // kept: under the median
+    in.push_back(pt(11, 2, 0.45));   // dropped: over the median, under the mean
+    in.push_back(pt(12, 1, 0.01));   // dropped: one image
     DensifyOptions opt;
-    opt.lone_parallax_deg = 2.0;
     DensifyStats st;
-    std::vector<DensePoint> in = {pt(0.01, 1, 0.1, 5), pt(0.02, 3, 0.1, 5), pt(2.05, 1, 0.1, 5),
-                                  pt(3.05, 1, 0.1, 1.0)};
-    const std::vector<DensePoint> out = finalizePoints(in, 3, 0.1, 0, opt, st);
-    check(out.size() == 2, "lone rule kept " + std::to_string(out.size()) + ", want 2");
-    check(st.lone_kept == 1, "lone points kept: " + std::to_string(st.lone_kept));
+    const std::vector<DensePoint> out = finalizePoints(in, 0, 0, 0, opt, st);
+    std::vector<double> xs;
+    for (const DensePoint& p : out) xs.push_back(p.xyz.x);
+    check(xs == std::vector<double>({0, 1, 2, 3, 4, 10}), "auto min-track kept the wrong points");
+    check(std::fabs(st.two_image_bar - 0.3) < 1e-12, "bar " + std::to_string(st.two_image_bar));
+    check(st.two_image_kept == 1, "two-image points kept: " + std::to_string(st.two_image_kept));
+    DensifyStats st3;
+    check(finalizePoints(in, 3, 0, 0, opt, st3).size() == 5, "--min-track 3 kept a short track");
+}
+
+// Mutants: uniform, 1 / error, or depth_per_px weights. B (wide) is right but
+// 0.3 px off its epipolar lines, so its error is the larger; C (narrow) is
+// 0.05 px along them, error near zero, depth 2 cm off.
+void fusion_weights_by_depth_precision() {
+    const Scene sc = planeScene();
+    const std::vector<View> views = {
+        pinView("a", 0, {0, 0, 0}, {3, 0, 0}, 640, 640, 320),
+        pinView("b", 1, {0, 0.8, 0}, {3, 0, 0}, 640, 640, 320),
+        pinView("c", 2, {0, 0.12, 0}, {3, 0, 0}, 640, 640, 320)};
+    DensifyOptions opt;
+    opt.max_depth_error = 0;
+    opt.min_parallax_deg = 0;
+    RefMatches m = oracleMatches(sc, views, 0, {1, 2}, 320, 0.0, opt);
+    for (size_t i = 0; i < m.warp[0].size() / 2; i++) {
+        m.warp[0][2 * i + 1] += 2.0f * 0.3f / 320;   // b: across its epipolar lines
+        m.warp[1][2 * i] += 2.0f * 0.05f / 320;      // c: along them
+    }
+    std::vector<int64_t> centre;   // the middle of the frame, where all three agree
+    for (int y = 120; y < 200; y += 4)
+        for (int x = 120; x < 200; x += 4) centre.push_back((int64_t)y * 320 + x);
+    DensifyStats st;
+    const std::vector<DensePoint> pts = triangulateRef(m, views, centre, opt, st);
+    int both = 0;
+    for (const DensePoint& p : pts) both += p.distinct_images == 3;
+    check(both > (int)centre.size() * 9 / 10, "points fused from both neighbours: " + std::to_string(both));
+    const double e = medianTruthError(sc, views[0], pts);
+    check(e < 0.0015, "median error " + std::to_string(e) + " m: the imprecise pair outweighed the precise one");
+}
+
+// Mutant: channels swapped when sampling, fusing or writing.
+void colour_channels_in_order() {
+    ImageData img;
+    img.width = img.height = 2;
+    img.rgb = {200, 100, 50, 200, 100, 50, 200, 100, 50, 200, 100, 50};
+    const std::array<float, 3> c = sampleRgb(img, 1.0, 1.0);
+    check(std::fabs(c[0] - 200 / 255.f) < 1e-6 && std::fabs(c[2] - 50 / 255.f) < 1e-6, "sampleRgb channel order");
+    const Scene sc = planeScene();
+    const std::vector<View> views = {pinView("a", 0, {0, -0.3, 0}, {3, 0, 0}, 640, 640, 320),
+                                     pinView("b", 1, {0, 0.3, 0}, {3, 0, 0}, 640, 640, 320)};
+    DensifyOptions opt;
+    opt.max_depth_error = 0;
+    RefMatches m = oracleMatches(sc, views, 0, {1}, 64, 0.0, opt);
+    m.colour_at = [](double, double) { return std::array<float, 3>{0.9f, 0.5f, 0.1f}; };
+    DensifyStats st;
+    const std::vector<DensePoint> pts = triangulateRef(m, views, allPixels(m), opt, st);
+    check(!pts.empty() && pts[0].rgb[0] == 0.9f && pts[0].rgb[2] == 0.1f, "triangulateRef colour order");
+}
+
+// Mutant: an off-by-one in the held-out set, or held-out images left
+// selectable as references or neighbours.
+void holdout_is_every_nth_and_never_matched() {
+    const fs::path d = tempDir("holdout");
+    writeStairDataset(stairScene(), d.string(), 96, 192, 600);
+    DensifyJob job;
+    job.model_dir = (d / "sparse" / "0").string();
+    job.opt.holdout_every = 3;
+    job.opt.refs = 1.0;
+    const DensifyPlan pl = planDensify(job);
+    check(pl.held_out == std::vector<int>({0, 3, 6, 9}), "held out the wrong images");
+    std::set<int> held(pl.held_out.begin(), pl.held_out.end());
+    for (int r : pl.refs) check(!held.count(r), "a held-out image is a reference");
+    for (const auto& n : pl.nbrs)
+        for (int q : n) check(!held.count(q), "a held-out image is a neighbour");
+    for (const auto& rv : pl.ref_views) {
+        check(!held.count(pl.views[(size_t)rv.view].image), "a held-out view is matched");
+        for (int v : rv.nbr_views) check(!held.count(pl.views[(size_t)v].image), "a held-out view is a neighbour view");
+    }
+    check(pl.refs.size() == 8, "references: " + std::to_string(pl.refs.size()));
+    fs::remove_all(d);
+}
+
+// Mutant: a half-pixel shift in cutView's sampling grid or its mask lookup.
+void cut_view_is_pixel_exact() {
+    ImageData img;
+    img.width = img.height = 32;
+    std::mt19937 rng(4);
+    img.rgb.resize(32 * 32 * 3);
+    img.keep.resize(32 * 32);
+    for (auto& v : img.rgb) v = (uint8_t)(rng() & 255);
+    for (auto& v : img.keep) v = (uint8_t)(rng() & 1);
+    SourceImage src;
+    src.cam = sfm::Camera::defaultFor(1, 32, 32, 30, sfm::CamModel::Pinhole);
+    const std::vector<View> v = imageViews(src, 0, false, 0);
+    std::vector<uint8_t> rgb, keep;
+    cutView(img, src, v[0], 32, rgb, keep);
+    check(keep == img.keep, "keep mask moved");
+    size_t bad = 0;
+    for (size_t i = 0; i < rgb.size(); i++)
+        bad += img.keep[i / 3] ? rgb[i] != img.rgb[i] : rgb[i] != 0;
+    check(bad == 0, "pixels changed by a same-size cut: " + std::to_string(bad));
+    // At half size the mask is read at each output pixel's centre: source (2x+1, 2y+1).
+    cutView(img, src, v[0], 16, rgb, keep);
+    size_t off = 0;
+    for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 16; x++) off += keep[(size_t)y * 16 + x] != img.keep[(size_t)(2 * y + 1) * 32 + 2 * x + 1];
+    check(off == 0, "half-size mask read off-centre at " + std::to_string(off) + " pixels");
+}
+
+// Mutant: --flip-mask ignored, for a mask file or an image's alpha.
+void flip_mask_inverts_keep() {
+    const fs::path d = tempDir("flip");
+    const uint8_t rgba[16] = {10, 20, 30, 255, 10, 20, 30, 0, 10, 20, 30, 255, 10, 20, 30, 255};
+    const uint8_t m[4] = {255, 0, 0, 255};
+    stbi_write_png((d / "a.png").string().c_str(), 2, 2, 4, rgba, 8);
+    stbi_write_png((d / "m.png").string().c_str(), 2, 2, 1, m, 2);
+    const ImageData plain = loadImage((d / "a.png").string(), (d / "m.png").string(), false);
+    const ImageData flip = loadImage((d / "a.png").string(), (d / "m.png").string(), true);
+    check(plain.keep == std::vector<uint8_t>({1, 0, 0, 1}), "mask file read wrong");
+    check(flip.keep == std::vector<uint8_t>({0, 1, 1, 0}), "--flip-mask ignored for a mask file");
+    const ImageData alpha = loadImage((d / "a.png").string(), "", false);
+    const ImageData alpha_flip = loadImage((d / "a.png").string(), "", true);
+    check(alpha.keep == std::vector<uint8_t>({1, 0, 1, 1}), "alpha read wrong");
+    check(alpha_flip.keep == std::vector<uint8_t>({0, 1, 0, 0}), "--flip-mask ignored for alpha");
+    fs::remove_all(d);
 }
 
 // ===========================================================================
@@ -642,9 +840,10 @@ void face_pairing_by_axis() {
 // Output
 // ===========================================================================
 
-// Mutant: images.bin rewritten (track rows added), a pose rounded, or the
-// output allowed over its source.
-void sibling_is_byte_identical_and_readable() {
+// Mutants: the source's point ids left in images.bin (they alias the dense
+// points), a pose rounded, the tracks written y-first or in the wrong
+// channel order, the output allowed over or above its source.
+void sibling_is_consistent_and_readable() {
     const fs::path d = tempDir("sibling");
     writeStairDataset(stairScene(), d.string(), 96, 192, 300);
     const std::string src = (d / "sparse" / "0").string(), out = (d / "sparse" / "0-roma").string();
@@ -655,26 +854,89 @@ void sibling_is_byte_identical_and_readable() {
     std::vector<DensePoint> cloud(3);
     for (int i = 0; i < 3; i++) {
         cloud[(size_t)i].xyz = {0.1 * i, 0.2, 0.3};
-        cloud[(size_t)i].track = {{0, 10.0, 20.0}, {1, 30.0, 40.0}};
-        cloud[(size_t)i].rgb[0] = 1.0f;
+        cloud[(size_t)i].track = {{0, 10.0 + i, 200.0}, {7, 30.0, 400.0 - i}};
+        cloud[(size_t)i].rgb[0] = 0.9f;
+        cloud[(size_t)i].rgb[1] = 0.5f;
+        cloud[(size_t)i].rgb[2] = 0.1f;
     }
     writeSibling(src, out, pl, cloud, "{}\n");
-    for (const char* f : {"cameras.bin", "images.bin", "gauge.txt"})
+    for (const char* f : {"cameras.bin", "gauge.txt"})
         check(slurp(fs::path(src) / f) == slurp(fs::path(out) / f), std::string(f) + " not byte-identical");
-    check(sfm::checkFixedModel(out, sfm::readFixedPoses(src)).empty(), "checkFixedModel");
+    check(sfm::checkFixedModel(out, sfm::readFixedPoses(src)).empty(), "poses not byte-identical");
     const sfm::Reconstruction r = sfm::Reconstruction::readBinary(out);
-    check(r.points3D.size() == 3, "points3D.bin holds " + std::to_string(r.points3D.size()));
-    check(r.points3D.begin()->second.rgb[0] == 255, "colour");
-    check(fs::file_size(fs::path(out) / "points3D_tracks.bin") == 4 + 8 + 3 * (8 + 4 + 2 * 12),
-          "tracks file size");
-    bool refused = false;
-    try {
-        writeSibling(src, src, pl, cloud, "{}\n");
-    } catch (const std::exception&) {
-        refused = true;
+    const sfm::Reconstruction s0 = sfm::Reconstruction::readBinary(src);
+    size_t obs = 0, linked = 0;
+    for (const auto& kv : r.images) {
+        obs += kv.second.points2D.size();
+        for (uint64_t id : kv.second.point3D_ids) linked += id != sfm::kInvalidPoint3D;
+        check(kv.second.points2D.size() == s0.images.at(kv.first).points2D.size(), "2-D points changed");
     }
-    check(refused, "writing over the source was allowed");
-    check(slurp(fs::path(src) / "images.bin") == slurp(fs::path(out) / "images.bin"), "source damaged");
+    check(obs > 0, "the source has no 2-D points to test against");
+    check(linked == 0, "image rows still name point ids: " + std::to_string(linked));
+    for (const auto& kv : r.points3D) check(kv.second.track.empty(), "a point has a track");
+    check(r.points3D.size() == 3, "points3D.bin holds " + std::to_string(r.points3D.size()));
+    const uint8_t* c = r.points3D.begin()->second.rgb;
+    check(c[0] == 230 && c[1] == 128 && c[2] == 26, "colour written out of order");
+    {
+        std::ifstream t(fs::path(out) / "points3D_tracks.bin", std::ios::binary);
+        char magic[4];
+        uint64_t n = 0;
+        t.read(magic, 4);
+        t.read((char*)&n, 8);
+        check(n == 3, "tracks count");
+        for (uint64_t i = 0; i < n; i++) {
+            uint64_t id;
+            uint32_t k;
+            t.read((char*)&id, 8);
+            t.read((char*)&k, 4);
+            check(k == 2, "track length");
+            for (uint32_t j = 0; j < k; j++) {
+                uint32_t img;
+                float xy[2];
+                t.read((char*)&img, 4);
+                t.read((char*)xy, 8);
+                const Observation& o = cloud[i].track[j];
+                const View& v = pl.views[(size_t)o.view];
+                const Vec2 want = viewToSource(pl.images[(size_t)v.image], v, o.x, o.y);
+                check(img == pl.images[(size_t)v.image].id, "track image id");
+                check(std::fabs(xy[0] - want.x) < 1e-2 && std::fabs(xy[1] - want.y) < 1e-2,
+                      "track observation written as (" + std::to_string(xy[0]) + ", " + std::to_string(xy[1]) +
+                          "), want (" + std::to_string(want.x) + ", " + std::to_string(want.y) + ")");
+            }
+        }
+    }
+    for (const std::string& bad : {src, (d / "sparse").string(), d.string(), (fs::path(src) / "x").string()}) {
+        bool refused = false;
+        try {
+            writeSibling(src, bad, pl, cloud, "{}\n");
+        } catch (const std::exception&) {
+            refused = true;
+        }
+        check(refused, "writing to " + bad + " was allowed");
+    }
+    check(!outDirProblem(d.string(), src, (d / "sparse" / "-0").string()).empty(),
+          "a sibling sorting before its source was allowed");
+    check(outDirProblem(d.string(), src, out).empty(), "the default sibling was refused");
+    check(fs::exists(fs::path(src) / "images.bin") && fs::exists(fs::path(src) / "cameras.bin"), "source damaged");
+
+    // A sibling is a model like any other: densify runs on it.
+    DensifyJob again;
+    again.model_dir = out;
+    again.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+    again.opt.refs = 2;
+    again.opt.max_depth_error = -1;
+    const Scene scene = stairScene();
+    struct Size : Matcher {
+        int inputSize() const override { return 64; }
+        Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+        std::string describe() const override { return ""; }
+    } sizer;
+    again.matcher = &sizer;
+    const DensifyPlan p2 = planDensify(again);
+    OracleMatcher om(&scene, OracleMatcher::independentViews(p2.images), 64, 0.0, 0.0, 1);
+    again.matcher = &om;
+    const DensifyResult res = runDensify(again, p2, nullptr);
+    check(!res.cloud.empty(), "densifying a sibling produced nothing");
     fs::remove_all(d);
 }
 
@@ -716,12 +978,20 @@ static int body(int argc, char** argv) {
         {"fusion_drops_the_disagreeing_neighbour", fusion_drops_the_disagreeing_neighbour},
         {"certainty_floor_and_masks", certainty_floor_and_masks},
         {"support_counts_distinct_images", support_counts_distinct_images},
-        {"voxel_select_and_lone_rule", voxel_select_and_lone_rule},
+        {"voxel_select_keeps_longest_then_best", voxel_select_keeps_longest_then_best},
+        {"auto_min_track_admits_consistent_pairs", auto_min_track_admits_consistent_pairs},
+        {"fusion_weights_by_depth_precision", fusion_weights_by_depth_precision},
+        {"colour_channels_in_order", colour_channels_in_order},
+        {"consistency_counts_images_not_faces", consistency_counts_images_not_faces},
+        {"coarse_warp_thresholds_scale", coarse_warp_thresholds_scale},
+        {"holdout_is_every_nth_and_never_matched", holdout_is_every_nth_and_never_matched},
+        {"cut_view_is_pixel_exact", cut_view_is_pixel_exact},
+        {"flip_mask_inverts_keep", flip_mask_inverts_keep},
         {"refs_by_visibility_is_greedy_coverage", refs_by_visibility_is_greedy_coverage},
         {"covis_neighbours_need_parallax", covis_neighbours_need_parallax},
         {"faces_map_back_to_the_panorama", faces_map_back_to_the_panorama},
         {"face_pairing_by_axis", face_pairing_by_axis},
-        {"sibling_is_byte_identical_and_readable", sibling_is_byte_identical_and_readable},
+        {"sibling_is_consistent_and_readable", sibling_is_consistent_and_readable},
         {"warp_files_round_trip", warp_files_round_trip},
     };
     int ran = 0;

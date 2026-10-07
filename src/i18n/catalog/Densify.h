@@ -343,33 +343,61 @@ SS_DENSIFY_OPT(opt_sampson,
     "Наибольшая ошибка Сэмпсона до триангуляции, квадратные пиксели. По умолчанию: 5",
     "Üçgenlemeden önceki en büyük Sampson hatası, piksel kare. Varsayılan: 5")
 SS_DENSIFY_OPT(opt_parallax,
-    "Smallest angle between the two viewing rays, in degrees. Default: 1.5",
-    "2 本の視線のなす角の下限（度）。既定: 1.5",
-    "两条视线间的最小夹角（度）。默认：1.5",
-    "兩條視線間的最小夾角（度）。預設：1.5",
-    "두 시선 사이의 최소 각도 (도). 기본값: 1.5",
-    "Kleinster Winkel zwischen den beiden Sehstrahlen, in Grad. Standard: 1.5",
-    "Plus petit angle entre les deux rayons de vue, en degrés. Défaut : 1.5",
-    "Menor ángulo entre los dos rayos de visión, en grados. Por defecto: 1.5",
-    "Menor ângulo entre os dois raios de visão, em graus. Por omissão: 1.5",
-    "Angolo minimo tra i due raggi di vista, in gradi. Predefinito: 1.5",
-    "Kleinste hoek tussen de twee zichtstralen, in graden. Standaard: 1.5",
-    "Наименьший угол между двумя лучами зрения, в градусах. По умолчанию: 1.5",
-    "İki görüş ışını arasındaki en küçük açı, derece. Varsayılan: 1.5")
+    "Smallest angle between a point's two viewing rays, in degrees. Default: 1.5",
+    "点の 2 本の視線のなす角の下限（度）。既定: 1.5",
+    "点的两条视线间的最小夹角（度）。默认：1.5",
+    "點的兩條視線間的最小夾角（度）。預設：1.5",
+    "점의 두 시선 사이의 최소 각도 (도). 기본값: 1.5",
+    "Kleinster Winkel zwischen den beiden Sehstrahlen eines Punktes, in Grad. Standard: 1.5",
+    "Plus petit angle entre les deux rayons de vue d'un point, en degrés. Défaut : 1.5",
+    "Menor ángulo entre los dos rayos de visión de un punto, en grados. Por defecto: 1.5",
+    "Menor ângulo entre os dois raios de visão de um ponto, em graus. Por omissão: 1.5",
+    "Angolo minimo tra i due raggi di vista di un punto, in gradi. Predefinito: 1.5",
+    "Kleinste hoek tussen de twee zichtstralen van een punt, in graden. Standaard: 1.5",
+    "Наименьший угол между двумя лучами зрения точки, в градусах. По умолчанию: 1.5",
+    "Bir noktanın iki görüş ışını arasındaki en küçük açı, derece. Varsayılan: 1.5")
 SS_DENSIFY_OPT(opt_min_track,
-    "Images a point must reproject into to be kept. Default: 3 with three or more neighbours",
-    "点を残すのに再投影が合う必要がある画像数。既定: 近傍が 3 以上なら 3",
-    "保留一个点所需的重投影吻合图像数。默认：邻近图像不少于 3 时为 3",
-    "保留一個點所需的重投影吻合影像數。預設：鄰近影像不少於 3 時為 3",
-    "점을 남기려면 재투영이 맞아야 하는 이미지 수. 기본값: 이웃이 3 이상이면 3",
-    "Bilder, in die ein Punkt zurückprojizieren muss. Standard: 3 bei drei oder mehr Nachbarn",
-    "Images où un point doit se reprojeter pour être gardé. Défaut : 3 avec trois voisins ou plus",
-    "Imágenes en las que un punto debe reproyectarse para conservarse. Por defecto: 3 con tres vecinos o más",
-    "Imagens em que um ponto tem de se reprojetar para ser mantido. Por omissão: 3 com três vizinhos ou mais",
-    "Immagini in cui un punto deve riproiettarsi per restare. Predefinito: 3 con tre o più vicini",
-    "Beelden waarin een punt moet terugprojecteren om te blijven. Standaard: 3 bij drie of meer buren",
-    "Снимки, в которые точка должна перепроецироваться. По умолчанию: 3 при трёх и более соседях",
-    "Bir noktanın tutulması için yeniden izdüştüğü görüntüler. Varsayılan: üç ya da daha çok komşuyla 3")
+    "Images a point must reproject into. Default: auto, 3, or 2 when its error is no worse than the median of the 3-image points",
+    "点の再投影が合う必要がある画像数。既定: auto（3、または誤差が 3 枚の点の中央値以下なら 2）",
+    "点须重投影吻合的图像数。默认：auto，即 3，或误差不超过三图像点中位数时为 2",
+    "點須重投影吻合的影像數。預設：auto，即 3，或誤差不超過三影像點中位數時為 2",
+    "점의 재투영이 맞아야 하는 이미지 수. 기본값: auto, 3 또는 오차가 3 장 점의 중앙값 이하이면 2",
+    "Bilder, in die ein Punkt zurückprojizieren muss. Standard: auto, 3, oder 2 bei einem Fehler nicht über dem Median der 3-Bild-Punkte",
+    "Images où un point doit se reprojeter. Défaut : auto, 3, ou 2 si son erreur ne dépasse pas la médiane des points à 3 images",
+    "Imágenes en las que un punto debe reproyectarse. Por defecto: auto, 3, o 2 si su error no supera la mediana de los puntos de 3 imágenes",
+    "Imagens em que um ponto tem de se reprojetar. Por omissão: auto, 3, ou 2 se o erro não exceder a mediana dos pontos de 3 imagens",
+    "Immagini in cui un punto deve riproiettarsi. Predefinito: auto, 3, o 2 se il suo errore non supera la mediana dei punti a 3 immagini",
+    "Beelden waarin een punt moet terugprojecteren. Standaard: auto, 3, of 2 als de fout niet boven de mediaan van de 3-beeldpunten ligt",
+    "Снимки, в которые должна перепроецироваться точка. По умолчанию: auto, 3 или 2, если ошибка не выше медианы точек с 3 снимками",
+    "Bir noktanın yeniden izdüşmesi gereken görüntüler. Varsayılan: auto, 3 ya da hatası 3 görüntülü noktaların ortancasını aşmıyorsa 2")
+SS_DENSIFY_OPT(opt_covis_min_angle,
+    "Neighbours must see their shared sparse points at least this many degrees apart. Default: 1.5",
+    "近傍は共有する疎な点をこの角度（度）以上離れて見る必要がある。既定: 1.5",
+    "邻近图像对共享稀疏点的观察夹角至少为此度数。默认：1.5",
+    "鄰近影像對共享稀疏點的觀察夾角至少為此度數。預設：1.5",
+    "이웃은 공유 희소 점을 이 각도(도) 이상 떨어져서 봐야 함. 기본값: 1.5",
+    "Nachbarn müssen ihre gemeinsamen Sparse-Punkte mindestens so viele Grad auseinander sehen. Standard: 1.5",
+    "Les voisins doivent voir leurs points épars communs sous au moins cet angle, en degrés. Défaut : 1.5",
+    "Los vecinos deben ver sus puntos dispersos comunes con al menos este ángulo, en grados. Por defecto: 1.5",
+    "Os vizinhos têm de ver os pontos esparsos comuns com pelo menos este ângulo, em graus. Por omissão: 1.5",
+    "I vicini devono vedere i punti sparsi comuni con almeno questo angolo, in gradi. Predefinito: 1.5",
+    "Buren moeten hun gedeelde sparse punten onder minstens zoveel graden zien. Standaard: 1.5",
+    "Соседи должны видеть общие разреженные точки под углом не менее стольких градусов. По умолчанию: 1.5",
+    "Komşular ortak seyrek noktalarını en az bu kadar derece açıyla görmeli. Varsayılan: 1.5")
+SS_DENSIFY_OPT(opt_max_depth_error,
+    "Drop a point whose depth moves more than this share per match pixel. Default: auto, 2% or looser on narrow captures; off",
+    "マッチ 1 ピクセルで深度がこの割合以上動く点を除く。既定: auto（2%、狭い撮影ではそれより緩い）。off",
+    "每匹配像素深度变化超过此比例的点被剔除。默认：auto，2%，窄基线拍摄时更宽；off",
+    "每匹配像素深度變化超過此比例的點被剔除。預設：auto，2%，窄基線拍攝時更寬；off",
+    "매칭 1 픽셀에 깊이가 이 비율 이상 움직이는 점은 제거. 기본값: auto, 2% (좁은 촬영에서는 더 느슨함); off",
+    "Punkte verwerfen, deren Tiefe sich je Vergleichspixel um mehr als diesen Anteil ändert. Standard: auto, 2% oder lockerer bei engen Aufnahmen; off",
+    "Écarter un point dont la profondeur bouge de plus de cette part par pixel d'appariement. Défaut : auto, 2 % ou moins strict sur une prise étroite ; off",
+    "Descartar un punto cuya profundidad cambie más de esta fracción por píxel. Por defecto: auto, 2 % o más laxo en capturas estrechas; off",
+    "Descartar um ponto cuja profundidade mude mais do que esta fração por píxel. Por omissão: auto, 2% ou mais largo em capturas estreitas; off",
+    "Scartare un punto la cui profondità cambia più di questa frazione per pixel. Predefinito: auto, 2% o più largo su riprese strette; off",
+    "Een punt weglaten waarvan de diepte per koppelpixel meer dan dit aandeel verschuift. Standaard: auto, 2% of ruimer bij smalle opnamen; off",
+    "Отбросить точку, глубина которой на пиксель сопоставления меняется больше этой доли. По умолчанию: auto, 2% или мягче для узких съёмок; off",
+    "Eşleme pikseli başına derinliği bu orandan fazla değişen noktayı at. Varsayılan: auto, %2 ya da dar çekimlerde daha gevşek; off")
 SS_DENSIFY_OPT(opt_voxel,
     "One point per voxel of this size. Default: auto, half the sparse points' spacing; off",
     "このサイズのボクセルごとに 1 点。既定: auto（疎な点の間隔の半分）。off で無効",
@@ -641,6 +669,32 @@ SS_MSG(masks_inverted,
     TR("Maskeler her görüntünün ortalama {0} kadarını tutuyor; bu ters görünüyor. Burada maskeler "
        "görüntünün tutulduğu yerde beyazdır: kaldırılacak yeri boyayan maskeler için --flip-mask, ya "
        "da --force verin."));
+
+SS_MSG(warp_scale,
+    EN("The matcher returns {0} px warps for {1} px inputs: its pixels are coarser, so the "
+       "pixel thresholds are applied in warp pixels, scaled from the {1} px values"),
+    JA("マッチャは {1} px の入力に {0} px のワープを返します。ピクセルが粗いため、ピクセルのしきい値は "
+       "{1} px の値から換算してワープのピクセルで適用します"),
+    ZH_HANS("匹配器对 {1} px 输入返回 {0} px 的形变场：其像素更粗，像素阈值按 {1} px 的值换算后在形变像素上应用"),
+    ZH_HANT("匹配器對 {1} px 輸入傳回 {0} px 的形變場：其像素更粗，像素閾值按 {1} px 的值換算後在形變像素上套用"),
+    KO("매처가 {1} px 입력에 {0} px 워프를 돌려줍니다. 픽셀이 더 거칠어 픽셀 임계값은 {1} px 값에서 "
+       "환산해 워프 픽셀로 적용합니다"),
+    DE("Der Zuordner liefert {0}-px-Warps für {1}-px-Eingaben: seine Pixel sind gröber, daher gelten die "
+       "Pixelschwellen in Warp-Pixeln, umgerechnet aus den {1}-px-Werten"),
+    FR("L'apparieur renvoie des champs de {0} px pour des entrées de {1} px : ses pixels sont plus "
+       "grossiers, les seuils en pixels s'appliquent donc en pixels du champ, convertis depuis {1} px"),
+    ES("El emparejador devuelve campos de {0} px para entradas de {1} px: sus píxeles son más gruesos, "
+       "así que los umbrales se aplican en píxeles del campo, convertidos desde {1} px"),
+    PT("O emparelhador devolve campos de {0} px para entradas de {1} px: os píxeis são mais grossos, por "
+       "isso os limiares aplicam-se em píxeis do campo, convertidos de {1} px"),
+    IT("L'accoppiatore restituisce campi da {0} px per ingressi da {1} px: i suoi pixel sono più "
+       "grossi, quindi le soglie si applicano in pixel del campo, convertite da {1} px"),
+    NL("De koppelaar geeft velden van {0} px voor invoer van {1} px: zijn pixels zijn grover, dus de "
+       "pixeldrempels gelden in veldpixels, omgerekend vanaf {1} px"),
+    RU("Сопоставитель возвращает поля {0} px для входа {1} px: его пиксели крупнее, поэтому пороги "
+       "применяются в пикселях поля, пересчитанные из значений для {1} px"),
+    TR("Eşleyici {1} px girdiler için {0} px alanlar döndürüyor: pikselleri daha kaba, bu yüzden piksel "
+       "eşikleri {1} px değerlerinden çevrilerek alan piksellerinde uygulanır"));
 
 SS_MSG(matcher,
     EN("Matcher: {0}"), JA("マッチャ: {0}"), ZH_HANS("匹配器：{0}"), ZH_HANT("匹配器：{0}"),
