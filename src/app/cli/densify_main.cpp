@@ -76,7 +76,9 @@ void usage() {
     help_row("--reproj <px>", D::opt_reproj);
     help_row("--sampson <px2>", D::opt_sampson);
     help_row("--parallax <deg>", D::opt_parallax);
-    help_row("--min-track <n>", D::opt_min_track);
+    help_row("--min-track auto|<n>", D::opt_min_track);
+    help_row("--covis-min-angle <deg>", D::opt_covis_min_angle);
+    help_row("--max-depth-error auto|<f>|off", D::opt_max_depth_error);
     help_row("--voxel auto|<size>|off", D::opt_voxel);
     help_row("--max-points auto|<n>|off", D::opt_max_points);
     help_row("--max-baseline auto|<d>|off", D::opt_max_baseline);
@@ -201,7 +203,18 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--reproj") o.reproj_px = real(1e-9);
         else if (a == "--sampson") o.sampson_px2 = real(0);
         else if (a == "--parallax") o.min_parallax_deg = real(0);
-        else if (a == "--min-track") o.min_track = (int)real(1);
+        else if (a == "--min-track") {
+            const std::string v = next();
+            if (v == "auto") o.min_track = 0;
+            else {
+                char* end = nullptr;
+                const long n = std::strtol(v.c_str(), &end, 10);
+                if (v.empty() || *end || n < 1) bad(v);
+                o.min_track = (int)n;
+            }
+        }
+        else if (a == "--covis-min-angle") o.covis_min_angle_deg = real(0);
+        else if (a == "--max-depth-error") o.max_depth_error = autoOff();
         else if (a == "--voxel") o.voxel = autoOff();
         else if (a == "--max-points") o.max_points = (int64_t)autoOff();
         else if (a == "--max-baseline") o.max_baseline = autoOff();
@@ -264,6 +277,8 @@ int spirula_densify_main(int argc, char** argv) {
         else if (job.export_dir.empty())
             matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), 640);
         job.matcher = matcher.get();
+        if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
+            throw std::runtime_error(job.out_dir + ": " + why);
         if (job.export_dir.empty() && fs::exists(job.out_dir) && !job.overwrite) {
             std::fprintf(stderr, "%s\n", format(D::out_exists, {job.out_dir}).c_str());
             return 2;
@@ -292,7 +307,7 @@ int spirula_densify_main(int argc, char** argv) {
         std::printf("%s\n", format(D::filters, {(long long)pl.match_size, num(r.reproj_px),
                                                 num(r.sampson_px2), num(r.min_parallax_deg),
                                                 num(r.plugin_exact ? r.certainty_floor : r.min_certainty),
-                                                (long long)pl.min_track})
+                                                pl.min_track > 0 ? std::to_string(pl.min_track) : std::string("auto")})
                                 .c_str());
         std::printf("%s\n", format(D::budget, {(long long)r.matches_per_ref,
                                                pl.voxel > 0 ? num(pl.voxel) : std::string("off"),
@@ -308,6 +323,10 @@ int spirula_densify_main(int argc, char** argv) {
             }
         }
         if (job.matcher) std::printf("%s\n", format(D::matcher, {job.matcher->describe()}).c_str());
+        job.on_warp_scale = [](int warp, int input) {
+            std::printf("%s\n", format(D::warp_scale, {(long long)warp, (long long)input}).c_str());
+            std::fflush(stdout);
+        };
         std::fflush(stdout);
 
         int last_pct = -1;
@@ -355,16 +374,19 @@ int spirula_densify_main(int argc, char** argv) {
         js << "],\n  \"matches_per_ref\": " << r.matches_per_ref << ", \"min_certainty\": " << jnum(r.min_certainty)
            << ", \"certainty_floor\": " << jnum(r.certainty_floor) << ", \"sample_cap\": " << jnum(r.sample_cap) << ",\n"
            << "  \"reproj_px\": " << jnum(r.reproj_px) << ", \"sampson_px2\": " << r.sampson_px2
-           << ", \"min_parallax_deg\": " << jnum(r.min_parallax_deg) << ", \"min_track\": " << pl.min_track
-           << ", \"lone_parallax_deg\": " << jnum(r.lone_parallax_deg)
-           << ", \"max_depth_error\": " << jnum(r.max_depth_error) << ",\n"
+           << ", \"min_parallax_deg\": " << jnum(r.min_parallax_deg) << ", \"min_track\": " << (pl.min_track > 0 ? std::to_string(pl.min_track) : std::string("\"auto\""))
+           << ", \"covis_min_angle_deg\": " << jnum(r.covis_min_angle_deg)
+           << ", \"max_depth_error\": " << jnum(r.max_depth_error)
+           << ", \"median_pair_angle_deg\": " << jnum(pl.median_pair_angle_deg)
+           << ", \"match_focal\": " << jnum(pl.match_focal) << ",\n"
            << "  \"voxel\": " << jnum(pl.voxel) << ", \"max_points\": " << pl.max_points << ", \"seed\": " << r.seed << ",\n"
            << "  \"mask_keep\": " << jnum(pl.mask_keep) << ", \"flip_mask\": " << (job.flip_mask ? "true" : "false") << ",\n"
            << "  \"stats\": {\"samples\": " << st.samples << ", \"below_certainty\": " << st.below_certainty
            << ", \"outside\": " << st.outside << ", \"sampson\": " << st.sampson << ", \"nonfinite\": " << st.nonfinite
            << ", \"reproj\": " << st.reproj << ", \"cheirality\": " << st.cheirality << ", \"parallax\": " << st.parallax
            << ", \"candidates\": " << st.candidates << ", \"ref_reproj\": " << st.ref_reproj << ", \"fused\": " << st.fused
-           << ", \"short_track\": " << st.short_track << ", \"lone_kept\": " << st.lone_kept
+           << ", \"short_track\": " << st.short_track << ", \"inconsistent\": " << st.inconsistent << ", \"uncertain\": " << st.uncertain
+           << ", \"two_image_kept\": " << st.two_image_kept << ", \"two_image_bar\": " << jnum(st.two_image_bar)
            << ", \"voxel_merged\": " << st.voxel_merged << ", \"capped\": " << st.capped << "},\n"
            << "  \"track_hist\": {";
         bool first = true;

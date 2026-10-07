@@ -43,12 +43,12 @@ struct DensifyOptions {
     // camera's own pixels, as the plugin measures them.
     double reproj_px = 1.0;
     double sampson_px2 = 5.0;
-    double min_parallax_deg = 1.5;
-    int min_track = 0;              // 0: auto (3 with >= 3 neighbours, else 2)
-    // A short track survives alone in its voxel past this; off by default, as
-    // on the S-1 staircase it kept every floater the multi-view check removed.
-    double lone_parallax_deg = INFINITY;
-    double max_depth_error = 0.02;  // per match pixel, as a share of the depth; <= 0 off
+    double min_parallax_deg = 1.5;  // the per-point filter
+    double covis_min_angle_deg = 1.5; // the neighbour prior: angle at the shared sparse points
+    // 0: auto -- 3 images, or 2 with an error no worse than the median of the
+    // run's 3-image points (docs/notes/densify.md, "Minimum track").
+    int min_track = 0;
+    double max_depth_error = 0;     // per match pixel, a share of the depth; 0 auto, < 0 off
     bool no_filter = false;
 
     double voxel = 0;               // 0: auto, < 0: off
@@ -89,7 +89,8 @@ struct DensePoint {
 struct DensifyStats {
     int64_t samples = 0, below_certainty = 0, outside = 0, sampson = 0, nonfinite = 0,
             reproj = 0, cheirality = 0, parallax = 0, candidates = 0, ref_reproj = 0, inconsistent = 0, uncertain = 0,
-            fused = 0, short_track = 0, lone_kept = 0, voxel_merged = 0, capped = 0;
+            fused = 0, short_track = 0, two_image_kept = 0, voxel_merged = 0, capped = 0;
+    double two_image_bar = -1;           // the auto min-track error bar, -1 unused
     std::map<int, int64_t> track_hist;   // distinct images per output point
     void add(const DensifyStats& o);
 };
@@ -129,8 +130,8 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
                                        const std::vector<int64_t>& samples,
                                        const DensifyOptions& opt, DensifyStats& stats);
 
-// Short-track filter (with the lone-voxel exception in the default mode),
-// track-preserving voxel select, then a seeded cap. `voxel` <= 0 is off.
+// The minimum-track filter (0 = auto), a track-preserving voxel select, then
+// a seeded cap. `voxel` <= 0 is off.
 std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_track,
                                        double voxel, int64_t max_points,
                                        const DensifyOptions& opt, DensifyStats& stats);
