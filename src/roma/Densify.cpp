@@ -24,6 +24,15 @@ void DensifyStats::add(const DensifyStats& o) {
     ref_reproj += o.ref_reproj; inconsistent += o.inconsistent; uncertain += o.uncertain; fused += o.fused; short_track += o.short_track;
     two_image_kept += o.two_image_kept;
     seen_through += o.seen_through;
+    depth_samples += o.depth_samples; depth_nodata += o.depth_nodata;
+    depth_disagree += o.depth_disagree; depth_through += o.depth_through;
+    depth_local += o.depth_local; depth_covered += o.depth_covered; depth_kept += o.depth_kept;
+    depth_edge += o.depth_edge; depth_normal += o.depth_normal; depth_local_normal += o.depth_local_normal;
+    for (size_t i = 0; i < normal_agree_hist.size(); i++) {
+        normal_agree_hist[i] += o.normal_agree_hist[i];
+        normal_null_hist[i] += o.normal_null_hist[i];
+        local_normal_hist[i] += o.local_normal_hist[i];
+    }
     if (o.two_image_bar >= 0) two_image_bar = o.two_image_bar; voxel_merged += o.voxel_merged; capped += o.capped;
     for (const auto& kv : o.track_hist) track_hist[kv.first] += kv.second;
 }
@@ -433,6 +442,12 @@ std::vector<size_t> voxelSelect(const std::vector<DensePoint>& pts, double voxel
         auto [it, fresh] = chosen.emplace(keyOf(pts[i].xyz, voxel), i);
         if (fresh) continue;
         const size_t prev = it->second;
+        // A matched point beats a depth point: the depth's track is every image
+        // that agreed, not a measurement, and its error is in other units.
+        if (pts[i].from_depth != pts[prev].from_depth) {
+            if (!pts[i].from_depth) it->second = i;
+            continue;
+        }
         const int tl = trackLen(pts[i], by_images), pl = trackLen(pts[prev], by_images);
         if (tl > pl || (tl == pl && pts[i].error < pts[prev].error)) it->second = i;
     }
@@ -444,7 +459,8 @@ std::vector<size_t> voxelSelect(const std::vector<DensePoint>& pts, double voxel
 std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_track,
                                        double voxel, int64_t max_points,
                                        const DensifyOptions& opt, DensifyStats& st,
-                                       const std::function<bool(const DensePoint&)>& veto) {
+                                       const std::function<bool(const DensePoint&)>& veto,
+                                       int64_t max_fill) {
     const bool by_images = !opt.plugin_exact;
     std::vector<DensePoint> kept;
     kept.reserve(pts.size());
@@ -458,7 +474,7 @@ std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_trac
         // as the median of the run's own longer tracks.
         std::vector<double> e3;
         for (const DensePoint& p : pts)
-            if (trackLen(p, by_images) >= 3) e3.push_back(p.error);
+            if (trackLen(p, by_images) >= 3 && !p.from_depth) e3.push_back(p.error);
         double bar = -1;
         if (!e3.empty()) {
             std::nth_element(e3.begin(), e3.begin() + (long)(e3.size() / 2), e3.end());
@@ -482,12 +498,24 @@ std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_trac
         }
     }
     auto cap = [&](std::vector<DensePoint>& v) {
-        if (max_points <= 0 || (int64_t)v.size() <= max_points) return;
+        if (max_points <= 0) return;
         std::vector<size_t> idx(v.size());
         std::iota(idx.begin(), idx.end(), 0);
         std::mt19937_64 rng(opt.seed);
         std::shuffle(idx.begin(), idx.end(), rng);
-        idx.resize((size_t)max_points);
+        // Matched points before depth points: in a hybrid run the cap spends
+        // itself on the fill last, or the fill has a budget of its own.
+        const auto mid = std::stable_partition(idx.begin(), idx.end(), [&](size_t i) { return !v[i].from_depth; });
+        if (max_fill >= 0) {
+            const size_t nm = (size_t)(mid - idx.begin());
+            const size_t km = std::min(nm, (size_t)max_points), kf = std::min(idx.size() - nm, (size_t)max_fill);
+            if (km == nm && kf == idx.size() - nm) return;
+            idx.erase(idx.begin() + (long)(nm + kf), idx.end());
+            idx.erase(idx.begin() + (long)km, idx.begin() + (long)nm);
+        } else {
+            if ((int64_t)v.size() <= max_points) return;
+            idx.resize((size_t)max_points);
+        }
         std::vector<DensePoint> c;
         c.reserve(idx.size());
         for (size_t i : idx) c.push_back(std::move(v[i]));

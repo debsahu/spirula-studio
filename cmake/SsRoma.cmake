@@ -8,10 +8,10 @@
 #   roma_*_test      one executable per src/roma/tests/*.cpp
 
 file(GLOB SS_ROMA_HOST_SOURCES CONFIGURE_DEPENDS ${SS_SRC}/roma/*.cpp)
-# CameraMath.cpp and SourceCamera.cpp are the engine's too; as archive members
+# CameraMath, SourceCamera and DepthPng are the engine's or the app's too; as archive members
 # they are pulled in only where nothing else provides them, as ss_sfm does stb.
 add_library(ss_roma_host STATIC ${SS_ROMA_HOST_SOURCES}
-    ${SS_SRC}/data/CameraMath.cpp ${SS_SRC}/data/SourceCamera.cpp)
+    ${SS_SRC}/data/CameraMath.cpp ${SS_SRC}/data/SourceCamera.cpp ${SS_SRC}/app/DepthPng.cpp)
 target_include_directories(ss_roma_host PUBLIC ${SS_SRC})
 target_link_libraries(ss_roma_host PUBLIC ss_sfm)
 target_compile_options(ss_roma_host PRIVATE

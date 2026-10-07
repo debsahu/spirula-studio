@@ -12,6 +12,7 @@ struct CheckOptions {
     int match_size = 640;     // the oracle's resolution: RoMa's `base`
     double noise_px = 0.1;    // oracle jitter, match pixels (a guess at RoMa's, not a measurement)
     double outliers = 0.03;   // oracle share of matches sent somewhere random
+    std::string source = "roma";  // roma, moge or hybrid; moge and hybrid synthesise depths/
     bool masks = true;        // mask the empty background, as a sky mask would
     bool keep = false;        // leave the dataset behind
 };

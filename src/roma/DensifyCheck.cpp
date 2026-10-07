@@ -11,6 +11,13 @@
 
 namespace roma {
 
+namespace {
+// The oracle's 0.1 match px at up to 2x the match size; generous so only a
+// wrong camera mapping trips it (docs/notes/densify.md).
+constexpr double kCheckReprojP95 = 2.0;
+}  // namespace
+
+
 namespace fs = std::filesystem;
 
 int densifyCheck(const CheckOptions& co) {
@@ -35,9 +42,23 @@ int densifyCheck(const CheckOptions& co) {
         };
     job.opt.refs = 1.0;
     job.opt.seed = 7;
+    std::unique_ptr<DepthFiles> depth;
+    if (co.source != "roma") {
+        if (!fs::exists(dir / "depths")) writeStairDepths(scene, dir.string(), SyntheticDepth{});
+        depth = std::make_unique<DepthFiles>(
+            [&](const std::string& n) { return (dir / "depths" / n).string(); },
+            [](const SourceImage& im) { return im.cam.isSpherical(); }, (dir / "depths").string());
+        job.depth = depth.get();
+        job.on_depth_fit = [](const SourceImage& im, const DepthField& f) {
+            std::printf("check: depth %s: %s, a %.3f b %.4f, residual %.4f, anchors %d\n", im.name.c_str(),
+                        f.ok ? "fitted" : f.refused.c_str(), f.a, f.b, f.rel_residual, f.anchors);
+        };
+    }
     std::unique_ptr<Matcher> matcher;
     DensifyPlan plan;
-    if (co.matches.empty()) {
+    if (co.source == "moge") {
+        plan = planDensify(job);
+    } else if (co.matches.empty()) {
         struct Size : Matcher {
             int s;
             explicit Size(int s_) : s(s_) {}
@@ -55,12 +76,15 @@ int densifyCheck(const CheckOptions& co) {
         plan = planDensify(job);
     }
     job.matcher = matcher.get();
-    std::printf("check: %s; %zu images, %zu views, %zu reference views, %lld pairs, voxel %.4f m, "
+    std::printf("check: %s, source %s; %zu images, %zu views, %zu reference views, %lld pairs, voxel %.4f m, "
                 "min track %d\n",
-                matcher->describe().c_str(), plan.images.size(), plan.views.size(),
+                matcher ? matcher->describe().c_str() : "no matcher", co.source.c_str(), plan.images.size(), plan.views.size(),
                 plan.ref_views.size(), (long long)plan.pairs, plan.voxel, plan.min_track);
     const DensifyResult r = runDensify(job, plan, nullptr);
-    writeSibling(job.model_dir, job.out_dir, plan, r.cloud, "{\"check\": true}\n");
+    ReprojStats rp;
+    if (!r.cloud.empty()) rp = writeSibling(job.model_dir, job.out_dir, plan, r.cloud, "{\"check\": true}\n");
+    std::printf("check: written points reprojected: %lld observations, mean %.3f px, p95 %.3f px, invalid %lld\n",
+                (long long)rp.observations, rp.mean_px, rp.p95_px, (long long)rp.invalid);
 
     const CloudScore s = scoreCloud(scene, r.cloud, 0.01, 0.05, 0.02, 0.02);
     const DensifyStats& st = r.stats;
@@ -103,6 +127,8 @@ int densifyCheck(const CheckOptions& co) {
     gate(s.within >= 0.95, "share within 1 cm of a surface", s.within, ">= 0.95");
     gate(s.riser_cover >= 0.90, "riser area covered at 2 cm", s.riser_cover, ">= 0.90");
     gate(s.beyond == 0, "points farther than 5 cm", (double)s.beyond, "== 0");
+    gate(rp.observations > 0 && rp.invalid == 0, "written observations that do not reproject", (double)rp.invalid, "== 0");
+    gate(rp.p95_px <= kCheckReprojP95, "written reprojection p95, source px", rp.p95_px, "<= 2");
     if (!co.keep && co.dir.empty()) {
         std::error_code ec;
         fs::remove_all(dir, ec);

@@ -160,6 +160,34 @@ SS_DENSIFY_OPT(opt_flip_mask,
     "Maskers die juist het te verwijderen gebied tekenen",
     "Маски, которые закрашивают удаляемую область",
     "Bunun yerine kaldırılacak bölgeyi boyayan maskeler")
+SS_DENSIFY_OPT(opt_source,
+    "Where points come from: roma (dense matches), moge (fitted monocular depth), hybrid (matches, depth filling the rest). Default: auto, hybrid when depth maps exist",
+    "点の出所: roma（密なマッチ）、moge（合わせ込んだ単眼深度）、hybrid（マッチ、残りを深度で補う）。既定: auto（深度マップがあれば hybrid）",
+    "点的来源：roma（稠密匹配），moge（拟合后的单目深度），hybrid（匹配，其余由深度补充）。默认：auto，有深度图时为 hybrid",
+    "點的來源：roma（稠密匹配），moge（擬合後的單目深度），hybrid（匹配，其餘由深度補充）。預設：auto，有深度圖時為 hybrid",
+    "점의 출처: roma (조밀 매칭), moge (맞춘 단안 깊이), hybrid (매칭, 나머지는 깊이로 채움). 기본값: auto, 깊이 맵이 있으면 hybrid",
+    "Woher die Punkte kommen: roma (dichte Zuordnungen), moge (angepasste monokulare Tiefe), hybrid (Zuordnungen, Tiefe füllt den Rest). Standard: auto, hybrid mit Tiefenkarten",
+    "D'où viennent les points : roma (appariements denses), moge (profondeur monoculaire ajustée), hybrid (appariements, la profondeur complète le reste). Défaut : auto, hybrid s'il y a des cartes de profondeur",
+    "De dónde salen los puntos: roma (correspondencias densas), moge (profundidad monocular ajustada), hybrid (correspondencias, la profundidad completa el resto). Por defecto: auto, hybrid si hay mapas de profundidad",
+    "De onde vêm os pontos: roma (correspondências densas), moge (profundidade monocular ajustada), hybrid (correspondências, a profundidade preenche o resto). Por omissão: auto, hybrid se houver mapas de profundidade",
+    "Da dove vengono i punti: roma (corrispondenze dense), moge (profondità monoculare adattata), hybrid (corrispondenze, la profondità riempie il resto). Predefinito: auto, hybrid con mappe di profondità",
+    "Waar de punten vandaan komen: roma (dichte overeenkomsten), moge (aangepaste monoculaire diepte), hybrid (overeenkomsten, diepte vult de rest). Standaard: auto, hybrid als er dieptekaarten zijn",
+    "Откуда берутся точки: roma (плотные соответствия), moge (подогнанная монокулярная глубина), hybrid (соответствия, остальное дополняет глубина). По умолчанию: auto, hybrid при наличии карт глубины",
+    "Noktaların kaynağı: roma (yoğun eşleşmeler), moge (uydurulmuş tek gözlü derinlik), hybrid (eşleşmeler, kalanı derinlik doldurur). Varsayılan: auto, derinlik haritaları varsa hybrid")
+SS_DENSIFY_OPT(opt_depth_dir,
+    "The depth maps spirula geometry wrote, relative to the dataset or absolute. Default: depths",
+    "spirula geometry が書いた深度マップ（相対または絶対パス）。既定: depths",
+    "spirula geometry 写出的深度图，相对或绝对路径。默认：depths",
+    "spirula geometry 寫出的深度圖，相對或絕對路徑。預設：depths",
+    "spirula geometry 가 쓴 깊이 맵, 상대 또는 절대 경로. 기본값: depths",
+    "Die Tiefenkarten von spirula geometry, relativ zum Datensatz oder absolut. Standard: depths",
+    "Les cartes de profondeur de spirula geometry, relatives au jeu de données ou absolues. Défaut : depths",
+    "Los mapas de profundidad de spirula geometry, relativos al conjunto o absolutos. Por defecto: depths",
+    "Os mapas de profundidade do spirula geometry, relativos ao conjunto ou absolutos. Por omissão: depths",
+    "Le mappe di profondità di spirula geometry, relative all'insieme o assolute. Predefinito: depths",
+    "De dieptekaarten van spirula geometry, relatief aan de dataset of absoluut. Standaard: depths",
+    "Карты глубины от spirula geometry, относительно набора или абсолютный путь. По умолчанию: depths",
+    "spirula geometry'nin yazdığı derinlik haritaları, veri kümesine göre ya da mutlak. Varsayılan: depths")
 SS_DENSIFY_OPT(opt_preset,
     "RoMa v2's match resolution: turbo 320, fast 512, base 640, high 640 then 960, precise 800 then 1280. Default: base",
     "RoMa v2 のマッチ解像度: turbo 320、fast 512、base 640、high 640 から 960、precise 800 から 1280。既定: base",
@@ -710,6 +738,59 @@ SS_MSG(warp_scale,
     TR("Eşleyici {1} px girdiler için {0} px alanlar döndürüyor: pikselleri daha kaba, bu yüzden piksel "
        "eşikleri {1} px değerlerinden çevrilerek alan piksellerinde uygulanır"));
 
+SS_MSG(source,
+    EN("Source: {0}"), JA("出所: {0}"), ZH_HANS("来源：{0}"), ZH_HANT("來源：{0}"), KO("출처: {0}"),
+    DE("Quelle: {0}"), FR("Source : {0}"), ES("Fuente: {0}"), PT("Fonte: {0}"), IT("Fonte: {0}"),
+    NL("Bron: {0}"), RU("Источник: {0}"), TR("Kaynak: {0}"));
+
+SS_MSG(depth_maps,
+    EN("Depth: {0}"), JA("深度: {0}"), ZH_HANS("深度：{0}"), ZH_HANT("深度：{0}"), KO("깊이: {0}"),
+    DE("Tiefe: {0}"), FR("Profondeur : {0}"), ES("Profundidad: {0}"), PT("Profundidade: {0}"),
+    IT("Profondità: {0}"), NL("Diepte: {0}"), RU("Глубина: {0}"), TR("Derinlik: {0}"));
+
+SS_MSG(depth_refused,
+    EN("Depth map of {0} not used: {1}"),
+    JA("{0} の深度マップは使いません: {1}"),
+    ZH_HANS("未使用 {0} 的深度图：{1}"),
+    ZH_HANT("未使用 {0} 的深度圖：{1}"),
+    KO("{0} 의 깊이 맵을 쓰지 않음: {1}"),
+    DE("Tiefenkarte von {0} nicht verwendet: {1}"),
+    FR("Carte de profondeur de {0} non utilisée : {1}"),
+    ES("Mapa de profundidad de {0} sin usar: {1}"),
+    PT("Mapa de profundidade de {0} não usado: {1}"),
+    IT("Mappa di profondità di {0} non usata: {1}"),
+    NL("Dieptekaart van {0} niet gebruikt: {1}"),
+    RU("Карта глубины {0} не используется: {1}"),
+    TR("{0} derinlik haritası kullanılmadı: {1}"));
+
+SS_MSG(depth_stats,
+    EN("Depth samples {0}. Rejected: no data {1}, other images disagree {2}, seen through {3}, "
+       "against nearby matches {4}; kept {5}, agreement within {6}"),
+    JA("深度サンプル {0}。除外: データなし {1}、他画像と不一致 {2}、透けて見える {3}、近くのマッチと不一致 {4}。"
+       "採用 {5}、一致の許容 {6}"),
+    ZH_HANS("深度样本 {0}。剔除：无数据 {1}，与其他图像不一致 {2}，被看穿 {3}，与附近匹配不符 {4}；"
+            "保留 {5}，一致容差 {6}"),
+    ZH_HANT("深度樣本 {0}。剔除：無資料 {1}，與其他影像不一致 {2}，被看穿 {3}，與附近匹配不符 {4}；"
+            "保留 {5}，一致容差 {6}"),
+    KO("깊이 표본 {0}. 제외: 데이터 없음 {1}, 다른 이미지와 불일치 {2}, 관통되어 보임 {3}, 근처 매칭과 불일치 {4}; "
+       "유지 {5}, 일치 허용 {6}"),
+    DE("Tiefenstichproben {0}. Verworfen: keine Daten {1}, andere Bilder widersprechen {2}, durchschaut {3}, "
+       "gegen nahe Zuordnungen {4}; behalten {5}, Übereinstimmung innerhalb {6}"),
+    FR("Échantillons de profondeur {0}. Rejetés : sans données {1}, autres images en désaccord {2}, vus à travers {3}, "
+       "contre les appariements voisins {4} ; gardés {5}, accord à {6} près"),
+    ES("Muestras de profundidad {0}. Rechazadas: sin datos {1}, otras imágenes en desacuerdo {2}, vistas a través {3}, "
+       "contra correspondencias cercanas {4}; conservadas {5}, acuerdo dentro de {6}"),
+    PT("Amostras de profundidade {0}. Rejeitadas: sem dados {1}, outras imagens em desacordo {2}, vistas através {3}, "
+       "contra correspondências próximas {4}; mantidas {5}, acordo dentro de {6}"),
+    IT("Campioni di profondità {0}. Scartati: senza dati {1}, altre immagini in disaccordo {2}, visti attraverso {3}, "
+       "contro corrispondenze vicine {4}; tenuti {5}, accordo entro {6}"),
+    NL("Dieptesteekproeven {0}. Afgewezen: geen gegevens {1}, andere beelden oneens {2}, doorzien {3}, "
+       "tegen nabije overeenkomsten {4}; behouden {5}, overeenstemming binnen {6}"),
+    RU("Выборок глубины {0}. Отброшено: нет данных {1}, другие снимки не согласны {2}, видны насквозь {3}, "
+       "против соседних соответствий {4}; сохранено {5}, согласие в пределах {6}"),
+    TR("Derinlik örneği {0}. Elenen: veri yok {1}, diğer görüntüler uyuşmuyor {2}, içinden görülüyor {3}, "
+       "yakın eşleşmelere aykırı {4}; tutulan {5}, uyum payı {6}"));
+
 SS_MSG(matcher,
     EN("Matcher: {0}"), JA("マッチャ: {0}"), ZH_HANS("匹配器：{0}"), ZH_HANT("匹配器：{0}"),
     KO("매처: {0}"), DE("Zuordner: {0}"), FR("Apparieur : {0}"), ES("Emparejador: {0}"),
@@ -839,6 +920,156 @@ SS_MSG(unknown_option,
     NL("Onbekende optie '{0}'; --help somt ze op"),
     RU("Неизвестный параметр '{0}'; список в --help"),
     TR("Bilinmeyen seçenek '{0}'; --help hepsini listeler"));
+
+SS_MSG(opt_normal_dir,
+    EN("normal maps to use with the depth maps (default normals, spirula geometry's); missing ones are made from the depth"),
+    JA("深度マップと併用する法線マップ (既定 normals、spirula geometry の出力)。無い画像は深度から作ります"),
+    ZH_HANS("与深度图一起使用的法线图（默认 normals，spirula geometry 的输出）；缺少的由深度生成"),
+    ZH_HANT("與深度圖一起使用的法線圖（預設 normals，spirula geometry 的輸出）；缺少的由深度產生"),
+    KO("깊이 맵과 함께 쓸 법선 맵 (기본 normals, spirula geometry 출력); 없는 것은 깊이에서 만듭니다"),
+    DE("Normalenkarten zu den Tiefenkarten (Standard normals, von spirula geometry); fehlende entstehen aus der Tiefe"),
+    FR("cartes de normales à utiliser avec les profondeurs (par défaut normals, celles de spirula geometry) ; les manquantes sont tirées de la profondeur"),
+    ES("mapas de normales para usar con los de profundidad (por defecto normals, los de spirula geometry); los que faltan salen de la profundidad"),
+    PT("mapas de normais a usar com os de profundidade (padrão normals, os do spirula geometry); os que faltam vêm da profundidade"),
+    IT("mappe delle normali da usare con quelle di profondità (predefinito normals, di spirula geometry); le mancanti vengono dalla profondità"),
+    NL("normaalkaarten bij de dieptekaarten (standaard normals, die van spirula geometry); ontbrekende komen uit de diepte"),
+    RU("карты нормалей к картам глубины (по умолчанию normals, от spirula geometry); недостающие строятся из глубины"),
+    TR("derinlik haritalarıyla kullanılacak normal haritaları (varsayılan normals, spirula geometry çıktısı); eksikler derinlikten üretilir"));
+
+SS_MSG(opt_normal_check,
+    EN("drop a depth point whose normal is more than this many degrees from the images that agree on its depth (default 55), or off"),
+    JA("深度が一致する画像の法線からこの角度 (度) 以上ずれた深度点を捨てます (既定 55)。off で無効"),
+    ZH_HANS("深度点的法线与深度一致的图像相差超过此角度（度）时丢弃（默认 55），或 off"),
+    ZH_HANT("深度點的法線與深度一致的影像相差超過此角度（度）時捨棄（預設 55），或 off"),
+    KO("깊이가 일치하는 이미지의 법선과 이 각도(도)보다 더 벗어난 깊이 점을 버립니다 (기본 55), 또는 off"),
+    DE("einen Tiefenpunkt verwerfen, dessen Normale mehr als so viele Grad von den in der Tiefe übereinstimmenden Bildern abweicht (Standard 55), oder off"),
+    FR("écarter un point de profondeur dont la normale s'écarte de plus de ce nombre de degrés des images qui confirment sa profondeur (55 par défaut), ou off"),
+    ES("descartar un punto de profundidad cuya normal se aparte más de estos grados de las imágenes que coinciden en su profundidad (55 por defecto), u off"),
+    PT("descartar um ponto de profundidade cuja normal se afaste mais destes graus das imagens que concordam com a sua profundidade (padrão 55), ou off"),
+    IT("scartare un punto di profondità la cui normale si scosta di più di questi gradi dalle immagini che ne confermano la profondità (predefinito 55), o off"),
+    NL("een dieptepunt verwerpen waarvan de normaal meer dan zoveel graden afwijkt van de beelden die het over zijn diepte eens zijn (standaard 55), of off"),
+    RU("отбросить точку глубины, нормаль которой отличается от нормалей согласных по глубине снимков больше чем на столько градусов (по умолчанию 55), или off"),
+    TR("normali, derinliğinde uzlaşan görüntülerinkinden bu kadar dereceden fazla sapan derinlik noktasını at (varsayılan 55) ya da off"));
+
+SS_MSG(computing_depths,
+    EN("Images without a depth map in {0}: running spirula geometry --depth for those (the present ones are kept)"),
+    JA("{0} に深度マップの無い画像があります。それらだけ spirula geometry --depth で作ります (既存は保持)"),
+    ZH_HANS("{0} 中有图像缺少深度图：仅对这些运行 spirula geometry --depth（保留已有的）"),
+    ZH_HANT("{0} 中有影像缺少深度圖：僅對這些執行 spirula geometry --depth（保留既有的）"),
+    KO("{0} 에 깊이 맵이 없는 이미지가 있습니다: 그것들만 spirula geometry --depth 로 만듭니다 (기존 것은 유지)"),
+    DE("Bilder ohne Tiefenkarte in {0}: spirula geometry --depth erzeugt nur diese (vorhandene bleiben)"),
+    FR("Images sans carte de profondeur dans {0} : spirula geometry --depth ne produit que celles-ci (les existantes sont conservées)"),
+    ES("Imágenes sin mapa de profundidad en {0}: spirula geometry --depth crea solo esos (se conservan los existentes)"),
+    PT("Imagens sem mapa de profundidade em {0}: o spirula geometry --depth cria só esses (os existentes ficam)"),
+    IT("Immagini senza mappa di profondità in {0}: spirula geometry --depth crea solo quelle (le esistenti restano)"),
+    NL("Beelden zonder dieptekaart in {0}: spirula geometry --depth maakt alleen die (bestaande blijven)"),
+    RU("В {0} есть снимки без карты глубины: spirula geometry --depth строит только их (имеющиеся сохраняются)"),
+    TR("{0} içinde derinlik haritası olmayan görüntüler var: yalnızca onlar için spirula geometry --depth çalıştırılıyor (mevcutlar korunur)"));
+
+SS_MSG(depth_inventory,
+    EN("Depth maps in {0}: {1} reused, {2} computed, {3} still missing"),
+    JA("{0} の深度マップ: 再利用 {1}、作成 {2}、未作成 {3}"),
+    ZH_HANS("{0} 中的深度图：复用 {1}，计算 {2}，仍缺 {3}"),
+    ZH_HANT("{0} 中的深度圖：重用 {1}，計算 {2}，仍缺 {3}"),
+    KO("{0} 의 깊이 맵: 재사용 {1}, 계산 {2}, 아직 없음 {3}"),
+    DE("Tiefenkarten in {0}: {1} wiederverwendet, {2} berechnet, {3} fehlen noch"),
+    FR("Cartes de profondeur dans {0} : {1} réutilisées, {2} calculées, {3} encore manquantes"),
+    ES("Mapas de profundidad en {0}: {1} reutilizados, {2} calculados, {3} aún faltan"),
+    PT("Mapas de profundidade em {0}: {1} reutilizados, {2} calculados, {3} ainda em falta"),
+    IT("Mappe di profondità in {0}: {1} riusate, {2} calcolate, {3} ancora mancanti"),
+    NL("Dieptekaarten in {0}: {1} hergebruikt, {2} berekend, {3} ontbreken nog"),
+    RU("Карты глубины в {0}: повторно {1}, построено {2}, всё ещё нет {3}"),
+    TR("{0} içindeki derinlik haritaları: {1} yeniden kullanıldı, {2} hesaplandı, {3} hâlâ eksik"));
+
+SS_MSG(normal_refused,
+    EN("Normal map of {0} not used: median cosine {1} against its own depth, another convention; normals from the depth instead"),
+    JA("{0} の法線マップは使いません: 自身の深度との余弦の中央値 {1}、別の規約です。代わりに深度から法線を作ります"),
+    ZH_HANS("未使用 {0} 的法线图：与其深度的余弦中位数 {1}，属于另一约定；改用深度生成的法线"),
+    ZH_HANT("未使用 {0} 的法線圖：與其深度的餘弦中位數 {1}，屬於另一約定；改用深度產生的法線"),
+    KO("{0} 의 법선 맵을 쓰지 않음: 자기 깊이와의 코사인 중앙값 {1}, 다른 규약; 대신 깊이에서 법선을 만듭니다"),
+    DE("Normalenkarte von {0} nicht verwendet: Median-Kosinus {1} zur eigenen Tiefe, eine andere Konvention; Normalen stattdessen aus der Tiefe"),
+    FR("Carte de normales de {0} non utilisée : cosinus médian {1} face à sa propre profondeur, une autre convention ; normales tirées de la profondeur à la place"),
+    ES("Mapa de normales de {0} sin usar: coseno mediano {1} frente a su propia profundidad, otra convención; normales de la profundidad en su lugar"),
+    PT("Mapa de normais de {0} não usado: cosseno mediano {1} face à própria profundidade, outra convenção; normais da profundidade em vez disso"),
+    IT("Mappa delle normali di {0} non usata: coseno mediano {1} rispetto alla propria profondità, un'altra convenzione; normali dalla profondità invece"),
+    NL("Normaalkaart van {0} niet gebruikt: mediane cosinus {1} tegen de eigen diepte, een andere conventie; normalen in plaats daarvan uit de diepte"),
+    RU("Карта нормалей {0} не используется: медианный косинус {1} к её же глубине, другое соглашение; нормали строятся из глубины"),
+    TR("{0} normal haritası kullanılmadı: kendi derinliğine göre medyan kosinüs {1}, başka bir kural; normaller bunun yerine derinlikten"));
+
+SS_MSG(normals_from,
+    EN("Normals: {0} images from {1}, {2} from their fitted depth ({3} normal maps in another convention not used)"),
+    JA("法線: {0} 枚は {1} から、{2} 枚は合わせた深度から ({3} 枚の別規約の法線マップは不使用)"),
+    ZH_HANS("法线：{0} 张来自 {1}，{2} 张来自拟合的深度（{3} 张另一约定的法线图未使用）"),
+    ZH_HANT("法線：{0} 張來自 {1}，{2} 張來自擬合的深度（{3} 張另一約定的法線圖未使用）"),
+    KO("법선: {0} 장은 {1} 에서, {2} 장은 맞춘 깊이에서 (다른 규약의 법선 맵 {3} 장은 미사용)"),
+    DE("Normalen: {0} Bilder aus {1}, {2} aus ihrer angepassten Tiefe ({3} Normalenkarten in anderer Konvention nicht verwendet)"),
+    FR("Normales : {0} images depuis {1}, {2} depuis leur profondeur ajustée ({3} cartes dans une autre convention non utilisées)"),
+    ES("Normales: {0} imágenes desde {1}, {2} desde su profundidad ajustada ({3} mapas en otra convención sin usar)"),
+    PT("Normais: {0} imagens de {1}, {2} da sua profundidade ajustada ({3} mapas noutra convenção não usados)"),
+    IT("Normali: {0} immagini da {1}, {2} dalla loro profondità adattata ({3} mappe in un'altra convenzione non usate)"),
+    NL("Normalen: {0} beelden uit {1}, {2} uit hun gepaste diepte ({3} normaalkaarten in een andere conventie niet gebruikt)"),
+    RU("Нормали: {0} снимков из {1}, {2} из подогнанной глубины ({3} карт в другом соглашении не используются)"),
+    TR("Normaller: {0} görüntü {1} içinden, {2} uydurulmuş derinlikten ({3} başka kuraldaki normal haritası kullanılmadı)"));
+
+SS_MSG(normal_stats,
+    EN("Normal check ({0} degrees): {1} depth points against the agreeing images, {2} hybrid fills against their neighbours' plane"),
+    JA("法線チェック ({0} 度): 一致画像に対して {1} 点、近傍の平面に対してハイブリッド補完 {2} 点"),
+    ZH_HANS("法线检查（{0} 度）：对照一致图像剔除 {1} 个深度点，对照邻域平面剔除 {2} 个混合填充"),
+    ZH_HANT("法線檢查（{0} 度）：對照一致影像剔除 {1} 個深度點，對照鄰域平面剔除 {2} 個混合填補"),
+    KO("법선 검사 ({0} 도): 일치 이미지 대비 깊이 점 {1} 개, 이웃 평면 대비 하이브리드 채움 {2} 개"),
+    DE("Normalenprüfung ({0} Grad): {1} Tiefenpunkte gegen die übereinstimmenden Bilder, {2} Hybrid-Füllungen gegen die Ebene ihrer Nachbarn"),
+    FR("Contrôle des normales ({0} degrés) : {1} points de profondeur face aux images concordantes, {2} remplissages hybrides face au plan de leurs voisins"),
+    ES("Control de normales ({0} grados): {1} puntos de profundidad frente a las imágenes que coinciden, {2} rellenos híbridos frente al plano de sus vecinos"),
+    PT("Verificação de normais ({0} graus): {1} pontos de profundidade face às imagens concordantes, {2} preenchimentos híbridos face ao plano dos vizinhos"),
+    IT("Controllo normali ({0} gradi): {1} punti di profondità rispetto alle immagini concordi, {2} riempimenti ibridi rispetto al piano dei vicini"),
+    NL("Normaalcontrole ({0} graden): {1} dieptepunten tegen de instemmende beelden, {2} hybride vullingen tegen het vlak van hun buren"),
+    RU("Проверка нормалей ({0} градусов): {1} точек глубины против согласных снимков, {2} гибридных заполнений против плоскости соседей"),
+    TR("Normal denetimi ({0} derece): uzlaşan görüntülere karşı {1} derinlik noktası, komşularının düzlemine karşı {2} hibrit dolgu"));
+
+SS_MSG(empty_result,
+    EN("No points survived the filters: nothing written to {0}. A model with no points would sort after its source and could be picked."),
+    JA("フィルタを通った点がありません: {0} には何も書きません。点の無いモデルは元の後に並び、選ばれる恐れがあります。"),
+    ZH_HANS("没有点通过过滤：未写入 {0}。没有点的模型排在源模型之后，可能被选中。"),
+    ZH_HANT("沒有點通過過濾：未寫入 {0}。沒有點的模型排在來源模型之後，可能被選中。"),
+    KO("필터를 통과한 점이 없습니다: {0} 에 아무것도 쓰지 않습니다. 점이 없는 모델은 원본 뒤에 정렬되어 선택될 수 있습니다."),
+    DE("Kein Punkt hat die Filter überstanden: nichts nach {0} geschrieben. Ein Modell ohne Punkte sortiert hinter seiner Quelle und könnte gewählt werden."),
+    FR("Aucun point n'a passé les filtres : rien n'est écrit dans {0}. Un modèle sans points se classerait après sa source et pourrait être choisi."),
+    ES("Ningún punto pasó los filtros: nada escrito en {0}. Un modelo sin puntos se ordenaría tras su origen y podría elegirse."),
+    PT("Nenhum ponto passou nos filtros: nada escrito em {0}. Um modelo sem pontos ordenar-se-ia após a origem e poderia ser escolhido."),
+    IT("Nessun punto ha superato i filtri: niente scritto in {0}. Un modello senza punti verrebbe dopo la sorgente e potrebbe essere scelto."),
+    NL("Geen punt kwam door de filters: niets naar {0} geschreven. Een model zonder punten sorteert na zijn bron en kan gekozen worden."),
+    RU("Ни одна точка не прошла фильтры: в {0} ничего не записано. Модель без точек шла бы после исходной и могла быть выбрана."),
+    TR("Hiçbir nokta filtrelerden geçmedi: {0} içine bir şey yazılmadı. Noktasız bir model kaynağından sonra sıralanır ve seçilebilirdi."));
+
+SS_MSG(reprojection,
+    EN("Written points reprojected through their cameras: {0} observations, mean {1} px, p95 {2} px, {3} invalid"),
+    JA("書いた点をカメラで再投影: 観測 {0}、平均 {1} px、p95 {2} px、無効 {3}"),
+    ZH_HANS("写入的点经相机重投影：{0} 个观测，平均 {1} px，p95 {2} px，无效 {3}"),
+    ZH_HANT("寫入的點經相機重投影：{0} 個觀測，平均 {1} px，p95 {2} px，無效 {3}"),
+    KO("기록한 점을 카메라로 재투영: 관측 {0}, 평균 {1} px, p95 {2} px, 무효 {3}"),
+    DE("Geschriebene Punkte durch ihre Kameras rückprojiziert: {0} Beobachtungen, Mittel {1} px, p95 {2} px, {3} ungültig"),
+    FR("Points écrits reprojetés par leurs caméras : {0} observations, moyenne {1} px, p95 {2} px, {3} invalides"),
+    ES("Puntos escritos reproyectados por sus cámaras: {0} observaciones, media {1} px, p95 {2} px, {3} no válidas"),
+    PT("Pontos escritos reprojetados pelas câmaras: {0} observações, média {1} px, p95 {2} px, {3} inválidas"),
+    IT("Punti scritti riproiettati dalle loro camere: {0} osservazioni, media {1} px, p95 {2} px, {3} non valide"),
+    NL("Geschreven punten teruggeprojecteerd door hun camera's: {0} waarnemingen, gemiddeld {1} px, p95 {2} px, {3} ongeldig"),
+    RU("Записанные точки перепроецированы их камерами: наблюдений {0}, среднее {1} px, p95 {2} px, недопустимых {3}"),
+    TR("Yazılan noktalar kameralarından yeniden izdüşürüldü: {0} gözlem, ortalama {1} px, p95 {2} px, {3} geçersiz"));
+
+SS_MSG(fill_budget,
+    EN("Hybrid fill: at most {0} depth points beside the matches' {1}"),
+    JA("ハイブリッド補完: マッチの {1} 点とは別に深度点を最大 {0} 点"),
+    ZH_HANS("混合填充：在匹配的 {1} 个点之外最多 {0} 个深度点"),
+    ZH_HANT("混合填補：在匹配的 {1} 個點之外最多 {0} 個深度點"),
+    KO("하이브리드 채움: 매칭 {1} 점과 별도로 깊이 점 최대 {0} 점"),
+    DE("Hybrid-Füllung: höchstens {0} Tiefenpunkte neben den {1} der Matches"),
+    FR("Remplissage hybride : au plus {0} points de profondeur en plus des {1} des correspondances"),
+    ES("Relleno híbrido: como mucho {0} puntos de profundidad además de los {1} de las correspondencias"),
+    PT("Preenchimento híbrido: no máximo {0} pontos de profundidade além dos {1} das correspondências"),
+    IT("Riempimento ibrido: al più {0} punti di profondità oltre ai {1} delle corrispondenze"),
+    NL("Hybride vulling: hoogstens {0} dieptepunten naast de {1} van de matches"),
+    RU("Гибридное заполнение: не более {0} точек глубины сверх {1} от сопоставлений"),
+    TR("Hibrit dolgu: eşleşmelerin {1} noktasına ek olarak en çok {0} derinlik noktası"));
 
 }  // namespace densify
 }  // namespace msg

@@ -20,6 +20,7 @@
 #include "core/ImageFile.h"
 #include "external/stb_image.h"
 #include "external/stb_image_write.h"
+#include "roma/DepthSource.h"
 #include "roma/Sample.h"
 #include "sfm/core/FixedPoses.h"
 #include "sfm/core/Model.h"
@@ -264,6 +265,17 @@ DensifyPlan planDensify(const DensifyJob& job) {
     pl.split = o.split < 0 ? any_equi : o.split == 1;
     if (pl.split && !any_equi) throw std::runtime_error("--split yes needs an equirectangular model");
     pl.match_size = job.matcher ? job.matcher->inputSize() : 640;
+    {
+        const bool m = job.matcher != nullptr || !job.export_dir.empty(), d = job.depth != nullptr;
+        if (o.source == DensifySource::Auto)
+            pl.source = m && d ? DensifySource::Hybrid : d ? DensifySource::Depth : DensifySource::Roma;
+        else
+            pl.source = o.source;
+        if (o.source != DensifySource::Auto &&
+            ((pl.source != DensifySource::Roma && !d) || (pl.source != DensifySource::Depth && !m)))
+            throw std::runtime_error("the chosen source needs " +
+                                     std::string(!d ? "depth maps" : "a matcher"));
+    }
     for (int i = 0; i < N; i++) {
         const SourceImage& s = pl.images[(size_t)i];
         const bool split = pl.split && s.cam.isSpherical();
@@ -370,6 +382,9 @@ DensifyPlan planDensify(const DensifyJob& job) {
     pl.voxel = o.voxel > 0 ? o.voxel : o.voxel < 0 ? 0 : 0.5 * pl.sparse_spacing;
     pl.max_points = o.max_points > 0 ? o.max_points : o.max_points < 0 ? 0
                     : std::clamp<int64_t>(4 * pl.sparse_points, 1000000, 8000000);
+    // The matches alone fill the auto cap on the basement, which left a hybrid
+    // with no fill at all; the fill gets a quarter on top (a choice, not fitted).
+    if (pl.source == DensifySource::Hybrid && o.max_points == 0) pl.max_fill = pl.max_points / 4;
     if (o.matches_per_ref <= 0) {
         // 16%: points written per sample on the basement (200,229 of 1,219,543).
         constexpr double kYield = 0.16;
@@ -516,12 +531,61 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         res.seconds_total = std::chrono::duration<double>(clock::now() - t0).count();
         return res;
     }
-    if (!job.matcher) throw std::runtime_error("no matcher");
+    if (!job.matcher && !job.depth) throw std::runtime_error("no matcher and no depth source");
 
     std::vector<DensePoint> all;
     bool warned = false;
+    double res_depth_tol = 0;
     double match_s = 0;
     int done = 0;
+    // The depth source: every usable image's map, fitted to its own sparse points.
+    std::vector<DepthField> fields;
+    std::vector<int> others;
+    DepthAgreeOptions dao;
+    const bool use_matches = job.matcher && pl.source != DensifySource::Depth;
+    const bool use_depth = job.depth && pl.source != DensifySource::Roma;
+    sfm::Reconstruction rec;
+    if (use_depth) {
+        rec = sfm::Reconstruction::readBinary(job.model_dir);
+        fields.resize(pl.images.size());
+        std::vector<char> held(pl.images.size(), 0);
+        for (int i : pl.held_out) held[(size_t)i] = 1;
+        std::vector<double> res;
+        for (size_t i = 0; i < pl.images.size(); i++) {
+            if (held[i]) continue;
+            RawDepth raw;
+            if (!job.depth->load(pl.images[i], raw)) {
+                fields[i].refused = "no depth map";
+            } else {
+                DepthFitOptions fo;
+                fo.seed = o.seed + i;
+                fo.align = o.depth_align;
+                fo.normal_files = o.depth_normal_files;
+                fo.normal_min_cos = o.depth_normal_min_cos;
+                fields[i] = fitDepth(pl.images[i], rec, raw, fo);
+            }
+            if (job.on_depth_fit) job.on_depth_fit(pl.images[i], fields[i]);
+            if (fields[i].ok) {
+                others.push_back((int)i);
+                res.push_back(fields[i].rel_residual);
+            }
+        }
+        dao.min_agree = o.depth_min_agree;
+        dao.vote = o.depth_agreement;
+        if (o.depth_tol > 0) {
+            dao.tol = o.depth_tol;
+        } else if (!res.empty()) {
+            // 2.5 x the median fit residual, the scatter one map has against the
+            // sparse points, kept within 1-5 %.
+            std::nth_element(res.begin(), res.begin() + (long)(res.size() / 2), res.end());
+            dao.tol = std::clamp(2.5 * res[res.size() / 2], 0.01, 0.05);
+        }
+        dao.through = 2 * dao.tol;
+        dao.normal_check = o.depth_normal_check;
+        dao.normal_deg = o.depth_normal_deg;
+        res_depth_tol = dao.tol;
+    }
+
     for (const auto& rv : pl.ref_views) {
         const View& A = pl.views[(size_t)rv.view];
         if (!o.plugin_exact) cache.full(A.image);
@@ -529,63 +593,155 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         const int sa = cache.slot(rv.view);
         const std::vector<uint8_t> rgbA = ca.rgb[(size_t)sa], keepA = ca.keep[(size_t)sa];
         const SourceImage& srcA = pl.images[(size_t)A.image];
-        RefMatches m;
-        m.ref = rv.view;
-        MatchImage ma{A.name, pl.match_size, pl.match_size, rgbA.data()};
-        for (int b : rv.nbr_views) {
-            const View& B = pl.views[(size_t)b];
-            const CutImage& cb = cache.cut(B.image);
-            const int sb = cache.slot(b);
-            const std::vector<uint8_t> rgbB = cb.rgb[(size_t)sb], keepB = cb.keep[(size_t)sb];
-            const MatchImage mb{B.name, pl.match_size, pl.match_size, rgbB.data()};
-            const auto tm = clock::now();
-            Warp w = job.matcher->match(ma, mb);
-            match_s += std::chrono::duration<double>(clock::now() - tm).count();
-            if (m.w == 0) { m.w = w.width; m.h = w.height; }
-            if (w.width != m.w || w.height != m.h)
-                throw std::runtime_error("matcher returned differently sized warps for " + A.name);
-            const std::vector<uint8_t> ka = resizeKeep(keepA, pl.match_size, m.w);
-            const std::vector<uint8_t> kb = resizeKeep(keepB, pl.match_size, m.w);
-            m.cert.push_back(collectCertainty(w, ka, kb, o));
-            m.warp.push_back(std::move(w.warp));
-            m.nbrs.push_back(b);
-        }
-        if (m.nbrs.empty()) continue;
-        // Thresholds are in pixels of the matcher's input; a coarser warp
-        // (RoMa's stride-4 coarse match) gets them in its own pixels.
-        DensifyOptions ro = o;
-        if (m.w != pl.match_size && !o.plugin_exact) {
-            const double k = (double)m.w / pl.match_size;
-            ro.reproj_px *= k;
-            ro.sampson_px2 *= k * k;
-            if (ro.max_depth_error > 0) ro.max_depth_error /= k;
-            if (!warned && job.on_warp_scale) job.on_warp_scale(m.w, pl.match_size);
-            warned = true;
-        }
-        if (o.plugin_exact) {
-            // The plugin's colour reads the match-resolution, masked reference.
-            m.rgb_match = rgbA;
-            if (m.w != pl.match_size) m.rgb_match.assign((size_t)m.w * m.h * 3, 0);
-        } else {
+        std::function<std::array<float, 3>(double, double)> colour_at;
+        if (!o.plugin_exact) {
             const ImageData& full = cache.full(A.image);
-            m.colour_at = [&full, &srcA, &A](double x, double y) {
+            colour_at = [&full, &srcA, &A](double x, double y) {
                 const Vec2 s = viewToSource(srcA, A, x, y);
                 return sampleRgb(full, s.x, s.y);
             };
         }
-        std::vector<float> best((size_t)m.w * m.h, 0.0f);
-        for (const auto& c : m.cert)
-            for (size_t i = 0; i < best.size(); i++) best[i] = std::max(best[i], c[i]);
-        if (!o.plugin_exact)
-            for (float& v : best)
-                if (v < o.min_certainty) v = 0;
-        SampleOptions so;
-        so.count = o.matches_per_ref;
-        so.cap = o.sample_cap;
-        so.no_filter = o.no_filter;
-        so.seed = o.seed * 1000003ull + (uint64_t)rv.view;
-        const std::vector<int64_t> samples = sampleWithCoverage(best, m.w, m.h, so);
-        std::vector<DensePoint> pts = triangulateRef(m, pl.views, samples, ro, res.stats);
+        RefMatches m;
+        m.ref = rv.view;
+        std::vector<float> best;
+        std::vector<DensePoint> pts;
+        if (use_matches) {
+            MatchImage ma{A.name, pl.match_size, pl.match_size, rgbA.data()};
+            for (int b : rv.nbr_views) {
+                const View& B = pl.views[(size_t)b];
+                const CutImage& cb = cache.cut(B.image);
+                const int sb = cache.slot(b);
+                const std::vector<uint8_t> rgbB = cb.rgb[(size_t)sb], keepB = cb.keep[(size_t)sb];
+                const MatchImage mb{B.name, pl.match_size, pl.match_size, rgbB.data()};
+                const auto tm = clock::now();
+                Warp w = job.matcher->match(ma, mb);
+                match_s += std::chrono::duration<double>(clock::now() - tm).count();
+                if (m.w == 0) { m.w = w.width; m.h = w.height; }
+                if (w.width != m.w || w.height != m.h)
+                    throw std::runtime_error("matcher returned differently sized warps for " + A.name);
+                const std::vector<uint8_t> ka = resizeKeep(keepA, pl.match_size, m.w);
+                const std::vector<uint8_t> kb = resizeKeep(keepB, pl.match_size, m.w);
+                m.cert.push_back(collectCertainty(w, ka, kb, o));
+                m.warp.push_back(std::move(w.warp));
+                m.nbrs.push_back(b);
+            }
+        }
+        if (!m.nbrs.empty()) {
+            // Thresholds are in pixels of the matcher's input; a coarser warp
+            // (RoMa's stride-4 coarse match) gets them in its own pixels.
+            DensifyOptions ro = o;
+            if (m.w != pl.match_size && !o.plugin_exact) {
+                const double k = (double)m.w / pl.match_size;
+                ro.reproj_px *= k;
+                ro.sampson_px2 *= k * k;
+                if (ro.max_depth_error > 0) ro.max_depth_error /= k;
+                if (!warned && job.on_warp_scale) job.on_warp_scale(m.w, pl.match_size);
+                warned = true;
+            }
+            if (o.plugin_exact) {
+                // The plugin's colour reads the match-resolution, masked reference.
+                m.rgb_match = rgbA;
+                if (m.w != pl.match_size) m.rgb_match.assign((size_t)m.w * m.h * 3, 0);
+            } else {
+                m.colour_at = colour_at;
+            }
+            best.assign((size_t)m.w * m.h, 0.0f);
+            for (const auto& c : m.cert)
+                for (size_t i = 0; i < best.size(); i++) best[i] = std::max(best[i], c[i]);
+            if (!o.plugin_exact)
+                for (float& v : best)
+                    if (v < o.min_certainty) v = 0;
+            SampleOptions so;
+            so.count = o.matches_per_ref;
+            so.cap = o.sample_cap;
+            so.no_filter = o.no_filter;
+            so.seed = o.seed * 1000003ull + (uint64_t)rv.view;
+            const std::vector<int64_t> samples = sampleWithCoverage(best, m.w, m.h, so);
+            pts = triangulateRef(m, pl.views, samples, ro, res.stats);
+        }
+        if (use_depth && fields[(size_t)A.image].ok) {
+            const int G = pl.match_size;
+            const DepthField& fA = fields[(size_t)A.image];
+            const std::vector<uint8_t> keepG = resizeKeep(keepA, pl.match_size, G);
+            std::vector<float> weight((size_t)G * G, 1.0f);
+            const bool hybrid = !best.empty();
+            for (int y = 0; y < G; y++)
+                for (int x = 0; x < G; x++) {
+                    const size_t i = (size_t)y * G + x;
+                    if (!keepG.empty() && !keepG[i]) { weight[i] = 0; continue; }
+                    // Hybrid: the depth source fills only where the matches are not certain.
+                    if (hybrid && best[(size_t)(y * m.h / G) * m.w + (size_t)(x * m.w / G)] > 0) {
+                        weight[i] = 0;
+                        res.stats.depth_covered++;
+                    }
+                }
+            // Hybrid: a fill point must also agree with the matched points and
+            // the sparse points around it: their fit residual, and their plane.
+            std::vector<float> local((size_t)G * G, NAN);
+            // Their points on an 8-cell grid for the plane: a fill is far from
+            // matched pixels by construction, so it looks +-3 coarse cells out.
+            const int GC = (G + 7) / 8;
+            std::vector<int> head((size_t)GC * GC, -1), next;
+            std::vector<Vec3> near_pts;
+            auto note = [&](const Vec3& X) {
+                double field, own;
+                if (!fA.at(srcA, X, &field, &own)) return;
+                const Vec3 Xv = sfm::mul(A.R, X) + A.t;
+                if (!(Xv.z > 0)) return;
+                const Vec2 q = A.cam.project(Xv);
+                const int x = (int)(q.x * G / A.cam.width), y = (int)(q.y * G / A.cam.height);
+                if (x < 0 || y < 0 || x >= G || y >= G) return;
+                local[(size_t)y * G + x] = (float)(field / own - 1.0);
+                next.push_back(head[(size_t)(y / 8) * GC + x / 8]);
+                head[(size_t)(y / 8) * GC + x / 8] = (int)near_pts.size();
+                near_pts.push_back(X);
+            };
+            if (hybrid) {
+                for (const DensePoint& p : pts) note(p.xyz);
+                for (uint64_t pid : srcA.points) {
+                    auto it = rec.points3D.find(pid);
+                    if (it != rec.points3D.end()) note(it->second.xyz);
+                }
+            }
+            const double tol = dao.tol;
+            std::function<bool(int64_t, const Vec3&, const Vec3*)> local_ok;
+            DensifyStats& rst = res.stats;
+            if (hybrid && o.hybrid_local_check)
+                local_ok = [&, G, tol](int64_t s, const Vec3& X, const Vec3* n) {
+                    const int cx = (int)(s % G), cy = (int)(s / G);
+                    std::vector<float> v;
+                    std::vector<Vec3> P;
+                    for (int y = std::max(0, cy - 8); y <= std::min(G - 1, cy + 8); y++)
+                        for (int x = std::max(0, cx - 8); x <= std::min(G - 1, cx + 8); x++) {
+                            const float r = local[(size_t)y * G + x];
+                            if (std::isfinite(r)) v.push_back(std::fabs(r));
+                        }
+                    const double radius = 0.06 * (X - A.centre).norm();
+                    for (int y = std::max(0, cy / 8 - 3); y <= std::min(GC - 1, cy / 8 + 3); y++)
+                        for (int x = std::max(0, cx / 8 - 3); x <= std::min(GC - 1, cx / 8 + 3); x++)
+                            for (int k = head[(size_t)y * GC + x]; k >= 0; k = next[(size_t)k])
+                                if ((near_pts[(size_t)k] - X).norm() <= radius) P.push_back(near_pts[(size_t)k]);
+                    if (v.size() >= 3) {
+                        std::nth_element(v.begin(), v.begin() + (long)(v.size() / 2), v.end());
+                        if (v[v.size() / 2] > tol) return false;
+                    }
+                    Vec3 pn;
+                    if (!n || !o.hybrid_normal_check || !planeNormal(P, &pn)) return true;
+                    const double ang = std::min(normalAngleDeg(*n, pn), 180.0 - normalAngleDeg(*n, pn));
+                    rst.local_normal_hist[std::min<size_t>(35, (size_t)(ang / 5))]++;
+                    if (ang <= o.depth_normal_deg) return true;
+                    rst.depth_local_normal++;
+                    return false;
+                };
+            SampleOptions so;
+            so.count = o.matches_per_ref;
+            so.cap = 1.0f;
+            so.seed = o.seed * 1000003ull + (uint64_t)rv.view + 7;
+            const std::vector<int64_t> ds = sampleWithCoverage(weight, G, G, so);
+            std::vector<DensePoint> dp = depthPointsForView(pl.views, pl.images, fields, others, rv.view, G, G, ds,
+                                                            dao, colour_at, local_ok, res.stats);
+            for (DensePoint& p : dp) pts.push_back(std::move(p));
+        }
         for (DensePoint& p : pts) all.push_back(std::move(p));
         if (progress) progress(++done, (int)pl.ref_views.size(), (int64_t)all.size());
     }
@@ -597,7 +753,18 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         free_space = std::make_unique<FreeSpace>(pl, all, 3, 0.05);
         veto = [&free_space](const DensePoint& p) { return free_space->seesThrough(p); };
     }
-    res.cloud = finalizePoints(std::move(all), pl.min_track, pl.voxel, pl.max_points, o, res.stats, veto);
+    res.cloud = finalizePoints(std::move(all), pl.min_track, pl.voxel, pl.max_points, o, res.stats, veto, pl.max_fill);
+    // Match points take the depth source's normal where their first image has one.
+    for (DensePoint& p : res.cloud) {
+        if (fields.empty() || p.from_depth || p.track.empty()) continue;
+        const int im = pl.views[(size_t)p.track[0].view].image;
+        Vec3 n;
+        if (!fields[(size_t)im].normalAt(pl.images[(size_t)im], p.xyz, &n)) continue;
+        p.normal[0] = (float)n.x;
+        p.normal[1] = (float)n.y;
+        p.normal[2] = (float)n.z;
+    }
+    res.depth_tol = res_depth_tol;
     res.points = (int64_t)res.cloud.size();
     res.seconds_match = match_s;
     res.seconds_total = std::chrono::duration<double>(clock::now() - t0).count();
@@ -622,7 +789,8 @@ FreeSpace::FreeSpace(const DensifyPlan& pl, const std::vector<DensePoint>& pts, 
         m.d.assign((size_t)m.w * m.h, INFINITY);
     }
     for (const DensePoint& p : pts) {
-        if (p.distinct_images < min_images) continue;
+        // Depth points are not evidence: a map too deep there would veto the true surface.
+        if (p.distinct_images < min_images || p.from_depth) continue;
         std::vector<int> imgs;
         for (const Observation& o : p.track) {
             const int im = pl.views[(size_t)o.view].image;
@@ -741,10 +909,98 @@ std::string outDirProblem(const std::string& dataset_dir, const std::string& mod
     return {};
 }
 
-void writeSibling(const std::string& model_dir, const std::string& out_dir,
-                  const DensifyPlan& pl, const std::vector<DensePoint>& cloud,
-                  const std::string& settings_json) {
+void writeNormalsPly(const std::string& path, const std::vector<DensePoint>& cloud) {
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    f << "ply\nformat binary_little_endian 1.0\nelement vertex " << cloud.size()
+      << "\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\n"
+         "property float ny\nproperty float nz\nproperty uint point3D_id\nend_header\n";
+    using sfm::detail::wr;
+    for (size_t i = 0; i < cloud.size(); i++) {
+        const DensePoint& p = cloud[i];
+        for (double v : {p.xyz.x, p.xyz.y, p.xyz.z}) wr<float>(f, (float)v);
+        for (int k = 0; k < 3; k++) wr<float>(f, p.normal[k]);
+        wr<uint32_t>(f, (uint32_t)(i + 1));
+    }
+    if (!f) throw std::runtime_error("cannot write " + path);
+}
+
+DepthInventory ensureDepths(const std::vector<std::string>& names,
+                            const std::function<std::string(const std::string&)>& find,
+                            const std::function<void()>& compute) {
+    struct Seen { std::string path; uintmax_t size; fs::file_time_type time; };
+    std::vector<Seen> before;
+    DepthInventory inv;
+    for (const std::string& n : names) {
+        const std::string p = find(n);
+        if (p.empty()) { inv.missing++; continue; }
+        before.push_back({p, fs::file_size(p), fs::last_write_time(p)});
+    }
+    inv.reused = (int)before.size();
+    if (inv.missing == 0 || !compute) return inv;
+    compute();
+    for (const Seen& s : before) {
+        std::error_code ec;
+        if (fs::file_size(s.path, ec) != s.size || fs::last_write_time(s.path, ec) != s.time)
+            throw std::runtime_error("an existing depth map was rewritten: " + s.path);
+    }
+    inv.missing = 0;
+    for (const std::string& n : names) inv.missing += find(n).empty();
+    inv.computed = (int)names.size() - inv.missing - inv.reused;
+    return inv;
+}
+
+ReprojStats reprojectWritten(const std::string& model_dir) {
+    const sfm::Reconstruction rec = sfm::Reconstruction::readBinary(model_dir);
+    std::ifstream t(fs::path(model_dir) / "points3D_tracks.bin", std::ios::binary);
+    char magic[4] = {};
+    uint64_t n = 0;
+    t.read(magic, 4);
+    t.read((char*)&n, 8);
+    if (!t || std::string(magic, 4) != "RTK1") throw std::runtime_error("unreadable points3D_tracks.bin");
+    ReprojStats rs;
+    std::vector<double> err;
+    for (uint64_t i = 0; i < n; i++) {
+        uint64_t id = 0;
+        uint32_t k = 0;
+        t.read((char*)&id, 8);
+        t.read((char*)&k, 4);
+        auto pt = rec.points3D.find(id);
+        for (uint32_t j = 0; j < k; j++) {
+            uint32_t img = 0;
+            float xy[2] = {0, 0};
+            t.read((char*)&img, 4);
+            t.read((char*)xy, 8);
+            rs.observations++;
+            auto im = rec.images.find(img);
+            if (!t || pt == rec.points3D.end() || im == rec.images.end()) { rs.invalid++; continue; }
+            const sfm::Camera& cam = rec.cameras.at(im->second.camera_id);
+            const Vec3 Xc = sfm::mul(im->second.pose.R, pt->second.xyz) + im->second.pose.t;
+            if (!cam.isSpherical() && !(Xc.z > 0)) { rs.invalid++; continue; }
+            const Vec2 q = cam.project(Xc);
+            double e = std::hypot(q.x - xy[0], q.y - xy[1]);
+            // An equirect wraps: x and x +- width are one pixel.
+            if (cam.isSpherical()) e = std::min(e, std::hypot(cam.width - std::fabs(q.x - xy[0]), q.y - xy[1]));
+            const bool inside = xy[0] >= 0 && xy[1] >= 0 && xy[0] <= cam.width && xy[1] <= cam.height;
+            if (!std::isfinite(e) || !inside) { rs.invalid++; continue; }
+            err.push_back(e);
+        }
+    }
+    if (!t) throw std::runtime_error("points3D_tracks.bin is short");
+    if (!err.empty()) {
+        rs.mean_px = std::accumulate(err.begin(), err.end(), 0.0) / (double)err.size();
+        const size_t k95 = (size_t)(0.95 * (double)(err.size() - 1));
+        std::nth_element(err.begin(), err.begin() + (long)k95, err.end());
+        rs.p95_px = err[k95];
+    }
+    return rs;
+}
+
+ReprojStats writeSibling(const std::string& model_dir, const std::string& out_dir,
+                         const DensifyPlan& pl, const std::vector<DensePoint>& cloud,
+                         const std::string& settings_json) {
+    if (cloud.empty()) throw std::runtime_error("no points survived the filters; nothing written to " + out_dir);
     const fs::path src(model_dir), out(out_dir);
+    ReprojStats rs;
     const std::string problem = outDirProblem("", model_dir, out_dir);
     if (!problem.empty()) throw std::runtime_error(problem);
     const sfm::FixedPoses fp = sfm::readFixedPoses(model_dir);
@@ -793,7 +1049,21 @@ void writeSibling(const std::string& model_dir, const std::string& out_dir,
             }
             if (!f || !t) throw std::runtime_error("cannot write points3D.bin");
         }
-        put("densify.json", settings_json);
+        if (std::any_of(cloud.begin(), cloud.end(),
+                        [](const DensePoint& p) { return p.normal[0] || p.normal[1] || p.normal[2]; }))
+            writeNormalsPly((tmp / kNormalsPly).string(), cloud);
+        rs = reprojectWritten(tmp.string());
+        std::string js = settings_json;
+        const size_t close = js.rfind('}');
+        if (close != std::string::npos) {
+            auto jn = [](double v) { return std::isfinite(v) ? std::to_string(v) : std::string("null"); };
+            const size_t open = js.find('{');
+            const bool empty = js.find_first_not_of(" \n\t", open + 1) == close;
+            js.insert(close, std::string(empty ? "" : ",\n  ") + "\"reprojection\": {\"observations\": " +
+                                 std::to_string(rs.observations) + ", \"invalid\": " + std::to_string(rs.invalid) +
+                                 ", \"mean_px\": " + jn(rs.mean_px) + ", \"p95_px\": " + jn(rs.p95_px) + "}\n");
+        }
+        put("densify.json", js);
         const std::string bad = sfm::checkFixedModel(tmp.string(), fp);
         if (!bad.empty()) throw std::runtime_error("the copied model differs from its source: " + bad);
         // Byte for byte but for the point3D ids, which detachPoints cleared.
@@ -813,6 +1083,7 @@ void writeSibling(const std::string& model_dir, const std::string& out_dir,
         fs::remove_all(tmp, ec);
         throw;
     }
+    return rs;
 }
 
 }  // namespace roma

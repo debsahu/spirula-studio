@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "app/DepthPng.h"
 #include "data/CameraMath.h"
 #include "external/stb_image_write.h"
 #include "roma/Select.h"
@@ -263,6 +264,74 @@ void writeStairDataset(const Scene& sc, const std::string& dir, int pin_w, int e
         made++;
     }
     rec.writeBinary((root / "sparse" / "0").string());
+}
+
+void writeStairDepths(const Scene& sc, const std::string& dir, const SyntheticDepth& sd) {
+    const fs::path root(dir);
+    fs::create_directories(root / "depths");
+    if (sd.normals) fs::create_directories(root / "normals");
+    const sfm::Reconstruction rec = sfm::Reconstruction::readBinary((root / "sparse" / "0").string());
+    std::mt19937_64 rng(sd.seed);
+    std::normal_distribution<double> gauss(0.0, 1.0);
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    int copies = 0;
+    for (const auto& kv : rec.images) {
+        const sfm::Image& im = kv.second;
+        const sfm::Camera& cam = rec.cameras.at(im.camera_id);
+        const bool ray = cam.isSpherical();
+        const int w = cam.width / 2, h = cam.height / 2;
+        const Vec3 C = sfm::cameraCenter(im.pose);
+        const Mat3 Rt = sfm::transpose(im.pose.R);
+        // disparity_raw = (disparity_true - b) / a: what the fit has to undo.
+        const double a = 0.5 + uni(rng), b = (uni(rng) - 0.5) * 0.1;
+        // The last pinholes look straight at the risers (the first see them edge on).
+        const bool copy = !ray && (int)im.id > 8 - sd.copies && (int)im.id <= 8;
+        copies += copy;
+        std::vector<double> raw((size_t)w * h, 0.0);
+        std::vector<uint8_t> nrm((size_t)w * h * 3, 0);
+        const bool tilt = (int)im.id <= sd.tilted;
+        const double ta = sd.tilt_deg * M_PI / 180.0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                const Vec3 bc = cam.bearing({(x + 0.5) * 2.0, (y + 0.5) * 2.0});
+                const Vec3 d = sfm::mul(Rt, bc).normalized();
+                int q = -1;
+                const double t = sc.hit(C, d, &q);
+                if (!std::isfinite(t)) continue;
+                if (sd.normals) {
+                    Vec3 n = sc.quads[(size_t)q].u.cross(sc.quads[(size_t)q].v).normalized();
+                    if (n.dot(d) > 0) n = n * -1.0;
+                    n = sfm::mul(im.pose.R, n);
+                    if (tilt) {   // about an axis across the normal: every normal moves tilt_deg
+                        const Vec3 e = std::fabs(n.x) < 0.7 ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+                        const Vec3 u = n.cross(e).cross(n).normalized();
+                        n = n * std::cos(ta) + u * std::sin(ta);
+                    }
+                    const double c3[3] = {n.x, n.y, n.z};
+                    for (int k = 0; k < 3; k++)
+                        nrm[((size_t)y * w + x) * 3 + k] = (uint8_t)std::lround(127.5 + 127.5 * c3[k]);
+                }
+                double dep = ray ? t : t * bc.normalized().z;
+                if (copy && q >= 0 && q < 12 && q % 2 == 0) dep *= sd.copy_scale;   // risers only: no depth-wise fit absorbs it
+                dep *= 1.0 + sd.noise * gauss(rng);
+                const double disp = (1.0 / dep - b) / a;
+                if (disp > 0) raw[(size_t)y * w + x] = 1.0 / disp;
+            }
+        std::vector<double> v;
+        for (double r : raw)
+            if (r > 0) v.push_back(r);
+        if (v.empty()) continue;
+        std::nth_element(v.begin(), v.begin() + (long)(0.999 * (double)(v.size() - 1)), v.end());
+        const double top = v[(size_t)(0.999 * (double)(v.size() - 1))];
+        std::vector<uint16_t> px((size_t)w * h, 0);
+        for (size_t i = 0; i < raw.size(); i++)
+            if (raw[i] > 0) px[i] = (uint16_t)std::lround(std::clamp(raw[i] / top * 65535.0, 1.0, 65535.0));
+        const std::string path = (root / "depths" / im.name).string();
+        if (!app::save_depth_png16(path, px.data(), w, h)) throw std::runtime_error("cannot write " + path);
+        const std::string np = (root / "normals" / im.name).replace_extension(".png").string();
+        if (sd.normals && !stbi_write_png(np.c_str(), w, h, 3, nrm.data(), w * 3))
+            throw std::runtime_error("cannot write " + np);
+    }
 }
 
 OracleMatcher::OracleMatcher(const Scene* scene, std::vector<View> views, int size,

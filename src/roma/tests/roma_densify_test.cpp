@@ -10,6 +10,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <set>
@@ -20,6 +21,7 @@
 #include "external/stb_image_write.h"
 #include "roma/Densify.h"
 #include "roma/DensifyRun.h"
+#include "roma/DepthSource.h"
 #include "roma/DumpMatcher.h"
 #include "roma/Sample.h"
 #include "roma/Select.h"
@@ -612,6 +614,19 @@ void visibility_drops_seen_through_pairs() {
         blind_vetoes += blind.seesThrough(fl);
     }
     check(blind_vetoes == 0, "vetoed with no evidence: " + std::to_string(blind_vetoes));
+    // Depth points are no evidence either (mutant: a map too deep vetoes the surface).
+    std::vector<DensePoint> dep = trusted;
+    for (DensePoint& p : dep) p.from_depth = true;
+    const FreeSpace by_depth(pl, dep, 3, 0.05);
+    int depth_vetoes = 0;
+    for (size_t i = 0; i < 200 && i < trusted.size(); i++) {
+        DensePoint fl;
+        fl.xyz = pl.images[(size_t)seen_by[i][0]].centre * 0.4 + trusted[i].xyz * 0.6;
+        fl.track = {trusted[i].track[1], trusted[i].track[2]};
+        fl.distinct_images = 2;
+        depth_vetoes += by_depth.seesThrough(fl);
+    }
+    check(depth_vetoes == 0, "vetoed on depth points' evidence: " + std::to_string(depth_vetoes));
     // Through the filter itself: auto min-track drops the floater, keeps the pair.
     std::vector<DensePoint> pts = trusted;
     for (DensePoint& p : pts) p.error = 0.1;
@@ -626,6 +641,437 @@ void visibility_drops_seen_through_pairs() {
     const std::vector<DensePoint> out = finalizePoints(pts, 0, 0, 0, opt, st, [&](const DensePoint& p) { return fs_.seesThrough(p); });
     check(out.size() == trusted.size() && st.seen_through == 1, "the floater survived the filter");
     fs::remove_all(d);
+}
+
+// Mutants: the alignment off (raw values taken as distances), the rank gate
+// off (an unrelated map fitted anyway).
+void depth_fit_recovers_affine() {
+    sfm::Reconstruction rec;
+    SourceImage img;
+    img.name = "a.png";
+    img.cam = sfm::Camera::defaultFor(1, 400, 300, 300, sfm::CamModel::Pinhole);
+    img.pose = {sfm::mat3Identity(), {0, 0, 0}};
+    img.centre = {0, 0, 0};
+    std::mt19937 rng(2);
+    std::uniform_real_distribution<double> u(-1, 1), z(2, 6);
+    for (uint64_t i = 1; i <= 300; i++) {
+        sfm::Point3D p;
+        const double d = z(rng);
+        p.xyz = {u(rng) * d * 0.6, u(rng) * d * 0.45, d};
+        rec.points3D[i] = p;
+        img.points.push_back(i);
+    }
+    // A slanted plane z = 3 + 0.4 x; raw = 1 / ((1/z - b) / a), a = 0.7, b = 0.05.
+    RawDepth raw;
+    raw.width = 400;
+    raw.height = 300;
+    raw.ray = false;
+    raw.value.assign(400 * 300, 0.0f);
+    auto truth = [&](int x, int y) {
+        const Vec3 b = img.cam.bearing({x + 0.5, y + 0.5});
+        const double t = 3.0 / (b.z - 0.4 * b.x);   // ray b*t on z = 3 + 0.4 x
+        return b.z * t;
+    };
+    for (int y = 0; y < 300; y++)
+        for (int x = 0; x < 400; x++) raw.value[(size_t)y * 400 + x] = (float)(1.0 / ((1.0 / truth(x, y) - 0.05) / 0.7));
+    // The anchors on that plane, so the fit has the true depths to agree with.
+    for (auto& kv : rec.points3D) {
+        const Vec3 b = img.cam.bearing(img.cam.project(kv.second.xyz));
+        kv.second.xyz = b * (3.0 / (b.z - 0.4 * b.x));
+    }
+    DepthFitOptions fo;
+    const DepthField f = fitDepth(img, rec, raw, fo);
+    check(f.ok, "fit refused: " + f.refused);
+    double worst = 0;
+    for (int y = 10; y < 300; y += 37)
+        for (int x = 10; x < 400; x += 41)
+            worst = std::max(worst, std::fabs(f.dist[(size_t)y * 400 + x] / truth(x, y) - 1));
+    check(worst < 1e-3, "fitted depth off by " + std::to_string(worst) + " (relative)");
+    // An unrelated map: no monotone relation to the anchors.
+    RawDepth noise = raw;
+    for (float& v : noise.value) v = (float)(1.0 + 10.0 * std::fabs(u(rng)));
+    check(!fitDepth(img, rec, noise, fo).ok, "an unrelated map was fitted");
+}
+
+std::unique_ptr<DepthFiles> stairDepths(const fs::path& d) {
+    return std::make_unique<DepthFiles>([d](const std::string& n) { return (d / "depths" / n).string(); },
+                                        [](const SourceImage& im) { return im.cam.isSpherical(); },
+                                        (d / "depths").string());
+}
+
+// Mutants: the cross-view agreement off (the doubled stairs survive), the
+// no-data sentinel taken as a depth (points at the camera centres).
+void depth_agreement_drops_copies() {
+    const fs::path d = tempDir("depthcopy");
+    writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
+    SyntheticDepth sd;
+    sd.copies = 3;
+    writeStairDepths(stairScene(), d.string(), sd);
+    auto files = stairDepths(d);
+    const Scene scene = stairScene();
+    auto run = [&](bool agreement) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+        job.depth = files.get();
+        job.opt.refs = 1.0;
+        job.opt.matches_per_ref = 3000;
+        job.opt.depth_agreement = agreement;
+        if (!agreement) {   // the union of per-image clouds, as the DA360 seed is
+            job.opt.min_track = 1;
+            job.opt.depth_normal_check = false;
+        }
+        const DensifyPlan pl = planDensify(job);
+        return runDensify(job, pl, nullptr);
+    };
+    const DensifyResult r = run(true);
+    const CloudScore s = scoreCloud(scene, r.cloud, 0.01, 0.05, 0.02, 0.02);
+    check(s.points > 2000, "depth points: " + std::to_string(s.points));
+    check(s.beyond * 1000 <= s.points, "points beyond 5 cm with the agreement check: " + std::to_string(s.beyond));
+    double nearest_centre = INFINITY;
+    DensifyJob pj;
+    pj.model_dir = (d / "sparse" / "0").string();
+    const DensifyPlan pl = planDensify(pj);
+    for (const DensePoint& p : r.cloud)
+        for (const SourceImage& im : pl.images) nearest_centre = std::min(nearest_centre, (p.xyz - im.centre).norm());
+    check(nearest_centre > 0.2, "a point at a camera centre: the no-data sentinel became a depth");
+    // The fixture's power: without the agreement check the copies are there.
+    const DensifyResult lr = run(false);
+    // With no vote to catch it, only the sentinel keeps no-data pixels out.
+    double loose_centre = INFINITY;
+    for (const DensePoint& p : lr.cloud)
+        for (const SourceImage& im : pl.images) loose_centre = std::min(loose_centre, (p.xyz - im.centre).norm());
+    check(loose_centre > 0.2, "a point at a camera centre with no vote: the sentinel became a depth");
+    const CloudScore loose = scoreCloud(scene, lr.cloud, 0.01, 0.05, 0.02, 0.02);
+    check(loose.beyond > 20 * std::max<int64_t>(1, s.beyond) && loose.beyond * 50 > loose.points,
+          "the fixture has no doubled copy to remove: " + std::to_string(loose.beyond) + " of " +
+              std::to_string(loose.points));
+    fs::remove_all(d);
+}
+
+// Mutant: normals faced by n.z instead of each pixel's own ray. A wall seen
+// off axis on a 90-degree face: its camera-facing normal has n.z > 0
+// everywhere, so the n.z rule inverts all of it.
+void normals_face_their_own_ray() {
+    SourceImage img;
+    img.cam = sfm::Camera::defaultFor(1, 256, 256, 128, sfm::CamModel::Pinhole);
+    img.pose = {sfm::mat3Identity(), {0, 0, 0}};
+    const Vec3 n0 = Vec3{-1, 0, 0.3}.normalized();
+    const double c = -0.5;   // n0 . X = c, the camera on the side n0 points to
+    check(n0.z > 0, "the fixture's normal must have n.z > 0");
+    for (bool ray : {true, false}) {
+        std::vector<float> dist(256 * 256, 0.0f);
+        for (int y = 0; y < 256; y++)
+            for (int x = 0; x < 256; x++) {
+                const Vec3 b = img.cam.bearing({x + 0.5, y + 0.5}).normalized();
+                const double nb = n0.dot(b);
+                if (nb > -1e-3) continue;
+                const double t = c / nb;
+                dist[(size_t)y * 256 + x] = (float)(ray ? t : t * b.z);
+            }
+        std::vector<float> nrm;
+        normalsFromDepth(img, 256, 256, ray, dist, nrm);
+        int64_t valid = 0, wrong = 0, away = 0, off_axis = 0;
+        for (int y = 0; y < 256; y++)
+            for (int x = 0; x < 256; x++) {
+                const float* v = &nrm[((size_t)y * 256 + x) * 3];
+                if (!v[0] && !v[1] && !v[2]) continue;
+                valid++;
+                const Vec3 n{v[0], v[1], v[2]}, r = mapRay(img, 256, 256, x, y, true);
+                wrong += normalAngleDeg(n, n0) > 1.0;
+                away += n.dot(r) > 0;
+                off_axis += std::acos(r.z) > 30 * M_PI / 180;
+            }
+        const std::string mode = ray ? "ray depth: " : "z depth: ";
+        check(valid > 256 * 256 / 4, mode + "too few normals: " + std::to_string(valid));
+        check(off_axis * 2 > valid, mode + "the fixture is not off axis");
+        check(wrong == 0 && away == 0, mode + std::to_string(wrong) + " normals off the plane's, " +
+                                           std::to_string(away) + " facing away, of " + std::to_string(valid));
+        // faceCamera on the inverted field gives the plane's back.
+        std::vector<float> inv = nrm;
+        for (float& v : inv) v = -v;
+        const int64_t flipped = faceCamera(img, 256, 256, inv);
+        check(flipped == valid && inv == nrm, mode + "faceCamera flipped " + std::to_string(flipped) + " of " +
+                                                 std::to_string(valid));
+    }
+}
+
+// A fitted stair field (the fit off: the maps are distances) and that field's
+// own normals from depth, for the normal tests.
+struct StairField {
+    DensifyPlan pl;
+    sfm::Reconstruction rec;
+};
+StairField stairField(const fs::path& d) {
+    StairField sf;
+    DensifyJob job;
+    job.model_dir = (d / "sparse" / "0").string();
+    sf.pl = planDensify(job);
+    sf.rec = sfm::Reconstruction::readBinary(job.model_dir);
+    return sf;
+}
+std::unique_ptr<DepthFiles> stairDepthsWithNormals(const fs::path& d) {
+    return std::make_unique<DepthFiles>(
+        [d](const std::string& n) { return (d / "depths" / n).string(); },
+        [](const SourceImage& im) { return im.cam.isSpherical(); }, (d / "depths").string(),
+        [d](const std::string& n) {
+            const fs::path p = (d / "normals" / n).replace_extension(".png");
+            return fs::exists(p) ? p.string() : std::string();
+        });
+}
+
+// Mutant: normals/ ignored when present (always from depth). Also: a map in
+// another convention (turned 120 degrees) must not be used.
+void file_normals_used_when_present() {
+    for (double tilt : {15.0, 120.0}) {
+        const fs::path d = tempDir("filenormals");
+        writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
+        SyntheticDepth sd;
+        sd.noise = 0;
+        sd.copies = 0;
+        sd.normals = true;
+        sd.tilted = 100;
+        sd.tilt_deg = tilt;
+        writeStairDepths(stairScene(), d.string(), sd);
+        auto files = stairDepthsWithNormals(d);
+        const StairField sf = stairField(d);
+        int used = 0, fitted = 0;
+        int64_t off = 0, total = 0;
+        for (const SourceImage& im : sf.pl.images) {
+            RawDepth raw;
+            if (!files->load(im, raw)) continue;
+            check(!raw.normal.empty(), "no normal map loaded for " + im.name);
+            const DepthField f = fitDepth(im, sf.rec, raw, DepthFitOptions{});
+            if (!f.ok) continue;
+            fitted++;
+            used += f.normal_from == NormalFrom::File;
+            std::vector<float> own;
+            normalsFromDepth(im, f.width, f.height, f.ray, f.dist, own);
+            for (int y = 0; y < f.height; y++)
+                for (int x = 0; x < f.width; x++) {
+                    const float* v = &own[((size_t)y * f.width + x) * 3];
+                    Vec3 n;
+                    if ((!v[0] && !v[1] && !v[2]) || !f.normalAtPixel(x, y, &n)) continue;
+                    total++;
+                    off += normalAngleDeg(n, Vec3{v[0], v[1], v[2]}) > 10;
+                }
+        }
+        check(fitted >= 8, "fitted maps: " + std::to_string(fitted));
+        const std::string t = std::to_string((int)tilt) + " deg: ";
+        if (tilt < 90) {
+            check(used == fitted, t + "normal maps used for " + std::to_string(used) + " of " + std::to_string(fitted));
+            check(off * 2 > total, t + "the field follows the depth, not the file: " + std::to_string(off) +
+                                       " of " + std::to_string(total) + " pixels turned");
+        } else {
+            check(used == 0, t + "a normal map in another convention was used for " + std::to_string(used));
+            check(off * 50 < total, t + "rejected maps still in the field: " + std::to_string(off));
+        }
+        fs::remove_all(d);
+    }
+}
+
+// Mutants: a depth map recomputed when present (compute run with nothing
+// missing, or allowed to rewrite a present map).
+void depth_reuse_computes_only_missing() {
+    const fs::path d = tempDir("reuse");
+    const std::vector<std::string> names = {"a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"};
+    auto find = [&](const std::string& n) {
+        const fs::path p = (d / n).replace_extension(".png");
+        return fs::exists(p) ? p.string() : std::string();
+    };
+    auto put = [&](const std::string& n, const std::string& bytes) {
+        std::ofstream((d / n).replace_extension(".png"), std::ios::binary) << bytes;
+    };
+    for (const char* n : {"a.jpg", "b.jpg", "c.jpg"}) put(n, "kept");
+    int calls = 0;
+    const DepthInventory inv = ensureDepths(names, find, [&] {
+        calls++;
+        for (const std::string& n : names)
+            if (find(n).empty()) put(n, "new");
+    });
+    check(calls == 1 && inv.reused == 3 && inv.computed == 2 && inv.missing == 0,
+          "inventory " + std::to_string(inv.reused) + "/" + std::to_string(inv.computed) + "/" +
+              std::to_string(inv.missing) + ", calls " + std::to_string(calls));
+    check(slurp(d / "a.png") == "kept", "a present map changed");
+    const DepthInventory all = ensureDepths(names, find, [&] { calls++; });
+    check(calls == 1 && all.reused == 5 && all.computed == 0, "compute ran with nothing missing");
+    fs::remove(d / "e.png");
+    bool threw = false;
+    try {
+        ensureDepths(names, find, [&] { for (const std::string& n : names) put(n, "rewritten"); });
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    check(threw, "a compute that rewrote present maps was accepted");
+    fs::remove_all(d);
+}
+
+// Points of a depth run whose reference is one of the first `n` images.
+int64_t fromFirstImages(const DensifyResult& r, const DensifyPlan& pl, int n) {
+    int64_t k = 0;
+    for (const DensePoint& p : r.cloud)
+        if (p.from_depth && !p.track.empty() &&
+            (int)pl.images[(size_t)pl.views[(size_t)p.track[0].view].image].id <= n)
+            k++;
+    return k;
+}
+
+// Mutant: the normal-agreement check off. Four images' normal maps are wrong
+// (turned 70 degrees) while their depth is right.
+void normal_check_drops_disagreeing() {
+    const fs::path d = tempDir("normalcheck");
+    writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
+    SyntheticDepth sd;
+    sd.copies = 0;
+    sd.normals = true;
+    sd.tilted = 4;
+    writeStairDepths(stairScene(), d.string(), sd);
+    auto files = stairDepthsWithNormals(d);
+    auto run = [&](bool normal_check) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+        job.depth = files.get();
+        job.opt.refs = 1.0;
+        job.opt.matches_per_ref = 3000;
+        job.opt.depth_normal_check = normal_check;
+        job.opt.depth_normal_min_cos = -1;   // past the per-image gate: the cross-view check alone
+        const DensifyPlan pl = planDensify(job);
+        return std::make_pair(runDensify(job, pl, nullptr), pl);
+    };
+    const auto on = run(true), off = run(false);
+    const int64_t bad_on = fromFirstImages(on.first, on.second, 4), bad_off = fromFirstImages(off.first, off.second, 4);
+    const int64_t good_on = (int64_t)on.first.cloud.size() - bad_on, good_off = (int64_t)off.first.cloud.size() - bad_off;
+    check(bad_off > 300, "the fixture's wrong-normal images give too few points: " + std::to_string(bad_off));
+    check(bad_on * 10 < bad_off, "points from wrong-normal images: " + std::to_string(bad_on) + " with the check, " +
+                                     std::to_string(bad_off) + " without");
+    check(good_on * 10 > good_off * 7, "the check also removed good points: " + std::to_string(good_on) + " of " +
+                                           std::to_string(good_off));
+    fs::remove_all(d);
+}
+
+// Mutant: hybrid's fill-against-its-neighbours normal test off. The
+// cross-view normal check is off here, so only that test can remove them.
+void hybrid_fill_normal_matches_neighbours() {
+    const fs::path d = tempDir("hybridnormal");
+    writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
+    SyntheticDepth sd;
+    sd.copies = 0;
+    sd.normals = true;
+    sd.tilted = 4;
+    writeStairDepths(stairScene(), d.string(), sd);
+    auto files = stairDepthsWithNormals(d);
+    const Scene scene = stairScene();
+    struct Size : Matcher {
+        int inputSize() const override { return 128; }
+        Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+        std::string describe() const override { return ""; }
+    } sizer;
+    auto run = [&](bool local_normal) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+        job.depth = files.get();
+        job.matcher = &sizer;
+        job.opt.refs = 1.0;
+        job.opt.matches_per_ref = 3000;
+        job.opt.source = DensifySource::Hybrid;
+        job.opt.depth_normal_check = false;
+        job.opt.hybrid_normal_check = local_normal;
+        job.opt.depth_normal_min_cos = -1;
+        const DensifyPlan pl = planDensify(job);
+        // Sparse matches, so the fill has neighbours to compare with.
+        OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 128, 0.0, 0.0, 1);
+        job.matcher = &om;
+        job.opt.matches_per_ref = 300;
+        return std::make_pair(runDensify(job, pl, nullptr), pl);
+    };
+    const auto on = run(true), off = run(false);
+    const int64_t bad_on = fromFirstImages(on.first, on.second, 4), bad_off = fromFirstImages(off.first, off.second, 4);
+    check(on.first.stats.depth_local_normal > 0, "no fill was tested against its neighbours' plane");
+    check(bad_off > 100, "the fixture's wrong-normal images give too few fills: " + std::to_string(bad_off));
+    check(bad_on * 4 < bad_off, "fills from wrong-normal images: " + std::to_string(bad_on) + " with the test, " +
+                                    std::to_string(bad_off) + " without");
+    fs::remove_all(d);
+}
+
+// Mutant: hybrid's fill-only rule off (depth points everywhere, not only
+// where the matches have nothing).
+void hybrid_fills_only_uncovered() {
+    const fs::path d = tempDir("hybrid");
+    writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
+    writeStairDepths(stairScene(), d.string(), SyntheticDepth{});
+    auto files = stairDepths(d);
+    const Scene scene = stairScene();
+    struct Size : Matcher {
+        int inputSize() const override { return 128; }
+        Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+        std::string describe() const override { return ""; }
+    } sizer;
+    auto run = [&](DensifySource src) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+        job.depth = files.get();
+        job.matcher = &sizer;
+        job.opt.refs = 4;
+        job.opt.matches_per_ref = 3000;
+        job.opt.source = src;
+        const DensifyPlan pl = planDensify(job);
+        OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 128, 0.0, 0.0, 1);
+        job.matcher = &om;
+        return runDensify(job, pl, nullptr);
+    };
+    const DensifyResult h = run(DensifySource::Hybrid), m = run(DensifySource::Depth);
+    check(m.stats.depth_kept > 2000, "depth-only points: " + std::to_string(m.stats.depth_kept));
+    check(h.stats.depth_covered > 0, "hybrid saw no matched pixels to leave alone");
+    check(h.stats.depth_kept * 4 < m.stats.depth_kept,
+          "hybrid kept " + std::to_string(h.stats.depth_kept) + " depth points against " +
+              std::to_string(m.stats.depth_kept) + " depth-only: it is not filling only the gaps");
+    fs::remove_all(d);
+}
+
+// Mutant: a hybrid's fill sharing the cap (matches alone fill it, so no fill
+// survives), or the fill's own budget ignored.
+void hybrid_fill_has_its_own_budget() {
+    std::vector<DensePoint> pts;
+    for (int i = 0; i < 20; i++) {
+        DensePoint p;
+        p.xyz = {0.1 * i, 0, 0};
+        p.distinct_images = 3;
+        p.track.resize(3);
+        p.from_depth = i >= 10;
+        pts.push_back(p);
+    }
+    DensifyOptions opt;
+    DensifyStats st;
+    const std::vector<DensePoint> out = finalizePoints(pts, 3, 0, 5, opt, st, {}, 2);
+    int fill = 0;
+    for (const DensePoint& p : out) fill += p.from_depth;
+    check(out.size() == 7 && fill == 2, "kept " + std::to_string(out.size()) + " with " + std::to_string(fill) + " fill points");
+    DensifyStats s2;
+    const std::vector<DensePoint> shared = finalizePoints(pts, 3, 0, 5, opt, s2);
+    check(shared.size() == 5 && std::none_of(shared.begin(), shared.end(), [](const DensePoint& p) { return p.from_depth; }),
+          "the shared cap did not keep matches first");
+}
+
+// Mutant: a depth point's long track winning a voxel from a matched point
+// (the hybrid then loses its matches wherever another reference filled).
+void voxel_prefers_matched_points() {
+    DensePoint m, d;
+    m.xyz = {0.05, 0.05, 0.05};
+    m.distinct_images = 2;
+    m.track.resize(2);
+    m.error = 0.5;
+    d = m;
+    d.from_depth = true;
+    d.distinct_images = 12;
+    d.track.resize(12);
+    d.error = 0.001;
+    for (const std::vector<DensePoint>& v : {std::vector<DensePoint>{m, d}, std::vector<DensePoint>{d, m}}) {
+        const std::vector<size_t> sel = voxelSelect(v, 1.0, true);
+        check(sel.size() == 1 && !v[sel[0]].from_depth, "the depth point won the voxel");
+    }
 }
 
 // Mutant: shortest track kept, or the error tie-break reversed.
@@ -978,7 +1424,7 @@ void sibling_is_consistent_and_readable() {
                 const View& v = pl.views[(size_t)o.view];
                 const Vec2 want = viewToSource(pl.images[(size_t)v.image], v, o.x, o.y);
                 check(img == pl.images[(size_t)v.image].id, "track image id");
-                check(std::fabs(xy[0] - want.x) < 1e-2 && std::fabs(xy[1] - want.y) < 1e-2,
+                check(std::fabs(xy[0] - want.x) < 1e-3 && std::fabs(xy[1] - want.y) < 1e-3,
                       "track observation written as (" + std::to_string(xy[0]) + ", " + std::to_string(xy[1]) +
                           "), want (" + std::to_string(want.x) + ", " + std::to_string(want.y) + ")");
             }
@@ -1017,6 +1463,160 @@ void sibling_is_consistent_and_readable() {
     const DensifyResult res = runDensify(again, p2, nullptr);
     check(!res.cloud.empty(), "densifying a sibling produced nothing");
     fs::remove_all(d);
+}
+
+// Mutant: an empty cloud written as a sibling (it sorts after its source, so
+// a trainer could pick it and train from nothing).
+void empty_cloud_writes_nothing() {
+    const fs::path d = tempDir("emptycloud");
+    writeStairDataset(stairScene(), d.string(), 96, 192, 300);
+    const std::string src = (d / "sparse" / "0").string(), out = (d / "sparse" / "0-roma").string();
+    DensifyJob job;
+    job.model_dir = src;
+    const DensifyPlan pl = planDensify(job);
+    bool threw = false;
+    try {
+        writeSibling(src, out, pl, {}, "{}\n");
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    check(threw, "an empty cloud was written");
+    check(!fs::exists(out) && !fs::exists(out + ".partial"), "an empty sibling is on disk");
+    fs::remove_all(d);
+}
+
+// The written points through each image's own camera at the written pixels,
+// read back from disk. Mutant: the face-to-panorama mapping turned the wrong
+// way (face_R for its transpose), which the writer test cannot see.
+void written_points_reproject() {
+    const fs::path d = tempDir("reproject");
+    writeStairDataset(stairScene(), d.string(), 192, 384, 1000);
+    const std::string src = (d / "sparse" / "0").string(), out = (d / "sparse" / "0-roma").string();
+    const Scene scene = stairScene();
+    struct Size : Matcher {
+        int inputSize() const override { return 96; }
+        Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+        std::string describe() const override { return ""; }
+    } sizer;
+    DensifyJob job;
+    job.model_dir = src;
+    job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+    job.matcher = &sizer;
+    job.opt.refs = 1.0;
+    job.opt.max_depth_error = -1;
+    const DensifyPlan pl = planDensify(job);
+    OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 96, 0.0, 0.0, 1);
+    job.matcher = &om;
+    const DensifyResult r = runDensify(job, pl, nullptr);
+    int64_t sphere = 0;
+    for (const DensePoint& p : r.cloud)
+        for (const Observation& o : p.track) sphere += pl.views[(size_t)o.view].face >= 0;
+    check(sphere > 1000, "too few panorama-face observations to test the mapping: " + std::to_string(sphere));
+    const ReprojStats rs = writeSibling(src, out, pl, r.cloud, "{}\n");
+    check(rs.observations > 1000 && rs.invalid == 0,
+          std::to_string(rs.invalid) + " of " + std::to_string(rs.observations) + " observations invalid");
+    check(rs.p95_px < 0.5, "written points reproject at p95 " + std::to_string(rs.p95_px) + " px");
+    const std::string js = slurp(fs::path(out) / "densify.json");
+    check(js.find("\"reprojection\"") != std::string::npos && js.find("\"p95_px\"") != std::string::npos,
+          "densify.json has no reprojection: " + js);
+    // A depth point is an average over the agreeing images' fitted maps: its
+    // track must be where the average lands, not where the reference ray was.
+    SyntheticDepth noisy;
+    noisy.noise = 0.01;   // so the average moves off the reference ray by pixels
+    writeStairDepths(stairScene(), d.string(), noisy);
+    auto files = stairDepths(d);
+    DensifyJob dj;
+    dj.model_dir = src;
+    dj.image_path = job.image_path;
+    dj.depth = files.get();
+    dj.opt.refs = 1.0;
+    dj.opt.matches_per_ref = 2000;
+    const DensifyPlan dpl = planDensify(dj);
+    const DensifyResult dr = runDensify(dj, dpl, nullptr);
+    const ReprojStats ds = writeSibling(src, out, dpl, dr.cloud, "{}\n");
+    check(dr.stats.depth_kept > 1000 && ds.invalid == 0, "depth run: " + std::to_string(dr.stats.depth_kept) +
+                                                             " points, " + std::to_string(ds.invalid) + " invalid");
+    check(ds.p95_px < 0.1, "depth points reproject at p95 " + std::to_string(ds.p95_px) + " px");
+    fs::remove_all(d);
+}
+
+// Mutant: the `nonzero` clamp on the weighted draw dropped (it asks for more
+// pixels than exist).
+void sparse_mask_draws_each_pixel_once() {
+    const int w = 64, h = 48;
+    std::vector<float> c((size_t)w * h, 0.0f);
+    const int64_t on[] = {10 * 64 + 10, 20 * 64 + 30, 30 * 64 + 40, 40 * 64 + 50, 12 * 64 + 33};
+    for (int64_t i : on) c[(size_t)i] = 0.7f;
+    SampleOptions o;
+    o.count = 2000;
+    const std::vector<int64_t> s = sampleWithCoverage(c, w, h, o);
+    check(s.size() == 5, "drew " + std::to_string(s.size()) + " samples from 5 non-zero pixels");
+    for (int64_t i : on) check(std::count(s.begin(), s.end(), i) == 1, "pixel " + std::to_string(i) + " not drawn once");
+}
+
+// Mutants: the certainty test made strict (a value AT the threshold dropped),
+// the mask applied before the plugin's floor (the floor un-masks it), or the
+// matcher's warp modified in place.
+void certainty_threshold_and_masks() {
+    const Scene sc = planeScene();
+    const std::vector<View> views = {
+        pinView("a", 0, {0, -0.3, 0}, {3, 0, 0}, 640, 640, 320),
+        pinView("b", 1, {0, 0.3, 0.1}, {3, 0, 0}, 640, 640, 320)};
+    DensifyOptions opt;
+    opt.max_depth_error = 0;
+    opt.min_parallax_deg = 1.0;
+    RefMatches m = oracleMatches(sc, views, 0, {1}, 64, 0.0, opt);
+    const std::vector<int64_t> px = allPixels(m);
+    for (float& v : m.cert[0]) v = v > 0 ? opt.min_certainty : 0.0f;
+    DensifyStats st;
+    check(!triangulateRef(m, views, px, opt, st).empty() && st.below_certainty == 0,
+          "certainty exactly at the threshold dropped: " + std::to_string(st.below_certainty));
+    for (float& v : m.cert[0]) v = v > 0 ? std::nextafter(opt.min_certainty, 0.0f) : 0.0f;
+    DensifyStats st2;
+    check(triangulateRef(m, views, px, opt, st2).empty(), "certainty below the threshold kept");
+
+    Warp w;
+    w.width = w.height = 4;
+    w.warp.assign(32, 0.0f);
+    w.certainty.assign(16, 0.05f);
+    const Warp before = w;
+    std::vector<uint8_t> mask(16, 1);
+    mask[5] = 0;
+    DensifyOptions ex;
+    ex.plugin_exact = true;
+    const std::vector<float> c = collectCertainty(w, mask, {}, ex);
+    check(c[5] == 0.0f, "a masked pixel kept certainty " + std::to_string(c[5]) + " under the plugin's floor");
+    check(c[4] == ex.certainty_floor, "the plugin's floor not applied: " + std::to_string(c[4]));
+    check(w.warp == before.warp && w.certainty == before.certainty, "the matcher's warp was modified");
+}
+
+// Mutant: a neighbour's certainty ignored. One whose certainty is 0 and whose
+// warp is wrong must leave the output exactly as without it.
+void rejected_neighbour_changes_nothing() {
+    const Scene sc = planeScene();
+    const std::vector<View> views = {
+        pinView("a", 0, {0, -0.3, 0}, {3, 0, 0}, 960, 960, 480),
+        pinView("b", 1, {0, 0.3, 0.1}, {3, 0, 0}, 960, 960, 480),
+        pinView("c", 2, {0.2, 0.0, -0.3}, {3, 0, 0}, 960, 960, 480),
+        pinView("d", 3, {-0.2, 0.1, 0.3}, {3, 0, 0}, 960, 960, 480)};
+    DensifyOptions opt;
+    opt.max_depth_error = 0;
+    opt.min_parallax_deg = 1.0;
+    const RefMatches m = oracleMatches(sc, views, 0, {1, 2}, 96, 0.0, opt);
+    RefMatches m2 = oracleMatches(sc, views, 0, {1, 2, 3}, 96, 0.0, opt);
+    for (size_t i = 0; i < m2.cert[2].size(); i++) {
+        m2.cert[2][i] = 0.0f;
+        m2.warp[2][2 * i] = 0.1f;   // everything to one wrong pixel
+        m2.warp[2][2 * i + 1] = -0.2f;
+    }
+    DensifyStats s1, s2;
+    const std::vector<DensePoint> a = triangulateRef(m, views, allPixels(m), opt, s1);
+    const std::vector<DensePoint> b = triangulateRef(m2, views, allPixels(m), opt, s2);
+    bool same = a.size() == b.size() && !a.empty();
+    for (size_t i = 0; same && i < a.size(); i++)
+        same = (a[i].xyz - b[i].xyz).norm() == 0 && a[i].error == b[i].error && a[i].track.size() == b[i].track.size() &&
+               a[i].distinct_images == b[i].distinct_images;
+    check(same, "a rejected neighbour changed the output: " + std::to_string(a.size()) + " vs " + std::to_string(b.size()));
 }
 
 // The .rwm round trip, both encodings. Mutant: int16 scale wrong.
@@ -1064,6 +1664,14 @@ static int body(int argc, char** argv) {
         {"consistency_counts_images_not_faces", consistency_counts_images_not_faces},
         {"coarse_warp_thresholds_scale", coarse_warp_thresholds_scale},
         {"visibility_drops_seen_through_pairs", visibility_drops_seen_through_pairs},
+        {"depth_fit_recovers_affine", depth_fit_recovers_affine},
+        {"depth_agreement_drops_copies", depth_agreement_drops_copies},
+        {"hybrid_fills_only_uncovered", hybrid_fills_only_uncovered},
+        {"normals_face_their_own_ray", normals_face_their_own_ray},
+        {"file_normals_used_when_present", file_normals_used_when_present},
+        {"depth_reuse_computes_only_missing", depth_reuse_computes_only_missing},
+        {"normal_check_drops_disagreeing", normal_check_drops_disagreeing},
+        {"hybrid_fill_normal_matches_neighbours", hybrid_fill_normal_matches_neighbours},
         {"holdout_is_every_nth_and_never_matched", holdout_is_every_nth_and_never_matched},
         {"cut_view_is_pixel_exact", cut_view_is_pixel_exact},
         {"flip_mask_inverts_keep", flip_mask_inverts_keep},
@@ -1073,6 +1681,13 @@ static int body(int argc, char** argv) {
         {"face_pairing_by_axis", face_pairing_by_axis},
         {"sibling_is_consistent_and_readable", sibling_is_consistent_and_readable},
         {"warp_files_round_trip", warp_files_round_trip},
+        {"voxel_prefers_matched_points", voxel_prefers_matched_points},
+        {"hybrid_fill_has_its_own_budget", hybrid_fill_has_its_own_budget},
+        {"empty_cloud_writes_nothing", empty_cloud_writes_nothing},
+        {"written_points_reproject", written_points_reproject},
+        {"sparse_mask_draws_each_pixel_once", sparse_mask_draws_each_pixel_once},
+        {"certainty_threshold_and_masks", certainty_threshold_and_masks},
+        {"rejected_neighbour_changes_nothing", rejected_neighbour_changes_nothing},
     };
     int ran = 0;
     for (const auto& t : tests) {

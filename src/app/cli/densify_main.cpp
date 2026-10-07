@@ -5,6 +5,9 @@
 
 #include "app/Tools.h"
 
+#include "app/AppPaths.h"
+#include "data/CameraMath.h"
+
 #include "core/VulkanDeviceSelection.h"
 #include "data/DatasetParser.h"
 #include "i18n/Locale.h"
@@ -14,6 +17,7 @@
 #include "nn/io/Fetch.h"
 #include "roma/DensifyCheck.h"
 #include "roma/DensifyRun.h"
+#include "roma/DepthSource.h"
 #include "roma/DumpMatcher.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/RomaMatcher.h"
@@ -62,6 +66,10 @@ void usage() {
     help_row("--image-dir <dir>", D::opt_image_dir);
     help_row("--mask-dir <dir> | --no-masks", D::opt_mask_dir);
     help_row("--flip-mask", D::opt_flip_mask);
+    help_row("--source auto|roma|moge|hybrid", D::opt_source);
+    help_row("--depth-dir <dir>", D::opt_depth_dir);
+    help_row("--normal-dir <dir>", D::opt_normal_dir);
+    help_row("--normal-check <deg>|off", D::opt_normal_check);
     help_row("--preset turbo|fast|base|high|precise", D::opt_preset);
     help_row("--matches <dir>", D::opt_matches);
     help_row("--export-pairs <dir>", D::opt_export_pairs);
@@ -90,6 +98,7 @@ void usage() {
     // English, like every --check: a table of errors for whoever changed the stage.
     std::fprintf(stderr, "    --check [--check-dir <dir>] [--matches <dir>] [--check-noise <px>]\n"
                          "            [--check-outliers <share>] [--check-size <px>] [--check-no-masks]\n"
+                         "            [--check-source roma|moge|hybrid]\n"
                          "                                  run the synthetic staircase S-1 and exit\n");
     std::fprintf(stderr, "\n%s --device <index|name|uuid>  --lang <code>\n", D::label_common.get());
 }
@@ -132,6 +141,7 @@ int spirula_densify_main(int argc, char** argv) {
     bool rule_set = false;
     std::string device;
     roma::Preset preset = roma::Preset::Base;
+    std::string depth_dir = "depths", normal_dir = "normals";
     bool device_set = false;   // an explicit `--device ""` is Auto and beats SS_VK_DEVICE
 
     for (int i = 1; i < argc; ++i) {
@@ -171,7 +181,24 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--check-outliers") check_outliers = real(0);
         else if (a == "--check-size") check_size = (int)real(16);
         else if (a == "--check-no-masks") check_opt.masks = false;
+        else if (a == "--check-source") check_opt.source = next();
         else if (a == "--device") { device = next(); device_set = true; }
+        else if (a == "--source") {
+            const std::string v = next();
+            if (v == "auto") o.source = roma::DensifySource::Auto;
+            else if (v == "roma") o.source = roma::DensifySource::Roma;
+            else if (v == "moge") o.source = roma::DensifySource::Depth;
+            else if (v == "hybrid") o.source = roma::DensifySource::Hybrid;
+            else bad(v);
+        }
+        else if (a == "--depth-dir") depth_dir = next();
+        else if (a == "--normal-dir") normal_dir = next();
+        else if (a == "--normal-check") {
+            const double v = autoOff();
+            if (v == 0) bad("auto");
+            o.depth_normal_check = o.hybrid_normal_check = v > 0;
+            if (v > 0) o.depth_normal_deg = v;
+        }
         else if (a == "--preset") {
             const std::string v = next();
             if (!roma::parse_preset(v, preset)) bad(v);
@@ -278,10 +305,37 @@ int spirula_densify_main(int argc, char** argv) {
 
         if (job.export_dir.empty() && matches.empty())
             nn::configure_device(spirula::vkselect::requestFrom(device, device_set).text);
+        // The depth source: the dataset's `spirula geometry` maps; the missing
+        // ones are made here when its own folder is in use (D::computing_depths).
+        const fs::path depth_root = fs::path(depth_dir).is_absolute() ? fs::path(depth_dir)
+                                                                      : fs::path(dataset) / depth_dir;
+        const fs::path normal_root = fs::path(normal_dir).is_absolute() ? fs::path(normal_dir)
+                                                                        : fs::path(dataset) / normal_dir;
+        auto have_depth = [&] {
+            std::error_code ec;
+            return fs::is_directory(depth_root, ec) && !fs::is_empty(depth_root, ec);
+        };
+        const bool want_depth = o.source == roma::DensifySource::Depth || o.source == roma::DensifySource::Hybrid;
+        std::unique_ptr<roma::DepthFiles> depth;
+        if ((have_depth() || want_depth) && o.source != roma::DensifySource::Roma && job.export_dir.empty()) {
+            const std::string root = depth_root.string(), nroot = normal_root.string();
+            depth = std::make_unique<roma::DepthFiles>(
+                [root](const std::string& n) { return dsparse::find_aux_file(root, n, "depth"); },
+                // `spirula geometry` writes ray depth exactly where it splits the
+                // lens into faces; the trainer asks the same function.
+                [](const roma::SourceImage& im) {
+                    const sfm::Camera& c = im.cam;
+                    const int model = c.isSpherical() ? 3 : c.isFisheye() ? 1 : 0;
+                    return camhost::splits_to_pinhole_faces(model, c.width, c.height, c.fx, c.fy);
+                },
+                root, [nroot](const std::string& n) { return dsparse::find_aux_file(nroot, n, "normal"); });
+            job.depth = depth.get();
+        }
+
         std::unique_ptr<roma::Matcher> matcher;
         const roma::PresetSpec& spec = roma::preset_spec(preset);
         if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, spec.hr ? spec.hr : spec.lr);
-        else if (job.export_dir.empty())
+        else if (job.export_dir.empty() && o.source != roma::DensifySource::Depth)
             matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), preset);
         job.matcher = matcher.get();
         if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
@@ -329,7 +383,53 @@ int spirula_densify_main(int argc, char** argv) {
                 return 2;
             }
         }
-        if (job.matcher) std::printf("%s\n", format(D::matcher, {job.matcher->describe()}).c_str());
+        const char* src_name = pl.source == roma::DensifySource::Roma ? "roma"
+                             : pl.source == roma::DensifySource::Depth ? "moge" : "hybrid";
+        std::printf("%s\n", format(D::source, {src_name}).c_str());
+        if (job.matcher && pl.source != roma::DensifySource::Depth)
+            std::printf("%s\n", format(D::matcher, {job.matcher->describe()}).c_str());
+        if (pl.max_fill >= 0)
+            std::printf("%s\n", format(D::fill_budget, {(long long)pl.max_fill, (long long)pl.max_points}).c_str());
+        struct NormalTally {
+            int file = 0, depth = 0, other_convention = 0;
+            std::vector<std::pair<std::string, double>> checked;   // per normal map: median cosine
+        } normals;
+        roma::DepthInventory inventory;
+        if (job.depth && pl.source != roma::DensifySource::Roma) {
+            std::printf("%s\n", format(D::depth_maps, {job.depth->describe()}).c_str());
+            std::vector<std::string> names;
+            for (const roma::SourceImage& im : pl.images) names.push_back(im.name);
+            const std::string root = depth_root.string();
+            // Only into geometry's own folder: a sky-blanked copy cannot be extended.
+            const bool own = fs::path(depth_dir).lexically_normal() == fs::path("depths");
+            std::function<void()> compute;
+            if (own)
+                compute = [&] {
+                    std::printf("%s\n", format(D::computing_depths, {root}).c_str());
+                    std::fflush(stdout);
+                    std::string cmd = "\"" + app::exe_path() + "\" geometry \"" + dataset + "\" --depth --no-normal";
+                    if (image_dir != "images") cmd += " --image-dir \"" + image_dir + "\"";
+                    if (device_set) cmd += " --device \"" + device + "\"";
+                    if (std::system(cmd.c_str()) != 0) throw std::runtime_error("spirula geometry failed");
+                };
+            const roma::DepthInventory inv = inventory = roma::ensureDepths(
+                names, [root](const std::string& n) { return dsparse::find_aux_file(root, n, "depth"); }, compute);
+            std::printf("%s\n", format(D::depth_inventory, {root, (long long)inv.reused, (long long)inv.computed,
+                                                            (long long)inv.missing}).c_str());
+            job.on_depth_fit = [&normals](const roma::SourceImage& im, const roma::DepthField& f) {
+                if (!f.ok) {
+                    std::printf("%s\n", format(D::depth_refused, {im.name, f.refused}).c_str());
+                    return;
+                }
+                if (f.normal_from == roma::NormalFrom::File) normals.file++;
+                else normals.depth++;
+                if (std::isfinite(f.normal_file_cos)) normals.checked.push_back({im.name, f.normal_file_cos});
+                if (std::isfinite(f.normal_file_cos) && f.normal_from != roma::NormalFrom::File) {
+                    normals.other_convention++;
+                    std::printf("%s\n", format(D::normal_refused, {im.name, num(f.normal_file_cos)}).c_str());
+                }
+            };
+        }
         job.on_warp_scale = [](int warp, int input) {
             std::printf("%s\n", format(D::warp_scale, {(long long)warp, (long long)input}).c_str());
             std::fflush(stdout);
@@ -350,6 +450,19 @@ int spirula_densify_main(int argc, char** argv) {
             return 0;
         }
         const roma::DensifyStats& st = res.stats;
+        if (pl.source != roma::DensifySource::Roma)
+            std::printf("%s\n", format(D::depth_stats, {(long long)st.depth_samples, (long long)st.depth_nodata,
+                                                         (long long)st.depth_disagree, (long long)st.depth_through,
+                                                         (long long)st.depth_local, (long long)st.depth_kept,
+                                                         num(res.depth_tol)}).c_str());
+        if (pl.source != roma::DensifySource::Roma) {
+            std::printf("%s\n", format(D::normals_from, {(long long)normals.file, normal_root.string(),
+                                                          (long long)normals.depth,
+                                                          (long long)normals.other_convention}).c_str());
+            std::printf("%s\n", format(D::normal_stats, {o.depth_normal_check ? num(o.depth_normal_deg) : std::string("off"),
+                                                          (long long)st.depth_normal,
+                                                          (long long)st.depth_local_normal}).c_str());
+        }
         std::printf("%s\n", format(D::rejected, {(long long)st.samples, (long long)st.below_certainty,
                                                  (long long)st.outside, (long long)st.sampson,
                                                  (long long)st.reproj, (long long)st.cheirality,
@@ -362,7 +475,8 @@ int spirula_densify_main(int argc, char** argv) {
            << "  \"source_model\": \"" << jsonEscape(job.model_dir) << "\",\n"
            << "  \"source_images_bin_sha256\": \"" << nn::sha256_file(job.model_dir + "/images.bin") << "\",\n"
            << "  \"source_cameras_bin_sha256\": \"" << nn::sha256_file(job.model_dir + "/cameras.bin") << "\",\n"
-           << "  \"matcher\": \"" << jsonEscape(job.matcher->describe()) << "\",\n"
+           << "  \"matcher\": \"" << jsonEscape(job.matcher ? job.matcher->describe() : std::string()) << "\",\n"
+           << "  \"source\": \"" << src_name << "\", \"depth\": \"" << jsonEscape(job.depth ? job.depth->describe() : std::string()) << "\",\n"
            << "  \"plugin_exact\": " << (r.plugin_exact ? "true" : "false") << ",\n"
            << "  \"images\": " << pl.images.size() << ", \"sparse_points\": " << pl.sparse_points
            << ", \"sparse_spacing\": " << jnum(pl.sparse_spacing) << ",\n"
@@ -386,22 +500,46 @@ int spirula_densify_main(int argc, char** argv) {
            << ", \"max_depth_error\": " << jnum(r.max_depth_error)
            << ", \"median_pair_angle_deg\": " << jnum(pl.median_pair_angle_deg)
            << ", \"match_focal\": " << jnum(pl.match_focal) << ",\n"
-           << "  \"voxel\": " << jnum(pl.voxel) << ", \"max_points\": " << pl.max_points << ", \"seed\": " << r.seed << ",\n"
+           << "  \"voxel\": " << jnum(pl.voxel) << ", \"max_points\": " << pl.max_points << ", \"max_fill\": " << pl.max_fill << ", \"seed\": " << r.seed << ",\n"
            << "  \"mask_keep\": " << jnum(pl.mask_keep) << ", \"flip_mask\": " << (job.flip_mask ? "true" : "false") << ",\n"
            << "  \"stats\": {\"samples\": " << st.samples << ", \"below_certainty\": " << st.below_certainty
            << ", \"outside\": " << st.outside << ", \"sampson\": " << st.sampson << ", \"nonfinite\": " << st.nonfinite
            << ", \"reproj\": " << st.reproj << ", \"cheirality\": " << st.cheirality << ", \"parallax\": " << st.parallax
            << ", \"candidates\": " << st.candidates << ", \"ref_reproj\": " << st.ref_reproj << ", \"fused\": " << st.fused
            << ", \"short_track\": " << st.short_track << ", \"inconsistent\": " << st.inconsistent << ", \"uncertain\": " << st.uncertain
+           << ", \"depth_samples\": " << st.depth_samples << ", \"depth_nodata\": " << st.depth_nodata
+           << ", \"depth_disagree\": " << st.depth_disagree << ", \"depth_through\": " << st.depth_through
+           << ", \"depth_local\": " << st.depth_local << ", \"depth_covered\": " << st.depth_covered
+           << ", \"depth_kept\": " << st.depth_kept << ", \"depth_edge\": " << st.depth_edge << ", \"depth_tol\": " << jnum(res.depth_tol)
+           << ", \"depth_normal\": " << st.depth_normal << ", \"depth_local_normal\": " << st.depth_local_normal
            << ", \"two_image_kept\": " << st.two_image_kept << ", \"seen_through\": " << st.seen_through << ", \"two_image_bar\": " << jnum(st.two_image_bar)
            << ", \"voxel_merged\": " << st.voxel_merged << ", \"capped\": " << st.capped << "},\n"
            << "  \"track_hist\": {";
         bool first = true;
         for (const auto& kv : st.track_hist) { js << (first ? "" : ", ") << '"' << kv.first << "\": " << kv.second; first = false; }
+        js << "},\n  \"normals\": {\"normal_check_deg\": " << (o.depth_normal_check ? jnum(o.depth_normal_deg) : std::string("null"))
+           << ", \"from_file\": " << normals.file << ", \"from_depth\": " << normals.depth
+           << ", \"other_convention\": " << normals.other_convention << ", \"agree_5deg\": [";
+        for (size_t i = 0; i < st.normal_agree_hist.size(); i++) js << (i ? ", " : "") << st.normal_agree_hist[i];
+        js << "], \"null_5deg\": [";
+        for (size_t i = 0; i < st.normal_null_hist.size(); i++) js << (i ? ", " : "") << st.normal_null_hist[i];
+        js << "], \"hybrid_fill_vs_plane_5deg\": [";
+        for (size_t i = 0; i < st.local_normal_hist.size(); i++) js << (i ? ", " : "") << st.local_normal_hist[i];
+        js << "], \"map_cosine\": {";
+        for (size_t i = 0; i < normals.checked.size(); i++)
+            js << (i ? ", " : "") << '"' << jsonEscape(normals.checked[i].first) << "\": " << jnum(normals.checked[i].second);
+        js << "}},\n  \"depth_maps\": {\"reused\": " << inventory.reused << ", \"computed\": " << inventory.computed
+           << ", \"missing\": " << inventory.missing;
         js << "},\n  \"points\": " << res.points << ", \"seconds_total\": " << jnum(res.seconds_total)
            << ", \"seconds_match\": " << jnum(res.seconds_match) << "\n}\n";
 
-        roma::writeSibling(job.model_dir, job.out_dir, pl, res.cloud, js.str());
+        if (res.cloud.empty()) {
+            std::fprintf(stderr, "%s\n", format(D::empty_result, {job.out_dir}).c_str());
+            return 1;
+        }
+        const roma::ReprojStats rp = roma::writeSibling(job.model_dir, job.out_dir, pl, res.cloud, js.str());
+        std::printf("%s\n", format(D::reprojection, {(long long)rp.observations, num(rp.mean_px), num(rp.p95_px),
+                                                     (long long)rp.invalid}).c_str());
         std::printf("%s\n", format(D::done, {job.out_dir, (long long)res.points,
                                              spirula::i18n::format_duration(res.seconds_total),
                                              spirula::i18n::format_duration(res.seconds_match)})
