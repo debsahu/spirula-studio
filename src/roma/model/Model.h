@@ -80,9 +80,10 @@ public:
 class CoarseMatcher {
 public:
     ~CoarseMatcher();
+    // `out_ba`, when valid, also gets B's warp into A from the same tokens.
     void run(const Weights& w, vk::Arena& arena, const nn::Tensor taps_a[2],
              const nn::Tensor taps_b[2], int64_t h, int64_t wd, const nn::Tensor& out,
-             StageLog& log);
+             StageLog& log, const nn::Tensor& out_ba = nn::Tensor{});
     struct Plan {
         uint64_t transformer = 0, similarity = 0, head = 0;
         uint64_t total() const { return std::max({transformer, similarity, head}); }
@@ -102,6 +103,32 @@ private:
 void dpt_head(const Weights& w, vk::Arena& arena, const nn::Tensor& tap0,
               const nn::Tensor& x, int64_t h, int64_t wd, const nn::Tensor& out);
 uint64_t dpt_plan_bytes(const Weights& w, int64_t h, int64_t wd);
+
+// torch.linspace(a, b, n) in float32 on the CPU, from Python-double ends: the
+// first half steps up from a, the second half down from b.
+std::vector<float> torch_linspace(double a, double b, int64_t n);
+// get_normalized_grid's axis: torch_linspace(-1 + 1/n, 1 - 1/n, n).
+std::vector<float> centred_grid(int64_t n);
+
+// One ConvRefiner pass at an h x wd map: VGG maps [h, wd, feat], warp [n, 2]
+// and confidence [n, prev_c] in, warp [n, 2] and confidence [n, 4] out.
+// `sx`, `sy`: the image's size over RoMa's 512 anchor.
+struct Refiner {
+    static void run(const Weights& w, vk::Arena& arena, const RefinerHparams& r,
+                    const nn::Tensor& feat_a, const nn::Tensor& feat_b,
+                    const nn::Tensor& warp, const nn::Tensor& conf, int prev_c, float sx,
+                    float sy, int64_t h, int64_t wd, const nn::Tensor& warp_out,
+                    const nn::Tensor& conf_out);
+    static uint64_t planBytes(const RefinerHparams& r, int64_t h, int64_t wd);
+};
+
+// corr [h*wd, (2r+1)^2] of fa [h*wd, C] against fb [h, wd, C] around `warp`.
+// The unfused path materializes every window sample (SS_ROMA_LOCAL_CORR=unfused).
+void local_correlation(vk::Arena& arena, const nn::Tensor& out, const nn::Tensor& fa,
+                       const nn::Tensor& fb, const nn::Tensor& warp, int radius, int64_t h,
+                       int64_t wd, bool fused);
+uint64_t local_correlation_plan(int64_t n, int64_t C, int radius, bool fused);
+bool local_corr_fused();
 
 // False under SS_ROMA_ROPE_F32=1, which runs the matcher's RoPE in fp32 to
 // match compare_torch.py --ref rope32: a diagnostic, not a model.

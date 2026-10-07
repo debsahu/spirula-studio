@@ -275,7 +275,7 @@ int spirula_densify_main(int argc, char** argv) {
         std::unique_ptr<roma::Matcher> matcher;
         if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, 640);
         else if (job.export_dir.empty())
-            matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), 640);
+            matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), roma::Preset::Base);
         job.matcher = matcher.get();
         if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
             throw std::runtime_error(job.out_dir + ": " + why);
