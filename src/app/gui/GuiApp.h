@@ -416,7 +416,7 @@ private:
     // The dense model of `dataset` that "Edit Dense Cloud" opens: its -roma-edit
     // if one exists, else its -roma, "" for none. Listed once a second.
     std::string dense_model_to_edit(const std::string& dataset);
-    void draw_dense_edit_button(const std::string& dataset);
+    void draw_dense_edit_button(const std::string& dataset, bool same_line);
     std::vector<ReconModel> _recon_models;
     std::string _recon_models_for;
     double _recon_models_at = -10.0;

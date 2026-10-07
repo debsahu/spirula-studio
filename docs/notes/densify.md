@@ -328,7 +328,8 @@ error, noise and three images with the risers 5 % too deep): roma 83,808 points 
   than one for each eight times a write takes. The model view the screen already has
   draws them, and the last one is the filtered cloud. A write that fails costs nothing.
 - Gate: `tools/roma/densify_gui_gate.py` (`tools/guictl.py` on a 6-image fixture).
-- Gate for the edit and the preview: `tools/roma/densify_edit_gui_gate.py`.
+- Gate for the edit and the preview: `tools/roma/densify_gui_gate.py`; the preview is sampled
+  during its run and the edit round trip is its last steps.
 
 ## Checks
 

@@ -5899,10 +5899,10 @@ std::string GuiApp::dense_model_to_edit(const std::string& dataset) {
     return _dense_edit_dir;
 }
 
-void GuiApp::draw_dense_edit_button(const std::string& dataset) {
+void GuiApp::draw_dense_edit_button(const std::string& dataset, bool same_line) {
     const std::string model = dense_model_to_edit(dataset);
     if (model.empty()) return;
-    ImGui::SameLine();
+    if (same_line) ImGui::SameLine();
     ImGui::BeginDisabled(dataset_busy() || native_work_busy());
     if (ui::Button(emsg::dense_edit)) {
         _edit_after_open = true;
@@ -5951,7 +5951,7 @@ void GuiApp::draw_recon_model_row(bool busy) {
     }
     ImGui::EndDisabled();
     ui::help_on_hover(dgmsg::model_combo_help);
-    if (!busy) draw_dense_edit_button(_cfg.data);
+    if (!busy) draw_dense_edit_button(_cfg.data, /*same_line=*/false);
 }
 
 void GuiApp::draw_dense_row(bool busy) {
@@ -6662,7 +6662,7 @@ void GuiApp::draw_dataset_open_buttons(const DatasetFolders& f, bool model) {
             request_open_splat(f.dir);
         }
         ui::help_on_hover(emsg::sparse_edit_help);
-        draw_dense_edit_button(f.dir);
+        draw_dense_edit_button(f.dir, /*same_line=*/true);
         ImGui::SameLine();
         if (ui::Button(spirula::i18n::msg::partition::open_button)) open_partition_panel(f);
         ui::help_on_hover(spirula::i18n::msg::partition::open_button_help);
