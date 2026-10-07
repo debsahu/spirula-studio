@@ -1,7 +1,7 @@
 """Equal-budget comparison of densify settings over one fixed set of .rwm matches.
 
 Every arm runs `spirula densify --matches <dumps>` on the same dataset, pair list
-and --max-points, once per seed; the WS-4 basement scorer (eval_basement.py) scores
+and --max-points, once per seed; the basement scorer (tools/roma/ws6_eval/ws4_eval_basement.py) scores
 each output, and this script adds held-out anchors, ROI-matched thinning, a
 stairs-only subset and the floor (baseline sd over seeds), then reads the bars.
 
@@ -20,7 +20,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--spirula', required=True)
 ap.add_argument('--dataset', required=True)
 ap.add_argument('--matches', required=True)
-ap.add_argument('--pairs', required=True, help="the plan's pairs.txt (densify --export-pairs)")
+ap.add_argument('--pairs', required=True, help="the run's pairs.txt (densify --export-pairs)")
 ap.add_argument('--scorer', required=True)
 ap.add_argument('--python', default=sys.executable, help='interpreter for the scorer')
 ap.add_argument('--spike', required=True)

@@ -493,7 +493,7 @@ Ported as designs from spirula-studio#154 (D1odeKing; `LICENSES/NOTICE-spirula-s
 **The gate.** Pre-registered in `docs/superpowers/plans/2026-10-07-integrate-pr154.md` §11, geometry only.
 - Inputs: basement, 2,056 pairs, every 8th panorama held out. All arms read the same dumps, regenerated on the M5 Pro with precision and B -> A.
 - Budget: `--max-points 1000000`, seeds 0/1/2. The floor is the baseline's sd.
-- Harness and scorer: `tools/roma/eval_equal_budget.py` with WS-4's scorer.
+- Harness and scorer: `tools/roma/eval_equal_budget.py` with the basement scorer (`tools/roma/ws6_eval/ws4_eval_basement.py`).
 - The run below is on the build with the far-isolated filter; one on the build before it gave the same verdicts.
 - The cycle threshold: the pre-registered rule (99 % of geometric-pass candidates below T) **found no threshold**, since 6.85 % of them miss by more than 3.15 px. 1.3 px is post hoc, the Youden optimum against the geometric rejects, flat from 1.0 to 1.5 px.
 
@@ -509,7 +509,7 @@ Ported as designs from spirula-studio#154 (D1odeKing; `LICENSES/NOTICE-spirula-s
 | anchors seen by >= 2 held-out panoramas, c5 | 0.900 | 0.902 | 0.895 | 0.873 |
 | outside-box share | 0.0141 | 0.0103 | 0.0113 | 0.0083 |
 
-Nulls: 1 % floaters add 2.3 pp of violations, and shuffled depth reads 19.7x, so the violation rows stand. Plane bias is void, as WS-4 predicted.
+Nulls: 1 % floaters add 2.3 pp of violations, and shuffled depth reads 19.7x, so the violation rows stand. Plane bias is void, as predicted.
 S-1:
 - Oracle: passes at every setting.
 - Real RoMa (native dumps of the staircase), points beyond 5 cm / riser cover: base 47 / 0.955, cycle 9 / 0.951, refine 41 / 0.945, both 9 / 0.943.
@@ -532,7 +532,7 @@ Two findings for whoever revisits this:
   the same matches (`reference/python/roma_plugin_parity.py` writes the fixture).
 - `densify_autopick_test`: a densified sibling model never wins the parser's automatic pick.
 - `warp_cache_test`: the cache (`WarpCache.h`). Each test names the mutation it catches.
-- p23 mutation run, 2026-10-07 (each fails the test named; WS-4e's 41 re-run alongside, each still
+- p23 mutation run, 2026-10-07 (each fails the test named; the earlier 41 re-run alongside, each still
   failing its test): cycle miss in camera pixels or over them, missing reverse passing, align_corners
   sampling, axes swapped, auto read as on, histogram before the filters or in camera pixels, reverse read
   at the reference pixel (`cycle_*`); precision as covariance, p00/p11 swapped, one observation per view,
