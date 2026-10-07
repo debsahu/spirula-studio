@@ -156,9 +156,15 @@ float apply_act(float x, int kind) {
         case ACT_ELU:       return (x > 0.0f) ? x : (exp(x) - 1.0f);
         case ACT_SILU:      return x / (1.0f + exp(-x));
         case ACT_EXP:       return exp(x);
-        // log1p(exp(x)) in the form that cannot overflow: max(x,0) + log(1 + exp(-|x|)).
-        // torch returns x outright above 20, where the two differ by < 2e-9.
-        case ACT_SOFTPLUS:  return max(x, 0.0f) + log(1.0f + exp(-abs(x)));
+        // max(x,0) + log1p(exp(-|x|)), which cannot overflow. log(1+t) alone loses every
+        // digit below t = 6e-8, and Metal's fast math folds Kahan's (1+t)-1 trick away,
+        // so t < 1/8 uses the series (7 terms: 6e-8 relative at the edge).
+        case ACT_SOFTPLUS: {
+            const float t = exp(-abs(x));
+            const float series = t * (1.0f - t * (0.5f - t * (0.33333334f - t * (0.25f
+                                 - t * (0.2f - t * (0.16666667f - t * 0.14285715f))))));
+            return max(x, 0.0f) + ((t < 0.125f) ? series : log(1.0f + t));
+        }
         default:            return x;
     }
 }

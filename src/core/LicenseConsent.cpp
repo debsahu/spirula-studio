@@ -56,7 +56,7 @@ std::string settings_path() {
         if (!home.empty()) dir = fs::path(home) / ".config";
     }
 #endif
-    if (dir.empty()) dir = ".";
+    if (dir.empty()) return std::string();
     // An existing spirulae-splat/ from before the rename is adopted where it is.
     std::error_code ec;
     fs::path app = dir / "spirula-studio";
@@ -67,7 +67,9 @@ std::string settings_path() {
 
 std::vector<std::string> accepted_all() {
     std::vector<std::string> out;
-    for (const std::string& l : read_lines(settings_path()))
+    const std::string path = settings_path();
+    if (path.empty()) return out;
+    for (const std::string& l : read_lines(path))
         if (l.rfind(kKey, 0) == 0 && l.size() > std::char_traits<char>::length(kKey)) {
             const std::string f = l.substr(std::char_traits<char>::length(kKey));
             if (std::find(out.begin(), out.end(), f) == out.end()) out.push_back(f);
@@ -80,8 +82,20 @@ bool accepted(const std::string& family) {
     return std::find(all.begin(), all.end(), family) != all.end();
 }
 
+std::vector<std::string> missing(const std::string& families) {
+    std::vector<std::string> out;
+    std::stringstream ss(families);
+    for (std::string t; std::getline(ss, t, ',');) {
+        const size_t a = t.find_first_not_of(" \t"), b = t.find_last_not_of(" \t");
+        if (a == std::string::npos) continue;
+        t = t.substr(a, b - a + 1);
+        if (!accepted(t)) out.push_back(t);
+    }
+    return out;
+}
+
 bool record(const std::string& family) {
-    if (family.empty()) return false;
+    if (family.empty() || settings_path().empty()) return false;
     if (accepted(family)) return true;
     const fs::path path = settings_path();
     std::error_code ec;
@@ -91,12 +105,18 @@ bool record(const std::string& family) {
     // Written beside and renamed over, so a crash cannot leave half a settings file.
     fs::path tmp = path;
     tmp += ".tmp";
+    bool written = false;
     {
         std::ofstream o(tmp, std::ios::binary | std::ios::trunc);
         for (const std::string& l : lines) o << l << '\n';
+        o.flush();
+        written = o.good();
     }
-    fs::rename(tmp, path, ec);
-    if (ec) fs::remove(tmp, ec);
+    if (written) fs::rename(tmp, path, ec);
+    if (!written || ec) {
+        fs::remove(tmp, ec);
+        return false;
+    }
     return accepted(family);
 }
 

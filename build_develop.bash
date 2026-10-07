@@ -63,6 +63,13 @@ bash tools/mask_editor_checks/survivors.sh >/dev/null ||
 bash tools/license_checks/survivors.sh >/dev/null ||
     { bash tools/license_checks/survivors.sh | command grep '^FAIL'; exit 1; }
 
+# The embedded licence texts are generated from LICENSES/; a stale copy would show
+# the user terms other than the file says.
+if command -v python3 >/dev/null 2>&1; then
+    python3 tools/gen_license_texts.py --check ||
+        { echo "src/core/LicenseTexts.cpp is stale: python3 tools/gen_license_texts.py"; exit 1; }
+fi
+
 # Comment blocks in uncommitted work must fit the AGENTS.md budget. Also wired
 # into CMake (cmake/SsChecks.cmake), which covers a bare cmake/ninja build;
 # running it here fails before the configure step rather than after it.

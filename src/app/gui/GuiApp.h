@@ -322,7 +322,8 @@ private:
                           const spirula::i18n::Msg& get, const std::function<void()>& request);
     bool license_accepted(const std::string& family) const;
     // Raises one modal per family not yet accepted, in order, then runs `then`.
-    // Cancelling any of them drops the rest and `then` never runs.
+    // Cancelling any of them drops the rest and `then` never runs. No caller yet:
+    // the densify step's RoMa v2 download (dinov3 + romav2) is the first.
     void request_licenses(std::vector<std::string> families, std::function<void()> then);
     void advance_license_queue();
 

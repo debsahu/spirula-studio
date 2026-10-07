@@ -12,8 +12,12 @@
 #include "app/Tools.h"
 #include "i18n/Locale.h"
 #include "i18n/catalog/Cli.h"
+#ifdef SS_TOOL_SAM
+#include "nn/io/Fetch.h"   // --accept-license: the inference layer is in this build
+#endif
 
 #include <cctype>
+#include <exception>
 #include <cstdio>
 #include <cstdlib>
 #ifdef _WIN32
@@ -172,6 +176,18 @@ int main(int argc, char** argv) {
     // file, which is a step below --lang and the environment.
     const char* lang = spirula::i18n::take_lang_arg(&argc, argv);
     spirula::i18n::init(lang, nullptr);
+
+#ifdef SS_TOOL_SAM
+    // --accept-license, anywhere in argv and for every command: how a terminal
+    // accepts a model licence (nn::ensure_file refuses without it). Removed from
+    // argv, so no tool's parser sees it.
+    try {
+        nn::consume_accept_license_args(argc, argv);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "%s\n", e.what());
+        return 2;
+    }
+#endif
 
     // Every tool, not only the window: the GUI runs reconstruction, masking
     // and meshing as child processes, and a child that dies of a fault leaves
