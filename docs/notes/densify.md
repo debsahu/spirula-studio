@@ -32,7 +32,8 @@ about whether a depth point is on the surface. For a matched point it is the tri
 residual in source pixels.
 
 An empty run under `--overwrite` also removes an older sibling of the same name, which would
-otherwise be trained from as if it were this run's.
+otherwise be trained from as if it were this run's. `--overwrite` only ever replaces or
+removes a folder that has a `densify.json`: `--out images --overwrite` is refused.
 
 The trainer reads it with `--colmap-recon-dir sparse/0-roma`. The parser's
 automatic pick never lands on it: models are sorted by image count, then by path,
@@ -130,21 +131,21 @@ The matcher is not ported from the plugin: it is upstream RoMa v2 (`src/roma/mod
 | certainty `clamp(min=0.2)`, a floor that removes nothing | a true filter at 0.2, also per neighbour | a floor makes every unmasked pixel sampleable, and lets a neighbour that does not see the point triangulate with it |
 | Sampson skipped for any non-pinhole pair | on bearings, never skipped | |
 | float32 pixel DLT | bearing DLT in double | |
-| every candidate averaged | the largest consistent set | measured on S-1 below |
+| every candidate averaged | the largest consistent set | measured on the synthetic staircase below |
 | track length in views, kept at 1 | distinct source images, at least 3 | |
-| no precision bar | `max_depth_error` 2 % | measured on S-1 below |
+| no precision bar | `max_depth_error` 2 % | measured on the synthetic staircase below |
 | voxel select off, after the cap | on (auto size), before the cap | |
 | colour from the match-resolution, masked reference | bilinear from the full-resolution source image | |
 | neighbours by nearest flattened pose | by covisibility with a parallax prior | the pose rule is blind to viewing direction |
 
-The plan proposed letting a short track survive alone in its voxel past 2 degrees of
-parallax. It was measured on S-1 (it kept 49 two-view floaters more than 5 cm off a
+Letting a short track survive alone in its voxel past 2 degrees of
+parallax was measured on the synthetic staircase (it kept 49 two-view floaters more than 5 cm off a
 surface, against 0 without it) and removed.
 
-## Depth source: MoGe-2 maps, and the hybrid (WS-4d, 2026-10-07)
+## Depth source: MoGe-2 maps, and the hybrid (2026-10-07)
 
-`--source auto|roma|moge|hybrid`. **Auto is `roma`** whenever a matcher is available (consultant ruling,
-2026-10-07, plan 13.3 C-4); `moge` only when no matcher can run (no licence, no checkpoint) and the
+`--source auto|roma|moge|hybrid`. **Auto is `roma`** whenever a matcher is available (decided
+2026-10-07); `moge` only when no matcher can run (no licence, no checkpoint) and the
 dataset has depth maps, said aloud with the reason; `hybrid` by explicit request only. With a matcher and
 a `depths/` folder the run prints that the maps are left alone. Why: at an explicit cap hybrid *is* roma
 with no fill (the matches fill the budget first), so equal-budget parity shows nothing; where a gain can
@@ -278,17 +279,17 @@ within 4 voxels of a matched point. **No hybrid gain is shown on this scene.** m
 behind: its stairs mostly do not survive the vote.
 
 **Decided 2026-10-07: `hybrid` is not the automatic default** (see the top of this section).
-The equal-budget numbers are WS-6's (plan 10.5.3).
+The equal-budget numbers come from the evaluation harness.
 
 Side profile (`render_profile`): DA360 shows the doubled stair line; hybrid and roma one; moge
 almost no stairs, so its passing the doubled-line gate is absence, not quality. The normal check
 (capped runs): moge anchors 47.3 -> 51.8 mm, hybrid violations 0.44 -> 0.38 %; mixed, kept on.
 
-**Maps of other pictures, measured**: `depths/` shifted 3 frames on the basement (the reviewer's
-case, maps from before the record existed): `--source moge` now exits 1, "only 17 of 127 images
+**Maps of other pictures, measured**: `depths/` shifted 3 frames on the basement (maps from before the record existed):
+`--source moge` now exits 1, "only 17 of 127 images
 have a usable depth map (13 %, below 50 %)"; `--source auto` does not read the maps (a matcher is there).
 
-S-1 through each source (stand-in matches, synthetic maps with a per-image disparity-affine
+The synthetic staircase through each source (stand-in matches, synthetic maps with a per-image disparity-affine
 error, noise and three images with the risers 5 % too deep): roma 83,808 points / 0.996 within
 1 cm / riser 0.953 / 0 beyond; moge 75,985 / 0.997 / 0.912 / 0; hybrid 87,639 / 0.996 / 0.945 / 0.
 
@@ -419,10 +420,13 @@ writes over it.
 - **Writer lock and publication** (`src/roma/Publish.h`): a file `.<m>-roma.lock` beside
   the model holds the writer's pid. `spirula densify` takes it before matching, the
   edit takes it before reading, and a live holder refuses the second writer with its pid;
-  a dead holder's lock is taken over. A folder is written as `<out>.partial` and swapped
+  a dead holder's lock is taken over by renaming it aside and reading it again, so two
+  takers cannot both win. One process holds it from one thread: a second thread is refused
+  like a second process. A folder is written as `<out>.partial` and swapped
   in: an existing one is set aside as `<out>.old` first and dropped after, and
-  `recoverPublish` puts it back if a crash left the swap half done. Neither suffix is
-  listed as a model.
+  `recoverPublish` puts it back if a crash left the swap half done; `--overwrite` is judged
+  after that recovery. The model list restores a `<m>.old` that has a `densify.json` and no
+  `<m>` while no writer is alive. Neither suffix is listed as a model.
 - **Live preview**: the dataset screen's densify step passes `--progress-dir`; the child
   writes `model.bin` snapshots (the cameras and a strided slice of at most 50 000 points
   of the cloud so far) through `CloudPreview`, at most one every 1.5 s and never more
@@ -432,7 +436,7 @@ writes over it.
 - Gate for the edit and the preview: `tools/roma/densify_gui_gate.py`; the preview is sampled
   during its run and the edit round trip is its last steps.
 
-## Far isolated points (consultant C-6, 2026-10-07)
+## Far isolated points (2026-10-07)
 
 `--far-isolated auto|off` (default `auto`), default mode only (`--plugin-exact` never runs it). After the
 voxel select and before the cap, a point is dropped when it is **far**: more than `margin` outside the
@@ -442,7 +446,7 @@ sparse points' p0.5-p99.5 box on some axis (max-norm), **and isolated**: at most
 | value | rule |
 |---|---|
 | box | per-axis p0.5 and p99.5 of the sparse points (numpy's linear interpolation) |
-| margin | 2 on a model whose `gauge.txt` says metric, else 0.2 x the box diagonal (about 2 m on the basement; the 0.2 is the consultant's choice, not fitted) |
+| margin | 2 on a model whose `gauge.txt` says metric, else 0.2 x the box diagonal (about 2 m on the basement; the 0.2 is a choice, not fitted) |
 | radius | 8 x the sparse median nearest-neighbour spacing (10 cm on the basement) |
 | neighbours | at most 2 |
 
@@ -461,16 +465,16 @@ Checks: `far_isolated_drops_only_isolated_far_points` (an injected fixture: 50 i
 margins out, a 5 x 10 grid at 0.5 spacing as the coherent structure, a triple and a quad on either side
 of the threshold, a far point whose neighbours lie inside the margin, a point 1.5 out on two axes that a
 2-norm would drop), `far_isolated_runs_before_the_cap`, `far_filter_is_scale_free`,
-`far_isolated_plan_states`. S-1 has no far points, so "removes 0 on S-1" proves nothing and is not a check.
+`far_isolated_plan_states`. The synthetic staircase has no far points, so "removes 0 on the staircase" proves nothing and is not a check.
 
 ## Checks
 
 - `roma_densify_test`: the stage on inputs whose answer is known, each test naming the
   wrong implementation it catches. Every named mutation was run and fails the test
   that names it.
-- `roma_plugin_parity_test <fixture>`: gate P-4, against the plugin's own host stage on
+- `roma_plugin_parity_test <fixture>`: `--plugin-exact` against the plugin's own host stage on
   the same matches (`reference/python/roma_plugin_parity.py` writes the fixture).
-- `densify_autopick_test`: gate H-3.
+- `densify_autopick_test`: a densified sibling model never wins the parser's automatic pick.
 - `warp_cache_test`: the cache (`WarpCache.h`). Each test names the mutation it catches.
 - Freeze mutation run, 2026-10-07 (each fails the test named; run by hand on the working tree, the rest
   of the suite passing): auto = hybrid with maps and auto never falling back to moge
@@ -479,23 +483,23 @@ of the threshold, a far point whose neighbours lie inside the margin, a point 1.
   fewer-than-2 and at-most-3 thresholds, self counted, cell scan limited on x, on y, on z
   (`far_isolated_drops_only_isolated_far_points`); filter after the cap, `--far-isolated off` ignored,
   plugin-exact filtering (`far_isolated_runs_before_the_cap`); box from extremes, margin not
-  scale-free, radius 4 x, no 100-point floor (`far_filter_is_scale_free`); the plan ignoring
+  scale-free, radius 4 x, no 100-point floor (`far_filter_is_scale_free`); `planDensify` ignoring
   `off` (`far_isolated_plan_states`). One mutant (cell scan limited on x) first survived: the fixture had
   no neighbours across a cell boundary; two squares straddling a cell corner were added.
-- WS-4d review mutation run, 2026-10-07 (each fails the test named): the convention checked after
+- Depth-source review mutation run, 2026-10-07 (each fails the test named): the convention checked after
   facing, the seen-through vote off, the rank and inlier-share gates off, the flatness test off,
   hybrid's residual test off, the fill budget changed, the share gate off, a record's image, map
   print or image print unchecked, an 8-bit or wrongly shaped map read, maps writable while geometry
   runs, voters without parallax, fill next to matches kept, the fit hold-out ignored; the
   `nonzero` clamp dropped is a `logic_error` its test reports.
-- WS-4d mutation run (each fails the test named): normals faced by `n.z` (derived and
+- Depth-source mutation run (each fails the test named): normals faced by `n.z` (derived and
   `faceCamera`), normal maps ignored, depth computed with nothing missing, a present map
   rewritten, normal agreement off, hybrid plane test off, alignment off, vote off, sentinel
   taken as depth, hybrid fill everywhere, hidden-copy vote off, depth track at the reference
   ray, depth point winning a voxel, depth points as free-space evidence, fill sharing the cap,
   empty cloud written, face mapping turned the wrong way, sample `nonzero` clamp dropped,
   certainty threshold strict, mask before the plugin floor, neighbour certainty ignored.
-- `spirula densify --check`: S-1, the synthetic staircase end to end, through the
+- `spirula densify --check`: the synthetic staircase end to end, through the
   plan, the run and the writer. It uses a geometric oracle by default; `--matches`
   runs it on real RoMa matches of the same scene (export the pairs with
   `spirula densify <check dir> --refs 1 --export-pairs`, match them with
@@ -503,11 +507,11 @@ of the threshold, a far point whose neighbours lie inside the margin, a point 1.
 
 ## Measured (2026-10-07, upstream RoMa v2 `base` matches dumped on an M4 Max)
 
-**P-4, against the plugin (54 basement face pairs, 18 reference faces, 163,422 samples).**
-**P-4 gates `--plugin-exact` only.** The fused-point miss below is accepted as a documented deviation
-(D-6). The default mode's fusion (`1 / depth_per_px^2`, the largest consistent set) has no external
-reference at all: it is covered by S-1 and `roma_densify_test`'s named mutants, which is a different and
-weaker kind of evidence than parity. Do not read "P-4 passes" as covering the shipped path.
+**Against the plugin (54 basement face pairs, 18 reference faces, 163,422 samples).**
+**The parity test gates `--plugin-exact` only.** The fused-point miss below is accepted as a documented
+deviation. The default mode's fusion (`1 / depth_per_px^2`, the largest consistent set) has no external
+reference at all: it is covered by the synthetic staircase and `roma_densify_test`'s named mutants, which is a different and
+weaker kind of evidence than parity. Do not read "parity passes" as covering the shipped path.
 Like for like since 2026-10-07: the C++ side reads the plugin's float32 R, t and K and
 rounds `K [R|t]` and the camera centres to float32 as the plugin holds them. Certainty after
 collect is bit-identical; point decisions agree on 99.996 %, candidate decisions on
@@ -521,7 +525,7 @@ residual that a DLT drives to rounding noise (candidate error differences of 7e-
 into the averaging weight. What is left per candidate is not explained; float32 rounding
 order in the plugin's `K @ [R|t]` and torch's `linspace` are the untested suspects.
 
-**S-1, the synthetic staircase.** With the geometric oracle (0.1 px noise at 640, 3 %
+**The synthetic staircase.** With the geometric oracle (0.1 px noise at 640, 3 %
 random matches), every gate passes: 99.8 % of points within 1 cm, 0 beyond 5 cm, riser cover
 0.906. Upstream RoMa v2 on the rendered views passes 99.46 % within 1 cm and riser cover
 0.934. It **misses** "zero beyond 5 cm" with 30 points (0.045 %). Unmasked, the same matches
@@ -539,10 +543,10 @@ that keeps the lower flight: a minimum track of 3 drops 87k of the 111k points i
 because with 3 neighbours, one of them held out, most of the stairs are seen by two panoramas.
 At `--min-track 2` the free-space violation rate is 0.40 % against DA360's 1.88 %, and the
 synthetic floater null reads +0.82 pp for 1 % floaters. The local-plane thickness is 7.6 mm
-against 10.2 mm, and its 1 cm noise null moves it by only 1.5 mm. On S-1 the same change costs
+against 10.2 mm, and its 1 cm noise null moves it by only 1.5 mm. On the staircase the same change costs
 130 points beyond 5 cm against 30.
 
-### The automatic minimum track (2026-10-07, reviewer's rule)
+### The automatic minimum track (2026-10-07)
 
 Same matches and the same build; `--min-track 3`, `auto` and `2`. Auto samples per view
 is now 10,212 and the 1 M cap binds, so the point counts share a cap.
@@ -559,8 +563,8 @@ The two-image bar was 0.518 px (the median of 3-image points), and it admitted 1
 two-image points before the voxel select and the cap. The steps-ROI floater rate did not
 rise against `--min-track 3`, which was the condition for making it the default; the
 whole-scene outside-the-box share did rise, 0.54 % to 1.36 %. The floater null (1 % synthetic
-floaters added to DA360) reads +0.82 pp. On the real-RoMa S-1: riser cover 0.955, 70
-points beyond 5 cm (`3`: 0.934 / 30). On the oracle S-1 one two-view outlier survives: a
+floaters added to DA360) reads +0.82 pp. On the real-RoMa staircase: riser cover 0.955, 70
+points beyond 5 cm (`3`: 0.934 / 30). On the oracle staircase one two-view outlier survives: a
 random match on its epipolar line has a near-zero two-view error, which is the case the
 rule cannot see.
 
@@ -586,6 +590,6 @@ Same matches and build, `--min-track auto` with the free-space test against `3`:
 321,010 two-image points were seen through and dropped, 939,479 admitted (before the voxel
 select and the 1 M cap). The violation rate stays below `3`, so auto stays the default. The
 whole-scene outside-the-box share did not come down (1.36 % without the test, 1.44 % with).
-S-1, geometric stand-in: 0 points beyond 5 cm, riser cover 0.953. S-1 on upstream RoMa:
+The staircase with geometric stand-in matches: 0 points beyond 5 cm, riser cover 0.953. On upstream RoMa:
 64 beyond 5 cm (18 of them two-image), `3`: 46, `2`: 215; the rest are 3-or-more-image points
 at silhouettes against the empty background.

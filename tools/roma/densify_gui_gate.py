@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WS-5 gate: tools/guictl.py drives the dense-points step end to end.
+"""GUI gate: tools/guictl.py drives the dense-points step end to end.
 
 Cuts a 6-image fixture from `spirula densify --check`, launches the GUI with a
 private config and cache (so the licences and the checkpoint are this run's
@@ -143,7 +143,7 @@ def main():
     models = cache / "spirula-studio" / "models"
 
     src, ds = work / "src", work / "ds6"
-    # Only the scene it writes matters here, not whether S-1's gates pass.
+    # Only the scene it writes matters here, not whether the staircase's gates pass.
     subprocess.run([exe, "densify", "--check", "--check-dir", str(src)],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run([sys.executable, "-I", str(HERE / "make_gui_fixture.py"), str(src), str(ds)],
