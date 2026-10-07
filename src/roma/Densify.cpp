@@ -23,6 +23,7 @@ void DensifyStats::add(const DensifyStats& o) {
     cheirality += o.cheirality; parallax += o.parallax; candidates += o.candidates;
     ref_reproj += o.ref_reproj; inconsistent += o.inconsistent; uncertain += o.uncertain; fused += o.fused; short_track += o.short_track;
     two_image_kept += o.two_image_kept;
+    seen_through += o.seen_through;
     if (o.two_image_bar >= 0) two_image_bar = o.two_image_bar; voxel_merged += o.voxel_merged; capped += o.capped;
     for (const auto& kv : o.track_hist) track_hist[kv.first] += kv.second;
 }
@@ -442,7 +443,8 @@ std::vector<size_t> voxelSelect(const std::vector<DensePoint>& pts, double voxel
 
 std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_track,
                                        double voxel, int64_t max_points,
-                                       const DensifyOptions& opt, DensifyStats& st) {
+                                       const DensifyOptions& opt, DensifyStats& st,
+                                       const std::function<bool(const DensePoint&)>& veto) {
     const bool by_images = !opt.plugin_exact;
     std::vector<DensePoint> kept;
     kept.reserve(pts.size());
@@ -468,6 +470,10 @@ std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_trac
             if (tl >= 3) {
                 kept.push_back(std::move(p));
             } else if (tl == 2 && p.error <= bar) {
+                if (veto && veto(p)) {
+                    st.seen_through++;
+                    continue;
+                }
                 st.two_image_kept++;
                 kept.push_back(std::move(p));
             } else {

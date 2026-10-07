@@ -72,6 +72,27 @@ struct DensifyResult {
 // the trainer's automatic pick would take it (densify_autopick_test).
 std::string siblingDir(const std::string& model_dir);
 
+// Per source image, on a coarse grid, the nearest distance at which it saw a
+// point of `pts` with >= `min_images` images. A point more than `margin` in
+// front of that (3x3 cells), in an image outside its track, is seen through.
+class FreeSpace {
+public:
+    FreeSpace(const DensifyPlan& pl, const std::vector<DensePoint>& pts, int min_images,
+              double margin, int grid = 512);
+    bool seesThrough(const DensePoint& p) const;
+
+private:
+    struct Map {
+        int w = 0, h = 0;
+        double sx = 1, sy = 1;
+        std::vector<float> d;
+    };
+    bool cell(int image, const sfm::Vec3& X, size_t* at, double* dist) const;
+    const DensifyPlan& pl_;
+    double margin_;
+    std::vector<Map> maps_;
+};
+
 // progress(done_refs, total_refs, points so far)
 DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& plan,
                          const std::function<void(int, int, int64_t)>& progress);

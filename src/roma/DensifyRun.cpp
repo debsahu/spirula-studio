@@ -10,6 +10,7 @@
 #include <iterator>
 #include <list>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <stdexcept>
@@ -588,11 +589,90 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         for (DensePoint& p : pts) all.push_back(std::move(p));
         if (progress) progress(++done, (int)pl.ref_views.size(), (int64_t)all.size());
     }
-    res.cloud = finalizePoints(std::move(all), pl.min_track, pl.voxel, pl.max_points, o, res.stats);
+    std::function<bool(const DensePoint&)> veto;
+    std::unique_ptr<FreeSpace> free_space;
+    if (pl.min_track == 0 && !o.plugin_exact && o.visibility_check) {
+        // A two-image point has no third view to agree with it; it must at
+        // least not sit in space another image saw through (S-1: the floaters).
+        free_space = std::make_unique<FreeSpace>(pl, all, 3, 0.05);
+        veto = [&free_space](const DensePoint& p) { return free_space->seesThrough(p); };
+    }
+    res.cloud = finalizePoints(std::move(all), pl.min_track, pl.voxel, pl.max_points, o, res.stats, veto);
     res.points = (int64_t)res.cloud.size();
     res.seconds_match = match_s;
     res.seconds_total = std::chrono::duration<double>(clock::now() - t0).count();
     return res;
+}
+
+// ===========================================================================
+// Free space
+// ===========================================================================
+
+FreeSpace::FreeSpace(const DensifyPlan& pl, const std::vector<DensePoint>& pts, int min_images,
+                     double margin, int grid)
+    : pl_(pl), margin_(margin) {
+    maps_.resize(pl.images.size());
+    for (size_t i = 0; i < pl.images.size(); i++) {
+        const sfm::Camera& c = pl.images[i].cam;
+        Map& m = maps_[i];
+        m.w = std::min(grid, c.width);
+        m.h = std::max(1, (int)std::lround((double)c.height * m.w / c.width));
+        m.sx = (double)m.w / c.width;
+        m.sy = (double)m.h / c.height;
+        m.d.assign((size_t)m.w * m.h, INFINITY);
+    }
+    for (const DensePoint& p : pts) {
+        if (p.distinct_images < min_images) continue;
+        std::vector<int> imgs;
+        for (const Observation& o : p.track) {
+            const int im = pl.views[(size_t)o.view].image;
+            if (std::find(imgs.begin(), imgs.end(), im) != imgs.end()) continue;
+            imgs.push_back(im);
+            size_t at;
+            double dist;
+            if (cell(im, p.xyz, &at, &dist)) maps_[(size_t)im].d[at] = std::min(maps_[(size_t)im].d[at], (float)dist);
+        }
+    }
+}
+
+bool FreeSpace::cell(int image, const Vec3& X, size_t* at, double* dist) const {
+    const SourceImage& s = pl_.images[(size_t)image];
+    const Vec3 Xc = sfm::mul(s.pose.R, X) + s.pose.t;
+    if (!s.cam.isSpherical() && !(Xc.z > 0)) return false;
+    const Vec2 px = s.cam.project(Xc);
+    const Map& m = maps_[(size_t)image];
+    const int cx = (int)std::floor(px.x * m.sx), cy = (int)std::floor(px.y * m.sy);
+    if (cx < 0 || cy < 0 || cx >= m.w || cy >= m.h) return false;
+    *at = (size_t)cy * m.w + cx;
+    *dist = (X - s.centre).norm();
+    return true;
+}
+
+bool FreeSpace::seesThrough(const DensePoint& p) const {
+    std::vector<int> own;
+    for (const Observation& o : p.track) own.push_back(pl_.views[(size_t)o.view].image);
+    for (size_t i = 0; i < maps_.size(); i++) {
+        if (std::find(own.begin(), own.end(), (int)i) != own.end()) continue;
+        size_t at;
+        double dist;
+        if (!cell((int)i, p.xyz, &at, &dist)) continue;
+        // The nearest over the 3x3 cells around it: at a depth edge a cell holds
+        // the far side's points but not always the occluder's.
+        const Map& m = maps_[i];
+        const int cx = (int)(at % (size_t)m.w), cy = (int)(at / (size_t)m.w);
+        float near = INFINITY;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+                int x = cx + dx;
+                const int y = cy + dy;
+                if (y < 0 || y >= m.h) continue;
+                if (pl_.images[i].cam.isSpherical()) x = (x + m.w) % m.w;
+                else if (x < 0 || x >= m.w) continue;
+                near = std::min(near, m.d[(size_t)y * m.w + x]);
+            }
+        if (std::isfinite(near) && dist < (double)near * (1.0 - margin_)) return true;
+    }
+    return false;
 }
 
 // ===========================================================================
