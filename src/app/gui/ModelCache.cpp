@@ -5,6 +5,7 @@
 
 #include "app/AppPaths.h"
 #include "app/gui/Subprocess.h"
+#include "core/LicenseConsent.h"
 #include "core/ModelMirror.h"
 
 #include "i18n/catalog/Dataset.h"
@@ -120,9 +121,26 @@ const LicenseInfo& license_for(const std::string& family) {
     static const LicenseInfo kBirefnet{
         "birefnet", &dmsg::license_birefnet_title, &dmsg::license_birefnet_summary,
         "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE", false};
+    // Both go with the one RoMa v2 file, which carries Meta's DINOv3 weights, so a
+    // request for it raises both. The Agreement is the one thing here a user
+    // must tick; it adds no term to Meta's own.
+    static const LicenseInfo kDinov3{
+        "dinov3", &dmsg::license_dinov3_title, &dmsg::license_dinov3_summary,
+        spirula::license::terms_for("dinov3")->url, true,
+        spirula::license::terms_for("dinov3")->text};
+    static const LicenseInfo kRomaV2{
+        "romav2", &dmsg::license_romav2_title, &dmsg::license_romav2_summary,
+        spirula::license::terms_for("romav2")->url, false,
+        spirula::license::terms_for("romav2")->text};
+    if (family == "dinov3") return kDinov3;
+    if (family == "romav2") return kRomaV2;
     if (family == "gdino") return kGdino;
     if (family == "birefnet") return kBirefnet;
     return family == "sam2" ? kSam2 : kSam3;
+}
+
+bool accept_license(const std::string& family) {
+    return spirula::license::record(family);
 }
 
 std::string model_path(const ModelEntry& e) {

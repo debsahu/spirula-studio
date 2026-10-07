@@ -45,7 +45,7 @@ struct PatchifyParams {
 
 struct ConvTScatterParams {
     uint64_t out, packed, bias;
-    uint32_t Hi, Wi, Co, groups_per_row, _pad0;
+    uint32_t Hi, Wi, Co, groups_per_row, k;
 };
 
 // Column-buffer budget. A full im2col of the seg head's 288x288x256 3x3 conv is
@@ -261,20 +261,25 @@ void conv2d_depthwise(const Tensor& out, const Tensor& in, const Tensor& w_in, i
                                    &p.groups_per_row);
 }
 
-void conv_transpose2x2(vk::Arena& arena, const Tensor& out, const Tensor& in,
-                       const Tensor& w_packed, const Tensor& bias, Act act) {
-    NN_CHECK(out.ndim == 3 && in.ndim == 3, "conv_transpose2x2 expects [H, W, C]");
+namespace {
+
+// ConvTranspose2d with kernel == stride == k and no padding.
+void conv_transpose_kxk(vk::Arena& arena, const Tensor& out, const Tensor& in,
+                        const Tensor& w_packed, const Tensor& bias, Act act, int k,
+                        const char* what) {
+    NN_CHECK(out.ndim == 3 && in.ndim == 3, "%s expects [H, W, C]", what);
     const int64_t Hi = in.shape[0], Wi = in.shape[1], Ci = in.shape[2];
     const int64_t Co = out.shape[2];
-    NN_CHECK(out.shape[0] == Hi * 2 && out.shape[1] == Wi * 2,
-               "conv_transpose2x2: output must be exactly 2x the input");
-    NN_CHECK(w_packed.rows() == Co * 4 && w_packed.cols() == Ci,
-               "conv_transpose2x2: packed weight must be [Cout*4, Cin]");
+    const int64_t taps = (int64_t)k * k;
+    NN_CHECK(out.shape[0] == Hi * k && out.shape[1] == Wi * k,
+             "%s: output must be exactly %dx the input", what, k);
+    NN_CHECK(w_packed.rows() == Co * taps && w_packed.cols() == Ci,
+             "%s: packed weight must be [Cout*%lld, Cin]", what, (long long)taps);
 
     vk::ArenaScope scope(arena);
-    Tensor packed = arena_tensor(arena, DType::F32, Hi * Wi, Co * 4);
+    Tensor packed = arena_tensor(arena, DType::F32, Hi * Wi, Co * taps);
     // Bias and activation belong to the scatter, not the GEMM: one bias entry
-    // serves all four taps of a channel.
+    // serves all taps of a channel.
     linear(packed, in.view(Hi * Wi, Ci), w_packed);
 
     const KernelName entry = span_entry("misc.convt_scatter", {out, packed});
@@ -285,9 +290,22 @@ void conv_transpose2x2(vk::Arena& arena, const Tensor& out, const Tensor& in,
     p.Hi = (uint32_t)Hi;
     p.Wi = (uint32_t)Wi;
     p.Co = (uint32_t)Co;
+    p.k = (uint32_t)k;
     vk::SpecList spec{0u, (uint32_t)act};
     vk::Stream::get().dispatchFlat(entry, spec, out.numel(), 256, &p, sizeof(p),
                                    &p.groups_per_row);
+}
+
+}  // namespace
+
+void conv_transpose2x2(vk::Arena& arena, const Tensor& out, const Tensor& in,
+                       const Tensor& w_packed, const Tensor& bias, Act act) {
+    conv_transpose_kxk(arena, out, in, w_packed, bias, act, 2, "conv_transpose2x2");
+}
+
+void conv_transpose4x4(vk::Arena& arena, const Tensor& out, const Tensor& in,
+                       const Tensor& w_packed, const Tensor& bias, Act act) {
+    conv_transpose_kxk(arena, out, in, w_packed, bias, act, 4, "conv_transpose4x4");
 }
 
 void patchify(const Tensor& out, const Tensor& in, int patch) {

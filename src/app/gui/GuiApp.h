@@ -321,6 +321,10 @@ private:
     void draw_model_fetch(FileDownload& dl, const spirula::i18n::Msg& missing,
                           const spirula::i18n::Msg& get, const std::function<void()>& request);
     bool license_accepted(const std::string& family) const;
+    // Raises one modal per family not yet accepted, in order, then runs `then`.
+    // Cancelling any of them drops the rest and `then` never runs.
+    void request_licenses(std::vector<std::string> families, std::function<void()> then);
+    void advance_license_queue();
 
     // ---- screens ----
     void draw_menu_bar();
@@ -954,9 +958,9 @@ private:
     FontSet _fonts;
     FileDownload _font_download;
     const CjkFace* _font_fetching = nullptr;
-    // Families whose licence the user has accepted, persisted in the settings.
-    std::vector<std::string> _accepted_licenses;
     std::string _license_prompt;      // family whose modal is open
+    std::vector<std::string> _license_queue;
+    std::function<void()> _license_then;
     std::string _license_model_id;    // the pick it downloads
     std::string _license_detector_id;
     bool _license_tick = false;

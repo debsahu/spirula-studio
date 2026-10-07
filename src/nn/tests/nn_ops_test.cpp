@@ -898,6 +898,42 @@ void test_conv(vk::Arena& arena) {
                         }
         check("conv_transpose 2x2 s2", readback(to), want, 2e-4f);
     }
+    {
+        // ConvTranspose2d(k=4, s=4): sixteen taps as sixteen channel groups.
+        // Distinct Hi/Wi/Co so a swapped axis or a transposed tap cannot cancel.
+        vk::ArenaScope scope(arena);
+        const int Hi = 5, Wi = 7, Ci = 9, Co = 3, K = 4;
+        auto x = randn((size_t)Hi * Wi * Ci);
+        auto w = randn((size_t)Ci * Co * K * K, 0.2f);  // [Cin, Cout, 4, 4]
+        auto b = randn((size_t)Co);
+        std::vector<float> wp((size_t)Co * K * K * Ci);
+        for (int ci = 0; ci < Ci; ++ci)
+            for (int co = 0; co < Co; ++co)
+                for (int i = 0; i < K; ++i)
+                    for (int j = 0; j < K; ++j)
+                        wp[((size_t)co * K * K + i * K + j) * Ci + ci] =
+                            w[(((size_t)ci * Co + co) * K + i) * K + j];
+
+        Tensor to = arena_tensor(arena, DType::F32, Hi * K, Wi * K, Co);
+        conv_transpose4x4(arena, to, upload_f32(arena, x, Hi, Wi, Ci),
+                          upload_f32(arena, wp, (int64_t)Co * K * K, Ci),
+                          upload_f32(arena, b, Co), Act::Relu);
+
+        std::vector<float> want((size_t)Hi * K * Wi * K * Co);
+        for (int y = 0; y < Hi; ++y)
+            for (int xx = 0; xx < Wi; ++xx)
+                for (int co = 0; co < Co; ++co)
+                    for (int i = 0; i < K; ++i)
+                        for (int j = 0; j < K; ++j) {
+                            double s = b[co];
+                            for (int ci = 0; ci < Ci; ++ci)
+                                s += (double)x[((size_t)y * Wi + xx) * Ci + ci] *
+                                     w[(((size_t)ci * Co + co) * K + i) * K + j];
+                            want[((size_t)(y * K + i) * (Wi * K) + xx * K + j) * Co + co] =
+                                act_ref((float)s, Act::Relu);
+                        }
+        check("conv_transpose 4x4 s4", readback(to), want, 2e-4f);
+    }
 }
 
 // ================
@@ -1320,6 +1356,41 @@ void test_geometry(vk::Arena& arena) {
             for (size_t i = 0; i < x.size(); ++i) want[i] = c.ref(x[i]);
             check(c.name, readback(to), want, 1e-5f);
         }
+    }
+    {   // F.softplus(beta=1, threshold=20): the +-100 inputs are where log(1+exp(x))
+        // written naively overflows to inf, and the 20..30 band is where torch
+        // returns x itself.
+        vk::ArenaScope scope(arena);
+        std::vector<float> x = randn(2048, 4.0f);
+        for (float v : {-100.0f, -30.0f, -20.5f, -0.0f, 19.9f, 20.0f, 20.1f, 25.0f, 100.0f})
+            x.push_back(v);
+        Tensor tx = upload_f32(arena, x, (int64_t)x.size());
+        Tensor to = arena_tensor(arena, DType::F32, (int64_t)x.size());
+        unary(to, tx, Act::Softplus);
+        std::vector<float> want(x.size());
+        for (size_t i = 0; i < x.size(); ++i)
+            want[i] = x[i] > 20.0f ? x[i] : (float)std::log1p(std::exp((double)x[i]));
+        check("softplus", readback(to), want, 1e-5f);
+
+        // The same activation as a GEMM epilogue, which is where RoMa's Cholesky head
+        // applies it.
+        const int M = 33, N = 17, K = 24;
+        auto a = randn((size_t)M * K);
+        auto wt = randn((size_t)N * K, 0.5f);
+        auto bs = randn((size_t)N);
+        Tensor tg = arena_tensor(arena, DType::F32, M, N);
+        LinearOpts lo;
+        lo.bias = upload_f32(arena, bs, N);
+        lo.act = Act::Softplus;
+        linear(tg, upload_f32(arena, a, M, K), upload_f32(arena, wt, N, K), lo);
+        std::vector<float> wg((size_t)M * N);
+        for (int m = 0; m < M; ++m)
+            for (int n = 0; n < N; ++n) {
+                double acc = bs[n];
+                for (int k = 0; k < K; ++k) acc += (double)a[(size_t)m * K + k] * wt[(size_t)n * K + k];
+                wg[(size_t)m * N + n] = acc > 20.0 ? (float)acc : (float)std::log1p(std::exp(acc));
+            }
+        check("linear epilogue softplus", readback(tg), wg, 2e-4f);
     }
     {   // AvgPool2d(3, stride=2, padding=1) -- pool2x between GRU resolutions.
         // count_include_pad=True is the whole point: every window divides by 9,

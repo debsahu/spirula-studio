@@ -58,6 +58,11 @@ bash tools/check_sam_guard.sh >/dev/null || { bash tools/check_sam_guard.sh; exi
 bash tools/mask_editor_checks/survivors.sh >/dev/null ||
     { bash tools/mask_editor_checks/survivors.sh | command grep '^FAIL'; exit 1; }
 
+# The licence dialog has no unit seam either; this pins that its Accept records
+# through the store the CLI reads.
+bash tools/license_checks/survivors.sh >/dev/null ||
+    { bash tools/license_checks/survivors.sh | command grep '^FAIL'; exit 1; }
+
 # Comment blocks in uncommitted work must fit the AGENTS.md budget. Also wired
 # into CMake (cmake/SsChecks.cmake), which covers a bare cmake/ninja build;
 # running it here fails before the configure step rather than after it.
