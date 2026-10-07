@@ -181,8 +181,8 @@ same way, so the tolerances stay tight rather than being widened to absorb it.
 - **Convolution** is chunked im2col + GEMM, not a bespoke kernel. A full im2col
   of the seg head's 288×288×256 3×3 conv would be 764 MiB, so the output
   positions are chunked to keep the column buffer near 32 MiB. Depthwise is
-  direct; transposed 2×2/stride-2 is a GEMM plus a scatter (the four kernel taps
-  are four output-channel groups). One well-tuned matmul therefore carries ~95%
+  direct; transposed k×k/stride-k (2 and 4) is a GEMM plus a scatter (the k²
+  kernel taps are k² output-channel groups). One well-tuned matmul therefore carries ~95%
   of the model's FLOPs.
 
 ## Portability rules for new kernels

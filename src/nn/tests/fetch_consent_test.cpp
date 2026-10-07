@@ -23,9 +23,11 @@
 #ifdef _WIN32
 #include <process.h>
 #define SS_SETENV(k, v) _putenv_s(k, v)
+#define SS_UNSETENV(k) _putenv_s(k, "")
 #else
 #include <unistd.h>
 #define SS_SETENV(k, v) setenv(k, v, 1)
+#define SS_UNSETENV(k) unsetenv(k)
 #endif
 
 namespace fs = std::filesystem;
@@ -157,8 +159,11 @@ void test_no_family_unaffected() {
     reset_dirs();
     nn::FetchFile f = never_file(nullptr);
     f.no_mirror = false;
+    SS_SETENV("SS_NO_AUTO_FETCH", "1");   // the mirror is a real host; do not call it
     const std::string m = message_of([&] { nn::ensure_file(f, "test"); });
-    check(!has(m, "has not been accepted"), "a file with no license_family is never gated");
+    SS_UNSETENV("SS_NO_AUTO_FETCH");
+    check(has(m, "may not download") && !has(m, "has not been accepted"),
+          "a file with no license_family is never gated");
     check(!nn::mirror_url(f).empty(), "default FetchFile keeps its project mirror");
     f.no_mirror = true;
     check(nn::mirror_url(f).empty(), "no_mirror: there is no mirror URL to fall back to");
