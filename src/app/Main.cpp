@@ -79,6 +79,9 @@ const std::vector<Tool>& tools() {
 #ifdef SS_TOOL_GEOMETRY
         {app::kToolGeometry, &cmsg::tool_geometry, spirula_geometry_main},
 #endif
+#ifdef SS_TOOL_DENSIFY
+        {app::kToolDensify, &cmsg::tool_densify, spirula_densify_main},
+#endif
 #ifdef SS_TOOL_MESH
         {app::kToolMesh, &cmsg::tool_mesh, spirula_mesh_main},
 #endif
