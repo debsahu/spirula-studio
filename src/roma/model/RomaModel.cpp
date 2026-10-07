@@ -334,6 +334,7 @@ MatchResult Model::match(const float* a_lr, const float* b_lr, const float* a_hr
         im.cache.resetHighWater();
         im.cache.reserve(one_image);
         const float* const rgb_a[2] = {a_lr, a_hr};
+        im.cached = ImageFeatures{};   // no hr handle survives an lr-only fill
         im.features(im.cached, im.cache, rgb_a, dims, scales);
         dump_tensor("dino_tap11_A", im.cached.taps[0], {h, wd, D});
         dump_tensor("dino_tap17_A", im.cached.taps[1], {h, wd, D});
