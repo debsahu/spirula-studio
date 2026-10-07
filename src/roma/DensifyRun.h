@@ -51,6 +51,9 @@ struct DensifyPlan {
     int64_t sparse_points = 0;
     double sparse_spacing = 0;                   // median nearest-neighbour distance
     bool metric = false;
+    enum class FarState { Off, PluginExact, TooFewPoints, On };
+    FarState far_state = FarState::Off;          // the far-isolated filter, and why it is not On
+    FarFilter far_filter;                        // resolved when far_state is On
     double max_baseline = 0;
     int min_track = 0;
     double voxel = 0;
@@ -72,7 +75,6 @@ struct DensifyResult {
     double seconds_match = 0, seconds_total = 0;
     double depth_tol = 0;                        // the depth agreement tolerance used
     double depth_share = -1;                     // usable maps among the matched images, -1 unused
-    std::string depth_dropped;                   // auto: why the depth source was not used
     std::string out_dir;
     std::vector<DensePoint> cloud;               // what points3D.bin holds
 };

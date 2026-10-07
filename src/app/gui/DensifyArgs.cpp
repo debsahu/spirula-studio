@@ -61,10 +61,9 @@ DensifyJob densify_after_settings(const DensifyJob& current, const DensifyJob& i
     return out;
 }
 
-int densify_resolved_source(int source, bool have_depth_maps) {
+int densify_resolved_source(int source) {
     source = std::clamp(source, 0, kNumDensifySources - 1);
-    if (source != kSourceAuto) return source;
-    return have_depth_maps ? kSourceHybrid : kSourceRoma;
+    return source == kSourceAuto ? kSourceRoma : source;
 }
 
 bool densify_has_depth_maps(const std::string& dataset) {

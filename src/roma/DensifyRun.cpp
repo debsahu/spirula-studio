@@ -252,6 +252,18 @@ DensifyPlan planDensify(const DensifyJob& job) {
             if (k == "metric") pl.metric = v == "1";
     }
 
+    if (!o.far_isolated) {
+        pl.far_state = DensifyPlan::FarState::Off;
+    } else if (o.plugin_exact) {
+        pl.far_state = DensifyPlan::FarState::PluginExact;
+    } else {
+        std::vector<Vec3> xyz;
+        xyz.reserve(rec.points3D.size());
+        for (const auto& kv : rec.points3D) xyz.push_back(kv.second.xyz);
+        pl.far_filter = resolveFarFilter(xyz, pl.metric, pl.sparse_spacing);
+        pl.far_state = pl.far_filter.margin > 0 ? DensifyPlan::FarState::On : DensifyPlan::FarState::TooFewPoints;
+    }
+
     // Plugin defaults where the default mode resolves something itself.
     if (o.plugin_exact) {
         if (o.min_track <= 0) o.min_track = 1;
@@ -267,8 +279,9 @@ DensifyPlan planDensify(const DensifyJob& job) {
     pl.match_size = job.matcher ? job.matcher->inputSize() : 640;
     {
         const bool m = job.matcher != nullptr || !job.export_dir.empty(), d = job.depth != nullptr;
+        // Auto is the matches; the depth maps stand in only when no matcher can run.
         if (o.source == DensifySource::Auto)
-            pl.source = m && d ? DensifySource::Hybrid : d ? DensifySource::Depth : DensifySource::Roma;
+            pl.source = m ? DensifySource::Roma : d ? DensifySource::Depth : DensifySource::Roma;
         else
             pl.source = o.source;
         if (o.source != DensifySource::Auto &&
@@ -583,12 +596,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
             char why[256];
             std::snprintf(why, sizeof why, "only %zu of %d images have a usable depth map (%.0f %%, below %.0f %%)",
                           others.size(), considered, 100 * res_out.depth_share, 100 * o.min_depth_share);
-            if (o.source != DensifySource::Auto || !use_matches)
-                throw std::runtime_error(std::string(why) + "; stale or mismatched maps? --min-depth-share 0 uses them anyway");
-            res_out.depth_dropped = why;
-            use_depth = false;
-            fields.clear();
-            others.clear();
+            throw std::runtime_error(std::string(why) + "; stale or mismatched maps? --min-depth-share 0 uses them anyway");
         }
         dao.min_agree = o.depth_min_agree;
         dao.vote = o.depth_agreement;
@@ -767,7 +775,8 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         free_space = std::make_unique<FreeSpace>(pl, all, 3, 0.05);
         veto = [&free_space](const DensePoint& p) { return free_space->seesThrough(p); };
     }
-    res.cloud = finalizePoints(std::move(all), pl.min_track, pl.voxel, pl.max_points, o, res.stats, veto, pl.max_fill);
+    const FarFilter* far_filter = pl.far_state == DensifyPlan::FarState::On ? &pl.far_filter : nullptr;
+    res.cloud = finalizePoints(std::move(all), pl.min_track, pl.voxel, pl.max_points, o, res.stats, veto, pl.max_fill, far_filter);
     // Match points take the depth source's normal where their first image has one.
     for (DensePoint& p : res.cloud) {
         if (fields.empty() || p.from_depth || p.track.empty()) continue;

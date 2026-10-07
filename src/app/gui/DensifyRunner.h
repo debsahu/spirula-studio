@@ -47,13 +47,13 @@ std::vector<std::string> densify_args(const DensifyJob& job, const std::string& 
                                       const std::string& images, const std::string& masks,
                                       bool masks_flipped, bool preset_supported);
 
-// Auto as the CLI resolves it: hybrid when the dataset has depth maps, else roma.
-// A fixed source resolves to itself.
-int densify_resolved_source(int source, bool have_depth_maps);
+// Auto as the CLI resolves it: roma, whatever depth maps the dataset holds (hybrid
+// only when asked for). A fixed source resolves to itself.
+int densify_resolved_source(int source);
 // Does `depths/` of this dataset hold anything?
 bool densify_has_depth_maps(const std::string& dataset);
-// RoMa and its licences are needed by every source but moge; auto is roma or
-// hybrid, so it needs them whatever the dataset holds.
+// RoMa and its licences are needed by every source but moge; auto is roma, so
+// it needs them whatever the dataset holds.
 bool densify_needs_roma(const DensifyJob& job);
 
 // What a new settings block does to the model the screen is on. A preset leaves

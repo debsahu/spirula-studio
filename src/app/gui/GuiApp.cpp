@@ -3015,8 +3015,7 @@ std::string GuiApp::state_json() {
     out += ",\"densify_model\":" + quoted(_densify.model);
     out += ",\"densify_source\":" + quoted(kDensifySources[std::clamp(_densify.source, 0, kNumDensifySources - 1)]);
     out += ",\"densify_auto_picks\":" +
-           quoted(kDensifySources[densify_resolved_source(
-               kSourceAuto, densify_has_depth_maps(_workspace))]);
+           quoted(kDensifySources[densify_resolved_source(kSourceAuto)]);
     out += ",\"densify_ready\":";
     out += densify_ready(_densify) ? "true" : "false";
     out += ",\"dense_panel_running\":";
@@ -5829,7 +5828,7 @@ void GuiApp::draw_densify_options() {
     ui::help_on_hover(dgmsg::source_help);
     if (_densify.source == kSourceAuto) {
         const bool depth = densify_has_depth_maps(_workspace);
-        ui::TextDisabledWrapped(depth ? dgmsg::source_auto_hybrid : dgmsg::source_auto_roma);
+        ui::TextDisabledWrapped(depth ? dgmsg::source_auto_roma_maps : dgmsg::source_auto_roma);
     }
 
     const bool presets = densify_has_flag("--preset");

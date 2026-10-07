@@ -277,7 +277,7 @@ void RecomputePanel::draw_dense(const Source& src, bool busy,
                &dgmsg::source_hybrid});
     ui::help_on_hover(dgmsg::source_help);
     if (_source == kSourceAuto)
-        ui::TextDisabledWrapped(densify_has_depth_maps(src.dataset) ? dgmsg::source_auto_hybrid
+        ui::TextDisabledWrapped(densify_has_depth_maps(src.dataset) ? dgmsg::source_auto_roma_maps
                                                                     : dgmsg::source_auto_roma);
     ImGui::SetNextItemWidth(px(200.0f));
     ImGui::BeginDisabled(!densify_has_flag("--preset"));

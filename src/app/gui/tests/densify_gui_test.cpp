@@ -140,12 +140,12 @@ int main() {
         hybrid.source = kSourceHybrid;
         expect(!densify_needs_roma(moge), "MoGe depth needs no RoMa checkpoint or licence");
         expect(densify_needs_roma(roma) && densify_needs_roma(hybrid) && densify_needs_roma(autoj),
-               "RoMa, hybrid and auto (roma or hybrid) all do");
-        expect(densify_resolved_source(kSourceAuto, true) == kSourceHybrid &&
-                   densify_resolved_source(kSourceAuto, false) == kSourceRoma &&
-                   densify_resolved_source(kSourceMoge, false) == kSourceMoge &&
-                   densify_resolved_source(kSourceRoma, true) == kSourceRoma,
-               "auto is hybrid with depth maps and roma without; a chosen source stays");
+               "RoMa, hybrid and auto (roma) all do");
+        expect(densify_resolved_source(kSourceAuto) == kSourceRoma &&
+                   densify_resolved_source(kSourceMoge) == kSourceMoge &&
+                   densify_resolved_source(kSourceHybrid) == kSourceHybrid &&
+                   densify_resolved_source(kSourceRoma) == kSourceRoma,
+               "auto is roma, with or without depth maps; hybrid is never auto; a chosen source stays");
         const fs::path ds = fs::temp_directory_path() / "spirula_densify_gui_source";
         fs::remove_all(ds);
         fs::create_directories(ds / "depths");
