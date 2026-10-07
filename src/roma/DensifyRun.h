@@ -71,6 +71,8 @@ struct DensifyResult {
     int64_t points = 0;
     double seconds_match = 0, seconds_total = 0;
     double depth_tol = 0;                        // the depth agreement tolerance used
+    double depth_share = -1;                     // usable maps among the matched images, -1 unused
+    std::string depth_dropped;                   // auto: why the depth source was not used
     std::string out_dir;
     std::vector<DensePoint> cloud;               // what points3D.bin holds
 };
@@ -135,6 +137,11 @@ ReprojStats reprojectWritten(const std::string& model_dir);
 ReprojStats writeSibling(const std::string& model_dir, const std::string& out_dir,
                          const DensifyPlan& plan, const std::vector<DensePoint>& cloud,
                          const std::string& settings_json);
+
+// Hybrid: the fill at sample `s` of a G x G grid agrees with the matched and
+// sparse points within +-8 cells (`local`: their relative residual, NaN none)
+// when the median is within `tol`; with fewer than 3 there, it is not refused.
+bool localResidualOk(const std::vector<float>& local, int G, int64_t s, double tol);
 
 // Depth maps in place before a depth run: those present are kept, `compute`
 // (when given) runs once if any are missing, and must leave every present map

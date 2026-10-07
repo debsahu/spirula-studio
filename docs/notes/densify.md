@@ -25,7 +25,14 @@ through its image's own camera and pose (`cameras.bin`, `images.bin`) at the pix
 covers the face-to-panorama mapping, which only happens at write time. `--check` gates it
 (no invalid observation, p95 at most 2 source pixels). It found a real defect on its first
 basement run: a depth point's track was the projection of the reference's own point, not of
-the averaged one written, and reprojected at p95 49.5 px; after the fix, 0.0004 px.
+the averaged one written, and reprojected at p95 49.5 px; after the fix, 0.0004 px. **For a
+depth point the number is now tautological**: its track is defined as the projection of the
+written point, so it can only be wrong through the face mapping or the writer. It says nothing
+about whether a depth point is on the surface. For a matched point it is the triangulation
+residual in source pixels.
+
+An empty run under `--overwrite` also removes an older sibling of the same name, which would
+otherwise be trained from as if it were this run's.
 
 The trainer reads it with `--colmap-recon-dir sparse/0-roma`. The parser's
 automatic pick never lands on it: models are sorted by image count, then by path,
@@ -147,13 +154,29 @@ field and a recorded densify field (a record from before it counts as auto). Gat
 **Depth maps** (`DepthSource.h`): the `spirula geometry` maps in `--depth-dir` (default
 `depths/`), 16-bit, relative or millimetres (both linear in depth, so the fit absorbs which),
 ray depth where geometry splits the lens into faces. 0 is no data and stays no data, so a
-sky-blanked `depths_nosky/` works through `--depth-dir`. **Reuse**: maps present are kept; when
-some are missing and the folder is geometry's own `depths/`, `spirula geometry --depth
---no-normal` runs once for the missing ones, and `ensureDepths` refuses the run if any present
-map changed size or time. The count reused / computed / still missing is printed. Another
-folder is never extended (a sky-blanked copy cannot be). With no maps at all, `auto` stays
-`roma`; asking for `moge` or `hybrid` computes them. *Choice, not asked for*: auto does not start
-a 40-minute MoGe run on a dataset that has no maps.
+sky-blanked `depths_nosky/` works through `--depth-dir`. **Reuse**: maps present are kept. When
+some are missing, the folder is geometry's own `depths/` **and the source was named**
+(`--source moge` or `hybrid`), `spirula geometry --depth --no-normal` runs once for the missing
+ones; the present maps are read-only while it runs, and `ensureDepths` refuses the run if any of
+them changed size or time anyway. **`--source auto` never starts a MoGe run**, with no maps or
+with some missing: it says how many images have none and uses what is there. The count reused /
+computed / still missing is printed. Another folder is never extended (a sky-blanked copy
+cannot be).
+
+**Maps for other pictures** (review B1, 2026-10-07). Depth reuse makes a stale or shifted
+`depths/` likely after a re-extract, and such maps are plausible depth: with the folder shifted
+by 3 frames, 17 of 127 passed every fit gate and the run wrote 38,951 points, 53 % of them near
+the real geometry (99.8 % normally), with exit 0. Three defences:
+- **geometry's record**: `spirula geometry` now writes `depths/geometry_maps.tsv` (`app/DepthManifest.h`):
+  per map, the image it was made for, a fingerprint of the image and of the map (size and
+  SHA-256 of the first and last MiB, so a copied dataset keeps them), and whether it is ray
+  depth. Densify refuses a recorded map that names another image, that changed since, or whose
+  image changed since; the ray/z choice comes from the record instead of being inferred. Maps
+  made before the record existed are not checked by it.
+- **the map itself**: refused if it is not 16-bit, or not the camera's shape (aspect within 1 %).
+- **the share**: if fewer than half of the matched (non-held-out) images have a usable map
+  (`--min-depth-share`, 0 accepts any), a named depth source is an error, and `auto` drops the
+  depth source with a warning and runs on matches alone.
 
 **Fit**, per image, to its own sparse points: `1/d_true = a / d_raw + b` (disparity affine),
 2-point RANSAC on relative depth error (10 %), Huber IRLS. Refused with fewer than 30 anchors,
@@ -177,7 +200,9 @@ then a vote of every other usable image, each comparing its own fitted map at th
 projection (relative): **agree** within `tol`, **see through** past `2 tol` in front, **hide a
 copy** when the map is up to 25 % behind the point. Kept with at least 2 agreeing and more agreeing
 than either other vote. `tol` is 2.5 x the median fit residual, within 1 to 5 % (4.77 % on the
-basement). *Deviation*: the brief asked for a hard "seen through" veto; it deleted the true
+basement); `--depth-tol`, `--depth-min-agree` and `--no-depth-vote` set them. **A voter must see
+the point from at least the parallax bar (1.5 degrees) away from the reference**: an adjacent
+frame shares the reference's monocular error and would agree with it whatever the truth. *Deviation*: the brief asked for a hard "seen through" veto; it deleted the true
 stairs whenever one image's map was a doubled copy too deep, since that image sees through every
 true point in front of it. A vote, not a veto. An **edge filter** drops a sample whose 5 x 5 map
 neighbourhood has no-data or spreads more than `4 tol` (silhouettes against the void, grazing
@@ -205,6 +230,12 @@ two-image matches in front of it. With the automatic cap the **fill gets its own
 quarter of the matches' (the matches alone fill 1 M on the basement, which left the first hybrid
 with no fill at all); an explicit `--max-points` is one budget, matches first. Normals of every
 written point that has one go to `points3D_normals.ply`.
+
+**Doubled layers** (review S4): a fill is placed where *this* reference has no certain match, but
+another reference's matches may already measure that surface, and a fill a centimetre off them is
+a second layer the voxel select cannot merge. So after all references a depth point within
+4 voxels (twice the sparse spacing, a choice) of any matched point is dropped
+(`dropFillNearMatches`, counted as `fill_near_matches`).
 
 ### Measured: basement steps ROI (vitl maps, 2048 x 1024, 146 panoramas, holdout every 8)
 

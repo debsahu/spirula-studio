@@ -26,8 +26,9 @@ void DensifyStats::add(const DensifyStats& o) {
     seen_through += o.seen_through;
     depth_samples += o.depth_samples; depth_nodata += o.depth_nodata;
     depth_disagree += o.depth_disagree; depth_through += o.depth_through;
-    depth_local += o.depth_local; depth_covered += o.depth_covered; depth_kept += o.depth_kept;
+    depth_local += o.depth_local; depth_left_to_matches += o.depth_left_to_matches; depth_kept += o.depth_kept;
     depth_edge += o.depth_edge; depth_normal += o.depth_normal; depth_local_normal += o.depth_local_normal;
+    depth_vote_close += o.depth_vote_close; fill_near_matches += o.fill_near_matches;
     for (size_t i = 0; i < normal_agree_hist.size(); i++) {
         normal_agree_hist[i] += o.normal_agree_hist[i];
         normal_null_hist[i] += o.normal_null_hist[i];
@@ -427,6 +428,30 @@ int trackLen(const DensePoint& p, bool by_images) {
 }
 
 }  // namespace
+
+int64_t dropFillNearMatches(std::vector<DensePoint>& pts, double radius) {
+    if (!(radius > 0)) return 0;
+    std::unordered_map<VoxelKey, std::vector<size_t>, VoxelHash> grid;
+    for (size_t i = 0; i < pts.size(); i++)
+        if (!pts[i].from_depth) grid[keyOf(pts[i].xyz, radius)].push_back(i);
+    if (grid.empty()) return 0;
+    auto covered = [&](const Vec3& X) {
+        const VoxelKey k = keyOf(X, radius);
+        for (int64_t dx = -1; dx <= 1; dx++)
+            for (int64_t dy = -1; dy <= 1; dy++)
+                for (int64_t dz = -1; dz <= 1; dz++) {
+                    auto it = grid.find({k.x + dx, k.y + dy, k.z + dz});
+                    if (it == grid.end()) continue;
+                    for (size_t j : it->second)
+                        if ((pts[j].xyz - X).norm() <= radius) return true;
+                }
+        return false;
+    };
+    const size_t before = pts.size();
+    pts.erase(std::remove_if(pts.begin(), pts.end(), [&](const DensePoint& p) { return p.from_depth && covered(p.xyz); }),
+              pts.end());
+    return (int64_t)(before - pts.size());
+}
 
 std::vector<size_t> voxelSelect(const std::vector<DensePoint>& pts, double voxel,
                                 bool by_images) {
