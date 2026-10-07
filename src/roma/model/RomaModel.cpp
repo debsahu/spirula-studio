@@ -307,6 +307,8 @@ MatchResult Model::match(const float* a_lr, const float* b_lr, const float* a_hr
         im.cache.reserve(one_image);
         const float* const rgb_a[2] = {a_lr, a_hr};
         im.features(im.cached, im.cache, rgb_a, dims, scales);
+        dump_tensor("dino_tap11_A", im.cached.taps[0], {h, wd, D});
+        dump_tensor("dino_tap17_A", im.cached.taps[1], {h, wd, D});
         im.cache_key = key_a;
         im.cache_spec = spec;
     }
@@ -324,6 +326,8 @@ MatchResult Model::match(const float* a_lr, const float* b_lr, const float* a_hr
         for (int t = 0; t < 2; ++t) B.taps[t] = nn::arena_tensor(im.arena, DType::F32, n, D);
         im.log.run("backbone", Backbone::planBytes(w, h, wd),
                    [&] { im.backbone.run(w, im.arena, B.img[0], B.taps[0], B.taps[1], h, wd); });
+        dump_tensor("dino_tap11_B", B.taps[0], {h, wd, D});
+        dump_tensor("dino_tap17_B", B.taps[1], {h, wd, D});
     }
     dump_host("input_A", a_lr, {spec.lr_h, spec.lr_w, 3});
     dump_host("input_B", b_lr, {spec.lr_h, spec.lr_w, 3});
