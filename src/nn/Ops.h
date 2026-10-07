@@ -32,6 +32,7 @@ enum class Act : uint32_t {
     Elu = 8,       // F.elu(alpha=1) -- its normal head's concentration channel
     Silu = 9,      // F.silu -- the SwiGLU FFN in DINOv2 giant2
     Exp = 10,      // torch.exp -- MoGe's `remap_output='exp'` on the point map
+    Softplus = 11, // F.softplus(beta=1, threshold=20) -- RoMa v2's Cholesky heads
 };
 
 enum class AttnBias : uint32_t {
@@ -209,6 +210,12 @@ void patch_gather(const Tensor& out, const Tensor& in, const Tensor& centers, in
 // kernel taps become four output-channel groups, so the tuned GEMM does the
 // work and a scatter reorders it.
 void conv_transpose2x2(vk::Arena& arena, const Tensor& out, const Tensor& in,
+                       const Tensor& w_packed, const Tensor& bias, Act act = Act::None);
+
+// ConvTranspose2d(kernel=4, stride=4), no padding: the k=2 trick with sixteen
+// taps. `w_packed` is [Cout*16, Cin], tap (ky, kx) of channel c at row
+// c*16 + ky*4 + kx, i.e. the checkpoint's [Cin, Cout, 4, 4] transposed.
+void conv_transpose4x4(vk::Arena& arena, const Tensor& out, const Tensor& in,
                        const Tensor& w_packed, const Tensor& bias, Act act = Act::None);
 
 // Non-overlapping patch extraction for a ViT stem:
