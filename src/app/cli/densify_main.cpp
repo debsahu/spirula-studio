@@ -344,7 +344,8 @@ int spirula_densify_main(int argc, char** argv) {
                 matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), preset);
             } catch (const std::exception& e) {
                 if (o.source != roma::DensifySource::Auto || !have_depth()) throw;
-                std::printf("%s\n", format(D::roma_unavailable, {e.what(), depth_root.string()}).c_str());
+                const std::string why = std::string(e.what()).substr(0, std::string(e.what()).find('\n'));
+                std::printf("%s\n", format(D::roma_unavailable, {why, depth_root.string()}).c_str());
             }
         }
         const bool want_depth = o.source == roma::DensifySource::Depth || o.source == roma::DensifySource::Hybrid;

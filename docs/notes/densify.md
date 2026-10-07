@@ -353,6 +353,16 @@ of the threshold, a far point whose neighbours lie inside the margin, a point 1.
 - `roma_plugin_parity_test <fixture>`: gate P-4, against the plugin's own host stage on
   the same matches (`reference/python/roma_plugin_parity.py` writes the fixture).
 - `densify_autopick_test`: gate H-3.
+- Freeze mutation run, 2026-10-07 (each fails the test named; run by hand on the working tree, the rest
+  of the suite passing): auto = hybrid with maps and auto never falling back to moge
+  (`auto_source_is_roma_unless_no_matcher`; the GUI's auto = hybrid, `densify_gui_test`); far filter:
+  isolation ignored, margin ignored, 2-norm distance, neighbours counted among far points only,
+  fewer-than-2 and at-most-3 thresholds, self counted, cell scan limited on x, on y, on z
+  (`far_isolated_drops_only_isolated_far_points`); filter after the cap, `--far-isolated off` ignored,
+  plugin-exact filtering (`far_isolated_runs_before_the_cap`); box from extremes, margin not
+  scale-free, radius 4 x, no 100-point floor (`far_filter_is_scale_free`); the plan ignoring
+  `off` (`far_isolated_plan_states`). One mutant (cell scan limited on x) first survived: the fixture had
+  no neighbours across a cell boundary; two squares straddling a cell corner were added.
 - WS-4d review mutation run, 2026-10-07 (each fails the test named): the convention checked after
   facing, the seen-through vote off, the rank and inlier-share gates off, the flatness test off,
   hybrid's residual test off, the fill budget changed, the share gate off, a record's image, map

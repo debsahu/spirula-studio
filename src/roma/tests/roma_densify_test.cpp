@@ -1133,6 +1133,9 @@ FarGroups farFixture() {
     for (int i = 0; i < 4; i++) add(7, {16, 300 + 0.25 * i, 0}, false, true);            // 3 neighbours each: not
     add(8, {12.5, 5, 5}, false, true);                                                  // far, with 3 neighbours that are not
     for (double dy : {-0.3, 0.3, 0.6}) add(9, {11.9, 5 + dy, 5}, false, false);         // ... within the margin
+    // Squares of 0.2 straddling a cell corner (cell = radius = 0.9), 3 neighbours each, all across a cell boundary.
+    for (double dx : {-0.1, 0.1}) for (double dy : {-0.1, 0.1}) add(10, {-9.0 + dx, 500.4 + dy, 100}, false, true);
+    for (double dy : {-0.1, 0.1}) for (double dz : {-0.1, 0.1}) add(11, {-20, 540 + dy, 540 + dz}, false, true);
     return g;
 }
 
@@ -1155,16 +1158,16 @@ void far_isolated_drops_only_isolated_far_points() {
         if (g.dropped[i]) expect_dropped++;
         else expect.push_back(g.pts[i]);
     }
-    check(expect_dropped == 53 && g.beyond == 108, "fixture drifted: " + std::to_string(expect_dropped) + " " + std::to_string(g.beyond));
+    check(expect_dropped == 53 && g.beyond == 116, "fixture drifted: " + std::to_string(expect_dropped) + " " + std::to_string(g.beyond));
     check(n == expect_dropped, "removed " + std::to_string(n) + ", expected " + std::to_string(expect_dropped));
     check(beyond == g.beyond, "far points " + std::to_string(beyond) + ", expected " + std::to_string(g.beyond));
     bool same = pts.size() == expect.size();
     for (size_t i = 0; same && i < pts.size(); i++) same = pts[i].xyz.x == expect[i].xyz.x && pts[i].xyz.y == expect[i].xyz.y && pts[i].xyz.z == expect[i].xyz.z;
     check(same, "the survivors are not the input minus the isolated far groups, in order");
-    int per_group[10] = {};
+    int per_group[12] = {};
     for (const DensePoint& p : pts) per_group[(int)p.error]++;
-    const int want[10] = {20, 3, 5, 1, 0, 50, 0, 4, 1, 3};
-    for (int k = 0; k < 10; k++) check(per_group[k] == want[k], "group " + std::to_string(k) + " kept " + std::to_string(per_group[k]));
+    const int want[12] = {20, 3, 5, 1, 0, 50, 0, 4, 1, 3, 4, 4};
+    for (int k = 0; k < 12; k++) check(per_group[k] == want[k], "group " + std::to_string(k) + " kept " + std::to_string(per_group[k]));
     std::vector<DensePoint> none = g.pts;
     FarFilter off = f;
     off.margin = 0;
@@ -1186,7 +1189,7 @@ void far_isolated_runs_before_the_cap() {
     // 53 points at random and the filter would then take the isolated ones among what is left.
     const std::vector<DensePoint> out = finalizePoints(g.pts, 1, 0, kept, opt, st, {}, -1, &f);
     check((int64_t)out.size() == kept && st.capped == 0, "kept " + std::to_string(out.size()) + ", capped " + std::to_string(st.capped));
-    check(st.far_isolated == 53 && st.far_beyond == 108, "stats " + std::to_string(st.far_isolated) + "/" + std::to_string(st.far_beyond));
+    check(st.far_isolated == 53 && st.far_beyond == 116, "stats " + std::to_string(st.far_isolated) + "/" + std::to_string(st.far_beyond));
     DensifyOptions no = opt;
     no.far_isolated = false;
     DensifyStats s2;
