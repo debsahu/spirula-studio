@@ -382,8 +382,8 @@ DensifyPlan planDensify(const DensifyJob& job) {
         o.max_depth_error = bar;
     }
     // Auto is off for both until the equal-budget gate passes (docs/notes/densify.md).
-    if (o.cycle_px == 0 || o.plugin_exact) o.cycle_px = -1;
-    if (o.refine_huber == 0 || o.plugin_exact) o.refine_huber = -1;
+    if (o.cycle_px == 0 || o.plugin_exact || o.no_filter) o.cycle_px = -1;
+    if (o.refine_huber == 0 || o.plugin_exact || o.no_filter) o.refine_huber = -1;
     pl.voxel = o.voxel > 0 ? o.voxel : o.voxel < 0 ? 0 : 0.5 * pl.sparse_spacing;
     pl.max_points = o.max_points > 0 ? o.max_points : o.max_points < 0 ? 0
                     : std::clamp<int64_t>(4 * pl.sparse_points, 1000000, 8000000);

@@ -348,7 +348,7 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
     if (m.record_candidates) m.record_candidates->assign(S, {});
     const sfm::Mat34 PA = projection(A, exact);
 
-    const bool cycle_on = !exact && opt.cycle_px > 0;
+    const bool cycle_on = !exact && !opt.no_filter && opt.cycle_px > 0;
     if (cycle_on && m.rev.size() != m.nbrs.size())
         throw std::runtime_error("the cycle check needs every neighbour's B -> A warp");
     for (size_t k = 0; k < m.nbrs.size(); k++) {
