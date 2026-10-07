@@ -96,6 +96,7 @@ Every automatic setting is printed, and recorded in `densify.json`:
 | parallax (`--parallax`, per point) | 1.5 degrees |
 | neighbour prior (`--covis-min-angle`) | 1.5 degrees at the shared sparse points |
 | min track | auto (above); 2 with a single neighbour |
+| far isolated | on: margin 2 (metric) or 0.2 x the sparse box diagonal, radius 8 x spacing, at most 2 neighbours (below) |
 | max depth error | `max(2 %, 1 / (f sin(theta / 2)))`, `theta` the median reference-neighbour angle and `f` the median view focal in match pixels. A heuristic: the half angle is chosen so a pair at half the capture's median parallax survives one match pixel of error; it is not fitted |
 | coarse warps | a warp smaller than the matcher's input (RoMa's stride-4 coarse match) scales the pixel thresholds into warp pixels, and the run says so |
 
@@ -142,8 +143,19 @@ surface, against 0 without it) and removed.
 
 ## Depth source: MoGe-2 maps, and the hybrid (WS-4d, 2026-10-07)
 
-`--source auto|roma|moge|hybrid`. Auto (provisional, see the measurement below) is `hybrid` when the dataset has depth maps and a
-matcher is available, `moge` with depth maps only, else `roma`; the choice is printed. The
+`--source auto|roma|moge|hybrid`. **Auto is `roma`** whenever a matcher is available (consultant ruling,
+2026-10-07, plan 13.3 C-4); `moge` only when no matcher can run (no licence, no checkpoint) and the
+dataset has depth maps, said aloud with the reason; `hybrid` by explicit request only. With a matcher and
+a `depths/` folder the run prints that the maps are left alone. Why: at an explicit cap hybrid *is* roma
+with no fill (the matches fill the budget first), so equal-budget parity shows nothing; where a gain can
+show (thinned ROI count, stairs-band planes, violations) it is a small loss; it costs 1.9x the memory
+(9.56 GB against 5.14 GB peak on the M4 Max) and depends on maps of a model nobody measured here. Its
+mechanism (depth fills where textureless surfaces starve the matcher) stands, and the basement is not
+that scene. **Pre-registered test to reinstate `hybrid` as auto**: a scene with large textureless surfaces
+(a painted interior wall run, or aerial0720's roofs) where, with the maps `spirula geometry`'s *default*
+model writes, hybrid beats roma at a thinned equal ROI count on independent anchors by more than 3 pooled
+sd (3 seeds) **and** its free-space violation rate is not worse by more than 3 sd. Until it runs,
+hybrid is an option, not a default. Test not run: it needs that scene. The
 licence gate applies to RoMa only. The GUI has a "Points from" combo (dataset step and the
 training screen's Add Dense Points row) that sends `--source`; Auto sends nothing and says which it will
 pick for the dataset. Only moge skips the RoMa/DINOv3 licences and the checkpoint, so the readiness gate,
@@ -159,7 +171,7 @@ some are missing, the folder is geometry's own `depths/` **and the source was na
 (`--source moge` or `hybrid`), `spirula geometry --depth --no-normal` runs once for the missing
 ones; the present maps are read-only while it runs, and `ensureDepths` refuses the run if any of
 them changed size or time anyway. **`--source auto` never starts a MoGe run**, with no maps or
-with some missing: it says how many images have none and uses what is there. The count reused /
+with some missing: with no matcher it says how many images have none and uses what is there. The count reused /
 computed / still missing is printed. Another folder is never extended (a sky-blanked copy
 cannot be).
 
@@ -175,8 +187,8 @@ the real geometry (99.8 % normally), with exit 0. Three defences:
   made before the record existed are not checked by it.
 - **the map itself**: refused if it is not 16-bit, or not the camera's shape (aspect within 1 %).
 - **the share**: if fewer than half of the matched (non-held-out) images have a usable map
-  (`--min-depth-share`, 0 accepts any), a named depth source is an error, and `auto` drops the
-  depth source with a warning and runs on matches alone.
+  (`--min-depth-share`, 0 accepts any), a depth source is an error (auto reads the maps only
+  when no matcher can run, so it is one too; with a matcher it never reads them).
 
 **Fit**, per image, to its own sparse points: `1/d_true = a / d_raw + b` (disparity affine),
 2-point RANSAC on relative depth error (10 %), Huber IRLS. Refused with fewer than 30 anchors,
@@ -265,9 +277,8 @@ of free-space violations. The S4 guard dropped 1,138,170 of its 1,697,082 fill p
 within 4 voxels of a matched point. **No hybrid gain is shown on this scene.** moge alone is far
 behind: its stairs mostly do not survive the vote.
 
-**Whether `hybrid` stays the automatic default is open, for the Fable consultant to decide on this
-evidence. Until then the default is provisional.** The equal-budget numbers for the final report
-are WS-6's.
+**Decided 2026-10-07: `hybrid` is not the automatic default** (see the top of this section).
+The equal-budget numbers are WS-6's (plan 10.5.3).
 
 Side profile (`render_profile`): DA360 shows the doubled stair line; hybrid and roma one; moge
 almost no stairs, so its passing the doubled-line gate is absence, not quality. The normal check
@@ -275,7 +286,7 @@ almost no stairs, so its passing the doubled-line gate is absence, not quality. 
 
 **Maps of other pictures, measured**: `depths/` shifted 3 frames on the basement (the reviewer's
 case, maps from before the record existed): `--source moge` now exits 1, "only 17 of 127 images
-have a usable depth map (13 %, below 50 %)"; `--source auto` warns and writes matches only.
+have a usable depth map (13 %, below 50 %)"; `--source auto` does not read the maps (a matcher is there).
 
 S-1 through each source (stand-in matches, synthetic maps with a per-image disparity-affine
 error, noise and three images with the risers 5 % too deep): roma 83,808 points / 0.996 within
@@ -383,7 +394,66 @@ writes over it.
   `gui.conf`.
 - **Presets**: the combo is sent as `--preset` only when `spirula densify --help` lists
   the flag, and is disabled with a tooltip until then.
+- **Edit Dense Cloud** (`PointsDoc`, `src/roma/DensifyEdit.cpp`): the button beside
+  "Edit Reconstruction" and the Model combo opens `sparse/<m>-roma` (or its edit, when
+  there is one) in the point editor. Save writes `sparse/<m>-roma-edit/` and never the
+  model it opened: `cameras.bin` and `images.bin` byte for byte, `points3D.bin`,
+  `points3D_tracks.bin` and the normals file filtered to the points that stay, and a
+  `densify.json` with `edited_from` (the first model, its name and checksums) and `edit`
+  (what this save removed). Only points can go: a moved scene or a removed camera is
+  refused, because the poses are the model. Nothing removed, or nothing left, writes
+  nothing. Opening the edit and saving rewrites it. The edit is picked by neither the
+  parser nor densify; pick it in the Model combo (`colmap_recon_dir`). Design after
+  spirula-studio#154 (`LICENSES/NOTICE-spirula-studio-PR154.txt`).
+- **Cloud checksums**: `densify.json` records SHA-256s of `points3D.bin` and
+  `points3D_tracks.bin`. The step checks them when the child exits, and the Model combo
+  marks each dense entry `[checksum ok]` or `[checksum mismatch]`.
+- **Writer lock and publication** (`src/roma/Publish.h`): a file `.<m>-roma.lock` beside
+  the model holds the writer's pid. `spirula densify` takes it before matching, the
+  edit takes it before reading, and a live holder refuses the second writer with its pid;
+  a dead holder's lock is taken over. A folder is written as `<out>.partial` and swapped
+  in: an existing one is set aside as `<out>.old` first and dropped after, and
+  `recoverPublish` puts it back if a crash left the swap half done. Neither suffix is
+  listed as a model.
+- **Live preview**: the dataset screen's densify step passes `--progress-dir`; the child
+  writes `model.bin` snapshots (the cameras and a strided slice of at most 50 000 points
+  of the cloud so far) through `CloudPreview`, at most one every 1.5 s and never more
+  than one for each eight times a write takes. The model view the screen already has
+  draws them, and the last one is the filtered cloud. A write that fails costs nothing.
 - Gate: `tools/roma/densify_gui_gate.py` (`tools/guictl.py` on a 6-image fixture).
+- Gate for the edit and the preview: `tools/roma/densify_gui_gate.py`; the preview is sampled
+  during its run and the edit round trip is its last steps.
+
+## Far isolated points (consultant C-6, 2026-10-07)
+
+`--far-isolated auto|off` (default `auto`), default mode only (`--plugin-exact` never runs it). After the
+voxel select and before the cap, a point is dropped when it is **far**: more than `margin` outside the
+sparse points' p0.5-p99.5 box on some axis (max-norm), **and isolated**: at most 2 other points within
+`radius`. The three values are resolved from the model, so the rule is scale-free:
+
+| value | rule |
+|---|---|
+| box | per-axis p0.5 and p99.5 of the sparse points (numpy's linear interpolation) |
+| margin | 2 on a model whose `gauge.txt` says metric, else 0.2 x the box diagonal (about 2 m on the basement; the 0.2 is the consultant's choice, not fitted) |
+| radius | 8 x the sparse median nearest-neighbour spacing (10 cm on the basement) |
+| neighbours | at most 2 |
+
+Never run on a model of under 100 sparse points (no box to speak of). The run prints the margin,
+radius and neighbour threshold with the count removed of the far points, and `densify.json` has a
+`far_isolated` block (state, box, margin, radius, beyond, removed). Neighbours of a far point are
+counted among every point within `margin - radius` of the box, not only among the far ones.
+
+Why: the basement's `--min-track auto` cloud has 1.3 k points (0.13 %) more than 2 m beyond the box;
+76.5 % are isolated and 13.3 % have DA360 support (arcs of two-image points at long range), against
+95 to 97 % support and 3 to 6 % isolated in the 0 to 2 m zone, which is the stairwell and the landing the
+box clips. The rule is the narrowest cut that removes the first class and nothing of the second. A
+generic statistical outlier filter was rejected: it would also thin stair edges.
+
+Checks: `far_isolated_drops_only_isolated_far_points` (an injected fixture: 50 isolated points 3
+margins out, a 5 x 10 grid at 0.5 spacing as the coherent structure, a triple and a quad on either side
+of the threshold, a far point whose neighbours lie inside the margin, a point 1.5 out on two axes that a
+2-norm would drop), `far_isolated_runs_before_the_cap`, `far_filter_is_scale_free`,
+`far_isolated_plan_states`. S-1 has no far points, so "removes 0 on S-1" proves nothing and is not a check.
 
 ## Checks
 
@@ -394,6 +464,16 @@ writes over it.
   the same matches (`reference/python/roma_plugin_parity.py` writes the fixture).
 - `densify_autopick_test`: gate H-3.
 - `warp_cache_test`: the cache (`WarpCache.h`). Each test names the mutation it catches.
+- Freeze mutation run, 2026-10-07 (each fails the test named; run by hand on the working tree, the rest
+  of the suite passing): auto = hybrid with maps and auto never falling back to moge
+  (`auto_source_is_roma_unless_no_matcher`; the GUI's auto = hybrid, `densify_gui_test`); far filter:
+  isolation ignored, margin ignored, 2-norm distance, neighbours counted among far points only,
+  fewer-than-2 and at-most-3 thresholds, self counted, cell scan limited on x, on y, on z
+  (`far_isolated_drops_only_isolated_far_points`); filter after the cap, `--far-isolated off` ignored,
+  plugin-exact filtering (`far_isolated_runs_before_the_cap`); box from extremes, margin not
+  scale-free, radius 4 x, no 100-point floor (`far_filter_is_scale_free`); the plan ignoring
+  `off` (`far_isolated_plan_states`). One mutant (cell scan limited on x) first survived: the fixture had
+  no neighbours across a cell boundary; two squares straddling a cell corner were added.
 - WS-4d review mutation run, 2026-10-07 (each fails the test named): the convention checked after
   facing, the seen-through vote off, the rank and inlier-share gates off, the flatness test off,
   hybrid's residual test off, the fill budget changed, the share gate off, a record's image, map
@@ -416,6 +496,10 @@ writes over it.
 ## Measured (2026-10-07, upstream RoMa v2 `base` matches dumped on an M4 Max)
 
 **P-4, against the plugin (54 basement face pairs, 18 reference faces, 163,422 samples).**
+**P-4 gates `--plugin-exact` only.** The fused-point miss below is accepted as a documented deviation
+(D-6). The default mode's fusion (`1 / depth_per_px^2`, the largest consistent set) has no external
+reference at all: it is covered by S-1 and `roma_densify_test`'s named mutants, which is a different and
+weaker kind of evidence than parity. Do not read "P-4 passes" as covering the shipped path.
 Like for like since 2026-10-07: the C++ side reads the plugin's float32 R, t and K and
 rounds `K [R|t]` and the camera centres to float32 as the plugin holds them. Certainty after
 collect is bit-identical; point decisions agree on 99.996 %, candidate decisions on

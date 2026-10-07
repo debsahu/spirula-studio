@@ -66,6 +66,7 @@ struct DensifyOptions {
     int min_track = 0;
     bool visibility_check = true;   // auto min-track: drop two-image points another image saw through
     double max_depth_error = 0;     // per match pixel, a share of the depth; 0 auto, < 0 off
+    bool far_isolated = true;       // drop isolated points far outside the sparse box (default mode only)
     bool no_filter = false;
 
     double voxel = 0;               // 0: auto, < 0: off
@@ -111,7 +112,8 @@ struct DensifyStats {
             fused = 0, short_track = 0, two_image_kept = 0, seen_through = 0, voxel_merged = 0,
             capped = 0, depth_samples = 0, depth_nodata = 0, depth_disagree = 0,
             depth_through = 0, depth_local = 0, depth_left_to_matches = 0, depth_kept = 0, depth_edge = 0,
-            depth_normal = 0, depth_local_normal = 0, depth_vote_close = 0, fill_near_matches = 0;
+            depth_normal = 0, depth_local_normal = 0, depth_vote_close = 0, fill_near_matches = 0,
+            far_beyond = 0, far_isolated = 0;
     // 5-degree bins: candidate normal against the agreeing images' (agree), against
     // a random pixel of the same image (null), and a hybrid fill against its neighbourhood.
     std::array<int64_t, 36> normal_agree_hist{}, normal_null_hist{}, local_normal_hist{};
@@ -155,14 +157,28 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
                                        const std::vector<int64_t>& samples,
                                        const DensifyOptions& opt, DensifyStats& stats);
 
-// The minimum-track filter (0 = auto), a track-preserving voxel select, then
-// a seeded cap. `voxel` <= 0 is off.
+// Far isolated points (docs/notes/densify.md): more than `margin` outside the sparse p0.5-p99.5 box
+// `lo`/`hi` on some axis, with at most `max_neighbours` others within `radius`. margin <= 0: off.
+struct FarFilter {
+    sfm::Vec3 lo, hi;
+    double margin = 0, radius = 0;
+    int max_neighbours = 2;
+};
+// The box from the sparse points (numpy's linear percentiles), the margin (2 for a metric
+// model, else 0.2 x the box diagonal) and the radius (8 x `spacing`). Fewer than 100 points: off.
+FarFilter resolveFarFilter(const std::vector<sfm::Vec3>& sparse, bool metric, double spacing);
+// Removes them, keeping the order of the rest; the count. `beyond` gets the number of far points.
+int64_t dropFarIsolated(std::vector<DensePoint>& pts, const FarFilter& f, int64_t* beyond = nullptr);
+
+// The minimum-track filter (0 = auto), a track-preserving voxel select, the far filter
+// (default mode, after the select), then a seeded cap. `voxel` <= 0 is off.
 // `veto`, when set, may drop a two-image point the automatic rule would admit.
 std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_track,
                                        double voxel, int64_t max_points,
                                        const DensifyOptions& opt, DensifyStats& stats,
                                        const std::function<bool(const DensePoint&)>& veto = {},
-                                       int64_t max_fill = -1);   // >= 0: depth points capped apart
+                                       int64_t max_fill = -1,    // >= 0: depth points capped apart
+                                       const FarFilter* far_filter = nullptr);
 
 // Depth points within `radius` of a matched point (any reference's) removed:
 // there the surface is measured, and a fill off it is a second layer. The count.

@@ -16,13 +16,16 @@
 #include "nn/Device.h"
 #include "nn/io/Fetch.h"
 #include "roma/DensifyCheck.h"
+#include "roma/DensifyPreview.h"
 #include "roma/DensifyRun.h"
 #include "roma/DepthSource.h"
+#include "roma/Publish.h"
 #include "roma/DumpMatcher.h"
 #include "roma/RomaIdentity.h"
 #include "roma/WarpCache.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/RomaMatcher.h"
+#include "sfm/core/Progress.h"
 
 #include <cmath>
 #include <cstdio>
@@ -98,7 +101,9 @@ void usage() {
     help_row("--voxel auto|<size>|off", D::opt_voxel);
     help_row("--max-points auto|<n>|off", D::opt_max_points);
     help_row("--max-baseline auto|<d>|off", D::opt_max_baseline);
+    help_row("--far-isolated auto|off", D::opt_far_isolated);
     help_row("--seed <n>", D::opt_seed);
+    help_row("--progress-dir <dir>", D::opt_progress_dir);
     help_row("--overwrite", D::opt_overwrite);
     help_row("--force", D::opt_force);
     help_row("--cache auto|off|<dir>", D::opt_cache);
@@ -148,7 +153,7 @@ int spirula_densify_main(int argc, char** argv) {
     app::set_program_name(argc > 0 ? argv[0] : nullptr, "spirula densify");
     roma::DensifyJob job;
     roma::DensifyOptions& o = job.opt;
-    std::string dataset, model, image_dir = "images", mask_dir = "masks", matches, check_dir;
+    std::string dataset, model, image_dir = "images", mask_dir = "masks", matches, check_dir, progress_dir;
     bool no_masks = false, check = false;
     roma::CheckOptions check_opt;
     double check_noise = check_opt.noise_px, check_outliers = check_opt.outliers;
@@ -277,10 +282,16 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--voxel") o.voxel = autoOff();
         else if (a == "--max-points") o.max_points = (int64_t)autoOff();
         else if (a == "--max-baseline") o.max_baseline = autoOff();
+        else if (a == "--far-isolated") {
+            const std::string v = next();
+            if (v != "auto" && v != "off") bad(v);
+            o.far_isolated = v == "auto";
+        }
         else if (a == "--seed") o.seed = (uint64_t)real(0);
         else if (a == "--cache") cache_arg = next();
         else if (a == "--cache-budget") cache_budget_arg = next();
         else if (a == "--clear-cache") clear_cache = true;
+        else if (a == "--progress-dir") progress_dir = next();
         else if (a == "--overwrite") job.overwrite = true;
         else if (a == "--force") job.force = true;
         else if (!a.empty() && a[0] == '-') {
@@ -344,9 +355,27 @@ int spirula_densify_main(int argc, char** argv) {
             std::error_code ec;
             return fs::is_directory(depth_root, ec) && !fs::is_empty(depth_root, ec);
         };
+        std::unique_ptr<roma::Matcher> matcher;
+        const roma::PresetSpec& spec = roma::preset_spec(preset);
+        if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, spec.hr ? spec.hr : spec.lr);
+        else if (job.export_dir.empty() && o.source != roma::DensifySource::Depth) {
+            // Auto without a licence or checkpoint falls back to geometry's depth maps, said aloud.
+            try {
+                matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), preset);
+            } catch (const std::exception& e) {
+                if (o.source != roma::DensifySource::Auto || !have_depth()) throw;
+                const std::string why = std::string(e.what()).substr(0, std::string(e.what()).find('\n'));
+                std::printf("%s\n", format(D::roma_unavailable, {why, depth_root.string()}).c_str());
+            }
+        }
+        const bool is_roma = matches.empty() && matcher;
         const bool want_depth = o.source == roma::DensifySource::Depth || o.source == roma::DensifySource::Hybrid;
+        // Auto reads the maps only with no matcher; with one, it says they are left alone.
+        const bool auto_no_matcher = o.source == roma::DensifySource::Auto && !matcher;
+        if (o.source == roma::DensifySource::Auto && matcher && have_depth())
+            std::printf("%s\n", format(D::depth_unused, {depth_root.string()}).c_str());
         std::unique_ptr<roma::DepthFiles> depth;
-        if ((have_depth() || want_depth) && o.source != roma::DensifySource::Roma && job.export_dir.empty()) {
+        if ((want_depth || auto_no_matcher) && job.export_dir.empty()) {
             const std::string root = depth_root.string(), nroot = normal_root.string();
             depth = std::make_unique<roma::DepthFiles>(
                 [root](const std::string& n) { return dsparse::find_aux_file(root, n, "depth"); },
@@ -362,15 +391,6 @@ int spirula_densify_main(int argc, char** argv) {
             job.depth = depth.get();
         }
 
-        std::unique_ptr<roma::Matcher> matcher;
-        const roma::PresetSpec& spec = roma::preset_spec(preset);
-        bool is_roma = false;
-        if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, spec.hr ? spec.hr : spec.lr);
-        else if (job.export_dir.empty() && o.source != roma::DensifySource::Depth) {
-            // The licence gate is inside ensure_checkpoint: nothing below runs without it.
-            matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), preset);
-            is_roma = true;
-        }
         job.matcher = matcher.get();
         uint64_t cache_budget = roma::kDefaultCacheBudget;
         if (cache_budget_arg != "auto" && !roma::parseByteSize(cache_budget_arg, &cache_budget)) bad_flag("--cache-budget", cache_budget_arg);
@@ -381,8 +401,23 @@ int spirula_densify_main(int argc, char** argv) {
             return 2;
         }
 
+        // Held from here to the end: two runs would match for half an hour and then fight over the folder.
+        std::unique_ptr<roma::WriterLock> out_lock;
+        if (job.export_dir.empty()) {
+            out_lock = std::make_unique<roma::WriterLock>(job.out_dir);
+            roma::recoverPublish(job.out_dir);
+        }
+
         const roma::DensifyPlan pl = roma::planDensify(job);
         const roma::DensifyOptions& r = pl.opt;
+        std::unique_ptr<roma::CloudPreview> preview;
+        if (!progress_dir.empty() && job.export_dir.empty()) {
+            sfm::progress::set_dir(progress_dir);
+            preview = std::make_unique<roma::CloudPreview>(job.model_dir);
+            job.on_cloud = [&preview](const std::vector<roma::DensePoint>& cloud, bool filtered) {
+                preview->update(cloud, filtered);
+            };
+        }
         std::printf("%s\n", format(D::model, {job.model_dir, (long long)pl.images.size(),
                                               (long long)pl.sparse_points, num(pl.sparse_spacing)})
                                 .c_str());
@@ -524,8 +559,6 @@ int spirula_densify_main(int argc, char** argv) {
             return 0;
         }
         const roma::DensifyStats& st = res.stats;
-        if (!res.depth_dropped.empty())
-            std::fprintf(stderr, "%s\n", format(D::depth_dropped, {res.depth_dropped}).c_str());
         if (pl.source != roma::DensifySource::Roma)
             std::printf("%s\n", format(D::depth_stats, {(long long)st.depth_samples, (long long)st.depth_nodata,
                                                          (long long)st.depth_disagree, (long long)st.depth_through,
@@ -545,6 +578,15 @@ int spirula_densify_main(int argc, char** argv) {
                                                  (long long)st.parallax, (long long)st.short_track,
                                                  (long long)st.voxel_merged})
                                 .c_str());
+        using FarState = roma::DensifyPlan::FarState;
+        if (pl.far_state == FarState::On)
+            std::printf("%s\n", format(D::far_isolated, {(long long)st.far_isolated, (long long)st.far_beyond,
+                                                         num(pl.far_filter.margin), (long long)pl.far_filter.max_neighbours,
+                                                         num(pl.far_filter.radius)}).c_str());
+        else if (pl.far_state == FarState::TooFewPoints)
+            std::printf("%s\n", format(D::far_isolated_few, {(long long)pl.sparse_points}).c_str());
+        else
+            std::printf("%s\n", D::far_isolated_off.get());
 
         std::string cache_json = "{\"enabled\": false}";
         if (cached) {
@@ -600,6 +642,14 @@ int spirula_densify_main(int argc, char** argv) {
            << ", \"max_depth_error\": " << jnum(r.max_depth_error)
            << ", \"median_pair_angle_deg\": " << jnum(pl.median_pair_angle_deg)
            << ", \"match_focal\": " << jnum(pl.match_focal) << ",\n"
+           << "  \"far_isolated\": {\"state\": \""
+           << (pl.far_state == FarState::On ? "on" : pl.far_state == FarState::Off ? "off"
+               : pl.far_state == FarState::PluginExact ? "plugin_exact" : "too_few_points")
+           << "\", \"margin\": " << jnum(pl.far_filter.margin) << ", \"radius\": " << jnum(pl.far_filter.radius)
+           << ", \"max_neighbours\": " << pl.far_filter.max_neighbours << ", \"box_lo\": [" << jnum(pl.far_filter.lo.x)
+           << ", " << jnum(pl.far_filter.lo.y) << ", " << jnum(pl.far_filter.lo.z) << "], \"box_hi\": ["
+           << jnum(pl.far_filter.hi.x) << ", " << jnum(pl.far_filter.hi.y) << ", " << jnum(pl.far_filter.hi.z)
+           << "], \"beyond\": " << st.far_beyond << ", \"removed\": " << st.far_isolated << "},\n"
            << "  \"voxel\": " << jnum(pl.voxel) << ", \"max_points\": " << pl.max_points << ", \"max_fill\": " << pl.max_fill << ", \"seed\": " << r.seed << ",\n"
            << "  \"mask_keep\": " << jnum(pl.mask_keep) << ", \"flip_mask\": " << (job.flip_mask ? "true" : "false") << ",\n"
            << "  \"stats\": {\"samples\": " << st.samples << ", \"below_certainty\": " << st.below_certainty
@@ -613,7 +663,7 @@ int spirula_densify_main(int argc, char** argv) {
            << ", \"depth_kept\": " << st.depth_kept << ", \"depth_edge\": " << st.depth_edge << ", \"depth_tol\": " << jnum(res.depth_tol)
            << ", \"depth_normal\": " << st.depth_normal << ", \"depth_local_normal\": " << st.depth_local_normal
            << ", \"depth_vote_close\": " << st.depth_vote_close << ", \"fill_near_matches\": " << st.fill_near_matches
-           << ", \"depth_share\": " << jnum(res.depth_share) << ", \"depth_fit_holdout\": " << o.depth_fit_holdout << ", \"depth_dropped\": \"" << jsonEscape(res.depth_dropped) << "\""
+           << ", \"depth_share\": " << jnum(res.depth_share) << ", \"depth_fit_holdout\": " << o.depth_fit_holdout
            << ", \"two_image_kept\": " << st.two_image_kept << ", \"seen_through\": " << st.seen_through << ", \"two_image_bar\": " << jnum(st.two_image_bar)
            << ", \"voxel_merged\": " << st.voxel_merged << ", \"capped\": " << st.capped << "},\n"
            << "  \"track_hist\": {";
@@ -653,6 +703,9 @@ int spirula_densify_main(int argc, char** argv) {
                                              spirula::i18n::format_duration(res.seconds_match)})
                                 .c_str());
         return 0;
+    } catch (const roma::WriterBusy& b) {
+        std::fprintf(stderr, "%s\n", format(D::writer_busy, {b.lock, (long long)b.pid}).c_str());
+        return 2;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", format(D::error, {e.what()}).c_str());
         return 1;

@@ -3,7 +3,7 @@
 
 Launches the GUI with a private config and cache, so no licence is accepted and
 no RoMa checkpoint exists, drops a dataset that has depth maps, and asserts that
-Auto reads as Hybrid there, that Hybrid and RoMa hold the run back for the
+Auto reads as RoMa there (hybrid only when asked), that Hybrid and RoMa hold the run back for the
 checkpoint, that MoGe depth does not, and that running it opens no licence
 prompt and fetches nothing. Then reads the dense model's own densify.json for
 the source it ran, and drops the dataset again for the source to come back.
@@ -74,8 +74,8 @@ def main():
             ctl("scroll", "--at", "400,300", "--dy", "-12")
         s = state()
         check(s["densify_source"] == "auto", "Points from starts on Auto")
-        check(s["densify_auto_picks"] == "hybrid",
-              "Auto reads as hybrid on a dataset with depth maps (%s)" % s["densify_auto_picks"])
+        check(s["densify_auto_picks"] == "roma",
+              "Auto reads as roma on a dataset with depth maps, not hybrid (%s)" % s["densify_auto_picks"])
         check(s["densify_missing"] and not s["densify_ready"],
               "Auto needs the RoMa checkpoint, so the run is held back")
 

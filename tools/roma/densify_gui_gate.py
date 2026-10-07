@@ -4,8 +4,11 @@
 Cuts a 6-image fixture from `spirula densify --check`, launches the GUI with a
 private config and cache (so the licences and the checkpoint are this run's
 own), refuses the DINOv3 licence once, accepts it, runs the step from the New
-Dataset screen, then picks the dense model on the training screen. Every
-assertion reads a file the run wrote or the app's own /ui/state.
+Dataset screen (watching the live preview of the growing cloud), then picks the
+dense model on the training screen. Then it opens the dense cloud in the point
+editor, deletes some points, saves, and selects the edit as the training seed:
+the seed's point count changes and the original is untouched. Every assertion
+reads a file the run wrote or the app's own /ui/state.
 
     python3 tools/roma/densify_gui_gate.py --exe build/spirula \
         --checkpoint ~/.cache/spirula-studio/models/romav2.0.1.pt
@@ -126,8 +129,12 @@ def main():
     ap.add_argument("--checkpoint")
     ap.add_argument("--port", type=int, default=7793)
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--shots", help="write screenshots of the edit steps into this folder")
     a = ap.parse_args()
     exe = os.path.abspath(a.exe)
+    a_shots = a.shots
+    if a_shots:
+        pathlib.Path(a_shots).mkdir(parents=True, exist_ok=True)
     work = pathlib.Path(tempfile.mkdtemp(prefix="densify_gui_gate_"))
     cfg, cache = work / "config", work / "cache"
     os.environ.update(XDG_CONFIG_HOME=str(cfg), XDG_CACHE_HOME=str(cache),
@@ -216,7 +223,18 @@ def main():
               "a source model can be chosen on this screen")
         ctl("click", "update_dataset")
         until(lambda: state()["busy"], "the run to start", 30)
-        until(lambda: not state()["busy"], "the run to finish", 900)
+        live = []
+        end = time.time() + 900
+        shot_live = False
+        while time.time() < end and state()["busy"]:
+            live.append(state()["live_model_points"])
+            if a_shots and not shot_live and live[-1] > 0:
+                shot_live = True
+                ctl("shot", str(pathlib.Path(a_shots) / "preview_during_run.png"))
+            time.sleep(0.5)
+        check(not state()["busy"], "the run to finish")
+        check(max(live) > 0, "the model view showed the growing cloud while the run went on "
+              "(%d samples, %s distinct counts)" % (len(live), len(set(live))))
         dense = ds / "sparse/0-roma"
         n_dense = count(dense / "points3D.bin") if (dense / "points3D.bin").exists() else -1
         check((dense / "points3D.bin").exists(), "the dense model was written")
@@ -233,6 +251,16 @@ def main():
                   "cameras and every pose are the source's, exactly")
         check(all(sha(ds / "sparse/0" / f) == h for f, h in before.items()),
               "the source model is untouched")
+        if (dense / "points3D.bin").exists():
+            stride = -(-n_dense // 50000)
+            want = -(-n_dense // stride)
+            until(lambda: state()["live_model_points"] == want,
+                  "the preview to hold the final cloud (%d of %d points)" % (want, n_dense), 20)
+            check(state()["live_model_points"] == want,
+                  "the last preview is the written cloud, decimated to at most 50000 points")
+            check(meta.get("points3D_sha256") == sha(dense / "points3D.bin") and
+                  meta.get("tracks_sha256") == sha(dense / "points3D_tracks.bin"),
+                  "densify.json records the checksums of the cloud it wrote")
         rec = json.loads((ds / ".spirula-dataset.json").read_text())
         check(rec["steps"].get("densify", {}).get("complete") is True,
               "the record names a finished dense points step")
@@ -264,6 +292,73 @@ def main():
               % state()["preview_points"])
         check(state()["recon_dir"] == "sparse/0-roma" and state()["train_phase"] == "ready",
               "the Model combo feeds the trainer's recon dir and the dataset reloads on it")
+
+        # ---- edit the dense cloud ---------------------------------------------
+        dense_before = {f.name: sha(f) for f in dense.iterdir()}
+        check(entries("model_combo", "[checksum ok]") and
+              len(entries("model_combo", "[checksum ok]")) == 1,
+              "the Model combo marks the dense model's checksum ok")
+        until(lambda: items("dense_edit"), "the Edit Dense Cloud button", 10)
+        check(state()["dense_edit_dir"].endswith("sparse/0-roma"), "the button edits the dense model")
+        ctl("click", "dense_edit")
+        until(lambda: state()["screen"] == "viewer" and state()["edit_dense"],
+              "the dense cloud to open in the editor", 60)
+        check(state()["edit_total"] == n_dense, "the editor holds every dense point (%d)" % state()["edit_total"])
+        # The editor opens framed on the cameras and the cloud lies beyond them: zoom out to it.
+        ctl("scroll", "--at", "950,470", "--dy", "-40")
+        ctl("click", "tool_box")
+        for p0, p1 in (("900,400", "1030,570"), ("1030,400", "1140,570"), ("880,380", "1150,590")):
+            ctl("drag", p0, p1)
+            ctl("click", "act_delete")
+            if state()["edit_alive"] < n_dense:
+                break
+        alive = state()["edit_alive"]
+        check(0 < alive < n_dense and state()["edit_dirty"], "some points were deleted (%d of %d stay)" % (alive, n_dense))
+        edit = ds / "sparse/0-roma-edit"
+        check(not edit.exists(), "nothing is written before Save")
+        if a_shots:
+            ctl("shot", str(pathlib.Path(a_shots) / "edit_before_save.png"))
+        # The save buttons sit below the fold of the panel.
+        for _ in range(4):
+            if items("save_over"):
+                break
+            ctl("scroll", "--at", "150,500", "--dy", "-20")
+        ctl("click", "save_over")
+        until(lambda: (edit / "densify.json").exists(), "the edit to be saved", 60)
+        if a_shots:
+            ctl("shot", str(pathlib.Path(a_shots) / "edit_saved.png"))
+        check(count(edit / "points3D.bin") == alive, "the edit holds exactly the points that stayed")
+        check({f.name: sha(f) for f in dense.iterdir()} == dense_before, "the original dense model is untouched")
+        check(sha(edit / "cameras.bin") == sha(dense / "cameras.bin") and
+              sha(edit / "images.bin") == sha(dense / "images.bin"),
+              "the edit's cameras and every pose are byte-identical to the original's")
+        emeta = json.loads((edit / "densify.json").read_text())
+        check(emeta["edited_from"]["model"] == "0-roma" and
+              emeta["edited_from"]["points3D_sha256"] == dense_before["points3D.bin"] and
+              emeta["points"] == alive and emeta["points3D_sha256"] == sha(edit / "points3D.bin"),
+              "densify.json names the original and records both checksums")
+        tracks = (edit / "points3D_tracks.bin").read_bytes()
+        check(tracks[:4] == b"RTK1" and struct.unpack("<Q", tracks[4:12])[0] == alive,
+              "the edit has a track for each point that stayed")
+
+        # ---- the edit as the seed -------------------------------------------------
+        ctl("click", "back_home")
+        ctl("click", "home_new_dataset")
+        ctl("drop", str(ds))
+        until(lambda: items("open_in_trainer"), "the Open in Trainer button", 30)
+        ctl("click", "open_in_trainer")
+        until(lambda: state()["screen"] == "train" and state()["train_phase"] == "ready",
+              "the trainer to load again", 120)
+        check(len(entries("model_combo", "[checksum ok]")) == 2,
+              "the Model combo lists the original and the edit, both checksums ok")
+        pick("model_combo", "sparse/0-roma-edit")
+        until(lambda: state()["recon_dir"] == "sparse/0-roma-edit", "the edit to be picked", 10)
+        until(lambda: state()["train_phase"] == "ready", "the dataset to reload", 120)
+        until(lambda: state()["preview_points"] == alive, "the preview to load the edit's points", 30)
+        check(state()["preview_points"] == alive != n_dense,
+              "the seed point count changed from %d to %d" % (n_dense, state()["preview_points"]))
+        if a_shots:
+            ctl("shot", str(pathlib.Path(a_shots) / "train_edit_seed.png"))
     finally:
         quit_gui(pid, exe)
         if not a.keep:

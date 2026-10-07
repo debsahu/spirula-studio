@@ -20,7 +20,9 @@
 #include "core/ImageFile.h"
 #include "external/stb_image.h"
 #include "external/stb_image_write.h"
+#include "core/Sha256.h"
 #include "roma/DepthSource.h"
+#include "roma/Publish.h"
 #include "roma/Sample.h"
 #include "sfm/core/FixedPoses.h"
 #include "sfm/core/Model.h"
@@ -252,6 +254,18 @@ DensifyPlan planDensify(const DensifyJob& job) {
             if (k == "metric") pl.metric = v == "1";
     }
 
+    if (!o.far_isolated) {
+        pl.far_state = DensifyPlan::FarState::Off;
+    } else if (o.plugin_exact) {
+        pl.far_state = DensifyPlan::FarState::PluginExact;
+    } else {
+        std::vector<Vec3> xyz;
+        xyz.reserve(rec.points3D.size());
+        for (const auto& kv : rec.points3D) xyz.push_back(kv.second.xyz);
+        pl.far_filter = resolveFarFilter(xyz, pl.metric, pl.sparse_spacing);
+        pl.far_state = pl.far_filter.margin > 0 ? DensifyPlan::FarState::On : DensifyPlan::FarState::TooFewPoints;
+    }
+
     // Plugin defaults where the default mode resolves something itself.
     if (o.plugin_exact) {
         if (o.min_track <= 0) o.min_track = 1;
@@ -267,8 +281,9 @@ DensifyPlan planDensify(const DensifyJob& job) {
     pl.match_size = job.matcher ? job.matcher->inputSize() : 640;
     {
         const bool m = job.matcher != nullptr || !job.export_dir.empty(), d = job.depth != nullptr;
+        // Auto is the matches; the depth maps stand in only when no matcher can run.
         if (o.source == DensifySource::Auto)
-            pl.source = m && d ? DensifySource::Hybrid : d ? DensifySource::Depth : DensifySource::Roma;
+            pl.source = m ? DensifySource::Roma : d ? DensifySource::Depth : DensifySource::Roma;
         else
             pl.source = o.source;
         if (o.source != DensifySource::Auto &&
@@ -583,12 +598,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
             char why[256];
             std::snprintf(why, sizeof why, "only %zu of %d images have a usable depth map (%.0f %%, below %.0f %%)",
                           others.size(), considered, 100 * res_out.depth_share, 100 * o.min_depth_share);
-            if (o.source != DensifySource::Auto || !use_matches)
-                throw std::runtime_error(std::string(why) + "; stale or mismatched maps? --min-depth-share 0 uses them anyway");
-            res_out.depth_dropped = why;
-            use_depth = false;
-            fields.clear();
-            others.clear();
+            throw std::runtime_error(std::string(why) + "; stale or mismatched maps? --min-depth-share 0 uses them anyway");
         }
         dao.min_agree = o.depth_min_agree;
         dao.vote = o.depth_agreement;
@@ -756,6 +766,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         }
         for (DensePoint& p : pts) all.push_back(std::move(p));
         if (progress) progress(++done, (int)pl.ref_views.size(), (int64_t)all.size());
+        if (job.on_cloud) job.on_cloud(all, false);
     }
     // Radius: 4 voxels, twice the sparse spacing (a choice, docs/notes/densify.md).
     if (use_matches && use_depth && pl.voxel > 0) res.stats.fill_near_matches = dropFillNearMatches(all, 4 * pl.voxel);
@@ -767,7 +778,8 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         free_space = std::make_unique<FreeSpace>(pl, all, 3, 0.05);
         veto = [&free_space](const DensePoint& p) { return free_space->seesThrough(p); };
     }
-    res.cloud = finalizePoints(std::move(all), pl.min_track, pl.voxel, pl.max_points, o, res.stats, veto, pl.max_fill);
+    const FarFilter* far_filter = pl.far_state == DensifyPlan::FarState::On ? &pl.far_filter : nullptr;
+    res.cloud = finalizePoints(std::move(all), pl.min_track, pl.voxel, pl.max_points, o, res.stats, veto, pl.max_fill, far_filter);
     // Match points take the depth source's normal where their first image has one.
     for (DensePoint& p : res.cloud) {
         if (fields.empty() || p.from_depth || p.track.empty()) continue;
@@ -778,6 +790,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         p.normal[1] = (float)n.y;
         p.normal[2] = (float)n.z;
     }
+    if (job.on_cloud) job.on_cloud(res.cloud, true);
     res.depth_tol = res_depth_tol;
     res.points = (int64_t)res.cloud.size();
     res.seconds_match = match_s;
@@ -1051,11 +1064,12 @@ ReprojStats writeSibling(const std::string& model_dir, const std::string& out_di
     ReprojStats rs;
     const std::string problem = outDirProblem("", model_dir, out_dir);
     if (!problem.empty()) throw std::runtime_error(problem);
+    WriterLock lock(out_dir);
     const sfm::FixedPoses fp = sfm::readFixedPoses(model_dir);
     const std::string source_images = slurp(src / "images.bin");
     std::vector<size_t> id_at;
     const std::string images_bin = detachPoints(source_images, &id_at);
-    const fs::path tmp = out.string() + ".partial";
+    const fs::path tmp = partialDir(out.string());
     std::error_code ec;
     fs::remove_all(tmp, ec);
     fs::create_directories(tmp);
@@ -1109,7 +1123,10 @@ ReprojStats writeSibling(const std::string& model_dir, const std::string& out_di
             const bool empty = js.find_first_not_of(" \n\t", open + 1) == close;
             js.insert(close, std::string(empty ? "" : ",\n  ") + "\"reprojection\": {\"observations\": " +
                                  std::to_string(rs.observations) + ", \"invalid\": " + std::to_string(rs.invalid) +
-                                 ", \"mean_px\": " + jn(rs.mean_px) + ", \"p95_px\": " + jn(rs.p95_px) + "}\n");
+                                 ", \"mean_px\": " + jn(rs.mean_px) + ", \"p95_px\": " + jn(rs.p95_px) + "},\n  " +
+                                 "\"points3D_sha256\": \"" + spirula::sha256_file((tmp / "points3D.bin").string()) +
+                                 "\", \"tracks_sha256\": \"" + spirula::sha256_file((tmp / "points3D_tracks.bin").string()) +
+                                 "\"\n");
         }
         put("densify.json", js);
         const std::string bad = sfm::checkFixedModel(tmp.string(), fp);
@@ -1125,8 +1142,7 @@ ReprojStats writeSibling(const std::string& model_dir, const std::string& out_di
         }
         if (back != want || slurp(tmp / "cameras.bin") != slurp(src / "cameras.bin"))
             throw std::runtime_error("the copied model differs from its source beyond its point ids");
-        fs::remove_all(out, ec);
-        fs::rename(tmp, out);
+        publishDir(tmp.string(), out.string());
     } catch (...) {
         fs::remove_all(tmp, ec);
         throw;
