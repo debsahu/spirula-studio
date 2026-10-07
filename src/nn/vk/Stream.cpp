@@ -45,6 +45,7 @@ struct Stream::Impl {
     // submits of a process are safe everywhere and a fast GPU outgrows it at once.
     static constexpr double kPriorFlops = 50e9;
     spirula::SubmitBudget budget{kPriorFlops};
+    double cap_override = -1;
 
     VkSemaphore timeline = VK_NULL_HANDLE;
     uint64_t    submitted = 0;
@@ -266,7 +267,12 @@ void Stream::Impl::harvest(int slot) {
     slot_work[slot] = 0;
 }
 
-double Stream::workCap() { return impl().budget.limit(); }
+double Stream::workCap() {
+    const Impl& s = impl();
+    return s.cap_override >= 0 ? s.cap_override : s.budget.limit();
+}
+
+void Stream::overrideWorkCap(double cap) { impl().cap_override = cap; }
 
 void Stream::sync() {
     Impl& s = impl();
@@ -345,7 +351,7 @@ void Stream::dispatch(const char* entry, const SpecList& spec, uint32_t gx, uint
         NN_LOG_ERROR("[ssam-sync] %s (%u,%u,%u)...\n", entry, gx, gy, gz);
 
     VkPipeline pipe = Pipelines::get().acquire(entry, spec);
-    const double cap = s.budget.limit();
+    const double cap = workCap();
     if (s.recording && s.recorded > 0 && s.work + work > cap) flush();
     VkCommandBuffer cb = begin();
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);

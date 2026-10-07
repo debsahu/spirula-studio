@@ -57,7 +57,11 @@ automatic pick never lands on it: models are sorted by image count, then by path
     `f` the coarser of the two views' focal lengths in match pixels.
 12. **Finalize** (minimum track, `--min-track auto`): a point seen in 3 or more images
     is kept; a two-image point only when its reprojection error is no worse than the
-    median error of the run's own 3-or-more-image points; one image never. Then one
+    median error of the run's own 3-or-more-image points **and no other image saw
+    through it**: per source image, a 512-wide grid holds the nearest distance at which
+    it observed a 3-image point, and a two-image point more than 5 % in front of that
+    (the nearest over 3x3 cells, so a depth edge does not veto), in an image outside its
+    own track, is dropped; a cell with no observation is no evidence. One image never. Then one
     point per voxel (the longest track, then the lower error), then a seeded cap.
 
 Every automatic setting is printed, and recorded in `densify.json`:
@@ -72,7 +76,7 @@ Every automatic setting is printed, and recorded in `densify.json`:
 | parallax (`--parallax`, per point) | 1.5 degrees |
 | neighbour prior (`--covis-min-angle`) | 1.5 degrees at the shared sparse points |
 | min track | auto (above); 2 with a single neighbour |
-| max depth error | `max(2 %, 1 / (f sin(theta / 2)))`, `theta` the median reference-neighbour angle and `f` the median view focal in match pixels |
+| max depth error | `max(2 %, 1 / (f sin(theta / 2)))`, `theta` the median reference-neighbour angle and `f` the median view focal in match pixels. A heuristic: the half angle is chosen so a pair at half the capture's median parallax survives one match pixel of error; it is not fitted |
 | coarse warps | a warp smaller than the matcher's input (RoMa's stride-4 coarse match) scales the pixel thresholds into warp pixels, and the run says so |
 
 ## Ported from the Lichtfeld densification plugin
@@ -213,3 +217,22 @@ aerial0720 (`sparse_seg1_1200/0`, read only): the median angle between a referen
 three most covisible neighbours is **3.17 degrees** (p10 1.85, p90 9.06, 450 pairs). A fixed
 2 % keeps only pairs past ~9 degrees at f = 320 match pixels, nearly nothing there; the
 automatic bar is 11.3 % there and 2.6 % on the basement (13.8 degrees).
+
+### The visibility test (2026-10-07)
+
+Same matches and build, `--min-track auto` with the free-space test against `3`:
+
+| steps ROI | 3 | auto + visibility |
+|---|---|---|
+| points | 26,655 | 40,744 |
+| sparse-anchor p50 / p90 mm | 24.2 / 334.4 | 20.9 / 55.8 |
+| anchors within 5 cm | 0.668 | 0.879 |
+| free-space violations | 0.51 % | **0.31 %** |
+| outside the sparse box (whole scene) | 0.54 % | 1.44 % |
+
+321,010 two-image points were seen through and dropped, 939,479 admitted (before the voxel
+select and the 1 M cap). The violation rate stays below `3`, so auto stays the default. The
+whole-scene outside-the-box share did not come down (1.36 % without the test, 1.44 % with).
+S-1, geometric stand-in: 0 points beyond 5 cm, riser cover 0.953. S-1 on upstream RoMa:
+64 beyond 5 cm (18 of them two-image), `3`: 46, `2`: 215; the rest are 3-or-more-image points
+at silhouettes against the empty background.

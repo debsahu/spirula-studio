@@ -3,6 +3,7 @@
 #include "roma/model/Rope.h"
 
 #include "core/Env.h"
+#include "nn/Ops.h"
 #include "nn/io/TorchPickle.h"
 #include "nn/vk/Memory.h"
 #include "nn/vk/Stream.h"
@@ -98,7 +99,10 @@ bool f16_weights() {
         const char* v = spirula::env("ROMA_F32_WEIGHTS");
         return v && v[0] && v[0] != '0';
     }();
-    return !f32;
+    // Without tensor cores f16 buys nothing (894 vs 889 ms a pair, M4 Max) and
+    // costs determinism: nn's timing probe picks one of two f16 tiles that differ
+    // by ~1e-5, and the bf16 RoPE turns that into 0.65 px between runs.
+    return !f32 && nn::coop_matrix_enabled();
 }
 
 Weights::~Weights() {
@@ -180,10 +184,8 @@ void Weights::load(const std::string& path) {
             bias.name = q + "attn.qkv.bias";
             bias.shape = {3 * W};
             bias.produce = [&f, q, W, heads] {
-                std::vector<float> v = f.read(q + "attn.qkv.bias").data;
-                const std::vector<float> m = f.read(q + "attn.qkv.bias_mask").data;
-                for (size_t i = 0; i < v.size(); ++i) v[i] *= m[i];
-                return permute_qk_rows(v, W, heads, 1);
+                return fold_qkv_bias(f.read(q + "attn.qkv.bias").data,
+                                     f.read(q + "attn.qkv.bias_mask").data, W, heads);
             };
             staged.push_back(std::move(bias));
         }
@@ -372,6 +374,103 @@ void Weights::load(const std::string& path) {
         NN_CHECK(taps == 3, "'%s': %d VGG taps, the refiners read 3", path.c_str(), taps);
     }
 
+    // ---- the three conv refiners, BatchNorm folded into each depthwise conv ----
+    {
+        for (const char* st : {"4", "2", "1"}) {
+            const std::string p = std::string("refiners.") + st + ".";
+            RefinerHparams r;
+            r.stride = std::atoi(st);
+            const auto pj = shape_of(f, p + "proj.weight");
+            NN_CHECK(pj.size() == 2, "'%s': %sproj.weight is not a matrix", path.c_str(),
+                     p.c_str());
+            r.proj = pj[0];
+            r.feat = pj[1];
+            r.demb = shape_of(f, p + "disp_emb.weight")[0];
+            expect_shape(f, p + "disp_emb.weight", {r.demb, 2, 1, 1});
+            const auto dw = shape_of(f, p + "block1.conv_depthwise.weight");
+            NN_CHECK(dw.size() == 4 && dw[1] == 1 && dw[2] == dw[3],
+                     "'%s': %sblock1 is not a square depthwise conv", path.c_str(), p.c_str());
+            r.hidden = dw[0];
+            r.kernel = (int)dw[2];
+            // hidden = 2*proj + demb + (2r+1)^2: the local window is what is left.
+            const int64_t k = r.hidden - 2 * r.proj - r.demb;
+            int rad = -1;
+            for (int t = 0; t <= 8; ++t)
+                if (k == (int64_t)(2 * t + 1) * (2 * t + 1)) rad = t;
+            NN_CHECK(k == 0 || rad >= 0, "'%s': %s leaves %lld channels for a local window",
+                     path.c_str(), p.c_str(), (long long)k);
+            r.radius = k == 0 ? -1 : rad;
+            while (f.has(p + "hidden_blocks." + std::to_string(r.blocks) +
+                         ".conv_depthwise.weight"))
+                ++r.blocks;
+            expect_shape(f, p + "warp_head.weight", {2, r.hidden, 1, 1});
+            expect_shape(f, p + "confidence_head.weight", {4, r.hidden, 1, 1});
+            refiners_.push_back(r);
+
+            plain(p + "proj.weight");
+            plain(p + "proj.bias");
+            for (const char* n : {"disp_emb", "warp_head", "confidence_head"}) {
+                Staged w;
+                w.name = p + n + ".weight";
+                w.shape = {shape_of(f, w.name)[0], shape_of(f, w.name)[1]};
+                const std::string nm = w.name;
+                w.produce = [&f, nm] { return f.read(nm).data; };
+                staged.push_back(std::move(w));
+                plain(p + n + ".bias");
+            }
+            for (int b = -1; b < r.blocks; ++b) {
+                const std::string q =
+                    p + (b < 0 ? std::string("block1.") : "hidden_blocks." + std::to_string(b) + ".");
+                const int64_t C = r.hidden, taps = (int64_t)r.kernel * r.kernel;
+                expect_shape(f, q + "conv_depthwise.weight", {C, 1, r.kernel, r.kernel});
+                expect_shape(f, q + "conv_pointwise.weight", {C, C, 1, 1});
+                for (const char* t : {"weight", "bias", "running_mean", "running_var"})
+                    expect_shape(f, q + "norm." + t, {C});
+                const std::string dwn = q + "conv_depthwise", bn = q + "norm";
+                Staged w;
+                w.name = dwn + ".weight";
+                w.shape = {C, taps};
+                w.produce = [&f, dwn, bn, C, taps] {
+                    std::vector<float> v = f.read(dwn + ".weight").data;
+                    const std::vector<float> g = f.read(bn + ".weight").data;
+                    const std::vector<float> var = f.read(bn + ".running_var").data;
+                    for (int64_t o = 0; o < C; ++o) {
+                        const float sc = g[(size_t)o] / std::sqrt(var[(size_t)o] + kBnEps);
+                        for (int64_t i = 0; i < taps; ++i) v[(size_t)(o * taps + i)] *= sc;
+                    }
+                    return v;
+                };
+                staged.push_back(std::move(w));
+                Staged bb;
+                bb.name = dwn + ".bias";
+                bb.shape = {C};
+                bb.produce = [&f, dwn, bn, C] {
+                    std::vector<float> v = f.read(dwn + ".bias").data;
+                    const std::vector<float> g = f.read(bn + ".weight").data;
+                    const std::vector<float> beta = f.read(bn + ".bias").data;
+                    const std::vector<float> mean = f.read(bn + ".running_mean").data;
+                    const std::vector<float> var = f.read(bn + ".running_var").data;
+                    for (int64_t o = 0; o < C; ++o) {
+                        const float sc = g[(size_t)o] / std::sqrt(var[(size_t)o] + kBnEps);
+                        v[(size_t)o] = (v[(size_t)o] - mean[(size_t)o]) * sc + beta[(size_t)o];
+                    }
+                    return v;
+                };
+                staged.push_back(std::move(bb));
+                Staged pw;
+                pw.name = q + "conv_pointwise.weight";
+                pw.shape = {C, C};
+                const std::string pn = pw.name;
+                pw.produce = [&f, pn] { return f.read(pn).data; };
+                staged.push_back(std::move(pw));
+                plain(q + "conv_pointwise.bias");
+            }
+        }
+        NN_CHECK(refiners_[0].feat == vgg_.back().cout,
+                 "'%s': the stride-4 refiner reads %lld channels, VGG's s4 tap has %lld",
+                 path.c_str(), (long long)refiners_[0].feat, (long long)vgg_.back().cout);
+    }
+
     // ---- upload, one tensor at a time so the host never holds the file ----
     std::vector<uint16_t> h16;
     uint64_t chunk_used = kChunk, chunk_size = 0;
@@ -403,6 +502,7 @@ void Weights::load(const std::string& path) {
                 h16[k] = nn::float_to_half(data[k]);
                 f16_inexact_ += nn::half_to_float(h16[k]) != data[k];
             }
+            f16_total_ += data.size();
             vk::Stream::get().upload(ptr, h16.data(), s.bytes());
         } else {
             vk::Stream::get().upload(ptr, data.data(), s.bytes());

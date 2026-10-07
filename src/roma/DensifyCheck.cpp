@@ -72,15 +72,15 @@ int densifyCheck(const CheckOptions& co) {
     {
         const double edges[] = {0, 3, 6, 12, 24, 1e9};
         for (int b = 0; b < 5; b++) {
-            int64_t n = 0, in = 0, far = 0, tl3 = 0;
+            int64_t n = 0, in = 0, beyond = 0, tl3 = 0;
             for (const DensePoint& p : r.cloud) {
                 if (p.parallax_deg < edges[b] || p.parallax_deg >= edges[b + 1]) continue;
                 const double d = scene.distance(p.xyz);
-                n++; in += d <= 0.01; far += d > 0.05; tl3 += p.distinct_images >= 3;
+                n++; in += d <= 0.01; beyond += d > 0.05; tl3 += p.distinct_images >= 3;
             }
             std::printf("check: parallax %4.0f-%-4.0f deg: points %7lld, within 1 cm %.3f, past 5 cm %lld, "
                         "track>=3 %.3f\n", edges[b], std::min(edges[b + 1], 999.0), (long long)n,
-                        n ? (double)in / n : 0.0, (long long)far, n ? (double)tl3 / n : 0.0);
+                        n ? (double)in / n : 0.0, (long long)beyond, n ? (double)tl3 / n : 0.0);
         }
     }
     if (std::getenv("SS_DENSIFY_CHECK_DEBUG")) {
@@ -102,7 +102,7 @@ int densifyCheck(const CheckOptions& co) {
     gate(s.points >= 5000, "points", (double)s.points, ">= 5000");
     gate(s.within >= 0.95, "share within 1 cm of a surface", s.within, ">= 0.95");
     gate(s.riser_cover >= 0.90, "riser area covered at 2 cm", s.riser_cover, ">= 0.90");
-    gate(s.far == 0, "points farther than 5 cm", (double)s.far, "== 0");
+    gate(s.beyond == 0, "points farther than 5 cm", (double)s.beyond, "== 0");
     if (!co.keep && co.dir.empty()) {
         std::error_code ec;
         fs::remove_all(dir, ec);

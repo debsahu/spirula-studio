@@ -61,13 +61,13 @@ private:
 };
 
 // Fraction of points within `tol` of a surface, the count farther than
-// `far`, and the share of riser area (sampled every `step`) with a point
+// `beyond_tol`, and the share of riser area (sampled every `step`) with a point
 // within `cover`.
 struct CloudScore {
-    int64_t points = 0, far = 0;
+    int64_t points = 0, beyond = 0;
     double within = 0, riser_cover = 0;
 };
 CloudScore scoreCloud(const Scene& scene, const std::vector<DensePoint>& cloud, double tol,
-                      double far, double step, double cover);
+                      double beyond_tol, double step, double cover);
 
 }  // namespace roma

@@ -7,6 +7,7 @@
 // file still runs the rest.
 
 #include "roma/Roma.h"
+#include "roma/model/Dump.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/Model.h"
 #include "roma/model/RomaMatcher.h"
@@ -158,6 +159,10 @@ void test_rope_permutation(vk::Arena& arena) {
 // pair, a batch stride that ignores row_stride.
 void test_rope_bf16(vk::Arena& arena) {
     std::printf("\nrope_bf16\n");
+    if (!matcher_rope_rounds()) {
+        std::printf("  SKIP: SS_ROMA_ROPE_F32 runs this kernel in fp32 by design\n");
+        return;
+    }
     const int heads = 3, hd = 64, batch = 2;
     const int64_t h = 4, w = 6, n = h * w, stride = 3 * heads * hd;
     const std::vector<float> table = matcher_rope_bf16(periods16(), h, w);
@@ -223,8 +228,169 @@ void test_rope_tables() {
     check(e < 1e-6, "rope_table_axes", "column pair of token (0, 1): %.2e", e);
 }
 
+
+// ---- Host references for the refiner kernels, in double, torch's semantics.
+
+// grid_sample(bilinear, zeros, align_corners) of fb [h, w, C] at normalized (x, y).
+void host_sample(const std::vector<float>& fb, int h, int w, int C, double x, double y,
+                 bool align_corners, std::vector<double>& out) {
+    const double sx = align_corners ? (x + 1) / 2 * (w - 1) : ((x + 1) * w - 1) / 2;
+    const double sy = align_corners ? (y + 1) / 2 * (h - 1) : ((y + 1) * h - 1) / 2;
+    out.assign((size_t)C, 0.0);
+    const int x0 = (int)std::floor(sx), y0 = (int)std::floor(sy);
+    const double lx = sx - x0, ly = sy - y0;
+    for (int dy = 0; dy < 2; ++dy)
+        for (int dx = 0; dx < 2; ++dx) {
+            const int xx = x0 + dx, yy = y0 + dy;
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+            const double wt = (dx ? lx : 1 - lx) * (dy ? ly : 1 - ly);
+            for (int c = 0; c < C; ++c) out[(size_t)c] += wt * fb[(size_t)((yy * w + xx) * C + c)];
+        }
+}
+
+struct CorrVariant {
+    bool swap_xy = false, align_corners = false, no_scale = false;
+    double step = 2.0;   // offsets are k * step / size
+};
+
+std::vector<double> host_local_corr(const std::vector<float>& fa, const std::vector<float>& fb,
+                                    const std::vector<float>& warp, int h, int w, int C, int r,
+                                    const CorrVariant& v = {}) {
+    const int K = (2 * r + 1) * (2 * r + 1);
+    std::vector<double> out((size_t)h * w * K), s;
+    for (int p = 0; p < h * w; ++p)
+        for (int k = 0; k < K; ++k) {
+            int ix = k % (2 * r + 1) - r, iy = k / (2 * r + 1) - r;
+            if (v.swap_xy) std::swap(ix, iy);
+            const double x = warp[(size_t)(2 * p)] + ix * v.step / w;
+            const double y = warp[(size_t)(2 * p + 1)] + iy * v.step / h;
+            host_sample(fb, h, w, C, x, y, v.align_corners, s);
+            double acc = 0;
+            for (int c = 0; c < C; ++c) acc += fa[(size_t)(p * C + c)] * s[(size_t)c];
+            out[(size_t)(p * K + k)] = v.no_scale ? acc : acc / std::sqrt((double)C);
+        }
+    return out;
+}
+
+double max_abs_rel(const std::vector<float>& got, const std::vector<double>& want) {
+    double num = 0, den = 0;
+    for (size_t i = 0; i < want.size(); ++i) {
+        num = std::max(num, std::fabs((double)got[i] - want[i]));
+        den = std::max(den, std::fabs(want[i]));
+    }
+    return num / std::max(den, 1e-30);
+}
+
+// ---- Local correlation, fused and unfused, vs torch's semantics; warps cross
+// the border. The bar must separate it from swapped x/y offsets,
+// align_corners=True, no 1/sqrt(C), and half-pixel offsets.
+void test_local_corr(vk::Arena& arena) {
+    std::printf("\nlocal_corr\n");
+    for (int r : {3, 1}) {
+        const int h = 9, w = 14, C = 20, n = h * w, K = (2 * r + 1) * (2 * r + 1);
+        const std::vector<float> fa = randn((size_t)(n * C), 10 + r);
+        const std::vector<float> fb = randn((size_t)(n * C), 20 + r);
+        std::vector<float> warp = randn((size_t)(2 * n), 30 + r, 0.7f);
+        warp[0] = -1.05f;
+        warp[3] = 0.98f;
+        const std::vector<double> want = host_local_corr(fa, fb, warp, h, w, C, r);
+        for (bool fused : {true, false}) {
+            vk::ArenaScope s(arena);
+            Tensor ta = upload(arena, fa, n, C), tb = upload(arena, fb, n, C);
+            Tensor tw = upload(arena, warp, n, 2);
+            Tensor out = nn::arena_tensor(arena, DType::F32, n, K);
+            local_correlation(arena, out, ta, tb, tw, r, h, w, fused);
+            const double e = max_abs_rel(download(out), want);
+            check(e < 1e-5, fused ? "local_corr_fused" : "local_corr_unfused",
+                  "r=%d: max abs / max |ref| %.2e (bar 1e-5)", r, e);
+        }
+        std::vector<float> wf(want.size());
+        for (size_t i = 0; i < want.size(); ++i) wf[i] = (float)want[i];
+        CorrVariant sw, ac, ns, half;
+        sw.swap_xy = true;
+        ac.align_corners = true;
+        ns.no_scale = true;
+        half.step = 1.0;
+        double worst = 1e9;
+        for (const CorrVariant* v : {&sw, &ac, &ns, &half})
+            worst = std::min(worst, max_abs_rel(wf, host_local_corr(fa, fb, warp, h, w, C, r, *v)));
+        check(worst > 1e-2, "local_corr_discriminates",
+              "r=%d: nearest wrong variant %.2e from the reference (must exceed 1e-2)", r, worst);
+    }
+}
+
+// ---- refine_disp / refine_update vs refiner.py, non-square. Catches (W, H)
+// swapped, the grid sign, relu for softplus, the 1-channel prev unpadded, p10.
+void test_refine_kernels(vk::Arena& arena) {
+    std::printf("\nrefine_kernels\n");
+    const int64_t h = 6, w = 11, n = h * w;
+    const std::vector<float> warp = randn((size_t)(2 * n), 41, 0.5f);
+    const std::vector<float> gx = centred_grid(w), gy = centred_grid(h);
+    std::vector<float> grid((size_t)(2 * n));
+    for (int64_t y = 0; y < h; ++y)
+        for (int64_t x = 0; x < w; ++x) {
+            grid[(size_t)(2 * (y * w + x))] = gx[(size_t)x];
+            grid[(size_t)(2 * (y * w + x) + 1)] = gy[(size_t)y];
+        }
+    {
+        vk::ArenaScope s(arena);
+        Tensor tw = upload(arena, warp, n, 2), tg = upload(arena, grid, n, 2);
+        Tensor out = nn::arena_tensor(arena, DType::F32, n, 2);
+        struct {
+            uint64_t out, warp, grid;
+            float sx, sy;
+            uint32_t n, groups_per_row;
+        } p{out.ptr, tw.ptr, tg.ptr, 1.25f, 0.5f, (uint32_t)n, 0};
+        vk::Stream::get().dispatchFlat("roma.refine_disp", {1u}, 2 * n, 256, &p, sizeof(p),
+                                       &p.groups_per_row);
+        const std::vector<float> got = download(out);
+        double e = 0;
+        for (int64_t i = 0; i < 2 * n; ++i)
+            e = std::max(e, std::fabs(got[(size_t)i] - (i % 2 ? 0.5 : 1.25) *
+                                                         ((double)warp[(size_t)i] - grid[(size_t)i])));
+        check(e < 1e-6, "refine_disp", "max abs %.2e", e);
+    }
+    for (int prev_c : {1, 4}) {
+        vk::ArenaScope s(arena);
+        const std::vector<float> conf = randn((size_t)(prev_c * n), 42 + prev_c);
+        std::vector<float> dw = randn((size_t)(2 * n), 43), dc = randn((size_t)(4 * n), 44, 3.0f);
+        dc[1] = 25.0f;   // softplus' linear branch
+        Tensor tw = upload(arena, warp, n, 2), tc = upload(arena, conf, n, prev_c);
+        Tensor tdw = upload(arena, dw, n, 2), tdc = upload(arena, dc, n, 4);
+        Tensor ow = nn::arena_tensor(arena, DType::F32, n, 2);
+        Tensor oc = nn::arena_tensor(arena, DType::F32, n, 4);
+        struct {
+            uint64_t warp_out, conf_out, warp, conf, dwarp, dconf;
+            float den_x, den_y;
+            uint32_t n, prev_c, groups_per_row;
+        } p{ow.ptr, oc.ptr, tw.ptr, tc.ptr, tdw.ptr, tdc.ptr, 4.0f * w, 4.0f * h,
+            (uint32_t)n, (uint32_t)prev_c, 0};
+        vk::Stream::get().dispatchFlat("roma.refine_update", {1u}, n, 256, &p, sizeof(p),
+                                       &p.groups_per_row);
+        const std::vector<float> gw = download(ow), gc = download(oc);
+        auto sp = [](double x) { return x > 20 ? x : std::log1p(std::exp(x)); };
+        double ew = 0, ecv = 0;
+        for (int64_t i = 0; i < n; ++i) {
+            ew = std::max(ew, std::fabs(gw[(size_t)(2 * i)] - (warp[(size_t)(2 * i)] + dw[(size_t)(2 * i)] / (4.0 * w))));
+            ew = std::max(ew, std::fabs(gw[(size_t)(2 * i + 1)] -
+                                        (warp[(size_t)(2 * i + 1)] + dw[(size_t)(2 * i + 1)] / (4.0 * h))));
+            const double l00 = sp(dc[(size_t)(4 * i + 1)]) + 1e-6, l10 = dc[(size_t)(4 * i + 2)];
+            const double l11 = sp(dc[(size_t)(4 * i + 3)]) + 1e-6;
+            const double d[4] = {dc[(size_t)(4 * i)], l00 * l00, l00 * l10, l10 * l10 + l11 * l11};
+            for (int k = 0; k < 4; ++k) {
+                const double prev = k < prev_c ? conf[(size_t)(prev_c * i + k)] : 0.0;
+                const double want = prev + d[k];
+                ecv = std::max(ecv, std::fabs(gc[(size_t)(4 * i + k)] - want) /
+                                        std::max(1.0, std::fabs(want)));
+            }
+        }
+        check(ew < 1e-6, "refine_update_warp", "prev_c %d: max abs %.2e", prev_c, ew);
+        check(ecv < 1e-5, "refine_update_conf", "prev_c %d: max rel %.2e", prev_c, ecv);
+    }
+}
+
 // ---- torch's antialiased bicubic preserves a constant and averages on a
-// downscale. Its exact match to torch is reported by compare_torch.py.
+// downscale. Its match to torch is roma_unit_test's resize_down / resize_up.
 void test_resize() {
     std::printf("\nresize\n");
     std::vector<uint8_t> flat(64 * 48 * 3, 200), checker(64 * 48 * 3);
@@ -288,7 +454,8 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
         if (f16_weights()) {
             // bf16 -> f16 is exact inside f16's normal range; 4.6e-4 of the
             // backbone's values are below it (measured on romav2.0.1.pt).
-            const double frac = (double)w.inexactF16() / 303.2e6;
+            const double frac =
+                (double)w.inexactF16() / (double)std::max<uint64_t>(w.totalF16(), 1);
             check(frac < 1e-3, "f16_inexact_bounded", "%llu backbone weights not exact in "
                   "f16 (%.2e of them)", (unsigned long long)w.inexactF16(), frac);
         }
@@ -328,8 +495,9 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
               st.name, st.peak / 1e6, st.plan / 1e6, 100.0 * (double)st.peak / (double)st.plan);
     std::printf("  weights on device: %.2f GB\n", m.weightBytes() / 1e9);
 
-    // The roma::Matcher adapter: the same coarse match, certainty as the
-    // sigmoid of the logit. Catches swapped warp channels, a missing sigmoid.
+    // ---- AB is independent of BA, a cache hit equals a miss, BA(A,B) = AB(B,A),
+    // the adapter is match() + sigmoid. Catches BA aliasing AB's state, a stale
+    // cache, the directions' VGG maps swapped, a missing sigmoid.
     std::vector<uint8_t> qa(A.size()), qb(B.size());
     std::vector<float> fa(A.size()), fb(B.size());
     for (size_t i = 0; i < A.size(); ++i) {
@@ -338,32 +506,193 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
         fa[i] = qa[i] / 255.0f;
         fb[i] = qb[i] / 255.0f;
     }
-    const CoarseMatch ref = m.coarse(fa.data(), fb.data(), size, size);
-    RomaMatcher rm(ckpt, size);
-    const Warp wp = rm.match({"a", size, size, qa.data()}, {"b", size, size, qb.data()});
-    double ew = 0, ec = 0;
-    size_t certain = 0;
-    const size_t n = (size_t)ref.w * ref.h;
-    for (size_t i = 0; i < n && wp.warp.size() == 2 * n && wp.certainty.size() == n; ++i) {
-        ew = std::max({ew, (double)std::fabs(wp.warp[2 * i] - ref.data[3 * i]),
-                       (double)std::fabs(wp.warp[2 * i + 1] - ref.data[3 * i + 1])});
-        ec = std::max(ec, std::fabs(wp.certainty[i] - 1.0 / (1.0 + std::exp(-ref.data[3 * i + 2]))));
-        certain += wp.certainty[i] > 0.5f;
+    MatchSpec ms;
+    ms.lr_h = ms.lr_w = size;
+    const MatchResult one = m.match(fa.data(), fb.data(), nullptr, nullptr, ms);
+    ms.bidirectional = true;
+    const MatchResult both = m.match(fa.data(), fb.data(), nullptr, nullptr, ms, "a");
+    const MatchResult hit = m.match(fa.data(), fb.data(), nullptr, nullptr, ms, "a");
+    const MatchResult swapped = m.match(fb.data(), fa.data(), nullptr, nullptr, ms, "b");
+    auto max_diff = [](const std::vector<float>& x, const std::vector<float>& y) {
+        if (x.size() != y.size()) return 1e30;
+        double e = 0;
+        for (size_t i = 0; i < x.size(); ++i) e = std::max(e, (double)std::fabs(x[i] - y[i]));
+        return e;
+    };
+    check(one.ab.h == size && one.ab.w == size && one.ab.warp.size() == (size_t)size * size * 2 &&
+              one.ab.confidence.size() == (size_t)size * size * 4 && both.ba.h == size,
+          "match_shape", "%dx%d, BA %dx%d", one.ab.w, one.ab.h, both.ba.w, both.ba.h);
+    size_t fin = 0;
+    for (float v : one.ab.warp) fin += std::isfinite(v);
+    for (float v : one.ab.confidence) fin += std::isfinite(v);
+    check(fin == one.ab.warp.size() + one.ab.confidence.size(), "match_finite", "%zu values",
+          fin);
+    check(max_diff(one.ab.warp, both.ab.warp) == 0 &&
+              max_diff(one.ab.confidence, both.ab.confidence) == 0,
+          "match_ab_independent_of_ba", "warp %.2e, confidence %.2e",
+          max_diff(one.ab.warp, both.ab.warp), max_diff(one.ab.confidence, both.ab.confidence));
+    check(max_diff(hit.ab.warp, both.ab.warp) == 0 && max_diff(hit.ba.warp, both.ba.warp) == 0 &&
+              max_diff(hit.ab.confidence, both.ab.confidence) == 0,
+          "match_cache_hit_exact", "warp %.2e", max_diff(hit.ab.warp, both.ab.warp));
+    // BA of (A, B) is AB of (B, A) only up to token order, which the bf16 RoPE
+    // amplifies; upstream torch itself, BA-certain pixels, worst of 3 pairs:
+    // p50 0.022 px, p99 1.5 px (toronto). The mutants this catches: >= 1 px p50.
+    std::vector<double> epe;
+    if (swapped.ab.warp.size() == both.ba.warp.size())
+        for (size_t i = 0; i < (size_t)size * size; ++i)
+            if (both.ba.overlap(i) > 0.5f)
+                epe.push_back(std::hypot(swapped.ab.warp[2 * i] - both.ba.warp[2 * i],
+                                         swapped.ab.warp[2 * i + 1] - both.ba.warp[2 * i + 1]) *
+                              size / 2);
+    std::sort(epe.begin(), epe.end());
+    const double p50 = epe.size() < 1000 ? 1e30 : epe[epe.size() / 2];
+    const double p99 = epe.size() < 1000 ? 1e30 : epe[epe.size() * 99 / 100];
+    check(p50 < 0.1 && p99 < 5.0, "match_ba_is_swapped_ab",
+          "over %zu BA-certain pixels (need 1000): EPE p50 %.2e px, p99 %.2e px, max %.2e px "
+          "(bars 0.1, 5)", epe.size(), p50, p99, epe.empty() ? 0.0 : epe.back());
+    const double sep = max_diff(both.ab.warp, both.ba.warp);
+    check(sep > 1e-2, "match_ba_discriminates", "AB vs BA differ by %.2e (must exceed 1e-2)",
+          sep);
+    std::printf("  certainty > 0.5: %.1f%% of pixels\n", [&] {
+        size_t c = 0;
+        for (size_t i = 0; i < (size_t)size * size; ++i) c += one.ab.overlap(i) > 0.5f;
+        return 100.0 * (double)c / ((double)size * size);
+    }());
+    for (const Model::Stage& st : m.stages())
+        check(st.peak <= st.plan, "match_stage_within_plan", "%s: %.1f of %.1f MB (%.0f%%)",
+              st.name, st.peak / 1e6, st.plan / 1e6, 100.0 * (double)st.peak / (double)st.plan);
+    check(m.peakBytes() <= m.plannedBytes(), "match_arena_within_plan", "%.1f of %.1f MB",
+          m.peakBytes() / 1e6, m.plannedBytes() / 1e6);
+
+    Preset pr = Preset::Base;
+    bool found = false;
+    for (Preset q : {Preset::Turbo, Preset::Fast, Preset::Base})
+        if (!found && preset_spec(q).lr == size) {
+            pr = q;
+            found = true;
+        }
+    if (found) {
+        RomaMatcher rm(ckpt, pr);
+        const Warp wp = rm.match({"a", size, size, qa.data()}, {"b", size, size, qb.data()});
+        const size_t n = (size_t)size * size;
+        double ec = 0;
+        size_t certain = 0;
+        for (size_t i = 0; i < n && wp.certainty.size() == n; ++i) {
+            ec = std::max(ec, (double)std::fabs(wp.certainty[i] - one.ab.overlap(i)));
+            certain += wp.certainty[i] > 0.5f;
+        }
+        check(wp.width == size && max_diff(wp.warp, one.ab.warp) == 0 && ec < 1e-7,
+              "matcher_adapter", "%s: warp %.2e, certainty %.2e vs match()",
+              rm.describe().c_str(), max_diff(wp.warp, one.ab.warp), ec);
+        std::printf("  adapter: %.1f%% of pixels certain > 0.5\n",
+                    100.0 * (double)certain / (double)std::max<size_t>(n, 1));
     }
-    check(wp.width == ref.w && wp.height == ref.h && wp.warp.size() == 2 * n, "matcher_shape",
-          "%dx%d", wp.width, wp.height);
-    check(ew < 1e-4 && ec < 1e-5, "matcher_adapter", "warp %.2e, certainty %.2e vs coarse()",
-          ew, ec);
-    std::printf("  adapter: %s, %.1f%% of pixels certain > 0.5\n", rm.describe().c_str(),
-                100.0 * (double)certain / (double)std::max<size_t>(n, 1));
 }
 
+
+// ---- Per preset: s/pair with A new each pair (cold) and A repeated (warm, the
+// densify loop's case), and device memory beside the weights. The plan's §5
+// gate: the precise preset's arena plus A's cache within 4 GB.
+void bench(const std::string& ckpt, const std::string& a, const std::string& b,
+           const std::string& list, int repeat) {
+    std::printf("\nbench %s\n", list.c_str());
+    NN_CHECK(!a.empty() && !b.empty(), "--bench needs --pair A B");
+    const nn::Image ia = nn::load_image(a), ib = nn::load_image(b);
+    NN_CHECK(ia.channels == 3 && ib.channels == 3, "--bench: the pair must be RGB");
+    size_t at = 0;
+    while (at <= list.size()) {
+        const size_t comma = std::min(list.find(',', at), list.size());
+        const std::string name = list.substr(at, comma - at);
+        at = comma + 1;
+        Preset pr;
+        if (!parse_preset(name, pr)) {
+            check(false, "bench_preset", "unknown preset '%s'", name.c_str());
+            continue;
+        }
+        RomaMatcher rm(ckpt, pr);
+        const bool both = spirula::env("ROMA_BENCH_BOTH") != nullptr;
+        // Densify hands over squares at inputSize(); resample once, untimed.
+        const int S = rm.inputSize();
+        auto square = [S](const nn::Image& im) {
+            const std::vector<float> f = resize_rgb(im.data.data(), im.width, im.height, S, S);
+            std::vector<uint8_t> q(f.size());
+            for (size_t i = 0; i < f.size(); ++i)
+                q[i] = (uint8_t)std::lround(std::min(1.0f, std::max(0.0f, f[i])) * 255.0f);
+            return q;
+        };
+        const std::vector<uint8_t> sa = square(ia), sb = square(ib);
+        const MatchImage mb{"b", S, S, sb.data()};
+        double cold = 0, warm = 0;
+        Warp out;
+        for (int r = 0; r < repeat + 1; ++r) {
+            // Pair 0 also builds pipelines and the arena: not timed.
+            const std::string key = "a" + std::to_string(r);
+            const MatchImage ma{key, S, S, sa.data()};
+            vk::Stream::get().sync();
+            double t0 = nn::now_ms();
+            out = both ? rm.matchBoth(ma, mb).first : rm.match(ma, mb);
+            const double t1 = nn::now_ms();
+            // A dump is of one match() per process, on a cold cache.
+            if (!dump_enabled()) out = both ? rm.matchBoth(ma, mb).first : rm.match(ma, mb);
+            const double t2 = nn::now_ms();
+            if (r) {
+                cold += (t1 - t0) / repeat;
+                warm += (t2 - t1) / repeat;
+            }
+        }
+        Model& m = rm.model();
+        const uint64_t arena = m.plannedBytes(), cache = m.cacheBytes();
+        size_t certain = 0;
+        for (float c : out.certainty) certain += c > 0.5f;
+        std::printf("  %-8s %s: cold %.3f s/pair, warm %.3f s/pair | arena plan %.0f MB "
+                    "(peak %.0f), A cache %.0f MB, weights %.0f MB | %dx%d, %.1f%% > 0.5\n",
+                    name.c_str(), both ? "AB+BA" : "AB", cold / 1e3, warm / 1e3, arena / 1e6,
+                    m.peakBytes() / 1e6, cache / 1e6, m.weightBytes() / 1e6, out.width,
+                    out.height, 100.0 * (double)certain / (double)std::max<size_t>(out.certainty.size(), 1));
+        check(out.width == rm.inputSize() && out.height == rm.inputSize() &&
+                  out.warp.size() == (size_t)out.width * out.height * 2 &&
+                  out.certainty.size() == (size_t)out.width * out.height,
+              "bench_warp_at_input_size", "%s: %dx%d, inputSize %d", name.c_str(), out.width,
+              out.height, rm.inputSize());
+        check(m.peakBytes() <= arena, "bench_arena_within_plan", "%s", name.c_str());
+        for (const Model::Stage& st : m.stages())
+            check(st.peak <= st.plan, "bench_stage_within_plan", "%s %s: %.1f of %.1f MB",
+                  name.c_str(), st.name, st.peak / 1e6, st.plan / 1e6);
+        if (pr == Preset::Precise)
+            check(arena + cache <= 4000000000ull, "precise_arena_4gb",
+                  "arena %.2f GB + A cache %.2f GB = %.2f GB (bar 4 GB)", arena / 1e9,
+                  cache / 1e9, (arena + cache) / 1e9);
+    }
+}
 }  // namespace
+
+// One coarse() on a W x H pair, for the non-square parity fixture: RoPE's two
+// axes and the DPT's resize targets only separate when H != W.
+void test_coarse_rect(const std::string& ckpt, const std::string& a, const std::string& b,
+                      int W, int H) {
+    std::printf("\ncoarse %dx%d\n", W, H);
+    NN_CHECK(!a.empty() && !b.empty(), "--rect needs --pair A B");
+    const nn::Image ia = nn::load_image(a), ib = nn::load_image(b);
+    const std::vector<float> A = resize_rgb(ia.data.data(), ia.width, ia.height, W, H);
+    const std::vector<float> B = resize_rgb(ib.data.data(), ib.width, ib.height, W, H);
+    Model m;
+    m.load(ckpt);
+    const CoarseMatch cm = m.coarse(A.data(), B.data(), H, W);
+    size_t finite = 0;
+    for (float v : cm.data) finite += std::isfinite(v);
+    check(cm.w == W / 4 && cm.h == H / 4, "rect_shape", "%dx%d", cm.w, cm.h);
+    check(finite == cm.data.size(), "rect_finite", "%zu of %zu", finite, cm.data.size());
+    for (const Model::Stage& st : m.stages())
+        check(st.peak <= st.plan, "stage_within_plan", "%s: %.1f of %.1f MB", st.name,
+              st.peak / 1e6, st.plan / 1e6);
+}
 
 int main(int argc, char** argv) {
     if (!spirula::env("NN_LOG")) nn::set_log_level(2);
-    std::string ckpt, a, b;
-    int size = 640, repeat = 1;
+    dump_enabled();
+    std::string ckpt, a, b, bench_list;
+    int size = 640, repeat = 1, rect_w = 0, rect_h = 0;
+    bool require_model = false;
     for (int i = 1; i < argc; ++i) {
         const std::string s = argv[i];
         auto next = [&] { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
@@ -371,6 +700,9 @@ int main(int argc, char** argv) {
         else if (s == "--pair") { a = next(); b = next(); }
         else if (s == "--size") size = std::atoi(next().c_str());
         else if (s == "--repeat") repeat = std::atoi(next().c_str());
+        else if (s == "--bench") bench_list = next();
+        else if (s == "--require-model") require_model = true;
+        else if (s == "--rect") { rect_w = std::atoi(next().c_str()); rect_h = std::atoi(next().c_str()); }
         else { std::printf("unknown argument '%s'\n", s.c_str()); return 2; }
     }
     try {
@@ -381,21 +713,30 @@ int main(int argc, char** argv) {
             arena.reserve(64ull << 20);
             test_rope_permutation(arena);
             test_rope_bf16(arena);
+            test_local_corr(arena);
+            test_refine_kernels(arena);
         }
         test_rope_tables();
         test_resize();
         std::error_code ec;
         if (ckpt.empty()) ckpt = nn::cached_path(checkpoint_file());
-        if (!std::filesystem::exists(ckpt, ec))
+        if (!std::filesystem::exists(ckpt, ec)) {
             std::printf("\nSKIP model: %s is not cached (--checkpoint PATH)\n", ckpt.c_str());
+            check(!require_model, "model_present", "--require-model and no checkpoint");
+        } else if (rect_w > 0)
+            test_coarse_rect(ckpt, a, b, rect_w, rect_h);
+        else if (!bench_list.empty())
+            bench(ckpt, a, b, bench_list, repeat);
         else
             test_model(ckpt, a, b, size, repeat);
     } catch (const std::exception& e) {
         std::printf("EXCEPTION: %s\n", e.what());
+        dump_finish(1);
         return 1;
     }
     std::printf("\n%d checks, %d failures\n%s\n", g_checks, g_failures,
                 g_failures ? "FAIL" : "PASS");
+    dump_finish(g_failures ? 1 : 0);
     vk::Stream::shutdown();
     vk::Pipelines::get().shutdown();
     vk::VramPool::get().releaseAll();
