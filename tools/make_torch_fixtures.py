@@ -130,6 +130,17 @@ _zip("amp.pt", b"\x80\x02" + b"N" * 50_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
 # 3M `N`: under the pickle cap, over the object cap.
 _zip("many_objects.pt", b"\x80\x02" + b"N" * 3_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
 
+# Memo / stack amplification, none of it counted by the mk() object cap. Each is
+# ~30 MB of pickle (under the 32 MiB cap), a few KB deflated.
+# 6M MEMOIZE: each one a new distinct memo key, one std::map node apiece, 1 byte each
+# (LONG_BINPUT with distinct keys is the same defect at 5 bytes, but does not deflate).
+_zip("memo_keys.pt", b"\x80\x02N" + b"\x94" * 6_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
+# 15M BINGET of one memo entry: a stack slot each, no new object.
+_zip("binget_stack.pt", b"\x80\x02Nq\x00" + b"h\x00" * 15_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
+# 6M LONG_BINGET of one memo entry.
+_zip("long_binget_stack.pt", b"\x80\x02Nq\x00" + b"j\x00\x00\x00\x00" * 6_000_000 + b".",
+     {}, zipfile.ZIP_DEFLATED)
+
 
 # --table <romav2.0.1.pt>: one line per tensor, in file order, "name dtype shape
 # sum abs_sum" (shape x-joined, "-" for 0-d; sums in float64).

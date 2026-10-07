@@ -18,6 +18,11 @@ namespace {
 // (a 48 KB deflated pickle of `N` opcodes otherwise reaches 5.6 GB).
 constexpr uint64_t kMaxPickleBytes = 32ull << 20;
 constexpr uint64_t kMaxObjects = 250000;
+// Memo entries and stack slots are not mk() objects (BINGET re-pushes an existing
+// one, LONG_BINPUT mints a map node per distinct key), so they get their own
+// bound: 6M five-byte opcodes fit under the pickle cap and cost ~300 MB unbounded.
+constexpr uint64_t kMaxMemo = kMaxObjects;
+constexpr uint64_t kMaxStack = kMaxObjects;
 constexpr int      kMaxNesting = 64;
 constexpr uint64_t kMaxElems = 1ull << 48;
 constexpr size_t   kMaxDims = 16;
@@ -104,9 +109,9 @@ public:
                 case 0x8c: push(str(u8())); break;                   // SHORT_BINUNICODE
                 case 'T': push(str((size_t)le(4))); break;           // BINSTRING
                 case 'U': push(str(u8())); break;                    // SHORT_BINSTRING
-                case 'q': memo_[(uint64_t)u8()] = top(); break;      // BINPUT
-                case 'r': memo_[le(4)] = top(); break;               // LONG_BINPUT
-                case 0x94: memo_[memo_.size()] = top(); break;       // MEMOIZE
+                case 'q': put((uint64_t)u8()); break;                // BINPUT
+                case 'r': put(le(4)); break;                         // LONG_BINPUT
+                case 0x94: put(memo_.size()); break;                 // MEMOIZE
                 case 'h': push(memo_at(u8())); break;                // BINGET
                 case 'j': push(memo_at(le(4))); break;               // LONG_BINGET
                 case 'c': {                                          // GLOBAL
@@ -220,7 +225,18 @@ private:
         o->s = g;
         return o;
     }
-    void push(P o) { st_.push_back(std::move(o)); }
+    void push(P o) {
+        NN_CHECK(st_.size() < kMaxStack, "%s: the pickle stack grows past %llu entries (limit)",
+                 path_.c_str(), (unsigned long long)kMaxStack);
+        st_.push_back(std::move(o));
+    }
+    void put(uint64_t k) {
+        P o = top();
+        NN_CHECK(memo_.count(k) || memo_.size() < kMaxMemo,
+                 "%s: the pickle memoizes more than %llu entries (limit)", path_.c_str(),
+                 (unsigned long long)kMaxMemo);
+        memo_[k] = std::move(o);
+    }
     P top() {
         NN_CHECK(!st_.empty(), "%s: pickle stack underflow", path_.c_str());
         return st_.back();

@@ -54,6 +54,10 @@ const Case kCases[] = {
     {"deep.pt", "nests deeper", "2M nested tuples overflow the stack when freed"},
     {"amp.pt", "limit", "a 48 KB file allocates 5.6 GB"},
     {"many_objects.pt", "more than 250000 objects", "3M opcodes become 3M heap objects"},
+    // Memo/stack bounds: kept last, the aggregate RSS reading below stops before them.
+    {"memo_keys.pt", "memoizes more than 250000", "6M MEMOIZE opcodes become 6M std::map nodes"},
+    {"binget_stack.pt", "stack grows past 250000", "15M BINGET opcodes become 15M stack slots"},
+    {"long_binget_stack.pt", "stack grows past 250000", "6M LONG_BINGET opcodes become 6M stack slots"},
 };
 
 std::string refusal(const std::string& path) {
@@ -105,20 +109,32 @@ void test_swapped_after_open(const std::string& dir) {
 int main(int argc, char** argv) {   // argv[1]: run just that file
     const std::string dir = std::string(SS_REPO_ROOT) + "/src/nn/tests/data/hostile/";
     const long before = peak_rss_mib();
+    long grew_before_memo = 0;
     for (const Case& c : kCases) {
         if (argc > 1 && std::string(argv[1]) != c.file) continue;
+#if !defined(_WIN32) && !defined(SS_UNDER_ASAN)
+        const long rss0 = peak_rss_mib();
+        if (std::string(c.file) == "memo_keys.pt") grew_before_memo = rss0 - before;
+#endif
         const std::string m = refusal(dir + c.file);
+#if !defined(_WIN32) && !defined(SS_UNDER_ASAN)
+        const long grew_here = peak_rss_mib() - rss0;   // high-water mark: sees only a new peak
+#endif
         const bool ok = m.find(c.reason) != std::string::npos;
         check(ok, std::string(c.file) + ": refused as '" + c.reason + "'");
+#if !defined(_WIN32) && !defined(SS_UNDER_ASAN)
+        check(grew_here < 100, std::string(c.file) + ": peak RSS rose " +
+                                   std::to_string(grew_here) + " MiB while refusing (< 100)");
+#endif
         if (!ok) std::printf("     got: %s\n     (without the check: %s)\n", m.c_str(), c.defect);
     }
     if (argc == 1) test_swapped_after_open(dir);
     // The memory bound is the point of the three size cases; one peak reading
     // covers all of them, and the unbounded versions each run to GiB.
 #if !defined(_WIN32) && !defined(SS_UNDER_ASAN)
-    const long grew = peak_rss_mib() - before;
+    const long grew = grew_before_memo;   // the 14 original files; each new one is checked alone above
     if (argc == 1)
-        check(grew < 100, "peak RSS grew " + std::to_string(grew) + " MiB over all 14 files (< 100)");
+        check(grew < 100, "peak RSS grew " + std::to_string(grew) + " MiB over all " + std::string("14 original") + " files (< 100)");
 #endif
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "PASSED", g_failures,
                 g_failures == 1 ? "" : "s");
