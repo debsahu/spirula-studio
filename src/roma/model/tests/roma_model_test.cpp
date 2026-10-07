@@ -533,18 +533,22 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
     check(max_diff(hit.ab.warp, both.ab.warp) == 0 && max_diff(hit.ba.warp, both.ba.warp) == 0 &&
               max_diff(hit.ab.confidence, both.ab.confidence) == 0,
           "match_cache_hit_exact", "warp %.2e", max_diff(hit.ab.warp, both.ab.warp));
-    // BA of (A, B) is AB of (B, A) up to the transformer's token order, which
-    // reorders sums that the bf16 RoPE then rounds: read the median, and p99.
+    // BA of (A, B) is AB of (B, A) only up to token order, which the bf16 RoPE
+    // amplifies; upstream torch itself, BA-certain pixels, worst of 3 pairs:
+    // p50 0.022 px, p99 1.5 px (toronto). The mutants this catches: >= 1 px p50.
     std::vector<double> epe;
-    for (size_t i = 0; i + 1 < both.ba.warp.size() && swapped.ab.warp.size() == both.ba.warp.size(); i += 2)
-        epe.push_back(std::hypot(swapped.ab.warp[i] - both.ba.warp[i],
-                                 swapped.ab.warp[i + 1] - both.ba.warp[i + 1]) * size / 2);
+    if (swapped.ab.warp.size() == both.ba.warp.size())
+        for (size_t i = 0; i < (size_t)size * size; ++i)
+            if (both.ba.overlap(i) > 0.5f)
+                epe.push_back(std::hypot(swapped.ab.warp[2 * i] - both.ba.warp[2 * i],
+                                         swapped.ab.warp[2 * i + 1] - both.ba.warp[2 * i + 1]) *
+                              size / 2);
     std::sort(epe.begin(), epe.end());
-    const double p50 = epe.empty() ? 1e30 : epe[epe.size() / 2];
-    const double p99 = epe.empty() ? 1e30 : epe[epe.size() * 99 / 100];
-    check(p50 < 1e-2 && p99 < 0.5, "match_ba_is_swapped_ab",
-          "EPE p50 %.2e px, p99 %.2e px, max %.2e px (bars 1e-2, 0.5)", p50, p99,
-          epe.empty() ? 0.0 : epe.back());
+    const double p50 = epe.size() < 1000 ? 1e30 : epe[epe.size() / 2];
+    const double p99 = epe.size() < 1000 ? 1e30 : epe[epe.size() * 99 / 100];
+    check(p50 < 0.1 && p99 < 5.0, "match_ba_is_swapped_ab",
+          "over %zu BA-certain pixels (need 1000): EPE p50 %.2e px, p99 %.2e px, max %.2e px "
+          "(bars 0.1, 5)", epe.size(), p50, p99, epe.empty() ? 0.0 : epe.back());
     const double sep = max_diff(both.ab.warp, both.ba.warp);
     check(sep > 1e-2, "match_ba_discriminates", "AB vs BA differ by %.2e (must exceed 1e-2)",
           sep);
@@ -619,11 +623,6 @@ void bench(const std::string& ckpt, const std::string& a, const std::string& b,
         const MatchImage mb{"b", S, S, sb.data()};
         double cold = 0, warm = 0;
         Warp out;
-        // The first GEMMs of a process run before the submit budget is measured,
-        // and under the narrow tile they are not reproducible (WS-3 measurement):
-        // a dump is of the steady state, after one match.
-        if (dump_enabled())
-            (void)rm.match({"warm-up", S, S, sb.data()}, mb);
         for (int r = 0; r < repeat + 1; ++r) {
             // Pair 0 also builds pipelines and the arena: not timed.
             const std::string key = "a" + std::to_string(r);
