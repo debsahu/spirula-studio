@@ -35,6 +35,14 @@ public:
     uint64_t peakBytes() const;      // the arena's high water
     uint64_t weightBytes() const;
 
+    // Each stage of the last coarse() against its own plan, in arena bytes
+    // above what was live when it started.
+    struct Stage {
+        const char* name;
+        uint64_t peak, plan;
+    };
+    const std::vector<Stage>& stages() const;
+
 private:
     struct Impl;
     Impl* impl_;

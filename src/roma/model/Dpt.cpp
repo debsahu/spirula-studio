@@ -22,7 +22,7 @@ using nn::DType;
 using nn::Tensor;
 
 constexpr float kNormEps = 1e-5f;   // nn.LayerNorm's default
-constexpr uint64_t kSlack = 64ull << 20;
+constexpr uint64_t kSlack = 33ull << 20;   // the conv column chunk (nn/OpConv.cpp)
 const std::string kHead = "matcher.head.";
 
 void conv3x3(vk::Arena& arena, const Weights& w, const Tensor& out, const Tensor& in,

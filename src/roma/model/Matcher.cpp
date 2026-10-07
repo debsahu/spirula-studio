@@ -23,7 +23,8 @@ using nn::LinearOpts;
 using nn::Tensor;
 
 constexpr float kNormEps = 1e-6f;
-constexpr uint64_t kSlack = 64ull << 20;
+// Attention's split-K partials, <= 512*64/heads queries x width floats.
+constexpr uint64_t kAttnSlack = 10ull << 20;
 
 // torch.linspace(-1 + 1/n, 1 - 1/n, n) on the CPU: the first half steps up
 // from the start, the second half down from the end.
@@ -71,23 +72,24 @@ void CoarseMatcher::ensurePosEmbed(const Weights& w, int64_t h, int64_t wd) {
     pos_w_ = wd;
 }
 
-uint64_t CoarseMatcher::planBytes(const Weights& w, int64_t h, int64_t wd) {
+CoarseMatcher::Plan CoarseMatcher::plan(const Weights& w, int64_t h, int64_t wd) {
     const MatcherHparams& mp = w.matcher();
     const int64_t n = h * wd, T = 2 * n, E = mp.width;
     // mv is allocated first and lives through the transformer.
     const int64_t proj = T * mp.out + T * E + T * mp.in;
     const int64_t block = T * mp.out + T * E * 2 + std::max<int64_t>(T * 4 * E, T * mp.mlp);
-    // After the transformer: mv for both images, then normalized copies, the
-    // similarity, the match embedding and the head's input.
-    const int64_t sim = T * mp.out * 2 + n * n + 2 * n * mp.out;
-    const int64_t head = T * mp.out + n * mp.out;
-    const uint64_t dpt = dpt_plan_bytes(w, h, wd);
-    return std::max<uint64_t>({(uint64_t)std::max({proj, block, sim}) * 4 + kSlack,
-                               (uint64_t)head * 4 + dpt});
+    // Normalized copies, the similarity, the match embedding and the head's input.
+    const int64_t sim = 2 * n * mp.out + n * n + 2 * n * mp.out;
+    Plan p;
+    p.transformer = (uint64_t)std::max(proj, block) * 4 + kAttnSlack;
+    p.similarity = (uint64_t)sim * 4 + (1u << 20);
+    p.head = dpt_plan_bytes(w, h, wd);
+    return p;
 }
 
 void CoarseMatcher::run(const Weights& w, vk::Arena& arena, const Tensor taps_a[2],
-                        const Tensor taps_b[2], int64_t h, int64_t wd, const Tensor& out) {
+                        const Tensor taps_b[2], int64_t h, int64_t wd, const Tensor& out,
+                        StageLog& log) {
     const MatcherHparams& mp = w.matcher();
     const int64_t n = h * wd, T = 2 * n, E = mp.width, C = mp.in / 2, O = mp.out;
     const int hd = (int)(E / mp.heads);
@@ -96,9 +98,11 @@ void CoarseMatcher::run(const Weights& w, vk::Arena& arena, const Tensor taps_a[
     dump_tensor("rope_matcher", cs, {n, hd / 2, 2});
     ensurePosEmbed(w, h, wd);
 
+    const Plan pl = plan(w, h, wd);
     vk::ArenaScope scope(arena);
-    Tensor mv = nn::arena_tensor(arena, DType::F32, T, O);
-    {
+    Tensor mv;
+    log.run("matcher transformer", pl.transformer, [&] {
+        mv = nn::arena_tensor(arena, DType::F32, T, O);
         vk::ArenaScope tokens(arena);
         Tensor x = nn::arena_tensor(arena, DType::F32, T, E);
         {
@@ -166,13 +170,14 @@ void CoarseMatcher::run(const Weights& w, vk::Arena& arena, const Tensor taps_a[
         LinearOpts lo;
         lo.bias = w.get(p + "output_projector.bias");
         nn::linear(mv, xn, w.get(p + "output_projector.weight"), lo);
-    }
+    });
     const Tensor mv_a = mv.slice0(0, n), mv_b = mv.slice0(n, n);
     dump_tensor("mv_A", mv_a, {h, wd, O});
     dump_tensor("mv_B", mv_b, {h, wd, O});
 
-    Tensor head_x = nn::arena_tensor(arena, DType::F32, n, O);
-    {
+    Tensor head_x;
+    log.run("matcher similarity", pl.similarity, [&] {
+        head_x = nn::arena_tensor(arena, DType::F32, n, O);
         vk::ArenaScope s(arena);
         Tensor na = nn::arena_tensor(arena, DType::F32, n, O);
         Tensor nb = nn::arena_tensor(arena, DType::F32, n, O);
@@ -188,8 +193,8 @@ void CoarseMatcher::run(const Weights& w, vk::Arena& arena, const Tensor taps_a[
         dump_tensor("match_emb_AB", emb, {h, wd, O});
         nn::add(head_x, taps_a[1].view(n, O), mv_a);
         nn::add(head_x, head_x, emb);
-    }
-    dpt_head(w, arena, taps_a[0], head_x, h, wd, out);
+    });
+    log.run("dpt head", pl.head, [&] { dpt_head(w, arena, taps_a[0], head_x, h, wd, out); });
     dump_tensor("dpt_out_AB", out, {4 * h, 4 * wd, 3});
 }
 

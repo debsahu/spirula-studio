@@ -7,11 +7,39 @@
 // [h*w, C] row-major with h = H/16; the coarse output is [4h, 4w, 3] holding
 // the normalized warp (x, y) and the overlap logit.
 
+#include "roma/Roma.h"
 #include "roma/model/Weights.h"
 #include "nn/Tensor.h"
 #include "nn/vk/Memory.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace roma {
+
+// Each stage's arena peak above the head it started at, against its plan, so
+// a term that never binds the overall maximum is still checked.
+class StageLog {
+public:
+    explicit StageLog(vk::Arena& a) : arena_(a) {}
+    template <class F>
+    void run(const char* name, uint64_t plan, F&& f) {
+        const uint64_t base = arena_.mark();
+        overall_ = std::max<uint64_t>(overall_, arena_.highWater());
+        arena_.resetHighWater();
+        f();
+        stages_.push_back({name, arena_.highWater() - base, plan});
+        overall_ = std::max<uint64_t>(overall_, arena_.highWater());
+    }
+    void clear() { stages_.clear(); }
+    const std::vector<Model::Stage>& stages() const { return stages_; }
+    uint64_t overall() const { return std::max<uint64_t>(overall_, arena_.highWater()); }
+
+private:
+    vk::Arena& arena_;
+    std::vector<Model::Stage> stages_;
+    uint64_t overall_ = 0;
+};
 
 // A device RoPE table cached per token grid.
 class RopeTable {
@@ -53,8 +81,13 @@ class CoarseMatcher {
 public:
     ~CoarseMatcher();
     void run(const Weights& w, vk::Arena& arena, const nn::Tensor taps_a[2],
-             const nn::Tensor taps_b[2], int64_t h, int64_t wd, const nn::Tensor& out);
-    static uint64_t planBytes(const Weights& w, int64_t h, int64_t wd);
+             const nn::Tensor taps_b[2], int64_t h, int64_t wd, const nn::Tensor& out,
+             StageLog& log);
+    struct Plan {
+        uint64_t transformer = 0, similarity = 0, head = 0;
+        uint64_t total() const { return std::max({transformer, similarity, head}); }
+    };
+    static Plan plan(const Weights& w, int64_t h, int64_t wd);
 
 private:
     void ensurePosEmbed(const Weights& w, int64_t h, int64_t wd);

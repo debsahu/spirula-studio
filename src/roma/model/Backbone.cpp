@@ -27,7 +27,9 @@ using nn::LinearOpts;
 using nn::Tensor;
 
 constexpr float kNormEps = 1e-5f;   // DINOv3's "layernormbf16"
-constexpr uint64_t kSlack = 64ull << 20;   // the conv column chunk and attention partials
+// The patch conv's 32 MiB column chunk (nn/OpConv.cpp) or attention's split-K
+// partials (<= 512*64/heads queries x width floats, 8 MiB here), never both.
+constexpr uint64_t kSlack = 34ull << 20;
 
 }  // namespace
 

@@ -98,13 +98,15 @@ struct Model::Impl {
     CoarseMatcher matcher;
     vk::Arena     arena{"roma"};
     uint64_t      planned = 0;
+    StageLog      log{arena};
 };
 
 Model::Model() : impl_(new Impl) {}
 Model::~Model() { delete impl_; }
 bool Model::loaded() const { return impl_->w.loaded(); }
 uint64_t Model::plannedBytes() const { return impl_->planned; }
-uint64_t Model::peakBytes() const { return impl_->arena.highWater(); }
+uint64_t Model::peakBytes() const { return impl_->log.overall(); }
+const std::vector<Model::Stage>& Model::stages() const { return impl_->log.stages(); }
 uint64_t Model::weightBytes() const { return impl_->w.deviceBytes(); }
 
 void Model::load(const std::string& checkpoint) {
@@ -136,7 +138,7 @@ CoarseMatch Model::coarse(const float* a, const float* b, int H, int W) {
         vgg = (uint64_t)taps * 4 + FineFeatures::planBytes(w, H, W);
     }
     const uint64_t plan =
-        fixed + std::max({Backbone::planBytes(w, h, wd), CoarseMatcher::planBytes(w, h, wd), vgg});
+        fixed + std::max({Backbone::planBytes(w, h, wd), CoarseMatcher::plan(w, h, wd).total(), vgg});
     im.planned = std::max(im.planned, plan);
     im.arena.reserve(plan);
 
@@ -157,8 +159,11 @@ CoarseMatch Model::coarse(const float* a, const float* b, int H, int W) {
     }
     Tensor res = nn::arena_tensor(im.arena, DType::F32, 4 * h, 4 * wd, 3);
 
+    im.log.clear();
     for (int i = 0; i < 2; ++i) {
-        im.backbone.run(w, im.arena, img[i], taps[i][0], taps[i][1], h, wd);
+        im.log.run("backbone", Backbone::planBytes(w, h, wd), [&] {
+            im.backbone.run(w, im.arena, img[i], taps[i][0], taps[i][1], h, wd);
+        });
         const char* tag = i ? "B" : "A";
         dump_tensor((std::string("dino_tap11_") + tag).c_str(), taps[i][0], {h, wd, D});
         dump_tensor((std::string("dino_tap17_") + tag).c_str(), taps[i][1], {h, wd, D});
@@ -175,7 +180,8 @@ CoarseMatch Model::coarse(const float* a, const float* b, int H, int W) {
                     hh /= 2;
                     ww /= 2;
                 }
-            FineFeatures::run(w, im.arena, img[i], ft, H, W);
+            im.log.run("fine features", FineFeatures::planBytes(w, H, W),
+                     [&] { FineFeatures::run(w, im.arena, img[i], ft, H, W); });
             const int scale[3] = {1, 2, 4};
             for (int t = 0; t < 3; ++t) {
                 const std::string name =
@@ -184,7 +190,7 @@ CoarseMatch Model::coarse(const float* a, const float* b, int H, int W) {
             }
         }
     }
-    im.matcher.run(w, im.arena, taps[0], taps[1], h, wd, res);
+    im.matcher.run(w, im.arena, taps[0], taps[1], h, wd, res, im.log);
     nn::tensor_to_host(res, out.data.data(), (int64_t)out.data.size());
     return out;
 }

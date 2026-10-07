@@ -10,7 +10,7 @@
 namespace roma {
 namespace {
 
-constexpr uint64_t kSlack = 64ull << 20;   // the conv column chunk
+constexpr uint64_t kSlack = 33ull << 20;   // the conv column chunk (nn/OpConv.cpp)
 
 // Two ping-pong maps, each as large as the widest non-tap map; the taps are
 // the caller's.

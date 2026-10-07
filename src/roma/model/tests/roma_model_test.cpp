@@ -320,6 +320,11 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
     const uint64_t plan = m.plannedBytes(), peak = m.peakBytes();
     check(peak <= plan, "arena_within_plan", "%.1f MB used of %.1f MB planned (%.0f%%)",
           peak / 1e6, plan / 1e6, 100.0 * (double)peak / (double)plan);
+    // Per stage too: a term that never binds the overall maximum still has
+    // to be right, or the size where it does bind fails in the field.
+    for (const Model::Stage& st : m.stages())
+        check(st.peak <= st.plan, "stage_within_plan", "%s: %.1f of %.1f MB (%.0f%%)",
+              st.name, st.peak / 1e6, st.plan / 1e6, 100.0 * (double)st.peak / (double)st.plan);
     std::printf("  weights on device: %.2f GB\n", m.weightBytes() / 1e9);
 }
 
