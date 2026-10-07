@@ -182,14 +182,17 @@ int main() {
             sfm::progress::set_dir(progress.string());
         }
         {
-            roma::CloudPreview prev((d / "no-such-model").string());
-            bool threw = false;
+            bool threw = false, active = true;
+            int writes = -1;
             try {
+                roma::CloudPreview prev((d / "no-such-model").string());
                 prev.update(cloud(10), true);
+                active = prev.active();
+                writes = prev.writes();
             } catch (...) {
                 threw = true;
             }
-            check(!threw && !prev.active() && prev.writes() == 0, "never blocks: an unreadable model turns the preview off, quietly");
+            check(!threw && !active && writes == 0, "never blocks: an unreadable model turns the preview off, quietly");
         }
 
         // ---- never seen half written -----------------------------------------------

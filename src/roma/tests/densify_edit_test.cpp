@@ -162,6 +162,38 @@ int inChild(F&& fn) {
     waitpid(pid, &st, 0);
     return WIFEXITED(st) ? WEXITSTATUS(st) : 255;
 }
+
+// A child that takes the lock on `dir` and waits; die() lets it exit without releasing it.
+struct Holder {
+    pid_t pid = -1;
+    int ready[2], go[2];
+    explicit Holder(const std::string& dir) {
+        if (pipe(ready) || pipe(go)) throw std::runtime_error("pipe");
+        pid = fork();
+        if (pid == 0) {
+            try {
+                roma::WriterLock lk(dir);
+                char c = 1;
+                (void)!write(ready[1], &c, 1);
+                (void)!read(go[0], &c, 1);
+                _exit(0);
+            } catch (...) {
+                _exit(3);
+            }
+        }
+        char c;
+        (void)!read(ready[0], &c, 1);
+    }
+    void die() {
+        char c = 1;
+        (void)!write(go[1], &c, 1);
+        int st = 0;
+        waitpid(pid, &st, 0);
+    }
+    ~Holder() {
+        close(ready[0]); close(ready[1]); close(go[0]); close(go[1]);
+    }
+};
 #endif
 
 }  // namespace
@@ -273,19 +305,7 @@ int main() {
         {
             const std::string out = (f.dense.parent_path() / "0-roma-edit").string();
             const auto locked_before = tree(out);
-            int hold[2], release[2];
-            if (pipe(hold) || pipe(release)) throw std::runtime_error("pipe");
-            const pid_t holder = fork();
-            if (holder == 0) {
-                roma::WriterLock lk(out);
-                const char one = 1;
-                (void)!write(hold[1], &one, 1);
-                char c;
-                (void)!read(release[0], &c, 1);
-                _exit(0);
-            }
-            char c;
-            (void)!read(hold[0], &c, 1);
+            Holder h(out);
             long busy_pid = 0;
             try {
                 roma::writeEditedSibling(f.dense.string(), dropEvery(kPoints, 3), true);
@@ -293,7 +313,7 @@ int main() {
                 busy_pid = b.pid;
             } catch (const std::exception&) {
             }
-            check(busy_pid == (long)holder, "lock: a second writer of the edit is refused, naming the holder");
+            check(busy_pid == (long)h.pid, "lock: a second writer of the edit is refused, naming the holder");
             bool second = false;
             try {
                 roma::WriterLock again(out);
@@ -301,12 +321,9 @@ int main() {
                 second = true;
             }
             check(second, "lock: a second process cannot take the lock either");
-            check(roma::WriterLock::holder(out) == (long)holder, "lock: holder() reports the live pid");
+            check(roma::WriterLock::holder(out) == (long)h.pid, "lock: holder() reports the live pid");
             check(tree(out) == locked_before, "lock: the refused writer wrote nothing");
-            // Let the holder die without releasing: the file stays, the pid is dead.
-            (void)!write(release[1], &c, 1);
-            int st = 0;
-            waitpid(holder, &st, 0);
+            h.die();
             check(fs::exists(roma::WriterLock::pathOf(out)), "lock: a dead holder leaves its file behind");
             check(roma::WriterLock::holder(out) == 0, "lock: a dead holder's pid is not live");
             bool took = false;
@@ -318,7 +335,25 @@ int main() {
             }
             check(took, "lock: a dead holder's lock is taken over, and this process may take it twice");
             check(!fs::exists(roma::WriterLock::pathOf(out)), "lock: released when the last holder lets go");
-            close(hold[0]); close(hold[1]); close(release[0]); close(release[1]);
+        }
+        {
+            // `densify`'s own publish takes the same lock.
+            const auto dense_before = tree(f.dense);
+            roma::DensifyJob job;
+            job.model_dir = f.src.string();
+            const roma::DensifyPlan pl = roma::planDensify(job);
+            Holder h(f.dense.string());
+            long busy_pid = 0;
+            try {
+                roma::writeSibling(f.src.string(), f.dense.string(), pl, f.cloud, "{}\n");
+            } catch (const roma::WriterBusy& b) {
+                busy_pid = b.pid;
+            } catch (const std::exception&) {
+            }
+            check(busy_pid == (long)h.pid, "lock: writeSibling is refused while another process writes the folder");
+            check(tree(f.dense) == dense_before && !fs::exists(roma::partialDir(f.dense.string())),
+                  "lock: the refused writeSibling changed nothing and left no .partial");
+            h.die();
         }
 
         // ---- a crash inside publishing ----------------------------------------------
