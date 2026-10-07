@@ -92,7 +92,7 @@ void CoarseMatcher::run(const Weights& w, vk::Arena& arena, const Tensor taps_a[
     const int64_t n = h * wd, T = 2 * n, E = mp.width, C = mp.in / 2, O = mp.out;
     const int hd = (int)(E / mp.heads);
     const std::string p = "matcher.mv_vit.";
-    const Tensor& cs = rope_.get(w.matcherPeriods(), h, wd, true);
+    const Tensor& cs = rope_.get(w.matcherPeriods(), h, wd, matcher_rope_rounds());
     dump_tensor("rope_matcher", cs, {n, hd / 2, 2});
     ensurePosEmbed(w, h, wd);
 

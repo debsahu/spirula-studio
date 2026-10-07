@@ -14,6 +14,8 @@
 #include "nn/Ops.h"
 #include "nn/vk/Stream.h"
 
+#include "core/Env.h"
+
 #include <string>
 
 namespace roma {
@@ -135,6 +137,14 @@ void Backbone::run(const Weights& w, vk::Arena& arena, const Tensor& image,
     }
 }
 
+bool matcher_rope_rounds() {
+    static const bool f32 = [] {
+        const char* v = spirula::env("ROMA_ROPE_F32");
+        return v && v[0] && v[0] != '0';
+    }();
+    return !f32;
+}
+
 void rope_half_bf16(const Tensor& x, const Tensor& cs, int n_heads, int head_dim, int64_t n,
                     int batch, int64_t row_stride) {
     NN_CHECK(x.dtype == DType::F32 && (head_dim & 1) == 0, "rope_half_bf16: bad operands");
@@ -146,8 +156,8 @@ void rope_half_bf16(const Tensor& x, const Tensor& cs, int n_heads, int head_dim
     } p{x.ptr, cs.ptr, (uint32_t)n, (uint32_t)n_heads, (uint32_t)head_dim, (uint32_t)batch,
         (uint32_t)row_stride, 0};
     const int64_t total = (int64_t)batch * n * n_heads * (head_dim / 2);
-    vk::Stream::get().dispatchFlat("roma.rope_half_bf16", {}, total, 256, &p, sizeof(p),
-                                   &p.groups_per_row);
+    vk::Stream::get().dispatchFlat("roma.rope_half_bf16", {matcher_rope_rounds() ? 1u : 0u},
+                                   total, 256, &p, sizeof(p), &p.groups_per_row);
 }
 
 }  // namespace roma

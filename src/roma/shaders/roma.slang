@@ -6,6 +6,10 @@
 
 #include "_common.slang"
 
+// 0 runs the same rotation in fp32: SS_ROMA_ROPE_F32, a parity diagnostic
+// against compare_torch.py --ref rope32, never a production path.
+[SpecializationConstant] const int kRound = 1;
+
 static const int WG = 256;
 
 struct RopeBf16Params {
@@ -22,6 +26,7 @@ struct RopeBf16Params {
 // torch's float -> bfloat16, round to nearest even (c10::BFloat16). No NaN
 // case: a NaN here is already a failed parity run.
 float bf16(float f) {
+    if (kRound == 0) return f;
     uint u = asuint(f);
     u = (u + 0x7FFFu + ((u >> 16u) & 1u)) & 0xFFFF0000u;
     return asfloat(u);

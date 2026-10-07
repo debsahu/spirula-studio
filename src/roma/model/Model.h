@@ -70,6 +70,10 @@ void dpt_head(const Weights& w, vk::Arena& arena, const nn::Tensor& tap0,
               const nn::Tensor& x, int64_t h, int64_t wd, const nn::Tensor& out);
 uint64_t dpt_plan_bytes(const Weights& w, int64_t h, int64_t wd);
 
+// False under SS_ROMA_ROPE_F32=1, which runs the matcher's RoPE in fp32 to
+// match compare_torch.py --ref rope32: a diagnostic, not a model.
+bool matcher_rope_rounds();
+
 // The multi-view transformer's bf16 RoPE (shaders/roma.slang).
 void rope_half_bf16(const nn::Tensor& x, const nn::Tensor& cs, int n_heads, int head_dim,
                     int64_t n, int batch, int64_t row_stride);

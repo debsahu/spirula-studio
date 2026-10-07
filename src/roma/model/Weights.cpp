@@ -215,9 +215,9 @@ void Weights::load(const std::string& path) {
                  "'%s': omega is not [%lld, 2]", path.c_str(), (long long)(mt_.out / 2));
         mt_.pos_pairs = om[0];
 
-        plain(p + "projector.weight", true);
+        plain(p + "projector.weight");
         plain(p + "projector.bias");
-        plain(p + "output_projector.weight", true);
+        plain(p + "output_projector.weight");
         plain(p + "output_projector.bias");
         plain(p + "norm.weight");
         plain(p + "norm.bias");
@@ -232,7 +232,7 @@ void Weights::load(const std::string& path) {
                 plain(q + n);
             for (const char* n : {"attn.qkv.weight", "attn.proj.weight", "mlp.fc1.weight",
                                   "mlp.fc2.weight"})
-                plain(q + n, true);
+                plain(q + n);
         }
     }
 
@@ -399,7 +399,10 @@ void Weights::load(const std::string& path) {
                  path.c_str(), s.name.c_str(), data.size(), (long long)s.numel());
         if (s.f16) {
             h16.resize(data.size());
-            for (size_t k = 0; k < data.size(); ++k) h16[k] = nn::float_to_half(data[k]);
+            for (size_t k = 0; k < data.size(); ++k) {
+                h16[k] = nn::float_to_half(data[k]);
+                f16_inexact_ += nn::half_to_float(h16[k]) != data[k];
+            }
             vk::Stream::get().upload(ptr, h16.data(), s.bytes());
         } else {
             vk::Stream::get().upload(ptr, data.data(), s.bytes());

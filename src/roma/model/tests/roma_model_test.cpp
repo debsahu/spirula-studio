@@ -284,12 +284,21 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
               w.vgg().size(), taps);
         // The stored periods are 100 ** (2k / 32), rounded to bf16.
         const std::vector<float> want = periods16();
+        if (f16_weights()) {
+            // bf16 -> f16 is exact inside f16's normal range; 4.6e-4 of the
+            // backbone's values are below it (measured on romav2.0.1.pt).
+            const double frac = (double)w.inexactF16() / 303.2e6;
+            check(frac < 1e-3, "f16_inexact_bounded", "%llu backbone weights not exact in "
+                  "f16 (%.2e of them)", (unsigned long long)w.inexactF16(), frac);
+        }
         check(w.backbonePeriods() == want && w.matcherPeriods() == want, "hparams_periods",
               "both RoPE period tables are DINOv3's");
     }
 
     Model m;
     m.load(ckpt);
+    std::printf("  pair: %s | %s at %d\n", a.empty() ? "(synthetic)" : a.c_str(),
+                b.empty() ? "(synthetic)" : b.c_str(), size);
     const std::vector<float> A = a.empty() ? synthetic(size, 0) : load_rgb(a, size);
     const std::vector<float> B = b.empty() ? synthetic(size, 13) : load_rgb(b, size);
     CoarseMatch cm;
