@@ -197,36 +197,34 @@ void window_unpartition(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID,
 // ---------------------------------------------------------------------------
 
 struct ConvTScatterParams {
-    float* out;     // [2*Hi, 2*Wi, Co]
-    uint*  packed;  // [Hi, Wi, Co*4] -- the GEMM's output
+    float* out;     // [k*Hi, k*Wi, Co]
+    uint*  packed;  // [Hi, Wi, Co*k*k] -- the GEMM's output
     uint*  bias;    // [Co] f32 (never null)
     uint   Hi;
     uint   Wi;
     uint   Co;
     uint   groups_per_row;
-    uint   _pad0;
+    uint   k;       // kernel == stride: 2 or 4
 };
 
-// ConvTranspose2d(k=2, s=2) is a GEMM followed by a shuffle: each input pixel
-// produces one 2x2 output block, and the four kernel taps are just four output
-// channel groups. OpConv.cpp repacks the [Cin, Cout, 2, 2] weight into a
-// [Cout*4, Cin] matrix at load time, runs the tuned GEMM, and this kernel
-// scatters. That is worth more than a bespoke deconv: the neck's two deconvs
-// are 22 GFLOP, and they get the same tiling as everything else.
+// ConvTranspose2d(kernel == stride == k): the k*k taps are k*k output-channel
+// groups of one GEMM (OpConv.cpp repacks the weight to [Cout*k*k, Cin]); this
+// kernel scatters its [Hi*Wi, Cout*k*k] result into the kxk blocks.
 [shader("compute")]
 [numthreads(WG, 1, 1)]
 void convt_scatter(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID,
                    uniform ConvTScatterParams p) {
     uint i = fold_index(gid, tid, p.groups_per_row, uint(WG));
-    uint Ho = p.Hi * 2u, Wo = p.Wi * 2u;
+    uint Ho = p.Hi * p.k, Wo = p.Wi * p.k;
     if (i >= Ho * Wo * p.Co) return;
     uint co = i % p.Co;
     uint rest = i / p.Co;
     uint xo = rest % Wo;
     uint yo = rest / Wo;
-    uint y = yo >> 1, sy = yo & 1u;
-    uint x = xo >> 1, sx = xo & 1u;
-    uint src = (y * p.Wi + x) * (p.Co * 4u) + co * 4u + sy * 2u + sx;
+    uint y = yo / p.k, sy = yo % p.k;
+    uint x = xo / p.k, sx = xo % p.k;
+    uint kk = p.k * p.k;
+    uint src = (y * p.Wi + x) * (p.Co * kk) + co * kk + sy * p.k + sx;
     float v = load_at(p.packed, src, kInputF16 != 0) + asfloat(p.bias[co]);
     store_at(p.out, i, apply_act(v, kAct));
 }

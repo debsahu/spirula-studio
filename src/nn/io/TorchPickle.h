@@ -5,8 +5,9 @@
 // straight out of its zip entry. Same surface as SafetensorsFile.
 //
 // Refuses anything it does not understand (an unknown opcode or class, a
-// non-contiguous tensor, a compressed storage) rather than guessing; it never
-// executes pickled code, so an arbitrary .pt cannot run anything here.
+// non-contiguous tensor) rather than guessing; it never executes pickled code,
+// so an arbitrary .pt cannot run anything here. The pickle's only imports are
+// the handful torch.save writes for a state dict.
 
 #include "nn/io/Onnx.h"
 

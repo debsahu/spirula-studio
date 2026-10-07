@@ -14696,6 +14696,156 @@ SS_MSG(license_birefnet_summary,
     TR("BiRefNet (Peng Zheng ve ark.) MIT lisansıyla yayımlanır. Onaylanacak olağandışı "
        "bir şey yok; uygulama küçük kalsın diye birlikte gelmez, indirilir."));
 
+// LEGAL -- human review in every language. The DINOv3 summary states only what
+// the Agreement says; it adds no term and drops none.
+SS_MSG(license_dinov3_title,
+    EN("DINOv3 License Agreement (Meta)"),
+    JA("DINOv3 ライセンス契約（Meta）"),
+    ZH_HANS("DINOv3 许可协议（Meta）"),
+    ZH_HANT("DINOv3 授權協議（Meta）"),
+    KO("DINOv3 라이선스 계약(Meta)"),
+    DE("DINOv3-Lizenzvereinbarung (Meta)"),
+    FR("Contrat de licence DINOv3 (Meta)"),
+    ES("Acuerdo de licencia de DINOv3 (Meta)"),
+    PT("Contrato de licença do DINOv3 (Meta)"),
+    IT("Accordo di licenza DINOv3 (Meta)"),
+    NL("DINOv3-licentieovereenkomst (Meta)"),
+    RU("Лицензионное соглашение DINOv3 (Meta)"),
+    TR("DINOv3 Lisans Sözleşmesi (Meta)"));
+
+SS_MSG(license_dinov3_summary,
+    EN("The RoMa v2 file contains Meta's DINOv3 model weights. They are Meta's, "
+       "not part of Spirula Studio, and come with Meta's DINOv3 License "
+       "Agreement, shown in full below. Please read it: accepting it here means "
+       "you agree to be bound by it. The file is downloaded from the RoMa v2 "
+       "authors' release; it is never bundled with the app."),
+    JA("RoMa v2 のファイルには、Meta の DINOv3 モデルの重みが含まれています。"
+       "これは Meta のものであり Spirula Studio の一部ではなく、Meta の DINOv3 "
+       "ライセンス契約が適用されます。契約の全文を下に表示しますので、お読みください。"
+       "ここで同意すると、この契約に拘束されることに同意したことになります。"
+       "ファイルは RoMa v2 の作者のリリースからダウンロードされ、アプリに同梱される"
+       "ことはありません。"),
+    ZH_HANS("RoMa v2 的文件包含 Meta 的 DINOv3 模型权重。它们属于 Meta，不属于 "
+            "Spirula Studio，并适用 Meta 的 DINOv3 许可协议，协议全文显示在下方。"
+            "请阅读：在此接受即表示你同意受其约束。该文件从 RoMa v2 作者的发布页下载，"
+            "不会随应用一起打包。"),
+    ZH_HANT("RoMa v2 的檔案包含 Meta 的 DINOv3 模型權重。它們屬於 Meta，不屬於 "
+            "Spirula Studio，並適用 Meta 的 DINOv3 授權協議，協議全文顯示在下方。"
+            "請閱讀：在此接受即表示你同意受其約束。該檔案從 RoMa v2 作者的發布頁下載，"
+            "不會隨應用程式一起打包。"),
+    KO("RoMa v2 파일에는 Meta의 DINOv3 모델 가중치가 들어 있습니다. 이는 Meta의 "
+       "것이며 Spirula Studio의 일부가 아니고, 아래에 전문을 표시한 Meta의 DINOv3 "
+       "라이선스 계약이 적용됩니다. 읽어 보세요. 여기서 동의하면 이 계약에 구속되는 "
+       "데 동의하는 것입니다. 파일은 RoMa v2 저자의 릴리스에서 내려받으며 앱에 "
+       "포함되어 배포되지 않습니다."),
+    DE("Die RoMa-v2-Datei enthält die DINOv3-Modellgewichte von Meta. Sie gehören "
+       "Meta, sind nicht Teil von Spirula Studio und unterliegen Metas DINOv3 "
+       "License Agreement, das unten vollständig angezeigt wird. Bitte lesen Sie "
+       "es: Mit der Annahme hier erklären Sie sich daran gebunden. Die Datei wird "
+       "aus dem Release der RoMa-v2-Autoren heruntergeladen und nie mit der "
+       "Anwendung mitgeliefert."),
+    FR("Le fichier RoMa v2 contient les poids du modèle DINOv3 de Meta. Ils "
+       "appartiennent à Meta, ne font pas partie de Spirula Studio et sont soumis "
+       "au DINOv3 License Agreement de Meta, affiché en entier ci-dessous. Lisez-le "
+       ": l'accepter ici signifie que vous acceptez d'être lié par ses termes. Le "
+       "fichier est téléchargé depuis la publication des auteurs de RoMa v2 ; il "
+       "n'est jamais fourni avec l'application."),
+    ES("El archivo de RoMa v2 contiene los pesos del modelo DINOv3 de Meta. Son de "
+       "Meta, no forman parte de Spirula Studio y se rigen por el DINOv3 License "
+       "Agreement de Meta, que se muestra completo abajo. Léelo: al aceptarlo aquí "
+       "aceptas quedar obligado por él. El archivo se descarga de la publicación de "
+       "los autores de RoMa v2; nunca se incluye con la aplicación."),
+    PT("O arquivo do RoMa v2 contém os pesos do modelo DINOv3 da Meta. Eles "
+       "pertencem à Meta, não fazem parte do Spirula Studio e estão sujeitos ao "
+       "DINOv3 License Agreement da Meta, exibido por inteiro abaixo. Leia-o: ao "
+       "aceitá-lo aqui, você concorda em ficar vinculado a ele. O arquivo é baixado "
+       "da release dos autores do RoMa v2 e nunca é incluído no aplicativo."),
+    IT("Il file di RoMa v2 contiene i pesi del modello DINOv3 di Meta. Sono di "
+       "Meta, non fanno parte di Spirula Studio e sono soggetti al DINOv3 License "
+       "Agreement di Meta, mostrato per intero qui sotto. Leggilo: accettandolo qui "
+       "accetti di esserne vincolato. Il file viene scaricato dalla release degli "
+       "autori di RoMa v2 e non viene mai incluso nell'app."),
+    NL("Het RoMa v2-bestand bevat de DINOv3-modelgewichten van Meta. Die zijn van "
+       "Meta, maken geen deel uit van Spirula Studio en vallen onder Meta's DINOv3 "
+       "License Agreement, hieronder volledig weergegeven. Lees het: door het hier "
+       "te aanvaarden stem je ermee in eraan gebonden te zijn. Het bestand wordt "
+       "gedownload van de release van de auteurs van RoMa v2 en wordt nooit met de "
+       "app meegeleverd."),
+    RU("Файл RoMa v2 содержит веса модели DINOv3 от Meta. Они принадлежат Meta, не "
+       "входят в Spirula Studio и распространяются на условиях Meta DINOv3 License "
+       "Agreement, полный текст которого показан ниже. Прочитайте его: приняв его "
+       "здесь, вы соглашаетесь быть связанным его условиями. Файл загружается из "
+       "релиза авторов RoMa v2 и никогда не поставляется вместе с приложением."),
+    TR("RoMa v2 dosyası, Meta'nın DINOv3 model ağırlıklarını içerir. Bunlar Meta'ya "
+       "aittir, Spirula Studio'nun parçası değildir ve tam metni aşağıda gösterilen "
+       "Meta'nın DINOv3 License Agreement'ına tabidir. Lütfen okuyun: burada kabul "
+       "etmeniz, onunla bağlı olmayı kabul ettiğiniz anlamına gelir. Dosya, RoMa v2 "
+       "yazarlarının sürümünden indirilir; uygulamayla birlikte asla dağıtılmaz."));
+
+SS_MSG(license_romav2_title,
+    EN("RoMa v2 licence (MIT)"),
+    JA("RoMa v2 のライセンス（MIT）"),
+    ZH_HANS("RoMa v2 许可协议（MIT）"),
+    ZH_HANT("RoMa v2 授權條款（MIT）"),
+    KO("RoMa v2 라이선스(MIT)"),
+    DE("Lizenz von RoMa v2 (MIT)"),
+    FR("Licence de RoMa v2 (MIT)"),
+    ES("Licencia de RoMa v2 (MIT)"),
+    PT("Licença do RoMa v2 (MIT)"),
+    IT("Licenza di RoMa v2 (MIT)"),
+    NL("Licentie van RoMa v2 (MIT)"),
+    RU("Лицензия RoMa v2 (MIT)"),
+    TR("RoMa v2 lisansı (MIT)"));
+
+SS_MSG(license_romav2_summary,
+    EN("RoMa v2 (Johan Edstedt) is released under the MIT licence, shown in full "
+       "below. Nothing unusual to agree to. The model file is downloaded from its "
+       "authors' release rather than bundled with the app."),
+    JA("RoMa v2（Johan Edstedt）は MIT ライセンスで公開されています。全文を下に"
+       "表示します。特別に同意が必要なことはありません。モデルのファイルは、アプリに"
+       "同梱せず、作者のリリースからダウンロードします。"),
+    ZH_HANS("RoMa v2（Johan Edstedt）以 MIT 许可协议发布，全文显示在下方。没有什么"
+            "特别需要同意的。模型文件从作者的发布页下载，而不是随应用打包。"),
+    ZH_HANT("RoMa v2（Johan Edstedt）以 MIT 授權條款發布，全文顯示在下方。沒有什麼"
+            "特別需要同意的。模型檔案從作者的發布頁下載，而不是隨應用程式打包。"),
+    KO("RoMa v2(Johan Edstedt)는 MIT 라이선스로 공개되어 있으며 전문은 아래에 "
+       "표시됩니다. 특별히 동의할 것은 없습니다. 모델 파일은 앱에 포함하지 않고 "
+       "저자의 릴리스에서 내려받습니다."),
+    DE("RoMa v2 (Johan Edstedt) steht unter der MIT-Lizenz, unten vollständig "
+       "angezeigt. Es ist nichts Ungewöhnliches zuzustimmen. Die Modelldatei wird "
+       "aus dem Release der Autoren heruntergeladen und nicht mit der Anwendung "
+       "mitgeliefert."),
+    FR("RoMa v2 (Johan Edstedt) est publié sous licence MIT, affichée en entier "
+       "ci-dessous. Rien d'inhabituel à accepter. Le fichier du modèle est "
+       "téléchargé depuis la publication de ses auteurs et n'est pas fourni avec "
+       "l'application."),
+    ES("RoMa v2 (Johan Edstedt) se publica bajo la licencia MIT, que se muestra "
+       "completa abajo. No hay nada inusual que aceptar. El archivo del modelo se "
+       "descarga de la publicación de sus autores y no se incluye con la "
+       "aplicación."),
+    PT("O RoMa v2 (Johan Edstedt) é publicado sob a licença MIT, exibida por inteiro "
+       "abaixo. Não há nada incomum a aceitar. O arquivo do modelo é baixado da "
+       "release dos autores e não é incluído no aplicativo."),
+    IT("RoMa v2 (Johan Edstedt) è pubblicato con licenza MIT, mostrata per intero "
+       "qui sotto. Non c'è nulla di insolito da accettare. Il file del modello "
+       "viene scaricato dalla release dei suoi autori e non è incluso nell'app."),
+    NL("RoMa v2 (Johan Edstedt) is uitgebracht onder de MIT-licentie, hieronder "
+       "volledig weergegeven. Er is niets ongewoons om mee in te stemmen. Het "
+       "modelbestand wordt gedownload van de release van de auteurs en niet met de "
+       "app meegeleverd."),
+    RU("RoMa v2 (Johan Edstedt) выпущен под лицензией MIT, полный текст которой "
+       "показан ниже. Ничего необычного принимать не нужно. Файл модели загружается "
+       "из релиза его авторов и не поставляется вместе с приложением."),
+    TR("RoMa v2 (Johan Edstedt) MIT lisansıyla yayımlanmıştır; tam metni aşağıda "
+       "gösterilir. Kabul edilecek olağandışı bir şey yok. Model dosyası, "
+       "uygulamayla birlikte verilmek yerine yazarlarının sürümünden indirilir."));
+
+SS_MSG(license_full_text,
+    EN("Full text"), JA("全文"), ZH_HANS("全文"), ZH_HANT("全文"), KO("전문"),
+    DE("Vollständiger Text"), FR("Texte intégral"), ES("Texto completo"),
+    PT("Texto completo"), IT("Testo completo"), NL("Volledige tekst"),
+    RU("Полный текст"), TR("Tam metin"));
+
 SS_MSG(mask_subject_note,
     EN("This model finds the main subject of each frame by itself: no prompt and no "
        "clicks are needed."),
