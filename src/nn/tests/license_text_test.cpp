@@ -1,7 +1,7 @@
 // The licence summaries and titles, in all 13 languages, carry no restriction the
 // licences do not: no commercial-use, non-commercial or redistribution wording
 // (Spirula redistributes no weights). A catalog edit that adds one fails here by
-// language and message. The RoMa v2 file's families are scanned in roma_license_test.
+// language and message. A model with licences of its own scans its families beside it.
 
 #include "i18n/Message.h"
 #include "nn/tests/license_wording.h"

@@ -32,8 +32,8 @@ struct FetchFile {
     // loaded (core/LicenseConsent.h): one family or a comma list; null for none.
     const char* license_family = nullptr;
     // True when even a verified cached copy may not be LOADED until the licence is
-    // accepted (the RoMa v2 file). False: only the download is gated, so a copy
-    // cached before consent was recorded keeps working.
+    // accepted. False: only the download is gated, so a copy cached before consent
+    // was recorded keeps working.
     bool license_gates_load = false;
     // True for a file that must come from `url` alone: re-hosting it would be
     // distributing it.

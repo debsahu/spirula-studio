@@ -353,7 +353,7 @@ void test_terms_shown() {
 
 void test_argv() {
     reset_dirs();
-    std::vector<std::string> store = {"spirula", "densify", "--accept-license", "sam3=yes",
+    std::vector<std::string> store = {"spirula", "sam", "--accept-license", "sam3=yes",
                                       "ds", "--accept-license=birefnet=yes", "--preset", "base"};
     std::vector<char*> argv;
     for (auto& s : store) argv.push_back(s.data());
@@ -361,7 +361,7 @@ void test_argv() {
     int argc = (int)store.size();
     const int n = app::consume_accept_license_args(argc, argv.data());
     check(n == 2 && argc == 5, "both spellings are found and removed from argv");
-    check(std::string(argv[1]) == "densify" && std::string(argv[2]) == "ds" &&
+    check(std::string(argv[1]) == "sam" && std::string(argv[2]) == "ds" &&
               std::string(argv[3]) == "--preset" && std::string(argv[4]) == "base",
           "every other argument keeps its order");
     check(lic::accepted("sam3") && lic::accepted("birefnet"), "and both were recorded");

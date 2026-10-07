@@ -1,7 +1,7 @@
 // nn::TorchCheckpoint against torch.save files written by real torch
 // (tools/make_torch_fixtures.py): the 2-tensor fixture, the awkward shapes of
-// a real state dict, and the refusals. A real checkpoint is read by
-// roma_checkpoint_test.
+// a real state dict, and the refusals. A model's real checkpoint is read by a
+// test beside the model.
 
 #include "nn/core/Error.h"
 #include "nn/io/TorchPickle.h"

@@ -14766,7 +14766,7 @@ SS_MSG(license_not_saved,
     TR("Kabulünüz {0} dosyasına kaydedilemedi, bu yüzden lisans kabul edilmiş "
        "sayılmaz."));
 
-// {0} is the licence family, e.g. "dinov3".
+// {0} is the licence family, e.g. "sam3".
 SS_MSG(license_not_accepted_download,
     EN("The {0} licence has not been accepted, so nothing was downloaded."),
     JA("{0} のライセンスに同意していないため、何もダウンロードしていません。"),
