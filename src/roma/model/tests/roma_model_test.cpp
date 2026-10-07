@@ -607,18 +607,28 @@ void bench(const std::string& ckpt, const std::string& a, const std::string& b,
         }
         RomaMatcher rm(ckpt, pr);
         const bool both = spirula::env("ROMA_BENCH_BOTH") != nullptr;
-        const MatchImage mb{"b", ib.width, ib.height, ib.data.data()};
+        // Densify hands over squares at inputSize(); resample once, untimed.
+        const int S = rm.inputSize();
+        auto square = [S](const nn::Image& im) {
+            const std::vector<float> f = resize_rgb(im.data.data(), im.width, im.height, S, S);
+            std::vector<uint8_t> q(f.size());
+            for (size_t i = 0; i < f.size(); ++i)
+                q[i] = (uint8_t)std::lround(std::min(1.0f, std::max(0.0f, f[i])) * 255.0f);
+            return q;
+        };
+        const std::vector<uint8_t> sa = square(ia), sb = square(ib);
+        const MatchImage mb{"b", S, S, sb.data()};
         double cold = 0, warm = 0;
         Warp out;
         // The first GEMMs of a process run before the submit budget is measured,
         // and under the narrow tile they are not reproducible (WS-3 measurement):
         // a dump is of the steady state, after one match.
         if (dump_enabled())
-            (void)rm.match({"warm-up", ib.width, ib.height, ib.data.data()}, mb);
+            (void)rm.match({"warm-up", S, S, sb.data()}, mb);
         for (int r = 0; r < repeat + 1; ++r) {
             // Pair 0 also builds pipelines and the arena: not timed.
             const std::string key = "a" + std::to_string(r);
-            const MatchImage ma{key, ia.width, ia.height, ia.data.data()};
+            const MatchImage ma{key, S, S, sa.data()};
             vk::Stream::get().sync();
             double t0 = nn::now_ms();
             out = both ? rm.matchBoth(ma, mb).first : rm.match(ma, mb);
