@@ -31,7 +31,12 @@ public:
         stages_.push_back({name, arena_.highWater() - base, plan});
         overall_ = std::max<uint64_t>(overall_, arena_.highWater());
     }
-    void clear() { stages_.clear(); }
+    // Starts a call: the previous one's stages, and its peak.
+    void clear() {
+        stages_.clear();
+        overall_ = 0;
+        arena_.resetHighWater();
+    }
     const std::vector<Model::Stage>& stages() const { return stages_; }
     uint64_t overall() const { return std::max<uint64_t>(overall_, arena_.highWater()); }
 
