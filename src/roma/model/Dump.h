@@ -7,6 +7,7 @@
 
 #include "nn/Tensor.h"
 
+#include <string>
 #include <vector>
 
 namespace roma {
@@ -16,6 +17,10 @@ namespace roma {
 bool dump_enabled();
 void dump_tensor(const char* name, const nn::Tensor& t, const std::vector<int64_t>& shape);
 void dump_host(const char* name, const float* data, const std::vector<int64_t>& shape);
+// Adds "key": "value" to the manifest's notes (quote-free values: a digest, a
+// preset name). The manifest always carries f16_weights, rope_rounds and
+// local_corr_fused; what only a caller can know goes here.
+void dump_note(const char* key, const std::string& value);
 // Marks the manifest finished with the process's exit status. A run that
 // never calls it reads as unfinished, which compare_torch.py refuses.
 void dump_finish(int exit_status);

@@ -1,18 +1,17 @@
-// WS-6 evaluation tool, not a unit test: run the native RomaMatcher over the pairs
+// Evaluation tool, not a test: run the native RomaMatcher over the pairs
 // `spirula densify --export-pairs` wrote and store each warp as float32 .rwm
-// (encoding 0), so tools can compare it with what PyTorch dumped for the same
-// bytes (reference/python/roma_dump_matches.py).
+// (encoding 0), for comparison with PyTorch's dump of the same bytes.
 //
 //   roma_match_pairs <export_dir> <out_dir> [--preset base] [--checkpoint PATH]
-//                    [--every N] [--limit N] [--shuffle-seed S] [--csv FILE]
+//       [--every N] [--limit N] [--shuffle-seed S] [--csv FILE] [--resume]
 //
-// <export_dir>/pairs.txt: one "A B" per line; <export_dir>/views/<name>.png the
-// 640 px masked views densify hands the matcher. Output <out_dir>/<A>__<B>.rwm.
-// Pairs are matched in file order (A's features stay cached by name), unless
-// --shuffle-seed is given, which picks a random subset of --limit pairs and
-// processes it sorted by A.
+// <export_dir>/pairs.txt: one "A B" per line; views/<name>.png the 640 px masked
+// views. Output <out_dir>/<A>__<B>.rwm plus run.json (preset, checkpoint SHA-256,
+// model source digest): a rerun into a directory whose run.json differs is refused
+// unless --resume says to keep its warps.
 
 #include "roma/Roma.h"
+#include "roma/RomaIdentity.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/RomaMatcher.h"
 
@@ -28,6 +27,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <random>
 #include <sstream>
@@ -73,6 +73,7 @@ int main(int argc, char** argv) {
     std::string exp, out, ckpt, preset = "base", csv;
     long every = 1, limit = 0;
     long long shuffle_seed = -1;
+    bool resume = false;
     int pos = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string s = argv[i];
@@ -83,12 +84,13 @@ int main(int argc, char** argv) {
         else if (s == "--limit") limit = std::atol(next().c_str());
         else if (s == "--shuffle-seed") shuffle_seed = std::atoll(next().c_str());
         else if (s == "--csv") csv = next();
+        else if (s == "--resume") resume = true;
         else if (!s.empty() && s[0] == '-') { std::fprintf(stderr, "unknown %s\n", s.c_str()); return 2; }
         else if (pos == 0) { exp = s; pos++; }
         else if (pos == 1) { out = s; pos++; }
     }
     if (exp.empty() || out.empty() || every < 1) {
-        std::fprintf(stderr, "usage: roma_match_pairs <export_dir> <out_dir> [--preset p]\n");
+        std::fprintf(stderr, "usage: roma_match_pairs <export_dir> <out_dir> [--preset p] [--checkpoint f] [--resume]\n");
         return 2;
     }
     try {
@@ -124,6 +126,30 @@ int main(int argc, char** argv) {
         }
         fs::create_directories(out);
 
+        // The warps already in <out_dir> came from some run; keep them only if it was this one.
+        const std::string identity = "{\"preset\": \"" + preset + "\", \"checkpoint_sha256\": \"" +
+                                     nn::sha256_file(ckpt) + "\", \"model_digest\": \"" +
+                                     roma::modelSourceDigest() + "\"}\n";
+        const fs::path run_json = fs::path(out) / "run.json";
+        {
+            std::ifstream f(run_json);
+            const std::string old((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            bool has_warps = false;
+            for (const auto& e : fs::directory_iterator(out))
+                has_warps = has_warps || e.path().extension() == ".rwm";
+            if (!old.empty() && old != identity && !resume)
+                throw std::runtime_error("refusing to resume into " + out + ": run.json is from a different run\n  was " +
+                                         old + "  now " + identity + "pass --resume to keep those warps anyway");
+            if (old.empty() && has_warps && !resume)
+                throw std::runtime_error("refusing to resume into " + out +
+                                         ": it holds warps but no run.json; pass --resume to keep them");
+            if (old.empty()) {
+                std::ofstream w(run_json, std::ios::trunc);
+                w << identity;
+                if (!w) throw std::runtime_error("cannot write " + run_json.string());
+            }
+        }
+
         roma::RomaMatcher rm(ckpt, pr);
         const int S = rm.inputSize();
         std::printf("preset %s input %d, %zu pairs, checkpoint %s\n", preset.c_str(), S,
@@ -148,7 +174,6 @@ int main(int argc, char** argv) {
         const auto t0 = std::chrono::steady_clock::now();
         double peak = 0, sum_s = 0;
         size_t done = 0, skipped = 0;
-        std::string last_a;
         for (const auto& [a, b] : pairs) {
             const fs::path dst = fs::path(out) / (a + "__" + b + ".rwm");
             if (fs::exists(dst)) { ++skipped; continue; }
@@ -173,7 +198,6 @@ int main(int argc, char** argv) {
             if (done % 50 == 0 || done == 1)
                 std::printf("%zu/%zu pairs, %.2f s/pair, footprint %.0f MB\n", done, pairs.size(),
                             sum_s / (double)done, fp);
-            last_a = a;
         }
         const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         std::printf("done: %zu matched, %zu already present, wall %.0f s, matcher %.3f s/pair, peak footprint %.0f MB\n",

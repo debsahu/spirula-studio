@@ -1,16 +1,29 @@
 // RoMa v2's host-side conversions, with no checkpoint and no GPU: the
 // resize RoMaV2.match() applies, the RoPE tables on a non-square grid, and the
 // load-time qkv bias fold and row permutation. Each case names the mistake it
-// catches; the goldens are torch 2.14.1 on the same bytes.
+// catches; the goldens are torch 2.14.1 on the same bytes
+// (tools/roma/make_unit_goldens.py regenerates them).
 
 #include "roma/Roma.h"
+#include "roma/model/Dump.h"
 #include "roma/model/Rope.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
+
+#ifdef _WIN32
+#define SS_SETENV(k, v) _putenv_s(k, v)
+#else
+#define SS_SETENV(k, v) setenv(k, v, 1)
+#endif
 
 using namespace roma;
 
@@ -29,8 +42,7 @@ void check(bool ok, const char* name, const char* fmt, ...) {
     if (!ok) ++g_failures;
 }
 
-// The bytes the goldens were made from; tools/roma/compare_torch.py has nothing
-// to do with them.
+// The bytes the goldens were made from.
 std::vector<uint8_t> lcg(size_t n, uint32_t seed) {
     std::vector<uint8_t> v(n);
     uint32_t x = seed;
@@ -122,9 +134,40 @@ void test_qkv_fold() {
     check(rows_ok, "qkv_row_permutation", "q and k rows permuted per head, v rows untouched");
 }
 
+// A dump directory is cleaned of the files its last manifest lists, and of
+// nothing else. Catches: sweeping every .npy in a directory the user pointed at.
+void test_dump_dir_cleanup() {
+    std::printf("\ndump directory cleanup\n");
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "roma_dump_unit_test";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    auto touch = [&](const char* name, const char* text) { std::ofstream(dir / name) << text; };
+    touch("listed.npy", "x");
+    touch("listed.1.npy", "x");
+    touch("unrelated.npy", "x");
+    touch("notes.txt", "x");
+    touch("manifest.json",
+          "{\"nonce\": \"n\", \"finished\": true, \"exit_status\": 0, \"files\": [\"listed\", \"listed.1\"]}\n");
+    SS_SETENV("SS_ROMA_DUMP", dir.string().c_str());
+    const bool on = dump_enabled();
+    check(on, "dump_enabled", "SS_ROMA_DUMP set");
+    check(!fs::exists(dir / "listed.npy") && !fs::exists(dir / "listed.1.npy"), "dump_listed_removed",
+          "files the old manifest named are gone");
+    check(fs::exists(dir / "unrelated.npy") && fs::exists(dir / "notes.txt"), "dump_unlisted_kept",
+          "files it did not name are untouched");
+    std::ifstream m(dir / "manifest.json");
+    const std::string fresh((std::istreambuf_iterator<char>(m)), std::istreambuf_iterator<char>());
+    check(fresh.find("\"finished\": false") != std::string::npos &&
+              fresh.find("listed") == std::string::npos,
+          "dump_manifest_rewritten", "an unfinished manifest naming nothing yet");
+    fs::remove_all(dir);
+}
+
 }  // namespace
 
 int main() {
+    test_dump_dir_cleanup();
     test_resize();
     test_rope_nonsquare();
     test_qkv_fold();

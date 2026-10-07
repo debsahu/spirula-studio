@@ -1357,66 +1357,6 @@ void test_geometry(vk::Arena& arena) {
             check(c.name, readback(to), want, 1e-5f);
         }
     }
-    {   // F.softplus(beta=1, threshold=20): the +-100 inputs are where log(1+exp(x))
-        // written naively overflows to inf, and the 20..30 band is where torch
-        // returns x itself.
-        vk::ArenaScope scope(arena);
-        std::vector<float> x = randn(2048, 4.0f);
-        for (float v : {-100.0f, -30.0f, -20.5f, -0.0f, 19.9f, 20.0f, 20.1f, 25.0f, 100.0f})
-            x.push_back(v);
-        Tensor tx = upload_f32(arena, x, (int64_t)x.size());
-        Tensor to = arena_tensor(arena, DType::F32, (int64_t)x.size());
-        unary(to, tx, Act::Softplus);
-        std::vector<float> want(x.size());
-        for (size_t i = 0; i < x.size(); ++i)
-            want[i] = x[i] > 20.0f ? x[i] : (float)std::log1p(std::exp((double)x[i]));
-        check("softplus", readback(to), want, 1e-5f);
-
-        // Per element, not against the tensor's RMS: log(1+t) alone returns 0 for every
-        // x below -16.6 and that is invisible to a tolerance scaled by the rest.
-        {
-            const std::vector<float> xs = {-60, -40, -30, -25, -20.5f, -18, -16.7f, -16, -12, -8,
-                                           -4, -2.2f, -2.0f, -1.9f, -1, -0.5f, 0, 0.5f, 1, 4, 10, 15, 19.9f};
-            Tensor ty = arena_tensor(arena, DType::F32, (int64_t)xs.size());
-            unary(ty, upload_f32(arena, xs, (int64_t)xs.size()), Act::Softplus);
-            const std::vector<float> got = readback(ty);
-            double worst = 0;
-            size_t at = 0;
-            for (size_t i = 0; i < xs.size(); ++i) {
-                const double w = std::log1p(std::exp((double)xs[i]));
-                const double e = std::fabs(got[i] - w) / w;
-                if (e > worst) { worst = e; at = i; }
-            }
-            ++g_checks;
-            if (worst > 1e-5) {
-                ++g_failures;
-                std::printf("  FAIL softplus tail               rel err %.3g at x=%g (got %.6g)\n",
-                            worst, xs[at], got[at]);
-            } else {
-                std::printf("  ok   softplus tail               rel err %.3g\n", worst);
-            }
-        }
-
-        // The same activation as a GEMM epilogue, which is where RoMa's Cholesky head
-        // applies it.
-        const int M = 33, N = 17, K = 24;
-        auto a = randn((size_t)M * K);
-        auto wt = randn((size_t)N * K, 0.5f);
-        auto bs = randn((size_t)N);
-        Tensor tg = arena_tensor(arena, DType::F32, M, N);
-        LinearOpts lo;
-        lo.bias = upload_f32(arena, bs, N);
-        lo.act = Act::Softplus;
-        linear(tg, upload_f32(arena, a, M, K), upload_f32(arena, wt, N, K), lo);
-        std::vector<float> wg((size_t)M * N);
-        for (int m = 0; m < M; ++m)
-            for (int n = 0; n < N; ++n) {
-                double acc = bs[n];
-                for (int k = 0; k < K; ++k) acc += (double)a[(size_t)m * K + k] * wt[(size_t)n * K + k];
-                wg[(size_t)m * N + n] = acc > 20.0 ? (float)acc : (float)std::log1p(std::exp(acc));
-            }
-        check("linear epilogue softplus", readback(tg), wg, 2e-4f);
-    }
     {   // AvgPool2d(3, stride=2, padding=1) -- pool2x between GRU resolutions.
         // count_include_pad=True is the whole point: every window divides by 9,
         // so an edge output is smaller than the mean of the taps it saw.

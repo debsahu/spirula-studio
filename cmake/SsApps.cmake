@@ -152,13 +152,6 @@ if(SS_BUILD_SAM)
          ${SS_SRC}/app/DepthPng.cpp)
     list(APPEND SS_TOOL_DEFS SS_TOOL_GEOMETRY=1)
     list(APPEND SS_TOOL_LIBS ss_metric3d ss_moge)
-
-    # ---- dense points for a solved model (src/roma/, docs/notes/densify.md) ----
-    if(SS_BUILD_SFM)
-        list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/densify_main.cpp)
-        list(APPEND SS_TOOL_DEFS SS_TOOL_DENSIFY=1)
-        list(APPEND SS_TOOL_LIBS ss_roma_host ss_roma)
-    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -281,6 +274,10 @@ endif()
 # ---------------------------------------------------------------------------
 # spirula -- the executable
 # ---------------------------------------------------------------------------
+# Optional modules add their tools here (SsRoma.cmake: `spirula densify`).
+list(APPEND SS_TOOL_SOURCES ${SS_EXT_TOOL_SOURCES})
+list(APPEND SS_TOOL_DEFS ${SS_EXT_TOOL_DEFS})
+list(APPEND SS_TOOL_LIBS ${SS_EXT_TOOL_LIBS})
 # The frame extraction and ffmpeg files are claimed by both the segmentation
 # tool and the GUI.
 list(REMOVE_DUPLICATES SS_TOOL_SOURCES)
@@ -403,13 +400,6 @@ add_executable(lidar_align_test
     ${SS_SRC}/app/ScanDepth.cpp
     ${SS_SRC}/app/DepthPng.cpp)
 ss_configure_app(lidar_align_test)
-
-# Gate H-3: a densified sibling model never wins the parser's automatic pick.
-if(SS_BUILD_SFM AND SS_BUILD_SAM)
-    add_executable(densify_autopick_test ${SS_SRC}/app/tests/densify_autopick_test.cpp)
-    ss_configure_app(densify_autopick_test)
-    target_link_libraries(densify_autopick_test PRIVATE ss_roma_host)
-endif()
 
 # The stencil shapes, spelling and fill, with no GUI: FrameMask.cpp is compiled
 # into the CLI too, so this must link without imgui.
@@ -542,13 +532,6 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/FrameMotion.cpp
         ${SS_SRC}/app/Pano360.cpp)
     ss_configure_app(dataset_plan_test)
-
-    # The argument list `spirula densify` is handed, and the model chooser's listing.
-    add_executable(densify_gui_test
-        ${SS_SRC}/app/gui/tests/densify_gui_test.cpp
-        ${SS_SRC}/app/gui/DensifyArgs.cpp
-        ${SS_SRC}/app/gui/ReconModels.cpp)
-    ss_configure_app(densify_gui_test)
 
     # The model files "Recompute Sparse Point Cloud" swaps, in a scratch folder.
     add_executable(recompute_files_test

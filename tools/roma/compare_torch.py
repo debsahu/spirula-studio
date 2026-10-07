@@ -6,7 +6,7 @@
 #   "romav2 @ git+https://github.com/Parskatt/RoMaV2.git@95c9968145c8906b7b59383258e9f73b02853d89",
 # ]
 # ///
-"""Compare src/roma/'s matcher against upstream RoMa v2 on the same bytes.
+"""Compare src/roma/model/ against upstream RoMa v2 on the same bytes.
 
 roma_model_test writes the [0, 1] images it ran on beside every stage
 (SS_ROMA_DUMP=<dir>), so the resampler and the image decoder are outside the
@@ -39,17 +39,23 @@ import tempfile
 
 import numpy as np
 
-CKPT_URL = "https://github.com/Parskatt/RoMaV2/releases/download/v2.0.1/romav2.0.1.pt"
+# The checkpoint upstream downloads, which is the one src/roma/model/Fetch.h pins.
+CKPT_FILE = "romav2.0.1.pt"
+CKPT_SHA256 = "1557dec0d21b62366465f7ff4d5fdf228cc695d0582e196ad2b80e05230828b7"
 
-# Plan section 9.1's bars. The bf16 RoPE makes torch miss P-2/P-3 against itself,
+# The floor is the worst of this many draws of torch against itself: one on a
+# second device and the rest perturbed. Fewer is too few to call a worst case.
+MIN_FLOOR_DRAWS = 4
+
+# The bf16 RoPE makes torch miss the coarse and full-match bars against itself,
 # so each is widened to FLOOR_FACTOR x the floor --floor-device measures (README);
 # --ref rope32, with the rounding off on both sides, is held to them unwidened.
 FLOOR_FACTOR = 2.0
 BARS = {
-    "f16": dict(p1=2e-3, p2_p50=0.05, p2_p99=0.5, p2_logit=2e-2,
-                p3_p50=0.05, p3_p99=0.5, p3_cert=2e-2, p3_cross=0.005, p3_prec=1e-2),
-    "f32": dict(p1=1e-4, p2_p50=0.01, p2_p99=0.1, p2_logit=1e-3,
-                p3_p50=0.01, p3_p99=0.1, p3_cert=2e-3, p3_cross=0.0005, p3_prec=1e-2),
+    "f16": dict(taps=2e-3, coarse_p50=0.05, coarse_p99=0.5, coarse_logit=2e-2,
+                full_p50=0.05, full_p99=0.5, full_cert=2e-2, full_cross=0.005, full_prec=1e-2),
+    "f32": dict(taps=1e-4, coarse_p50=0.01, coarse_p99=0.1, coarse_logit=1e-3,
+                full_p50=0.01, full_p99=0.1, full_cert=2e-3, full_cross=0.0005, full_prec=1e-2),
 }
 
 
@@ -71,6 +77,21 @@ def require_manifest(dump):
     return m
 
 
+def check_settings(m, weights, ref):
+    """The run's own record of what it ran with must agree with how it is scored."""
+    for key in ("f16_weights", "rope_rounds", "local_corr_fused"):
+        if not isinstance(m.get(key), bool):
+            sys.exit(f"manifest.json records no {key}: not a dump of this tree's "
+                     "roma_model_test, so the --weights label cannot be checked")
+    if m["f16_weights"] != (weights == "f16"):
+        sys.exit(f"--weights {weights}, but the run held the backbone in "
+                 f"{'f16' if m['f16_weights'] else 'f32'} (manifest.json f16_weights)")
+    if m["rope_rounds"] != (ref != "rope32"):
+        sys.exit(f"--ref {ref}, but the run's matcher RoPE "
+                 f"{'rounds to bf16' if m['rope_rounds'] else 'is fp32'} "
+                 "(manifest.json rope_rounds; SS_ROMA_ROPE_F32=1 makes it fp32)")
+
+
 def write_manifest(dump, files, nonce):
     with open(os.path.join(dump, "manifest.json"), "w") as f:
         json.dump(dict(nonce=nonce, finished=True, exit_status=0, files=sorted(files)), f)
@@ -90,9 +111,32 @@ def rel_l2(a, b):
     return float(np.linalg.norm(a - b) / max(np.linalg.norm(b), 1e-30))
 
 
+_CKPT_OK = False
+
+
+def verify_checkpoint():
+    """The weights upstream loaded are the ones the C++ side pins by SHA-256."""
+    global _CKPT_OK
+    if _CKPT_OK:
+        return
+    import torch
+    path = os.path.join(torch.hub.get_dir(), "checkpoints", CKPT_FILE)
+    if not os.path.exists(path):
+        sys.exit(f"{path}: upstream RoMaV2 loaded its weights from somewhere else; "
+                 "cannot check them against the pinned checkpoint")
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != CKPT_SHA256:
+        sys.exit(f"{path}: sha256 {h.hexdigest()}, not the pinned {CKPT_SHA256}")
+    _CKPT_OK = True
+
+
 def build_model(ref, device):
     import torch
     import romav2.dpt
+    import romav2.features
     # romav2.device picks MPS or CUDA at import; every module bound that name
     # at its own import, so each copy is repointed.
     dev = torch.device(device)
@@ -108,8 +152,9 @@ def build_model(ref, device):
     cfg = RoMaV2.Cfg(descriptor=Descriptor.Cfg(enable_amp=amp),
                      matcher=Matcher.Cfg(enable_amp=amp), setting="base")
     if not amp:
-        # dpt.py enters torch.autocast(bf16) unconditionally; route its
-        # module-level `torch` through a proxy whose autocast does nothing.
+        # dpt.py and the VGG in features.py enter torch.autocast(bf16)
+        # unconditionally (the latter for "cuda"); route each module-level
+        # `torch` through a proxy whose autocast does nothing.
         class _NoAutocast:
             def __getattr__(self, k):
                 return getattr(torch, k)
@@ -119,7 +164,9 @@ def build_model(ref, device):
                 return contextlib.nullcontext()
 
         romav2.dpt.torch = _NoAutocast()
+        romav2.features.torch = _NoAutocast()
     model = RoMaV2(cfg)
+    verify_checkpoint()
     if not amp:
         # Every refiner Block enters autocast(bf16) unless told not to.
         for refiner in model.refiners.values():
@@ -252,7 +299,7 @@ def reference_full(a, dump, img, device):
 
 
 def compare_full(a, dump, ref, bars, floor_of, row, missing):
-    """P-3: the final warp and certainty, with every refiner stage for bisecting."""
+    """The final warp and certainty, with every refiner stage for bisecting."""
     bidir = "dpt_out_BA" in ref
 
     def bar(stage, metric, key):
@@ -286,10 +333,10 @@ def compare_full(a, dump, ref, bars, floor_of, row, missing):
                 float(np.abs(sigmoid(oc_[..., 0]) - sigmoid(rc[..., 0])).max()), None)
             final[d] = (tag, ow, oc_, ref[k], rc)
     for d, (tag, ow, oc_, rw, rc) in final.items():
-        st = "P-3 " + d
+        st = "full match " + d
         e = epe_px(ow, rw)
-        row(st, "EPE p50 px", float(np.percentile(e, 50)), bar(st, "EPE p50 px", "p3_p50"))
-        row(st, "EPE p99 px", float(np.percentile(e, 99)), bar(st, "EPE p99 px", "p3_p99"))
+        row(st, "EPE p50 px", float(np.percentile(e, 50)), bar(st, "EPE p50 px", "full_p50"))
+        row(st, "EPE p99 px", float(np.percentile(e, 99)), bar(st, "EPE p99 px", "full_p99"))
         row(st, "EPE max px", float(e.max()), None)
         co, cr = sigmoid(oc_[..., 0]), sigmoid(rc[..., 0])
         # Where the reference is unsure the warp is ill-posed and amplifies any
@@ -297,19 +344,19 @@ def compare_full(a, dump, ref, bars, floor_of, row, missing):
         sure = (cr > 0.5).ravel()
         if sure.any():
             row(st, "EPE p50 px, ref cert>0.5", float(np.percentile(e[sure], 50)),
-                bar(st, "EPE p50 px, ref cert>0.5", "p3_p50"))
+                bar(st, "EPE p50 px, ref cert>0.5", "full_p50"))
             row(st, "EPE p99 px, ref cert>0.5", float(np.percentile(e[sure], 99)),
-                bar(st, "EPE p99 px, ref cert>0.5", "p3_p99"))
+                bar(st, "EPE p99 px, ref cert>0.5", "full_p99"))
         row(st, "certainty max abs", float(np.abs(co - cr).max()),
-            bar(st, "certainty max abs", "p3_cert"))
+            bar(st, "certainty max abs", "full_cert"))
         cross = np.zeros(co.shape, bool)
         for t in (0.2, 0.9):
             cross |= (co > t) != (cr > t)
         row(st, "cert crosses 0.2/0.9", float(cross.mean()),
-            bar(st, "cert crosses 0.2/0.9", "p3_cross"))
+            bar(st, "cert crosses 0.2/0.9", "full_cross"))
         # Precision (p00, p10, p11) is in match px^-2, relative to max(|ref|, 1),
         # gated at p99 where the reference is certain: elsewhere it is arbitrary,
-        # and a max is one pixel on an occlusion edge (README, P-3).
+        # and a max is one pixel on an occlusion edge (README).
         dp = np.abs(oc_[..., 1:] - rc[..., 1:]).astype(np.float64)
         rel = (dp / np.maximum(np.abs(rc[..., 1:]), 1.0)).reshape(-1, 3).max(-1)
         row(st, "precision max abs", float(dp.max()), None)
@@ -317,7 +364,7 @@ def compare_full(a, dump, ref, bars, floor_of, row, missing):
         if sure.any():
             row(st, "prec max rel, cert>0.5", float(rel[sure].max()), None)
             row(st, "prec p99 rel, cert>0.5", float(np.percentile(rel[sure], 99)),
-                bar(st, "prec p99 rel, cert>0.5", "p3_prec"))
+                bar(st, "prec p99 rel, cert>0.5", "full_prec"))
         else:
             missing(st + " has no certain pixel")
         row(st, "reference certain > 0.5", float((cr > 0.5).mean()), None)
@@ -335,14 +382,14 @@ def main():
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--device", default="cpu", help="torch device for the reference")
     ap.add_argument("--our-taps", action="store_true",
-                    help="feed OUR backbone taps to the torch matcher: P-2 of the matcher "
+                    help="feed OUR backbone taps to the torch matcher: the coarse warp of the matcher "
                          "alone, with the backbone's rounding taken out of it")
     ap.add_argument("--floor-device", default="auto",
                     help="second torch device whose reference, scored as ours, is the floor "
-                         "(auto: MPS, else CUDA; none: the plan's bars unwidened)")
+                         "(auto: MPS, else CUDA; none: the bars unwidened)")
     ap.add_argument("--floor-from", help="reuse the floor a previous --json of the same inputs, "
                     "--ref and mode recorded, instead of measuring it again")
-    ap.add_argument("--floor-perturb-draws", type=int, default=3,
+    ap.add_argument("--floor-perturb-draws", type=int, default=MIN_FLOOR_DRAWS - 1,
                     help="also reference draws on inputs + N(0, --floor-perturb), one seed "
                          "each, on --device; the floor is the max over every draw")
     ap.add_argument("--floor-perturb", type=float, default=1e-6)
@@ -350,7 +397,7 @@ def main():
                     help="add N(0, s) to the inputs: the reference's own noise floor")
     ap.add_argument("--perturb-seed", type=int, default=0)
     ap.add_argument("--full", action="store_true",
-                    help="P-3: the dump is of Model::match(); run RoMaV2.forward at its lr "
+                    help="the dump is of Model::match(): run RoMaV2.forward at its lr "
                          "(and hr) sizes, bidirectional when the dump has B->A, and compare "
                          "every refiner stage and the final warp and certainty")
     a = ap.parse_args()
@@ -361,6 +408,7 @@ def main():
         torch.set_num_threads(a.threads)
 
     manifest = require_manifest(a.dump)
+    check_settings(manifest, a.weights, a.ref)
     A, B = load(a.dump, "input_A"), load(a.dump, "input_B")
     if A is None or B is None:
         sys.exit(f"{a.dump}: no input_A.npy / input_B.npy in its manifest")
@@ -397,8 +445,12 @@ def main():
         save_reference(a.save_ref, ref, a.dump, "torch-" + a.device)
 
     # The floor: the same reference on a second torch device, scored as if it
-    # were ours. Every P-2/P-3 bar is then max(plan bar, FLOOR_FACTOR x floor).
+    # were ours. Every coarse and full-match bar is then max(bar, FLOOR_FACTOR x floor).
     floor_dev = None if a.floor_from else resolve_floor_device(a.floor_device, a.device)
+    if floor_dev and 1 + a.floor_perturb_draws < MIN_FLOOR_DRAWS:
+        sys.exit(f"--floor-perturb-draws {a.floor_perturb_draws}: the floor is the worst of "
+                 f"{1 + a.floor_perturb_draws} draws, and fewer than {MIN_FLOOR_DRAWS} is "
+                 "too few to call a worst case")
     floor_of, floor_info = {}, None
     if a.floor_from:
         with open(a.floor_from) as f:
@@ -407,6 +459,9 @@ def main():
             sys.exit(f"{a.floor_from}: floor of inputs {prev.get('input_sha')} ref "
                      f"{prev.get('ref')} full {prev.get('full')}, not this run's")
         floor_info = prev["floor"]
+        if not floor_info or floor_info.get("n_draws", 0) < MIN_FLOOR_DRAWS:
+            sys.exit(f"{a.floor_from}: its floor is the worst of "
+                     f"{(floor_info or {}).get('n_draws', 0)} draws, not {MIN_FLOOR_DRAWS}")
         floor_of = {(r_["stage"], r_["metric"]): r_["value"] for r_ in floor_info["rows"]}
     draws = []   # (label, reference): each scored against `ref` as if it were ours
     if floor_dev:
@@ -424,7 +479,7 @@ def main():
                 frows = []
                 compare(a, tmp, ref, bars, {}, collect(frows), lambda name: None)
             per_draw.append(dict(draw=label, rows=frows))
-        # The floor of a row is the worst draw: n >= 3 (plan section 9).
+        # The floor of a row is the worst draw.
         for d in per_draw:
             for r_ in d["rows"]:
                 k = (r_["stage"], r_["metric"])
@@ -479,7 +534,7 @@ def resolve_floor_device(choice, main_device):
             if ok and d != main_device:
                 return d
         sys.exit("--floor-device auto: no second torch device (MPS or CUDA) to measure the "
-                 "floor on; pass --floor-device none to hold P-2/P-3 to the plan's bars")
+                 "floor on; pass --floor-device none to hold the coarse and full-match rows to the bars unwidened")
     return choice
 
 
@@ -498,7 +553,7 @@ def save_reference(path, ref, dump, nonce):
 
 
 def compare_coarse(a, dump, ref, bars, floor_of, row, missing):
-    """P-1, the VGG taps and P-2."""
+    """The backbone and VGG taps, and the coarse warp."""
     def p2_bar(stage, metric, key):
         fl = floor_of.get((stage, metric))
         return bars[key] if fl is None else max(bars[key], FLOOR_FACTOR * fl)
@@ -524,10 +579,10 @@ def compare_coarse(a, dump, ref, bars, floor_of, row, missing):
         p1.append(e)
         row(name, "rel L2", e, None)
     if p1:
-        row("P-1 DINOv3 taps", "max rel L2", max(p1), bars["p1"])
+        row("backbone taps", "max rel L2", max(p1), bars["taps"])
 
-    # Not in the plan: the refiners' VGG maps share no rounding with the
-    # transformers, so they are held to the P-1 bar.
+    # The refiners' VGG maps share no rounding with the transformers, so they
+    # are held to the backbone-tap bar.
     vgg = []
     for name in ("vgg_s1_A", "vgg_s2_A", "vgg_s4_A", "vgg_s1_B", "vgg_s2_B", "vgg_s4_B"):
         ours = load(dump, name)
@@ -537,7 +592,7 @@ def compare_coarse(a, dump, ref, bars, floor_of, row, missing):
         vgg.append(rel_l2(ours, ref[name]))
         row(name, "rel L2", vgg[-1], None)
     if vgg:
-        row("VGG19-BN taps", "max rel L2", max(vgg), bars["p1"])
+        row("VGG19-BN taps", "max rel L2", max(vgg), bars["taps"])
 
     # Stages between the gates, for bisecting a failure.
     for name in ("mv_A", "mv_B", "sim_AB", "dpt_l1", "dpt_l2", "dpt_l3", "dpt_l4",
@@ -558,13 +613,13 @@ def compare_coarse(a, dump, ref, bars, floor_of, row, missing):
         # 640 match resolution is the delta times (W/2, H/2).
         d = (ours[..., :2] - r[..., :2]) * np.array([W / 2, H / 2])
         epe = np.sqrt((d.astype(np.float64) ** 2).sum(-1)).ravel()
-        row("P-2 coarse warp", "EPE p50 px", float(np.percentile(epe, 50)),
-            p2_bar("P-2 coarse warp", "EPE p50 px", "p2_p50"))
-        row("P-2 coarse warp", "EPE p99 px", float(np.percentile(epe, 99)),
-            p2_bar("P-2 coarse warp", "EPE p99 px", "p2_p99"))
-        row("P-2 coarse warp", "EPE max px", float(epe.max()), None)
-        row("P-2 overlap logit", "max abs", float(np.abs(ours[..., 2] - r[..., 2]).max()),
-            p2_bar("P-2 overlap logit", "max abs", "p2_logit"))
+        row("coarse warp", "EPE p50 px", float(np.percentile(epe, 50)),
+            p2_bar("coarse warp", "EPE p50 px", "coarse_p50"))
+        row("coarse warp", "EPE p99 px", float(np.percentile(epe, 99)),
+            p2_bar("coarse warp", "EPE p99 px", "coarse_p99"))
+        row("coarse warp", "EPE max px", float(epe.max()), None)
+        row("coarse overlap logit", "max abs", float(np.abs(ours[..., 2] - r[..., 2]).max()),
+            p2_bar("coarse overlap logit", "max abs", "coarse_logit"))
 
 
 
@@ -572,10 +627,10 @@ def report(a, rows, input_sha, manifest, floor_info):
     failed = any(r_["ok"] is False for r_ in rows)
     print(f"ref={a.ref} weights={a.weights} dump={a.dump} inputs={input_sha}"
           + (" (matcher fed our taps)" if a.our_taps else "")
-          + (" (full match, P-3)" if a.full else "")
+          + (" (full match)" if a.full else "")
           + (f" floor: worst of {floor_info['n_draws']} draws (device {floor_info['device']}, "
              f"perturbed {a.floor_perturb:g}) vs {floor_info['against']}, bars >= "
-             f"{FLOOR_FACTOR:g}x" if floor_info else " floor: none, plan bars"))
+             f"{FLOOR_FACTOR:g}x" if floor_info else " floor: none, bars unwidened"))
     floor_of = {(r_["stage"], r_["metric"]): r_["value"]
                 for r_ in (floor_info["rows"] if floor_info else [])}
     for r_ in rows:
@@ -589,6 +644,10 @@ def report(a, rows, input_sha, manifest, floor_info):
         with open(a.json, "w") as f:
             json.dump(dict(ref=a.ref, weights=a.weights, our_taps=a.our_taps, full=a.full,
                            input_sha=input_sha, dump_nonce=manifest.get("nonce"),
+                           ours=dict(f16_weights=manifest["f16_weights"],
+                                     rope_rounds=manifest["rope_rounds"],
+                                     local_corr_fused=manifest["local_corr_fused"],
+                                     notes=manifest.get("notes", {})),
                            floor=floor_info, rows=rows), f, indent=1)
     print("FAIL" if failed else "PASS")
     sys.exit(1 if failed else 0)

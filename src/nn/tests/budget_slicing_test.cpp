@@ -1,7 +1,7 @@
 // An op's result must not depend on how the submit budget slices it. The
 // budget is learned from timing, so a dependence there is run-to-run
 // nondeterminism: attention once re-decided its key-range split per query
-// slice, and RoMa v2's bf16 RoPE turned that into 2 px of warp between runs.
+// slice, and a bf16 RoPE downstream turned that into 2 px of warp between runs.
 // Each shape is run unsliced and at three budgets, and must match bit for bit.
 
 #include "nn/Ops.h"
@@ -64,11 +64,12 @@ int main() {
     arena.reserve(512ull << 20);
     {
         struct Shape { const char* name; int64_t n; int heads, batch; };
-        // RoMa v2's DINOv3 (1605 tokens, 16 heads) and its matcher's global
-        // and per-image blocks at 640^2.
+        // Each splits its key range once sliced (fewer than 512 workgroups) but
+        // not whole: a ViT backbone, a global block, and a batched call whose
+        // 4-head items fall under the target one at a time but not together.
         for (const Shape& s : {Shape{"attention_backbone", 1605, 16, 1},
                                Shape{"attention_global", 3200, 12, 1},
-                               Shape{"attention_per_image", 1600, 12, 2}}) {
+                               Shape{"attention_per_image", 1600, 4, 2}}) {
             nn::vk::ArenaScope scope(arena);
             const int hd = 64;
             const int64_t D = (int64_t)s.heads * hd, rows = s.n * s.batch;

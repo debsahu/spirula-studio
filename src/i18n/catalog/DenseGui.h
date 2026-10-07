@@ -142,32 +142,36 @@ SS_MSG(preset,
     TR("Eşleştirici ön ayarı"));
 
 SS_MSG(preset_help,
-    EN("auto picks the preset from the capture. fast and base match at lower resolution, high and precise "
-       "refine at full resolution and need more memory and time."),
-    JA("auto は撮影内容からプリセットを選びます。fast と base は低い解像度でマッチングし、high と precise は"
-       "フル解像度で精密化するため、メモリも時間も多く必要です。"),
-    ZH_HANS("auto 会根据采集内容选择预设。fast 和 base 以较低分辨率匹配，high 和 precise 在全分辨率下精修，"
-            "需要更多内存和时间。"),
-    ZH_HANT("auto 會依擷取內容選擇預設。fast 和 base 以較低解析度匹配，high 和 precise 在全解析度下精修，"
-            "需要更多記憶體和時間。"),
-    KO("auto는 촬영 내용에서 프리셋을 고릅니다. fast와 base는 낮은 해상도로 매칭하고, high와 precise는 "
-       "전체 해상도로 다듬으므로 메모리와 시간이 더 필요합니다."),
-    DE("auto wählt die Voreinstellung aus der Aufnahme. fast und base gleichen in niedrigerer Auflösung ab, high und "
-       "precise verfeinern in voller Auflösung und brauchen mehr Speicher und Zeit."),
-    FR("auto choisit le préréglage d'après la capture. fast et base apparient à plus basse résolution, high et "
-       "precise affinent en pleine résolution et demandent plus de mémoire et de temps."),
-    ES("auto elige el preajuste según la captura. fast y base emparejan a menor resolución; high y precise refinan "
-       "a resolución completa y necesitan más memoria y tiempo."),
-    PT("auto escolhe a predefinição a partir da captura. fast e base emparelham a menor resolução; high e precise "
-       "refinam à resolução total e precisam de mais memória e tempo."),
-    IT("auto sceglie il preset dalla cattura. fast e base abbinano a risoluzione più bassa; high e precise "
-       "rifiniscono a piena risoluzione e richiedono più memoria e tempo."),
-    NL("auto kiest de voorinstelling op basis van de opname. fast en base koppelen op lagere resolutie, high en "
-       "precise verfijnen op volle resolutie en vragen meer geheugen en tijd."),
-    RU("auto выбирает пресет по съёмке. fast и base сопоставляют в меньшем разрешении, high и precise уточняют "
-       "в полном и требуют больше памяти и времени."),
-    TR("auto ön ayarı çekime göre seçer. fast ve base daha düşük çözünürlükte eşleştirir; high ve precise tam "
-       "çözünürlükte inceltir, daha çok bellek ve zaman ister."));
+    EN("auto runs the default, base. turbo (320), fast (512) and base (640) match at a single "
+       "resolution; high (640, then 960) and precise (800, then 1280) need more memory and time."),
+    JA("auto は既定の base で実行します。turbo (320)、fast (512)、base (640) は 1 つの解像度でマッチングし、high (640 の次に 960) と "
+       "precise (800 の次に 1280) はメモリも時間も多く必要です。"),
+    ZH_HANS("auto 使用默认的 base。turbo (320)、fast (512) 和 base (640) 以单一分辨率匹配；high（先 640 后 960）和 precise（先 800 后 "
+            "1280）需要更多内存和时间。"),
+    ZH_HANT("auto 使用預設的 base。turbo (320)、fast (512) 和 base (640) 以單一解析度匹配；high（先 640 後 960）和 precise（先 800 後 "
+            "1280）需要更多記憶體和時間。"),
+    KO("auto는 기본값인 base로 실행합니다. turbo (320), fast (512), base (640)는 한 가지 해상도로 매칭하고, high (640 다음 960)와 "
+       "precise (800 다음 1280)는 메모리와 시간이 더 필요합니다."),
+    DE("auto verwendet den Standard base. turbo (320), fast (512) und base (640) gleichen in einer "
+       "Auflösung ab; high (640, dann 960) und precise (800, dann 1280) brauchen mehr Speicher und Zeit."),
+    FR("auto utilise la valeur par défaut, base. turbo (320), fast (512) et base (640) apparient à une "
+       "seule résolution ; high (640 puis 960) et precise (800 puis 1280) demandent plus de mémoire et "
+       "de temps."),
+    ES("auto usa el valor por defecto, base. turbo (320), fast (512) y base (640) emparejan a una sola "
+       "resolución; high (640 y luego 960) y precise (800 y luego 1280) necesitan más memoria y tiempo."),
+    PT("auto usa o valor por omissão, base. turbo (320), fast (512) e base (640) emparelham numa só "
+       "resolução; high (640 e depois 960) e precise (800 e depois 1280) precisam de mais memória e "
+       "tempo."),
+    IT("auto usa il valore predefinito, base. turbo (320), fast (512) e base (640) abbinano a una sola "
+       "risoluzione; high (640 poi 960) e precise (800 poi 1280) richiedono più memoria e tempo."),
+    NL("auto gebruikt de standaard, base. turbo (320), fast (512) en base (640) koppelen op één "
+       "resolutie; high (640, dan 960) en precise (800, dan 1280) vragen meer geheugen en tijd."),
+    RU("auto использует значение по умолчанию, base. turbo (320), fast (512) и base (640) сопоставляют в "
+       "одном разрешении; high (640, затем 960) и precise (800, затем 1280) требуют больше памяти и "
+       "времени."),
+    TR("auto varsayılan olan base'i kullanır. turbo (320), fast (512) ve base (640) tek bir çözünürlükte "
+       "eşleştirir; high (önce 640, sonra 960) ve precise (önce 800, sonra 1280) daha çok bellek ve "
+       "zaman ister.");
 
 SS_MSG(preset_missing,
     EN("This build's densify tool has no presets yet; it picks one itself."),

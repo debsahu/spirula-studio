@@ -1,9 +1,8 @@
 // RoMa v2's model-specific kernels: the refiners' elementwise heads, and the
-// matcher's bf16 RoPE. The multi-view transformer builds its
-// RoPE in bf16 (`pos_embed_rope_dtype="bf16"`) and casts q and k to it before
-// rotating, so the reference rounds them on every RoPE block even in fp32.
-// Measured on a 640^2 pair: running that rotation in fp32 instead moves the
-// coarse warp by 0.26 px at the median, 26x the parity bar.
+// matcher's bf16 RoPE. Written from the reference's behaviour (q and k are cast
+// to bf16 and rounded after each eager op of x*cos + rotate_half(x)*sin, even in
+// an fp32 run), not translated from its code. In fp32 instead, the coarse warp
+// moves 0.26 px at the median on a 640^2 pair, 26x the parity bar.
 
 #include "_common.slang"
 
@@ -97,13 +96,15 @@ struct RefineUpdateParams {
     uint   groups_per_row;
 };
 
-// F.softplus(beta 1, threshold 20) = log1p(exp(x)). Slang has no log1p, and
-// log(1 + t) near 1 lost 8% of t at x = -12 on MoltenVK, compensated or not;
-// below t = 1e-3 the cubic series is exact to f32.
+// F.softplus(beta 1, threshold 20) = max(x, 0) + log1p(exp(-|x|)); Slang has no
+// log1p and log(1 + t) alone loses t below 6e-8, so t < 1/8 uses the series
+// (7 terms, 6e-8 relative at the edge) and above it 1 + t rounds under 5e-7.
 float softplus20(float x) {
     if (x > 20.0f) return x;
-    float t = exp(x);
-    return t < 1e-3f ? t * (1.0f - t * (0.5f - t * (1.0f / 3.0f))) : log(1.0f + t);
+    const float t = exp(-abs(x));
+    const float series = t * (1.0f - t * (0.5f - t * (0.33333334f - t * (0.25f
+                         - t * (0.2f - t * (0.16666667f - t * 0.14285715f))))));
+    return max(x, 0.0f) + ((t < 0.125f) ? series : log(1.0f + t));
 }
 
 // warp = prev + d / (4 (W, H)); confidence = prev + (c0, l00^2, l00 l10,

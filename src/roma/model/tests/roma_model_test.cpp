@@ -7,6 +7,9 @@
 // file still runs the rest.
 
 #include "roma/Roma.h"
+#ifdef SS_ROMA_HOST
+#include "roma/WarpCache.h"
+#endif
 #include "roma/model/Dump.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/Model.h"
@@ -73,6 +76,27 @@ std::vector<float> download(const Tensor& t) {
     std::vector<float> v((size_t)t.numel());
     nn::tensor_to_host(t, v.data(), t.numel());
     return v;
+}
+
+// Counts are asserted exactly: an empty log passes the per-stage plan check.
+// coarse(): two backbones, transformer, similarity, DPT head (+2 fine features
+// with a dump on).
+size_t coarse_stage_count() { return 5 + (dump_enabled() ? 2 : 0); }
+// match(): A's fill on a miss (backbone + fine features per scale), B's backbone,
+// the matcher (a transformer; similarity and head per direction), then per scale
+// B's fine features and three refiners per direction.
+size_t match_stage_count(int scales, int dirs, bool miss) {
+    return (miss ? (size_t)(1 + scales) : 0) + 1 + 1 + 2 * (size_t)dirs +
+           (size_t)scales * (1 + 3 * (size_t)dirs);
+}
+
+void check_stages(const Model& m, size_t want, const char* what) {
+    check(m.stages().size() == want, "stage_count", "%s: %zu stages logged, want %zu", what,
+          m.stages().size(), want);
+    for (const Model::Stage& st : m.stages())
+        check(st.peak <= st.plan, "stage_within_plan", "%s %s: %.1f of %.1f MB (%.0f%%)", what,
+              st.name, st.peak / 1e6, st.plan / 1e6,
+              100.0 * (double)st.peak / (double)std::max<uint64_t>(st.plan, 1));
 }
 
 // DINOv3's periods for head_dim 64: 100 ** (2 * arange(16) / 32), stored bf16.
@@ -357,6 +381,8 @@ void test_refine_kernels(vk::Arena& arena) {
         dc[1] = 25.0f;   // softplus' linear branch
         // Deep in the exponential tail log(1 + exp(x)) loses digits; log1p does not.
         for (int64_t i = 1; i < 17; ++i) dc[(size_t)(4 * i + 1)] = -12.0f - (float)(i % 5);
+        // The band from the series to log(1 + t): x = -7 .. -1.9, t = 9e-4 .. 0.15.
+        for (int64_t i = 17; i < 41; ++i) dc[(size_t)(4 * i + 1)] = -7.0f + 0.22f * (float)(i - 17);
         Tensor tw = upload(arena, warp, n, 2), tc = upload(arena, conf, n, prev_c);
         Tensor tdw = upload(arena, dw, n, 2), tdc = upload(arena, dc, n, 4);
         Tensor ow = nn::arena_tensor(arena, DType::F32, n, 2);
@@ -393,9 +419,18 @@ void test_refine_kernels(vk::Arena& arena) {
             if (prev_c == 1)
                 etail = std::max(etail, std::fabs(gc[(size_t)(4 * i + 1)] - want) / want);
         }
-        if (prev_c == 1)
+        double eband = 0;
+        for (int64_t i = 17; i < 41; ++i) {
+            const double l00 = sp(dc[(size_t)(4 * i + 1)]) + 1e-6;
+            eband = std::max(eband, std::fabs(gc[(size_t)(4 * i + 1)] - l00 * l00) / (l00 * l00));
+        }
+        if (prev_c == 1) {
             check(etail < 1e-4, "refine_update_softplus_tail",
                   "p00 relative error at x <= -12: %.2e (log(1+exp(x)) gave 8e-2 on MoltenVK)", etail);
+            check(eband < 1e-5, "refine_update_softplus_band",
+                  "p00 relative error for x in [-7, -1.9]: %.2e (log(1+t) alone gives 6e-5 at t = 1e-3)",
+                  eband);
+        }
         check(ew < 1e-6, "refine_update_warp", "prev_c %d: max abs %.2e", prev_c, ew);
         check(ecv < 1e-5, "refine_update_conf", "prev_c %d: max rel %.2e", prev_c, ecv);
     }
@@ -502,9 +537,7 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
           peak / 1e6, plan / 1e6, 100.0 * (double)peak / (double)plan);
     // Per stage too: a term that never binds the overall maximum still has
     // to be right, or the size where it does bind fails in the field.
-    for (const Model::Stage& st : m.stages())
-        check(st.peak <= st.plan, "stage_within_plan", "%s: %.1f of %.1f MB (%.0f%%)",
-              st.name, st.peak / 1e6, st.plan / 1e6, 100.0 * (double)st.peak / (double)st.plan);
+    check_stages(m, coarse_stage_count(), "coarse");
     std::printf("  weights on device: %.2f GB\n", m.weightBytes() / 1e9);
 
     // ---- AB is independent of BA, BA(A,B) = AB(B,A), the cache, the adapter.
@@ -554,7 +587,7 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
     // without the sizes reuses hr maps the lr-only fill left behind, B's here
     // (with A's own there it passes by coincidence, measured).
     {
-        const int hs = size * 3 / 2;
+        const int hs = (size * 3 / 2 + 8) / 16 * 16;   // a multiple of the patch
         const std::vector<float> fah = resize_rgb(qa.data(), size, size, hs, hs);
         const std::vector<float> fbh = resize_rgb(qb.data(), size, size, hs, hs);
         MatchSpec mh;
@@ -600,9 +633,8 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
         for (size_t i = 0; i < (size_t)size * size; ++i) c += one.ab.overlap(i) > 0.5f;
         return 100.0 * (double)c / ((double)size * size);
     }());
-    for (const Model::Stage& st : m.stages())
-        check(st.peak <= st.plan, "match_stage_within_plan", "%s: %.1f of %.1f MB (%.0f%%)",
-              st.name, st.peak / 1e6, st.plan / 1e6, 100.0 * (double)st.peak / (double)st.plan);
+    // The last call was `after`: two scales, one direction, a cache miss.
+    check_stages(m, match_stage_count(2, 1, true), "match");
     check(m.peakBytes() <= m.plannedBytes(), "match_arena_within_plan", "%.1f of %.1f MB",
           m.peakBytes() / 1e6, m.plannedBytes() / 1e6);
 
@@ -632,13 +664,16 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
               rm.describe().c_str(), max_diff(wp.warp, one.ab.warp), ec);
         std::printf("  adapter: %.1f%% of pixels certain > 0.5\n",
                     100.0 * (double)certain / (double)std::max<size_t>(n, 1));
+    } else {
+        std::printf("  matcher_adapter SKIPPED: no preset matches at %d px (turbo 320, fast 512, "
+                    "base 640)\n", size);
     }
 }
 
 
 // ---- Per preset: s/pair with A new each pair (cold) and A repeated (warm, the
-// densify loop's case), and device memory beside the weights. The plan's §5
-// gate: the precise preset's arena plus A's cache within 4 GB.
+// densify loop's case), and device memory beside the weights. Gate: the
+// precise preset's arena plus A's cache within 4 GB.
 void bench(const std::string& ckpt, const std::string& a, const std::string& b,
            const std::string& list, int repeat) {
     std::printf("\nbench %s\n", list.c_str());
@@ -656,6 +691,7 @@ void bench(const std::string& ckpt, const std::string& a, const std::string& b,
             continue;
         }
         RomaMatcher rm(ckpt, pr);
+        const PresetSpec& pr_spec = preset_spec(pr);
         const bool both = spirula::env("ROMA_BENCH_BOTH") != nullptr;
         // Densify hands over squares at inputSize(); resample once, untimed.
         const int S = rm.inputSize();
@@ -701,9 +737,8 @@ void bench(const std::string& ckpt, const std::string& a, const std::string& b,
               "bench_warp_at_input_size", "%s: %dx%d, inputSize %d", name.c_str(), out.width,
               out.height, rm.inputSize());
         check(m.peakBytes() <= arena, "bench_arena_within_plan", "%s", name.c_str());
-        for (const Model::Stage& st : m.stages())
-            check(st.peak <= st.plan, "bench_stage_within_plan", "%s %s: %.1f of %.1f MB",
-                  name.c_str(), st.name, st.peak / 1e6, st.plan / 1e6);
+        // The loop's last call repeats the content of an earlier one: a cache hit.
+        check_stages(m, match_stage_count(pr_spec.hr ? 2 : 1, both ? 2 : 1, false), name.c_str());
         if (pr == Preset::Precise)
             check(arena + cache <= 4000000000ull, "precise_arena_4gb",
                   "arena %.2f GB + A cache %.2f GB = %.2f GB (bar 4 GB)", arena / 1e9,
@@ -728,14 +763,15 @@ void test_coarse_rect(const std::string& ckpt, const std::string& a, const std::
     for (float v : cm.data) finite += std::isfinite(v);
     check(cm.w == W / 4 && cm.h == H / 4, "rect_shape", "%dx%d", cm.w, cm.h);
     check(finite == cm.data.size(), "rect_finite", "%zu of %zu", finite, cm.data.size());
-    for (const Model::Stage& st : m.stages())
-        check(st.peak <= st.plan, "stage_within_plan", "%s: %.1f of %.1f MB", st.name,
-              st.peak / 1e6, st.plan / 1e6);
+    check_stages(m, coarse_stage_count(), "rect");
 }
 
 int main(int argc, char** argv) {
     if (!spirula::env("NN_LOG")) nn::set_log_level(2);
     dump_enabled();
+#ifdef SS_ROMA_HOST
+    dump_note("model_digest", modelSourceDigest());
+#endif
     std::string ckpt, a, b, bench_list;
     int size = 640, repeat = 1, rect_w = 0, rect_h = 0;
     bool require_model = false;
@@ -755,7 +791,7 @@ int main(int argc, char** argv) {
         vk::Context::get();
         NN_ENSURE_EMBEDDED_MODULES(roma);
         // --bench measures and dumps; the kernel tests are the plain run's, so a
-        // mutant they catch still reaches P-3 in a bench dump.
+        // mutant they catch still reaches the full-match parity in a bench dump.
         if (bench_list.empty()) {
             vk::Arena arena("roma-test");
             arena.reserve(64ull << 20);

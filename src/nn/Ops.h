@@ -32,7 +32,6 @@ enum class Act : uint32_t {
     Elu = 8,       // F.elu(alpha=1) -- its normal head's concentration channel
     Silu = 9,      // F.silu -- the SwiGLU FFN in DINOv2 giant2
     Exp = 10,      // torch.exp -- MoGe's `remap_output='exp'` on the point map
-    Softplus = 11, // F.softplus(beta=1, threshold=20) -- RoMa v2's Cholesky heads
 };
 
 enum class AttnBias : uint32_t {

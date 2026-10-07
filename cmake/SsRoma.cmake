@@ -1,11 +1,39 @@
-# The densify host stage (src/roma/*.cpp): view and pair selection,
-# certainty sampling, triangulation with known poses, filters and the
-# sibling-model writer. Host code on top of ss_sfm; the RoMa v2 network itself
-# (src/roma/model/) is a separate inference-layer library. docs/notes/densify.md.
-#
-# Defines:
-#   ss_roma_host     the static library
-#   roma_*_test      one executable per src/roma/tests/*.cpp
+# Everything RoMa v2, in two halves that SsNn.cmake and SsSfm.cmake know nothing
+# about (docs/notes/densify.md).
+#   host stage (SS_BUILD_SFM)  src/roma/*.cpp on ss_sfm: ss_roma_host and
+#       roma_*_test, one executable per src/roma/tests/*.cpp.
+#   network (SS_BUILD_SAM)     src/roma/model/ on the inference layer: ss_roma,
+#       its tests (src/roma/model/tests/*.cpp) and tools/roma/roma_match_pairs.
+# `spirula densify` needs both; its sources reach the app through the
+# SS_EXT_TOOL_* variables SsApps.cmake reads.
+
+if(SS_BUILD_SAM)
+    # Included after SsNn.cmake, which defines ss_nn_shaders() and ss_nn.
+    # The multi-view transformer's RoPE is the one shader, in bf16 by construction.
+    ss_nn_shaders(roma ${SS_SRC}/roma/shaders SS_ROMA_EMBED)
+    file(GLOB SS_ROMA_SOURCES CONFIGURE_DEPENDS ${SS_SRC}/roma/model/*.cpp)
+
+    add_library(ss_roma STATIC ${SS_ROMA_SOURCES} ${SS_ROMA_EMBED})
+    target_link_libraries(ss_roma PUBLIC ss_nn)
+    target_compile_options(ss_roma PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
+    set_property(TARGET ss_roma PROPERTY CXX_STANDARD 17)
+
+    file(GLOB SS_ROMA_MODEL_TESTS CONFIGURE_DEPENDS ${SS_SRC}/roma/model/tests/*.cpp)
+    foreach(test_src ${SS_ROMA_MODEL_TESTS})
+        get_filename_component(test_name ${test_src} NAME_WE)
+        add_executable(${test_name} ${test_src})
+        target_link_libraries(${test_name} PRIVATE ss_roma)
+        set_property(TARGET ${test_name} PROPERTY CXX_STANDARD 17)
+        target_compile_definitions(${test_name} PRIVATE SS_REPO_ROOT="${SS_ROOT}")
+        target_compile_options(${test_name} PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
+    endforeach()
+endif()
+
+if(NOT SS_BUILD_SFM)
+    return()
+endif()
 
 file(GLOB SS_ROMA_HOST_SOURCES CONFIGURE_DEPENDS ${SS_SRC}/roma/*.cpp)
 
@@ -40,3 +68,22 @@ foreach(test_src ${SS_ROMA_TESTS})
     target_compile_options(${test_name} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
 endforeach()
+
+if(SS_BUILD_SAM)
+    set(SS_EXT_TOOL_SOURCES ${SS_EXT_TOOL_SOURCES} ${SS_SRC}/app/cli/densify_main.cpp)
+    set(SS_EXT_TOOL_DEFS ${SS_EXT_TOOL_DEFS} SS_TOOL_DENSIFY=1)
+    set(SS_EXT_TOOL_LIBS ${SS_EXT_TOOL_LIBS} ss_roma_host ss_roma)
+
+    # A hand-run evaluation tool, not a test: it keeps the default test glob clean.
+    add_executable(roma_match_pairs ${CMAKE_CURRENT_SOURCE_DIR}/tools/roma/roma_match_pairs.cpp)
+    target_link_libraries(roma_match_pairs PRIVATE ss_roma_host ss_roma)
+    set_property(TARGET roma_match_pairs PROPERTY CXX_STANDARD 17)
+    target_compile_options(roma_match_pairs PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
+endif()
+
+# The model test records the model's source digest in its dump manifest.
+if(TARGET roma_model_test)
+    target_link_libraries(roma_model_test PRIVATE ss_roma_host)
+    target_compile_definitions(roma_model_test PRIVATE SS_ROMA_HOST=1)
+endif()

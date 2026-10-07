@@ -112,7 +112,6 @@ static const int ACT_TANH      = 7;  // torch.tanh         -- Metric3D's ConvGRU
 static const int ACT_ELU       = 8;  // F.elu(alpha=1)     -- its normal kappa
 static const int ACT_SILU      = 9;  // F.silu             -- SwiGLU (ViT-giant2)
 static const int ACT_EXP       = 10; // torch.exp          -- MoGe's z remap
-static const int ACT_SOFTPLUS  = 11; // F.softplus(1, 20)  -- RoMa v2's Cholesky heads
 
 // nn.SELU's constants, which are fixed by the paper (Klambauer et al. 2017)
 // and are what torch hard-codes -- not tunable, and not the same as ELU's.
@@ -156,15 +155,6 @@ float apply_act(float x, int kind) {
         case ACT_ELU:       return (x > 0.0f) ? x : (exp(x) - 1.0f);
         case ACT_SILU:      return x / (1.0f + exp(-x));
         case ACT_EXP:       return exp(x);
-        // max(x,0) + log1p(exp(-|x|)), which cannot overflow. log(1+t) alone loses every
-        // digit below t = 6e-8, and Metal's fast math folds Kahan's (1+t)-1 trick away,
-        // so t < 1/8 uses the series (7 terms: 6e-8 relative at the edge).
-        case ACT_SOFTPLUS: {
-            const float t = exp(-abs(x));
-            const float series = t * (1.0f - t * (0.5f - t * (0.33333334f - t * (0.25f
-                                 - t * (0.2f - t * (0.16666667f - t * 0.14285715f))))));
-            return max(x, 0.0f) + ((t < 0.125f) ? series : log(1.0f + t));
-        }
         default:            return x;
     }
 }

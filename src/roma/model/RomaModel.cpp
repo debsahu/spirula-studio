@@ -245,7 +245,7 @@ CoarseMatch Model::coarse(const float* a, const float* b, int H, int W) {
         dump_tensor((std::string("dino_tap17_") + tag).c_str(), taps[i][1], {h, wd, D});
     }
     if (dump) {
-        // Parity probe only: the refiners (WS-3) are what consume these maps.
+        // Parity probe only: the refiners are what consume these maps.
         for (int i = 0; i < 2; ++i) {
             vk::ArenaScope s(im.arena);
             Tensor ft[3];
@@ -268,6 +268,8 @@ CoarseMatch Model::coarse(const float* a, const float* b, int H, int W) {
     }
     im.matcher.run(w, im.arena, taps[0], taps[1], h, wd, res, im.log);
     nn::tensor_to_host(res, out.data.data(), (int64_t)out.data.size());
+    NN_CHECK(im.log.overall() <= plan, "roma: coarse used %llu arena bytes, planned %llu",
+             (unsigned long long)im.log.overall(), (unsigned long long)plan);
     return out;
 }
 
@@ -450,6 +452,8 @@ MatchResult Model::match(const float* a_lr, const float* b_lr, const float* a_hr
         }
     }
 
+    NN_CHECK(im.log.overall() <= plan, "roma: match used %llu arena bytes, planned %llu",
+             (unsigned long long)im.log.overall(), (unsigned long long)plan);
     MatchResult res;
     for (int d = 0; d < dirs; ++d) {
         DenseMatch& m = d ? res.ba : res.ab;

@@ -1,3 +1,9 @@
+// RoPE tables and the qkv row permutation, written from the reference's
+// behaviour (its coordinate recipe, its dtype settings, one bf16 rounding per
+// eager op) and checked bit for bit against torch's own tables. They are not a
+// translation of the reference's RoPE module, which is Meta's under the DINOv3
+// License.
+
 #include "roma/model/Rope.h"
 
 #include <cmath>

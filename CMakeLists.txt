@@ -10,10 +10,11 @@ project(spirula_studio LANGUAGES C CXX)  # CUDA enabled by the cuda backend modu
 #   SsBackendCuda.cmake    CUDA kernels + the engine library         } one
 #   SsBackendVulkan.cmake  portable engine + Vulkan compute runtime } of
 #   SsSfm.cmake            the SfM module (optional; Vulkan-only)
-#   SsRoma.cmake           the densify host stage (with SfM)
 #   SsNn.cmake             inference layer + SAM + video (optional; Vulkan-only)
+#   SsRoma.cmake           RoMa v2: the network (with SAM), the densify host stage (with SfM)
 #   SsI18n.cmake           ss_i18n, the translation library (a leaf)
 #   SsApps.cmake           the `spirula` executable (every tool in one)
+#   SsRomaApp.cmake        the RoMa tests that need SsApps' settings
 #   SsPackage.cmake        the redistributable form of it (macOS .app / .dmg)
 #   SsChecks.cmake         the source lints every build runs (last: it makes
 #                            every target above depend on them)
@@ -47,7 +48,6 @@ endif()
 # Before SsApps: the app links the ss_sfm target.
 if(SS_BUILD_SFM)
     include(SsSfm)
-    include(SsRoma)
 endif()
 
 # Likewise for `spirula sam` and the GUI's built-in masking.
@@ -55,7 +55,13 @@ if(SS_BUILD_SAM)
     include(SsNn)
 endif()
 
+# After both: it builds on ss_sfm and on the inference layer.
+if(SS_BUILD_SFM OR SS_BUILD_SAM)
+    include(SsRoma)
+endif()
+
 include(SsApps)
+include(SsRomaApp)
 
 # After SsApps: the packaging targets depend on the `spirula` target.
 include(SsPackage)
