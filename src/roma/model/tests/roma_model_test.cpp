@@ -9,6 +9,7 @@
 #include "roma/Roma.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/Model.h"
+#include "roma/model/RomaMatcher.h"
 #include "roma/model/Rope.h"
 #include "roma/model/Weights.h"
 
@@ -326,6 +327,35 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
         check(st.peak <= st.plan, "stage_within_plan", "%s: %.1f of %.1f MB (%.0f%%)",
               st.name, st.peak / 1e6, st.plan / 1e6, 100.0 * (double)st.peak / (double)st.plan);
     std::printf("  weights on device: %.2f GB\n", m.weightBytes() / 1e9);
+
+    // The roma::Matcher adapter: the same coarse match, certainty as the
+    // sigmoid of the logit. Catches swapped warp channels, a missing sigmoid.
+    std::vector<uint8_t> qa(A.size()), qb(B.size());
+    std::vector<float> fa(A.size()), fb(B.size());
+    for (size_t i = 0; i < A.size(); ++i) {
+        qa[i] = (uint8_t)std::lround(std::min(1.0f, std::max(0.0f, A[i])) * 255.0f);
+        qb[i] = (uint8_t)std::lround(std::min(1.0f, std::max(0.0f, B[i])) * 255.0f);
+        fa[i] = qa[i] / 255.0f;
+        fb[i] = qb[i] / 255.0f;
+    }
+    const CoarseMatch ref = m.coarse(fa.data(), fb.data(), size, size);
+    RomaMatcher rm(ckpt, size);
+    const Warp wp = rm.match({"a", size, size, qa.data()}, {"b", size, size, qb.data()});
+    double ew = 0, ec = 0;
+    size_t certain = 0;
+    const size_t n = (size_t)ref.w * ref.h;
+    for (size_t i = 0; i < n && wp.warp.size() == 2 * n && wp.certainty.size() == n; ++i) {
+        ew = std::max({ew, (double)std::fabs(wp.warp[2 * i] - ref.data[3 * i]),
+                       (double)std::fabs(wp.warp[2 * i + 1] - ref.data[3 * i + 1])});
+        ec = std::max(ec, std::fabs(wp.certainty[i] - 1.0 / (1.0 + std::exp(-ref.data[3 * i + 2]))));
+        certain += wp.certainty[i] > 0.5f;
+    }
+    check(wp.width == ref.w && wp.height == ref.h && wp.warp.size() == 2 * n, "matcher_shape",
+          "%dx%d", wp.width, wp.height);
+    check(ew < 1e-4 && ec < 1e-5, "matcher_adapter", "warp %.2e, certainty %.2e vs coarse()",
+          ew, ec);
+    std::printf("  adapter: %s, %.1f%% of pixels certain > 0.5\n", rm.describe().c_str(),
+                100.0 * (double)certain / (double)std::max<size_t>(n, 1));
 }
 
 }  // namespace
