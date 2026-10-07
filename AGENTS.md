@@ -661,6 +661,14 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   (Apache-2.0) and BiRefNet (MIT) are fetched the same way for consistency. They are fetched
   at run time after the user has seen the terms -- `src/app/gui/ModelCache.cpp`
   is where that policy lives, and it is the only place that should grow one.
+- **A licence that is shown in full is accepted in one place, and the CLI refuses
+  without it.** `core/LicenseConsent.h` reads and writes the `accepted_license=`
+  lines of gui.conf; the GUI dialog (`ModelCache.cpp`'s `accept_license`) and
+  `--accept-license <family>[=yes]` (`nn/io/Fetch.h`) both go through it, and
+  `nn::ensure_file` throws for a `FetchFile::license_family` that is not in it,
+  cached copy or not. The verbatim texts are `LICENSES/`, embedded by
+  `tools/gen_license_texts.py`; a family whose weights we must not redistribute
+  sets `no_mirror`. `src/roma/model/Fetch.h` is the worked example.
 - **The inference layer's VRAM pool is process-wide and grow-only**, so
   destroying a `sam::Session` frees nothing by itself and a 2 GB checkpoint
   stays resident until the process exits. `Session::unload()` (called by the
