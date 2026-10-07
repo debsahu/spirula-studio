@@ -92,14 +92,65 @@ std::vector<float> resize_rgb(const uint8_t* rgb, int w, int h, int ow, int oh) 
     return a;
 }
 
+// One image's matcher inputs on the device: the normalized image at each
+// scale, the backbone taps at lr, and the VGG maps (strides 1, 2, 4) at each.
+struct ImageFeatures {
+    Tensor img[2], taps[2], vgg[2][3];
+};
+
+int64_t vgg_floats(const Weights& w, int64_t H, int64_t W) {
+    int64_t f = 0;
+    for (const VggConv& c : w.vgg())
+        if (c.tap_after) {
+            f += H * W * c.cout;
+            H /= 2;
+            W /= 2;
+        }
+    return f;
+}
+
 struct Model::Impl {
     Weights       w;
     Backbone      backbone;
     CoarseMatcher matcher;
     vk::Arena     arena{"roma"};
+    vk::Arena     cache{"roma-ref"};   // A's features, kept across pairs
+    std::string   cache_key;
+    MatchSpec     cache_spec;
+    ImageFeatures cached;
     uint64_t      planned = 0;
     StageLog      log{arena};
+
+    // `img_out[s]` gets the normalized image of scale s; the rest from it.
+    void features(ImageFeatures& f, vk::Arena& dst, const float* const rgb[2],
+                  const int dims[2][2], int scales);
 };
+
+void Model::Impl::features(ImageFeatures& f, vk::Arena& dst, const float* const rgb[2],
+                           const int dims[2][2], int scales) {
+    const int64_t P = w.backbone().patch, D = w.backbone().width;
+    for (int s = 0; s < scales; ++s) {
+        const int H = dims[s][0], W = dims[s][1];
+        f.img[s] = nn::arena_tensor(dst, DType::F32, H, W, 3);
+        const std::vector<float> norm = imagenet(rgb[s], (int64_t)H * W * 3);
+        nn::tensor_from_host(f.img[s], norm.data(), (int64_t)norm.size());
+        int64_t hh = H, ww = W, k = 0;
+        for (const VggConv& c : w.vgg())
+            if (c.tap_after) {
+                f.vgg[s][k++] = nn::arena_tensor(dst, DType::F32, hh, ww, c.cout);
+                hh /= 2;
+                ww /= 2;
+            }
+    }
+    const int64_t h = dims[0][0] / P, wd = dims[0][1] / P;
+    for (int t = 0; t < 2; ++t) f.taps[t] = nn::arena_tensor(dst, DType::F32, h * wd, D);
+    log.run("backbone", Backbone::planBytes(w, h, wd),
+            [&] { backbone.run(w, arena, f.img[0], f.taps[0], f.taps[1], h, wd); });
+    for (int s = 0; s < scales; ++s)
+        log.run("fine features", FineFeatures::planBytes(w, dims[s][0], dims[s][1]), [&] {
+            FineFeatures::run(w, arena, f.img[s], f.vgg[s], dims[s][0], dims[s][1]);
+        });
+}
 
 Model::Model() : impl_(new Impl) {}
 Model::~Model() { delete impl_; }
@@ -108,6 +159,11 @@ uint64_t Model::plannedBytes() const { return impl_->planned; }
 uint64_t Model::peakBytes() const { return impl_->log.overall(); }
 const std::vector<Model::Stage>& Model::stages() const { return impl_->log.stages(); }
 uint64_t Model::weightBytes() const { return impl_->w.deviceBytes(); }
+uint64_t Model::cacheBytes() const { return impl_->cache.highWater(); }
+
+float DenseMatch::overlap(size_t i) const {
+    return 1.0f / (1.0f + std::exp(-confidence[i * 4]));
+}
 
 void Model::load(const std::string& checkpoint) {
     NN_ENSURE_EMBEDDED_MODULES(roma);
@@ -193,6 +249,184 @@ CoarseMatch Model::coarse(const float* a, const float* b, int H, int W) {
     im.matcher.run(w, im.arena, taps[0], taps[1], h, wd, res, im.log);
     nn::tensor_to_host(res, out.data.data(), (int64_t)out.data.size());
     return out;
+}
+
+MatchResult Model::match(const float* a_lr, const float* b_lr, const float* a_hr,
+                         const float* b_hr, const MatchSpec& spec, const std::string& key_a) {
+    NN_CHECK(loaded(), "roma::Model::match before load()");
+    Impl& im = *impl_;
+    const Weights& w = im.w;
+    const int64_t P = w.backbone().patch, D = w.backbone().width;
+    const int scales = spec.hr_h > 0 ? 2 : 1;
+    const int dims[2][2] = {{spec.lr_h, spec.lr_w}, {spec.hr_h, spec.hr_w}};
+    for (int s = 0; s < scales; ++s)
+        NN_CHECK(dims[s][0] > 0 && dims[s][1] > 0 && dims[s][0] % P == 0 && dims[s][1] % P == 0,
+                 "roma: %dx%d is not a multiple of the %lld-pixel patch", dims[s][1],
+                 dims[s][0], (long long)P);
+    NN_CHECK(scales == 1 || (a_hr && b_hr), "roma: an hr scale needs both hr images");
+    const int64_t h = spec.lr_h / P, wd = spec.lr_w / P, n = h * wd;
+    const int dirs = spec.bidirectional ? 2 : 1;
+    const std::vector<RefinerHparams>& refs = w.refiners();
+    NN_CHECK(refs.size() == 3, "roma: %zu refiners, the stage table has 3", refs.size());
+
+    // ---- the plan: A's cache, then B's inputs and the widest phase over them ----
+    int64_t img_f = 0, vgg_f[2] = {0, 0};
+    for (int s = 0; s < scales; ++s) {
+        img_f += (int64_t)dims[s][0] * dims[s][1] * 3;
+        vgg_f[s] = vgg_floats(w, dims[s][0], dims[s][1]);
+    }
+    const uint64_t one_image = (uint64_t)(img_f + 2 * n * D + vgg_f[0] + vgg_f[1]) * 4 +
+                               16 * 256;
+    const int64_t full = (int64_t)dims[scales - 1][0] * dims[scales - 1][1];
+    // Per direction, a warp and confidence to refine from and one to refine into.
+    const uint64_t state = (uint64_t)(dirs * 2 * full * 6) * 4 + 8 * 256;
+    uint64_t compute = std::max(Backbone::planBytes(w, h, wd),
+                                CoarseMatcher::plan(w, h, wd).total() +
+                                    (uint64_t)(dirs * 16 * n * 3) * 4 + 2 * 256);
+    for (int s = 0; s < scales; ++s) {
+        uint64_t worst = FineFeatures::planBytes(w, dims[s][0], dims[s][1]);
+        for (const RefinerHparams& r : refs)
+            worst = std::max(worst, Refiner::planBytes(r, dims[s][0] / r.stride,
+                                                       dims[s][1] / r.stride));
+        compute = std::max(compute, (uint64_t)vgg_f[s] * 4 + 3 * 256 + worst);
+    }
+    const uint64_t b_root = (uint64_t)(img_f + 2 * n * D) * 4 + 8 * 256;
+    const uint64_t plan = b_root + state + compute;
+    im.planned = std::max(im.planned, plan);
+    im.arena.reserve(plan);
+
+    const bool same = !key_a.empty() && key_a == im.cache_key &&
+                      spec.lr_h == im.cache_spec.lr_h && spec.lr_w == im.cache_spec.lr_w &&
+                      spec.hr_h == im.cache_spec.hr_h && spec.hr_w == im.cache_spec.hr_w;
+    im.log.clear();
+    vk::ArenaScope root(im.arena);
+    if (!same) {
+        im.cache_key.clear();
+        im.cache.reset();
+        im.cache.resetHighWater();
+        im.cache.reserve(one_image);
+        const float* const rgb_a[2] = {a_lr, a_hr};
+        im.features(im.cached, im.cache, rgb_a, dims, scales);
+        im.cache_key = key_a;
+        im.cache_spec = spec;
+    }
+    const ImageFeatures& A = im.cached;
+    ImageFeatures B;
+    {
+        // B's VGG maps are needed one scale at a time, so they are made in the
+        // phase that reads them; here only the image and the taps.
+        for (int s = 0; s < scales; ++s) {
+            B.img[s] = nn::arena_tensor(im.arena, DType::F32, dims[s][0], dims[s][1], 3);
+            const std::vector<float> norm =
+                imagenet(s ? b_hr : b_lr, (int64_t)dims[s][0] * dims[s][1] * 3);
+            nn::tensor_from_host(B.img[s], norm.data(), (int64_t)norm.size());
+        }
+        for (int t = 0; t < 2; ++t) B.taps[t] = nn::arena_tensor(im.arena, DType::F32, n, D);
+        im.log.run("backbone", Backbone::planBytes(w, h, wd),
+                   [&] { im.backbone.run(w, im.arena, B.img[0], B.taps[0], B.taps[1], h, wd); });
+    }
+    dump_host("input_A", a_lr, {spec.lr_h, spec.lr_w, 3});
+    dump_host("input_B", b_lr, {spec.lr_h, spec.lr_w, 3});
+    if (scales == 2) {
+        dump_host("input_A_hr", a_hr, {spec.hr_h, spec.hr_w, 3});
+        dump_host("input_B_hr", b_hr, {spec.hr_h, spec.hr_w, 3});
+    }
+
+    // ---- state: [dir][0] is refined from, [dir][1] refined into ----
+    Tensor warp[2][2], conf[2][2];
+    for (int d = 0; d < dirs; ++d)
+        for (int k = 0; k < 2; ++k) {
+            warp[d][k] = nn::arena_tensor(im.arena, DType::F32, full, 2);
+            conf[d][k] = nn::arena_tensor(im.arena, DType::F32, full, 4);
+        }
+    int64_t ch = 4 * h, cw = 4 * wd;
+    int prev_c = 1;
+    {
+        vk::ArenaScope s(im.arena);
+        Tensor out[2];
+        for (int d = 0; d < dirs; ++d) out[d] = nn::arena_tensor(im.arena, DType::F32, ch, cw, 3);
+        im.matcher.run(w, im.arena, A.taps, B.taps, h, wd, out[0], im.log,
+                       dirs == 2 ? out[1] : Tensor{});
+        for (int d = 0; d < dirs; ++d) {
+            nn::strided_copy(warp[d][1], out[d], ch * cw, 2, 3, 2);
+            nn::strided_copy(conf[d][1], out[d].offsetElems(2), ch * cw, 1, 3, 1);
+        }
+    }
+
+    static const char* kStage[2][3] = {{"refiner lr s4", "refiner lr s2", "refiner lr s1"},
+                                       {"refiner hr s4", "refiner hr s2", "refiner hr s1"}};
+    for (int s = 0; s < scales; ++s) {
+        const int H = dims[s][0], W = dims[s][1];
+        vk::ArenaScope phase(im.arena);
+        int64_t hh = H, ww = W, k = 0;
+        for (const VggConv& c : w.vgg())
+            if (c.tap_after) {
+                B.vgg[s][k++] = nn::arena_tensor(im.arena, DType::F32, hh, ww, c.cout);
+                hh /= 2;
+                ww /= 2;
+            }
+        im.log.run("fine features", FineFeatures::planBytes(w, H, W),
+                   [&] { FineFeatures::run(w, im.arena, B.img[s], B.vgg[s], H, W); });
+        if (s == 1) {
+            // RoMaV2.forward zeroes the precision before the second scale: it is
+            // absolute in pixels, and the logit is all that carries over.
+            for (int d = 0; d < dirs; ++d) {
+                const Tensor c(conf[d][1].ptr, DType::F32, ch * cw, 4);
+                const Tensor tmp(conf[d][0].ptr, DType::F32, ch * cw, 4);
+                nn::fill(tmp, 0.0f);
+                nn::strided_copy(tmp, c, ch * cw, 1, 4, 4);
+                nn::copy(c, tmp);
+            }
+        }
+        // AB reads (A, B); BA the same maps swapped.
+        const float sx = (float)(W / 512.0), sy = (float)(H / 512.0);
+        for (size_t ri = 0; ri < refs.size(); ++ri) {
+            const RefinerHparams& r = refs[ri];
+            const int64_t rh = H / r.stride, rw = W / r.stride, rn = rh * rw;
+            const int tap = r.stride == 1 ? 0 : r.stride == 2 ? 1 : 2;
+            for (int d = 0; d < dirs; ++d) {
+                // The confidence buffers hold [rows, prev_c] packed at their start.
+                const Tensor src_w(warp[d][1].ptr, DType::F32, ch, cw, 2);
+                const Tensor src_c(conf[d][1].ptr, DType::F32, ch, cw, prev_c);
+                const Tensor mid_w(warp[d][0].ptr, DType::F32, rh, rw, 2);
+                const Tensor mid_c(conf[d][0].ptr, DType::F32, rh, rw, prev_c);
+                nn::resize_bilinear(mid_w, src_w, false);
+                nn::resize_bilinear(mid_c, src_c, false);
+                const Tensor& fa = d ? B.vgg[s][tap] : A.vgg[s][tap];
+                const Tensor& fb = d ? A.vgg[s][tap] : B.vgg[s][tap];
+                im.log.run(kStage[s][ri], Refiner::planBytes(r, rh, rw), [&] {
+                    Refiner::run(w, im.arena, r, fa, fb, mid_w, mid_c, prev_c, sx, sy, rh, rw,
+                                 Tensor(warp[d][1].ptr, DType::F32, rn, 2),
+                                 Tensor(conf[d][1].ptr, DType::F32, rn, 4));
+                });
+                if (dump_enabled()) {
+                    const std::string tag = std::string(s ? "hr" : "lr") + "_s" +
+                                            std::to_string(r.stride) + (d ? "_BA" : "_AB");
+                    dump_tensor(("refine_warp_" + tag).c_str(),
+                                Tensor(warp[d][1].ptr, DType::F32, rn, 2), {rh, rw, 2});
+                    dump_tensor(("refine_conf_" + tag).c_str(),
+                                Tensor(conf[d][1].ptr, DType::F32, rn, 4), {rh, rw, 4});
+                }
+            }
+            ch = rh;
+            cw = rw;
+            prev_c = 4;
+        }
+    }
+
+    MatchResult res;
+    for (int d = 0; d < dirs; ++d) {
+        DenseMatch& m = d ? res.ba : res.ab;
+        m.h = (int)ch;
+        m.w = (int)cw;
+        m.warp.resize((size_t)(ch * cw * 2));
+        m.confidence.resize((size_t)(ch * cw * 4));
+        nn::tensor_to_host(Tensor(warp[d][1].ptr, DType::F32, ch * cw, 2), m.warp.data(),
+                           (int64_t)m.warp.size());
+        nn::tensor_to_host(Tensor(conf[d][1].ptr, DType::F32, ch * cw, 4), m.confidence.data(),
+                           (int64_t)m.confidence.size());
+    }
+    return res;
 }
 
 }  // namespace roma

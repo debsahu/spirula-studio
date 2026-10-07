@@ -26,19 +26,21 @@ constexpr float kNormEps = 1e-6f;
 // Attention's split-K partials, <= 512*64/heads queries x width floats.
 constexpr uint64_t kAttnSlack = 10ull << 20;
 
-// torch.linspace(-1 + 1/n, 1 - 1/n, n) on the CPU: the first half steps up
-// from the start, the second half down from the end.
-std::vector<float> centred_grid(int64_t n) {
-    std::vector<float> g((size_t)n);
-    const float a = -1.0f + 1.0f / (float)n, b = 1.0f - 1.0f / (float)n;
-    const float step = n > 1 ? (b - a) / (float)(n - 1) : 0.0f;
+}  // namespace
+
+std::vector<float> torch_linspace(double a, double b, int64_t n) {
+    std::vector<float> g((size_t)std::max<int64_t>(n, 0));
+    const float fa = (float)a, fb = (float)b;
+    const float step = n > 1 ? (fb - fa) / (float)(n - 1) : 0.0f;
     const int64_t half = n / 2;
     for (int64_t i = 0; i < n; ++i)
-        g[(size_t)i] = i < half ? a + step * (float)i : b - step * (float)(n - 1 - i);
+        g[(size_t)i] = i < half ? fa + step * (float)i : fb - step * (float)(n - 1 - i);
     return g;
 }
 
-}  // namespace
+std::vector<float> centred_grid(int64_t n) {
+    return torch_linspace(-1.0 + 1.0 / (double)n, 1.0 - 1.0 / (double)n, n);
+}
 
 CoarseMatcher::~CoarseMatcher() {
     if (pos_blob_) vk::device_free(pos_blob_);
@@ -89,7 +91,7 @@ CoarseMatcher::Plan CoarseMatcher::plan(const Weights& w, int64_t h, int64_t wd)
 
 void CoarseMatcher::run(const Weights& w, vk::Arena& arena, const Tensor taps_a[2],
                         const Tensor taps_b[2], int64_t h, int64_t wd, const Tensor& out,
-                        StageLog& log) {
+                        StageLog& log, const Tensor& out_ba) {
     const MatcherHparams& mp = w.matcher();
     const int64_t n = h * wd, T = 2 * n, E = mp.width, C = mp.in / 2, O = mp.out;
     const int hd = (int)(E / mp.heads);
@@ -175,27 +177,35 @@ void CoarseMatcher::run(const Weights& w, vk::Arena& arena, const Tensor taps_a[
     dump_tensor("mv_A", mv_a, {h, wd, O});
     dump_tensor("mv_B", mv_b, {h, wd, O});
 
-    Tensor head_x;
-    log.run("matcher similarity", pl.similarity, [&] {
-        head_x = nn::arena_tensor(arena, DType::F32, n, O);
-        vk::ArenaScope s(arena);
-        Tensor na = nn::arena_tensor(arena, DType::F32, n, O);
-        Tensor nb = nn::arena_tensor(arena, DType::F32, n, O);
-        nn::l2_normalize_rows(na, mv_a);
-        nn::l2_normalize_rows(nb, mv_b);
-        Tensor sim = nn::arena_tensor(arena, DType::F32, n, n);
-        // 1/temp as torch evaluates it: the reciprocal first, then the product.
-        nn::matmul_nt(sim, na, nb, 1.0f / mp.temp);
-        dump_tensor("sim_AB", sim, {n, n});
-        nn::softmax_rows(sim, sim);
-        Tensor emb = nn::arena_tensor(arena, DType::F32, n, O);
-        nn::matmul_nt(emb, sim, pos_t_);
-        dump_tensor("match_emb_AB", emb, {h, wd, O});
-        nn::add(head_x, taps_a[1].view(n, O), mv_a);
-        nn::add(head_x, head_x, emb);
-    });
-    log.run("dpt head", pl.head, [&] { dpt_head(w, arena, taps_a[0], head_x, h, wd, out); });
-    dump_tensor("dpt_out_AB", out, {4 * h, 4 * wd, 3});
+    // Upstream's order: A's head, then B's from the same tokens with the roles swapped.
+    auto direction = [&](const Tensor& mx, const Tensor& my, const Tensor taps_x[2],
+                         const Tensor& o, const char* tag) {
+        const std::string t(tag);
+        vk::ArenaScope dir(arena);
+        Tensor head_x;
+        log.run("matcher similarity", pl.similarity, [&] {
+            head_x = nn::arena_tensor(arena, DType::F32, n, O);
+            vk::ArenaScope s(arena);
+            Tensor na = nn::arena_tensor(arena, DType::F32, n, O);
+            Tensor nb = nn::arena_tensor(arena, DType::F32, n, O);
+            nn::l2_normalize_rows(na, mx);
+            nn::l2_normalize_rows(nb, my);
+            Tensor sim = nn::arena_tensor(arena, DType::F32, n, n);
+            // 1/temp as torch evaluates it: the reciprocal first, then the product.
+            nn::matmul_nt(sim, na, nb, 1.0f / mp.temp);
+            dump_tensor(("sim_" + t).c_str(), sim, {n, n});
+            nn::softmax_rows(sim, sim);
+            Tensor emb = nn::arena_tensor(arena, DType::F32, n, O);
+            nn::matmul_nt(emb, sim, pos_t_);
+            dump_tensor(("match_emb_" + t).c_str(), emb, {h, wd, O});
+            nn::add(head_x, taps_x[1].view(n, O), mx);
+            nn::add(head_x, head_x, emb);
+        });
+        log.run("dpt head", pl.head, [&] { dpt_head(w, arena, taps_x[0], head_x, h, wd, o); });
+        dump_tensor(("dpt_out_" + t).c_str(), o, {4 * h, 4 * wd, 3});
+    };
+    direction(mv_a, mv_b, taps_a, out, "AB");
+    if (out_ba.valid()) direction(mv_b, mv_a, taps_b, out_ba, "BA");
 }
 
 }  // namespace roma

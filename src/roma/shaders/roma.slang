@@ -1,4 +1,5 @@
-// RoMa v2's one model-specific kernel. The multi-view transformer builds its
+// RoMa v2's model-specific kernels: the refiners' elementwise heads, and the
+// matcher's bf16 RoPE. The multi-view transformer builds its
 // RoPE in bf16 (`pos_embed_rope_dtype="bf16"`) and casts q and k to it before
 // rotating, so the reference rounds them on every RoPE block even in fp32.
 // Measured on a 640^2 pair: running that rotation in fp32 instead moves the
@@ -59,4 +60,63 @@ void rope_half_bf16(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID,
     float d = bf16(asfloat(p.x[hi]));
     p.x[lo] = asuint(bf16(bf16(a * c) + bf16(-d * s)));
     p.x[hi] = asuint(bf16(bf16(d * c) + bf16(a * s)));
+}
+
+struct RefineDispParams {
+    float* out;    // [n, 2]: scale * (warp - grid)
+    uint*  warp;   // [n, 2]
+    uint*  grid;   // [n, 2], get_normalized_grid
+    float  sx;
+    float  sy;
+    uint   n;
+    uint   groups_per_row;
+};
+
+// ConvRefiner's displacement input, before disp_emb: scale_factor * (prev - grid).
+[shader("compute")]
+[numthreads(WG, 1, 1)]
+void refine_disp(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID,
+                 uniform RefineDispParams p) {
+    uint i = fold_index(gid, tid, p.groups_per_row, uint(WG));
+    if (i >= 2u * p.n) return;
+    float d = asfloat(p.warp[i]) - asfloat(p.grid[i]);
+    p.out[i] = ((i & 1u) == 0u ? p.sx : p.sy) * d;
+}
+
+struct RefineUpdateParams {
+    float* warp_out;   // [n, 2]
+    float* conf_out;   // [n, 4]: logit, then the precision matrix (p00, p10, p11)
+    uint*  warp;       // [n, 2], the previous warp
+    uint*  conf;       // [n, prev_c], the previous confidence; prev_c 1 pads with 0
+    uint*  dwarp;      // [n, 2], warp_head
+    uint*  dconf;      // [n, 4], confidence_head
+    float  den_x;      // refine_init * W of the refiner's map
+    float  den_y;
+    uint   n;
+    uint   prev_c;
+    uint   groups_per_row;
+};
+
+float softplus20(float x) { return x > 20.0f ? x : log(1.0f + exp(x)); }
+
+// warp = prev + d / (4 (W, H)); confidence = prev + (c0, l00^2, l00 l10,
+// l10^2 + l11^2), l00 and l11 softplus + 1e-6 (refiner.py's Cholesky head).
+[shader("compute")]
+[numthreads(WG, 1, 1)]
+void refine_update(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID,
+                   uniform RefineUpdateParams p) {
+    uint i = fold_index(gid, tid, p.groups_per_row, uint(WG));
+    if (i >= p.n) return;
+    p.warp_out[2u * i] = asfloat(p.warp[2u * i]) + asfloat(p.dwarp[2u * i]) / p.den_x;
+    p.warp_out[2u * i + 1u] =
+        asfloat(p.warp[2u * i + 1u]) + asfloat(p.dwarp[2u * i + 1u]) / p.den_y;
+    float c0 = asfloat(p.dconf[4u * i]);
+    float l00 = softplus20(asfloat(p.dconf[4u * i + 1u])) + 1e-6f;
+    float l10 = asfloat(p.dconf[4u * i + 2u]);
+    float l11 = softplus20(asfloat(p.dconf[4u * i + 3u])) + 1e-6f;
+    float d[4] = { c0, l00 * l00, l00 * l10, l10 * l10 + l11 * l11 };
+    for (uint k = 0; k < 4u; ++k) {
+        float prev = k < p.prev_c ? asfloat(p.conf[p.prev_c * i + k]) : 0.0f;
+        p.conf_out[4u * i + k] = prev + d[k];
+    }
 }
