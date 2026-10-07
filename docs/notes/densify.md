@@ -281,6 +281,88 @@ S-1 through each source (stand-in matches, synthetic maps with a per-image dispa
 error, noise and three images with the risers 5 % too deep): roma 83,808 points / 0.996 within
 1 cm / riser 0.953 / 0 beyond; moge 75,985 / 0.997 / 0.912 / 0; hybrid 87,639 / 0.996 / 0.945 / 0.
 
+## Warp cache (2026-10-07)
+
+A change to a filter or a threshold does not change what the matcher says about a pair, so
+`spirula densify` keeps each pair's warp and certainty on disk and serves it back
+(`src/roma/WarpCache.{h,cpp}`). It is a `roma::Matcher` decorator and touches nothing under
+`src/nn/` or `src/roma/model/`. The idea comes from a prediction cache in the unmerged upstream
+pull request #154 (D1odeKing); the code, the key and the tests are ours
+(`LICENSES/NOTICE-spirula-studio-PR154.txt`).
+
+- **Key**: SHA-256 over both images' pixel bytes and sizes **in order** (A to B is not B to A),
+  the matcher's input size, and the matcher identity: preset and its resolutions, the checkpoint's
+  SHA-256, the resolved precision (`f16_weights()`, which the cooperative-matrix probe decides),
+  `matcher_rope_rounds()`, `local_corr_fused()`, `SS_NN_GEMM_KERNEL`, the device's selector, and a
+  digest of every source under `src/nn/` and `src/roma/model/` that the build regenerates when one
+  changes (`cmake/RomaModelDigest.cmake`). So a changed kernel, another GPU, `SS_ROMA_ROPE_F32=1`
+  or a different checkpoint misses; a renamed or touched image does not. The images are the masked
+  match-resolution views the matcher is handed, so a mask edit that changes any pixel misses.
+- **Entry**: warp f32 and certainty f32, 12 B a pixel, an 80-byte header carrying the key and the
+  seconds the matcher took, and a 64-bit checksum trailer; 4.9 MB at 640 px. A half-float warp
+  would move a match 0.16 px at 640 and is not acceptable. **A uint16 certainty was built first
+  and dropped**: it differs from the matcher's by up to 7.6e-6, and on the synthetic staircase
+  through real RoMa that moved the cloud from 78,695 to 78,698 points, so a cached run was not the
+  run it replaced. With float32 the cold, warm and `--cache off` clouds are byte-identical.
+- **Verification**: an entry is decoded only if the magic, byte order, version, key, size range,
+  counts, length, checksum, warp finiteness and certainty range all hold; one that does not is
+  deleted and matched again (counted in `corrupt`). Writes go to a temporary beside the entry and
+  are renamed in, so a crash leaves a stale temporary (swept after an hour), never a partial entry.
+  A cache that cannot be written is reported and the run continues.
+- **Where and how big**: `<dataset>/densify_cache/<2 hex>/<key>.rwc`, 16 GiB by default, least
+  recently used first (a hit refreshes the file's time, so recency survives a restart). The newest
+  entry is never evicted, so the directory can exceed the budget by one entry. **A pair set larger
+  than the budget gets no hits on a repeat run** (a sequential scan over an LRU of smaller size
+  evicts each entry just before its turn): the summary line shows `evicted`, and
+  `--cache-budget` raises it. 2,056 pairs at `base` are about 10 GB; `high` is 9 MB a pair.
+- **Controls**: `--cache auto|off|<dir>` (auto is the dataset folder), `--cache-budget auto|<size>`
+  (`16G`, `500MiB`, `1.5G`; binary units), `--clear-cache` (deletes the entries, and only the
+  entries, then runs; a file that is not an entry stays). Every choice is printed, the end of the run
+  prints hits, misses, hit rate, the matcher time saved and what was written or evicted, and
+  `densify.json` gains `warp_cache`. `--matches` and `--source moge` do not use it.
+- **Time saved** is each hit's recorded matcher time less what the hit cost (hashing the images,
+  reading and verifying the entry), so it is a measurement, not an estimate from a mean.
+- **Not covered by the key**: the host stage's own settings, which is the point. Anything that
+  changes what the matcher is handed (`--face-pairs`, the face size, the masks, a different
+  neighbour set) changes the key through the pixels.
+- **Interface**: `static_assert(sizeof(Warp) ...)` in `WarpCache.h` stops the build when `Warp` gains
+  a field (the per-pixel precision the refinement needs), so the entry format cannot silently
+  drop it; extend the entry and raise `kEntryVersion`.
+- **Consent**: the cache is built from a constructed `RomaMatcher`, which needs a verified
+  checkpoint and both licences, so a warm cache never lets an unaccepted run proceed.
+
+**Measured (2026-10-07, M5 Pro, upstream-identical `base` preset, the real checkpoint).** The
+runs below went through a test harness that loads the checkpoint by path, because the CLI's
+licence gate could not be passed from the session; the CLI itself was run and refused, with a
+warm cache beside it, without reading a pair or touching an entry.
+
+| run | pairs | hits | misses | time | matcher time saved |
+|---|---|---|---|---|---|
+| basement, every 8th held out, cold | 2,056 | 0 | 2,056 | 5,352 s (matching 5,073 s) | 0 |
+| the same, warm | 2,056 | 2,056 (100 %) | 0 | 262.6 s (loading 38.2 s) | 5,035 s |
+
+The cache held 9.4 GiB (4.9 MB an entry). The cold run shared the GPU with other jobs on the
+machine, so its absolute time is slower than an idle one; the saving is the recorded matcher time
+of what the hits replaced, less what each hit cost. `points3D.bin`, `points3D_tracks.bin` and
+`images.bin` of the two runs are byte-identical (1,000,000 points, the cap). On the synthetic
+staircase (100 pairs, 91 distinct) the cache off, cold and warm outputs are byte-identical, the
+warm run took 4.95 s against 184 s, and 9 pairs hit inside the cold run because two views had the
+same masked bytes.
+
+Mutation run of `warp_cache_test`, 57 mutants, every one failing the test that names it: the key made
+from the image names with the pixels ignored (the stale name key), warp stored as half floats, certainty
+stored as uint16, key without image B, without the last byte, with the names, symmetric in A and B,
+without the sizes, without the identity or the input size, identity and size joined as text, each
+of the ten identity fields left out in turn, checksum, key, length, finiteness, certainty range,
+flags, version, byte order, size range and recorded time unchecked, entry written under its final
+name, old temporaries never swept or live ones swept, a hit not refreshing recency, nothing evicted
+or the newest evicted, `clear` removing the directory, lookup through the open-time index, unusable
+output going through the cache, seconds saved dropped or taken from the hit, hits or misses not
+counted, a damaged entry reported as a plain miss, a failed write throwing, an empty identity
+accepted, entries ordered by name on reopen, a hit's time without the hashing, zero accepted as a size, decimal units.
+A damaged entry left on disk is caught only by the direct `WarpCache::get` check, since a miss
+writes over it.
+
 ## In the GUI
 
 - **New Dataset screen**: "Add dense points (RoMa v2)", after the depth-and-normals
@@ -311,6 +393,7 @@ error, noise and three images with the risers 5 % too deep): roma 83,808 points 
 - `roma_plugin_parity_test <fixture>`: gate P-4, against the plugin's own host stage on
   the same matches (`reference/python/roma_plugin_parity.py` writes the fixture).
 - `densify_autopick_test`: gate H-3.
+- `warp_cache_test`: the cache (`WarpCache.h`). Each test names the mutation it catches.
 - WS-4d review mutation run, 2026-10-07 (each fails the test named): the convention checked after
   facing, the seen-through vote off, the rank and inlier-share gates off, the flatness test off,
   hybrid's residual test off, the fill budget changed, the share gate off, a record's image, map

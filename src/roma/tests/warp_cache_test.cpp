@@ -363,6 +363,12 @@ void damaged_entries_are_matched_again() {
         check(fake.calls == before + 1, std::string("entry not healed after: ") + dm.what);
     }
     check(cm.stats().corrupt == (int64_t)ds.size(), "corrupt count " + std::to_string(cm.stats().corrupt));
+    spit(path, std::vector<uint8_t>(good.size(), 0x33));
+    Warp scratch;
+    double secs = 0;
+    check(cache.get(key, &scratch, &secs) == Lookup::Corrupt, "a damaged file was not reported as damaged");
+    check(!fs::exists(path), "a damaged entry stayed on disk, uncounted against the budget");
+    check(cache.get(key, &scratch, &secs) == Lookup::Miss, "a removed entry was not a miss");
     fs::remove_all(d);
 }
 
@@ -679,6 +685,10 @@ void unusable_output_is_never_stored() {
     Warp wrong_shape;
     wrong_shape.width = wrong_shape.height = 4;
     check(!cache.put(key, wrong_shape, 0.0) && !fs::exists(cache.entryPath(key)), "put stored a warp whose arrays do not fit its size");
+    Warp loud = fake.match(a.view(), b.view());
+    loud.warp[3] = 0.5f;
+    loud.certainty[1] = 1.5f;
+    check(!cache.put(key, loud, 0.0) && !fs::exists(cache.entryPath(key)), "put stored a certainty above one");
     check(cache.info().entries == 0, "entries written for unusable output");
     fs::remove_all(d);
 }
@@ -845,6 +855,22 @@ void stage_output_is_unchanged_and_filters_reuse_matches() {
     check(tight_warm.calls == 0 && tight_warm.cs.hits == plain.calls, "a threshold change matched again");
     check(same(tight_plain, tight_warm), "a threshold change on a warm cache differs from a plain run");
     check(!same(plain, tight_plain), "the threshold change changed nothing: the test cannot tell reuse from a stale cloud");
+
+    // A touched file is the same pixels: still every pair a hit.
+    for (const auto& e : fs::directory_iterator(d / "images"))
+        fs::last_write_time(e.path(), fs::file_time_type::clock::now() + std::chrono::hours(1));
+    const StageRun touched = run(&cache, 1.0, "touched");
+    check(touched.calls == 0 && touched.cs.hits == plain.calls, "touching the images made the cache miss");
+
+    // The same name over other pixels: the pairs that see them miss, the rest hit. The oracle answers
+    // from names, so the counts, not the cloud, are what tell a stale hit from a fresh match.
+    fs::copy_file(d / "images" / "pin_05.png", d / "images" / "pin_01.png", fs::copy_options::overwrite_existing);
+    const StageRun swapped = run(&cache, 1.0, "swapped");
+    const StageRun swapped_plain = run(nullptr, 1.0, "swapped_plain");
+    check(swapped.cs.misses > 0 && swapped.cs.hits > 0, "an image replaced by another: hits " + std::to_string(swapped.cs.hits) +
+          ", misses " + std::to_string(swapped.cs.misses));
+    check(swapped.calls == swapped.cs.misses, "a pair that saw other pixels hit");
+    check(same(swapped_plain, swapped), "a cached run over a replaced image differs from a plain run");
     fs::remove_all(d);
 }
 
