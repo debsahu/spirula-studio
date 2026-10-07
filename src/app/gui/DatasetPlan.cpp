@@ -4,6 +4,7 @@
 #include "app/gui/ColmapRunner.h"
 #include "app/gui/SfmRunner.h"
 #include "data/Yaml.h"
+#include "i18n/catalog/DenseGui.h"
 #include "i18n/catalog/Log.h"
 
 #include <algorithm>
@@ -740,6 +741,20 @@ StepFields model_fields(const ColmapJob& job, const PrepJob& p) {
     return f;
 }
 
+StepFields densify_fields(const DensifyJob& d) {
+    StepFields f;
+    add(f, "densify_model", "", d.model.empty() ? "auto" : d.model);
+    add(f, "densify_preset", "", kDensifyPresets[std::clamp(d.preset, 0, kNumDensifyPresets - 1)]);
+    add(f, "densify_refs", "", num(d.refs));
+    add(f, "densify_neighbours", "", num(d.neighbours));
+    add(f, "densify_rule", "", kDensifyRules[std::clamp(d.rule, 0, 2)]);
+    add(f, "densify_matches", "", num(d.matches_per_ref));
+    add(f, "densify_max_points", "", num(d.max_points));
+    add(f, "densify_min_track", "", num(d.min_track));
+    add(f, "densify_masks", "", onoff(d.use_masks));
+    return f;
+}
+
 StepFields geometry_fields(const GeometryJob& g) {
     StepFields f;
     add(f, "geometry_model", "", g.model);
@@ -771,8 +786,9 @@ PlanJob plan_job(const SfmJob& job) {
     p.model = model_fields(job);
     p.mask_features = job.mask_features;
     p.geometry = job.geometry;
+    p.densify = job.densify;
     // The scans give the run its depth and normals.
-    if (job.lidar.enabled()) p.geometry.enable = false;
+    if (job.lidar.enabled()) p.geometry.enable = p.densify.enable = false;
     p.staged = true;
     p.lidar_clouds = job.lidar.clouds;
     p.lidar_in_frame = job.lidar.in_frame;
@@ -785,6 +801,7 @@ PlanJob plan_job(const ColmapJob& job, const PrepJob& prep) {
     p.model = model_fields(job, prep);
     p.mask_features = job.mask_features;
     p.geometry = job.geometry;
+    p.densify = job.densify;
     return p;
 }
 
@@ -813,6 +830,7 @@ DatasetPlan plan_dataset(const PlanJob& job, const WorkspaceState& ws,
     const StepRecord& rf = rec.step(Step::Frames);
     const StepRecord& rm = rec.step(Step::Masks);
     const StepRecord& rr = rec.step(Step::Model);
+    const StepRecord& rd = rec.step(Step::Densify);
     const StepRecord& rg = rec.step(Step::Geometry);
 
     StepPlan& fr = p[Step::Frames];
@@ -909,6 +927,25 @@ DatasetPlan plan_dataset(const PlanJob& job, const WorkspaceState& ws,
         std::copy(std::begin(done->parts), std::end(done->parts), std::begin(p.parts));
     else
         plan_parts(p, job, ws, rec, req, masks_feed);
+
+    StepPlan& d = p[Step::Densify];
+    if (fixed(Step::Densify)) {
+        d = (*done)[Step::Densify];
+    } else if (!job.densify.enable) {
+        // not part of this run
+    } else if ((makes(fr.act) || makes(md.act)) && ws.densify) {
+        set(d, Act::Redo, makes(fr.act) ? Why::Frames : Why::Model);
+    } else if (!ws.densify) {
+        set(d, Act::Run);
+    } else if (req.redo_densify || job.densify.overwrite) {
+        set(d, Act::Redo, Why::Requested);
+    } else if (!rd.present) {
+        set(d, Act::Reuse, Why::Unrecorded);
+    } else if (rd.frames_id != rf.id || rd.model_id != rr.id) {
+        set(d, Act::Redo, Why::Stale);
+    } else {
+        compare(d, rd, diff(rd.fields, densify_fields(job.densify)));
+    }
 
     StepPlan& g = p[Step::Geometry];
     if (fixed(Step::Geometry)) {
@@ -1078,6 +1115,11 @@ void apply_masks_plan(const StepPlan& s, PrepJob& job) {
     job.keep_masks = s.act == Act::Reuse || s.act == Act::Keep;
 }
 
+DensifyJob densify_for_plan(DensifyJob d, const StepPlan& s) {
+    d.overwrite = s.act == Act::Redo;
+    return d;
+}
+
 GeometryJob geometry_for_plan(GeometryJob g, const StepPlan& s) {
     auto has = [&](const char* k) {
         return std::find(s.kinds.begin(), s.kinds.end(), k) != s.kinds.end();
@@ -1120,6 +1162,7 @@ std::string describe_changes(const std::vector<FieldChange>& changes) {
 std::vector<std::string> plan_log_lines(Step step, const StepPlan& s,
                                         const std::string& workspace) {
     namespace L = spirula::i18n::msg::log;
+    namespace D = spirula::i18n::msg::densegui;
     using spirula::i18n::format;
     const std::string what = describe_changes(s.changes);
     const bool settings = s.why == Why::Settings;
@@ -1141,6 +1184,13 @@ std::vector<std::string> plan_log_lines(Step step, const StepPlan& s,
             if (s.act == Act::Keep) return {format(L::plan_model_kept, {what})};
             if (s.act == Act::Redo && settings) return {format(L::sfm_settings_changed, {what})};
             if (s.act == Act::Redo && s.why == Why::Stale) return {L::plan_model_stale.get()};
+            break;
+        case Step::Densify:
+            if (s.act == Act::Reuse && s.why != Why::Unrecorded) return {D::plan_current.get()};
+            if (s.act == Act::Redo && settings) return {format(D::plan_changed, {what})};
+            if (s.act == Act::Redo && (s.why == Why::Frames || s.why == Why::Model ||
+                                       s.why == Why::Stale))
+                return {D::plan_stale.get()};
             break;
         case Step::Geometry:
             if (s.act == Act::Reuse) return {L::plan_geometry_current.get()};
@@ -1170,7 +1220,7 @@ void StepRecorder::begin(Step s, StepFields fields, std::vector<std::string> mad
     r.made = std::move(made);
     if (s != Step::Frames) r.frames_id = _ids[(int)Step::Frames];
     if (s == Step::Model) r.masks_id = _ids[(int)Step::Masks];
-    if (s == Step::Geometry) r.model_id = _ids[(int)Step::Model];
+    if (s == Step::Geometry || s == Step::Densify) r.model_id = _ids[(int)Step::Model];
     _ids[(int)s] = r.id;
     _open[(int)s] = r;
     write_step_record(_ws, s, r);

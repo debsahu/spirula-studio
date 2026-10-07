@@ -543,6 +543,13 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/Pano360.cpp)
     ss_configure_app(dataset_plan_test)
 
+    # The argument list `spirula densify` is handed, and the model chooser's listing.
+    add_executable(densify_gui_test
+        ${SS_SRC}/app/gui/tests/densify_gui_test.cpp
+        ${SS_SRC}/app/gui/DensifyArgs.cpp
+        ${SS_SRC}/app/gui/ReconModels.cpp)
+    ss_configure_app(densify_gui_test)
+
     # The model files "Recompute Sparse Point Cloud" swaps, in a scratch folder.
     add_executable(recompute_files_test
         ${SS_SRC}/app/gui/tests/recompute_files_test.cpp

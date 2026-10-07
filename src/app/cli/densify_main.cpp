@@ -5,10 +5,12 @@
 
 #include "app/Tools.h"
 
+#include "core/VulkanDeviceSelection.h"
 #include "data/DatasetParser.h"
 #include "i18n/Locale.h"
 #include "i18n/TimeFormat.h"
 #include "i18n/catalog/Densify.h"
+#include "nn/Device.h"
 #include "nn/io/Fetch.h"
 #include "roma/DensifyCheck.h"
 #include "roma/DensifyRun.h"
@@ -88,7 +90,7 @@ void usage() {
     std::fprintf(stderr, "    --check [--check-dir <dir>] [--matches <dir>] [--check-noise <px>]\n"
                          "            [--check-outliers <share>] [--check-size <px>] [--check-no-masks]\n"
                          "                                  run the synthetic staircase S-1 and exit\n");
-    std::fprintf(stderr, "\n%s --lang <code>\n", D::label_common.get());
+    std::fprintf(stderr, "\n%s --device <index|name|uuid>  --lang <code>\n", D::label_common.get());
 }
 
 std::string num(double v, int prec = 3) {
@@ -127,6 +129,8 @@ int spirula_densify_main(int argc, char** argv) {
     double check_noise = check_opt.noise_px, check_outliers = check_opt.outliers;
     int check_size = check_opt.match_size;
     bool rule_set = false;
+    std::string device;
+    bool device_set = false;   // an explicit `--device ""` is Auto and beats SS_VK_DEVICE
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -165,6 +169,7 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--check-outliers") check_outliers = real(0);
         else if (a == "--check-size") check_size = (int)real(16);
         else if (a == "--check-no-masks") check_opt.masks = false;
+        else if (a == "--device") { device = next(); device_set = true; }
         else if (a == "--model") model = next();
         else if (a == "--out") job.out_dir = next();
         else if (a == "--image-dir") image_dir = next();
@@ -265,6 +270,8 @@ int spirula_densify_main(int argc, char** argv) {
                 return dsparse::find_aux_file(mask_root.string(), n, "mask");
             };
 
+        if (job.export_dir.empty() && matches.empty())
+            nn::configure_device(spirula::vkselect::requestFrom(device, device_set).text);
         std::unique_ptr<roma::Matcher> matcher;
         if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, 640);
         else if (job.export_dir.empty())

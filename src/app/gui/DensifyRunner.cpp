@@ -1,0 +1,140 @@
+// DensifyRunner.cpp -- see DensifyRunner.h.
+
+#include "app/gui/DensifyRunner.h"
+
+#include "app/AppPaths.h"
+#include "app/gui/Subprocess.h"
+#include "i18n/Locale.h"
+#include "i18n/catalog/DenseGui.h"
+#include "i18n/catalog/Densify.h"
+#include "i18n/catalog/Log.h"
+
+#ifdef SS_TOOL_DENSIFY
+#include "app/gui/FetchSource.h"
+#include "data/DatasetParser.h"
+#include "nn/Device.h"
+#include "nn/io/Fetch.h"
+#include "roma/model/Fetch.h"
+#endif
+
+#include <cstdlib>
+#include <filesystem>
+#include <mutex>
+
+namespace fs = std::filesystem;
+namespace dg = spirula::i18n::msg::densegui;
+namespace dn = spirula::i18n::msg::densify;
+namespace lmsg = spirula::i18n::msg::log;
+using spirula::i18n::format;
+
+namespace gui {
+
+std::string densify_availability() {
+#ifndef SS_TOOL_DENSIFY
+    return dg::unavailable.get();
+#else
+    if (app::exe_path().empty()) return lmsg::err_no_exe_path.get();
+    return "";
+#endif
+}
+
+bool densify_has_flag(const std::string& flag) {
+    static std::mutex mu;
+    static std::vector<std::pair<std::string, bool>> known;
+    std::lock_guard<std::mutex> lk(mu);
+    for (const auto& [f, has] : known)
+        if (f == flag) return has;
+    bool has = false;
+    if (densify_availability().empty()) {
+        const std::atomic<bool> never{false};
+        run_process({app::exe_path(), "densify", "--help"}, "",
+                    [&](const std::string& l) { has = has || l.find(flag) != std::string::npos; },
+                    never);
+    }
+    known.emplace_back(flag, has);
+    return has;
+}
+
+const std::vector<std::string>& densify_license_families() {
+    static const std::vector<std::string> kFamilies = {"romav2", "dinov3"};
+    return kFamilies;
+}
+
+std::vector<PendingDownload> densify_model_downloads() {
+    std::vector<PendingDownload> out;
+#ifdef SS_TOOL_DENSIFY
+    const nn::FetchFile& f = roma::checkpoint_file();
+    if (!file_is_cached(nn::cached_path(f), f.bytes)) out.push_back(pending_download(f));
+#endif
+    return out;
+}
+
+bool densify_model_cached() {
+#ifdef SS_TOOL_DENSIFY
+    return densify_model_downloads().empty();
+#else
+    return false;
+#endif
+}
+
+bool run_densify_step(const DensifyJob& job, const std::string& dataset,
+                      const std::string& images, const std::string& masks,
+                      bool masks_flipped, RunProgress& prog,
+                      const std::atomic<bool>& cancel, std::string& error) {
+    if (std::string why = densify_availability(); !why.empty()) {
+        error = why;
+        return false;
+    }
+    prog.enter(Stage::Densify, dg::stage_dense.get());
+#ifdef SS_TOOL_DENSIFY
+    {
+        const std::string model = job.model.empty() ? find_colmap_poses(dataset)
+                                                    : (fs::path(dataset) / job.model).string();
+        std::error_code ec;
+        if (model.empty() || !fs::exists(fs::path(model) / "images.bin", ec)) {
+            error = dg::err_no_model.get();
+            return false;
+        }
+    }
+#endif
+
+    DensifyJob j = job;
+#ifdef SS_TOOL_DENSIFY
+    if (j.device_uuid.empty()) j.device_uuid = nn::configured_device_selector();
+#endif
+    std::vector<std::string> argv = {app::exe_path(), "--lang",
+                                     spirula::i18n::code(spirula::i18n::current())};
+    for (std::string& a : densify_args(j, dataset, images, masks, masks_flipped,
+                                       densify_has_flag("--preset")))
+        argv.push_back(std::move(a));
+    std::string cmd;
+    for (const std::string& a : argv) cmd += (cmd.empty() ? "$ " : " ") + a;
+    prog.note(cmd, true);
+
+    int rc = run_process(argv, "", [&](const std::string& line) {
+        std::vector<std::string> got;
+        if (spirula::i18n::scan(dn::progress, line, got) && got.size() >= 3) {
+            prog.count(Stage::Densify, std::atoll(got[0].c_str()), std::atoll(got[1].c_str()));
+            prog.detail(Stage::Densify, line);
+            return;
+        }
+        prog.note(line, false);
+    }, cancel);
+
+    if (rc == kCancelled) {
+        error = lmsg::err_cancelled.get();
+        return false;
+    }
+    if (rc == kSpawnFailed) {
+        error = format(dg::err_spawn, {argv[0]});
+        return false;
+    }
+    if (rc != 0) {
+        error = dg::err_failed.get();
+        return false;
+    }
+    prog.mark(Stage::Densify, StageStatus::Done);
+    return true;
+}
+
+}  // namespace gui

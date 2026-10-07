@@ -106,6 +106,17 @@ static void test_dataset_preset() {
     s.sfm.geometry.split = 2;
     s.sfm.geometry.overwrite = true;
 
+    s.sfm.densify.enable = true;
+    s.sfm.densify.model = "sparse/3";   // the capture's own, so no preset carries it
+    s.sfm.densify.preset = 4;
+    s.sfm.densify.refs = 37;
+    s.sfm.densify.neighbours = 7;
+    s.sfm.densify.rule = 2;
+    s.sfm.densify.matches_per_ref = 12345;
+    s.sfm.densify.max_points = 2500000;
+    s.sfm.densify.min_track = 4;
+    s.sfm.densify.use_masks = false;
+
     s.sfm.quality = 1;
     s.sfm.data_type = 2;
     s.sfm.camera_model = "opencv-fisheye";
@@ -223,6 +234,17 @@ static void test_dataset_preset() {
     CHECK_EQ(b.sfm.geometry.ray_depth, s.sfm.geometry.ray_depth);
     CHECK_EQ(b.sfm.geometry.split, s.sfm.geometry.split);
     CHECK_EQ(b.sfm.geometry.overwrite, s.sfm.geometry.overwrite);
+
+    CHECK_EQ(b.sfm.densify.enable, s.sfm.densify.enable);
+    CHECK_EQ(b.sfm.densify.preset, s.sfm.densify.preset);
+    CHECK_EQ(b.sfm.densify.refs, s.sfm.densify.refs);
+    CHECK_EQ(b.sfm.densify.neighbours, s.sfm.densify.neighbours);
+    CHECK_EQ(b.sfm.densify.rule, s.sfm.densify.rule);
+    CHECK_EQ(b.sfm.densify.matches_per_ref, s.sfm.densify.matches_per_ref);
+    CHECK_EQ(b.sfm.densify.max_points, s.sfm.densify.max_points);
+    CHECK_EQ(b.sfm.densify.min_track, s.sfm.densify.min_track);
+    CHECK_EQ(b.sfm.densify.use_masks, s.sfm.densify.use_masks);
+    CHECK_EQ(b.sfm.densify.model, std::string());
 
     CHECK_EQ(b.sfm.quality, s.sfm.quality);
     CHECK_EQ(b.sfm.data_type, s.sfm.data_type);
@@ -344,7 +366,15 @@ static void test_sanitize() {
     s.mask.box_threshold = -2.0f;
     s.colmap.matcher = 0;
     s.colmap.camera_model = "NONSENSE";
+    s.sfm.densify.preset = 99;
+    s.sfm.densify.rule = -1;
+    s.sfm.densify.neighbours = 4000;
+    s.sfm.densify.max_points = -5;
     gui::sanitize_dataset_settings(s);
+    CHECK(s.sfm.densify.preset >= 0 && s.sfm.densify.preset < gui::kNumDensifyPresets);
+    CHECK_EQ(s.sfm.densify.rule, 0);
+    CHECK_EQ(s.sfm.densify.neighbours, 64);
+    CHECK_EQ(s.sfm.densify.max_points, 0);
     CHECK(s.sfm.quality >= 0 && s.sfm.quality <= 3);
     CHECK_EQ(s.sfm.camera_model, std::string("opencv"));
     CHECK_EQ(s.sfm.matcher, 0);
