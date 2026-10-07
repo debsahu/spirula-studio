@@ -7,6 +7,7 @@
 #include "core/LicenseConsent.h"
 #include "nn/core/Error.h"
 #include "nn/io/Fetch.h"
+#include "roma/model/Fetch.h"
 
 #include <algorithm>
 #include <cctype>
@@ -275,6 +276,39 @@ void test_argv() {
           "--accept-license with no value is an error");
 }
 
+void test_roma_checkpoint() {
+    reset_dirs();
+    const nn::FetchFile& f = roma::checkpoint_file();
+    check(std::string(f.url) ==
+              "https://github.com/Parskatt/RoMaV2/releases/download/v2.0.1/romav2.0.1.pt",
+          "roma: fetched from the authors' own release URL");
+    check(f.no_mirror && nn::mirror_url(f).empty(), "roma: never from the project mirror");
+    check(std::string(f.license_family) == "dinov3,romav2" && f.bytes == 1095883548ull,
+          "roma: needs both licences; 1,095,883,548 bytes");
+    const std::string m = message_of([] { roma::ensure_checkpoint(); });
+    check(has(m, "has not been accepted") && has(m, "--accept-license dinov3") &&
+              !fs::exists(nn::cached_path(f) + ".part"),
+          "roma: ensure_checkpoint refuses until accepted, with nothing fetched");
+
+    const char* real = std::getenv("SS_TEST_ROMAV2_PT");
+    if (!real || !*real) {
+        std::printf("SKIP roma: real-file hash (set SS_TEST_ROMAV2_PT)\n");
+        return;
+    }
+    check(nn::sha256_file(real) == f.sha256, "roma: the pinned SHA-256 is the real file's");
+    fs::create_directories(fs::path(nn::cached_path(f)).parent_path());
+    std::error_code ec;
+    fs::create_symlink(real, nn::cached_path(f), ec);
+    check(!ec, "roma: cache seeded with the real file");
+    check(has(message_of([] { roma::ensure_checkpoint(); }), "has not been accepted"),
+          "roma: a cached, hash-correct checkpoint is still refused until accepted");
+    nn::ConsentIO io;
+    Capture cap;
+    io.out = cap.f;
+    nn::accept_licenses("dinov3=yes,romav2=yes", io);
+    check(roma::ensure_checkpoint() == nn::cached_path(f), "roma: accepted, it loads from the cache");
+}
+
 }  // namespace
 
 int main() {
@@ -286,6 +320,7 @@ int main() {
         test_prompts();
         test_terms_shown();
         test_argv();
+        test_roma_checkpoint();
     } catch (const std::exception& e) {
         std::printf("FAIL exception: %s\n", e.what());
         return 1;
