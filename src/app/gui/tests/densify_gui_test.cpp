@@ -15,6 +15,10 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace gui;
 
@@ -249,6 +253,42 @@ int main() {
         std::ofstream(dense / "points3D.bin", std::ios::binary | std::ios::app) << "x";
         expect(cloud_check(dense.string()) == CloudCheck::Mismatch,
                "a cloud changed after it was recorded: Mismatch, not served from the cache of the good one");
+        fs::remove_all(ds);
+    }
+
+    // ---- a crash between densify's two renames ---------------------------------------
+    {
+        const fs::path ds = fs::temp_directory_path() / "spirula_densify_gui_test_crash";
+        fs::remove_all(ds);
+        const fs::path sp = ds / "sparse";
+        model(sp / "0", 120, 4000);
+        auto hide = [&](const char* name, bool densify) {
+            model(sp / (std::string(name) + ".old"), 120, 2500);
+            if (densify) std::ofstream(sp / (std::string(name) + ".old") / "densify.json") << "{}";
+        };
+        hide("0-roma", true);
+        hide("1-roma", true);
+        hide("2-roma", false);
+        std::ofstream(sp / ".1-roma.lock") << "999999999\n";
+#ifndef _WIN32
+        hide("3-roma", true);
+        std::ofstream(sp / ".3-roma.lock") << (long)getpid() << "\n";
+#endif
+        const auto m = list_recon_models(ds.string());
+        auto listed = [&](const char* rel) {
+            for (const ReconModel& x : m)
+                if (x.rel == rel) return true;
+            return false;
+        };
+        expect(listed("sparse/0-roma") && fs::exists(sp / "0-roma") && !fs::exists(sp / "0-roma.old"),
+               "a model hidden in the two-rename window is back and listed");
+        expect(listed("sparse/1-roma"), "... also when the dead writer left its lock file");
+        expect(!listed("sparse/2-roma") && fs::exists(sp / "2-roma.old"),
+               "a .old folder that is not a densify output is left where it is");
+#ifndef _WIN32
+        expect(!listed("sparse/3-roma") && fs::exists(sp / "3-roma.old") && !fs::exists(sp / "3-roma"),
+               "while a live process holds the lock, the set-aside copy is not touched");
+#endif
         fs::remove_all(ds);
     }
 

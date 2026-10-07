@@ -2,12 +2,14 @@
 
 #include "app/gui/ReconModels.h"
 
+#include "core/ProcessAlive.h"
 #include "core/Sha256.h"
 #include "data/Json.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 
@@ -32,6 +34,25 @@ namespace {
 
 bool ends_with(const std::string& s, const std::string& suffix) {
     return s.size() > suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+// A crash between densify's two renames leaves `<m>.old` and no `<m>`. Puts it back
+// unless a writer is alive; its lock is `.<m>.lock` beside it, as roma::WriterLock::pathOf names it.
+void restore_hidden_models(const fs::path& parent) {
+    std::error_code ec;
+    std::vector<fs::path> hidden;
+    for (fs::directory_iterator it(parent, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_directory(ec) && ends_with(it->path().filename().string(), ".old") &&
+            fs::exists(it->path() / "densify.json", ec))
+            hidden.push_back(it->path());
+    for (const fs::path& aside : hidden) {
+        const std::string name = aside.filename().string();
+        const fs::path model = parent / name.substr(0, name.size() - 4);
+        if (fs::exists(model, ec)) continue;
+        long pid = 0;
+        std::ifstream((parent / ("." + model.filename().string() + ".lock")).string()) >> pid;
+        if (!process_alive(pid)) fs::rename(aside, model, ec);
+    }
 }
 
 }  // namespace
@@ -86,6 +107,7 @@ std::vector<ReconModel> list_recon_models(const std::string& dataset) {
     for (const char* parent : {"sparse", "colmap/sparse"}) {
         const fs::path p = fs::path(dataset) / parent;
         if (!fs::is_directory(p, ec)) continue;
+        restore_hidden_models(p);
         for (fs::directory_iterator it(p, ec), end; !ec && it != end; it.increment(ec)) {
             if (!it->is_directory(ec)) continue;
             const fs::path d = it->path();

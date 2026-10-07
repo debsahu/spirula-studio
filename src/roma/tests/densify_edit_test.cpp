@@ -7,8 +7,10 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifndef _WIN32
@@ -144,7 +146,21 @@ std::vector<uint8_t> dropEvery(size_t n, size_t step, size_t phase = 0) {
     return keep;
 }
 
+// Writes `name` under `dir`, making `dir`; a densify output also has a densify.json.
+fs::path folder(const fs::path& dir, bool densify, const std::string& marker = "x") {
+    fs::create_directories(dir);
+    std::ofstream(dir / "marker") << marker;
+    if (densify) std::ofstream(dir / "densify.json") << "{}";
+    return dir;
+}
+
 #ifndef _WIN32
+// Stands in for a faster process taking the lock between our check and our takeover.
+std::string g_lock_to_steal;
+void liveLockAppears(const char* point) {
+    if (!std::strcmp(point, "lock-stale")) std::ofstream(g_lock_to_steal) << (long)getppid() << "\n";
+}
+
 const char* g_crash_at = nullptr;
 void crashProbe(const char* point) {
     if (g_crash_at && !std::strcmp(point, g_crash_at)) _exit(77);
@@ -299,6 +315,87 @@ int main() {
         // ---- replacing an edit from the original, when asked -----------------
         const roma::EditResult er3 = roma::writeEditedSibling(f.dense.string(), dropEvery(kPoints, 2), true);
         check(er3.kept == (int64_t)(kPoints / 2) && tree(f.dense) == before, "replace: a new edit from the original");
+        check(!fs::exists(roma::asideDir(er3.out_dir)) && !fs::exists(roma::partialDir(er3.out_dir)),
+              "replace: the finished edit leaves no .old and no .partial beside it");
+
+        // ---- publishing replaces a densify output and nothing else --------------------
+        {
+            const fs::path d = fs::temp_directory_path() / "spirula_densify_publish_guard_test";
+            std::error_code ec;
+            fs::remove_all(d, ec);
+            const std::string images = folder(d / "images", false, "photo").string();
+            const std::string tmp = folder(d / "images.partial", true, "new").string();
+            bool threw = false;
+            try {
+                roma::publishDir(tmp, images);
+            } catch (const std::exception&) {
+                threw = true;
+            }
+            check(threw, "publish: a folder with no densify.json is not replaced");
+            check(slurp(fs::path(images) / "marker") == "photo" && !fs::exists(roma::asideDir(images)) && fs::exists(tmp),
+                  "publish: the refused target is untouched, nothing set aside, the new folder still there");
+            check(!roma::removeStaleOutput(images) && fs::exists(images),
+                  "stale: an empty run does not remove a folder that is not a densify output");
+
+            const std::string out = folder(d / "m-roma", true, "old").string();
+            roma::publishDir(tmp, out);
+            check(slurp(fs::path(out) / "marker") == "new", "publish: a densify output is replaced");
+            check(!fs::exists(roma::asideDir(out)) && !fs::exists(tmp), "publish: a replace leaves no .old copy and no .partial");
+            check(roma::removeStaleOutput(out) && !fs::exists(out), "stale: an empty run removes the densify output it would have replaced");
+
+            // A folder somebody else named model.old is not ours to drop or to replace.
+            const std::string mine = folder(d / "p-roma", true, "mine").string();
+            const std::string theirs = folder(roma::asideDir(mine), false, "theirs").string();
+            roma::recoverPublish(mine);
+            check(slurp(fs::path(theirs) / "marker") == "theirs" && fs::exists(mine),
+                  "recover: a .old folder with no densify.json is left alone");
+            const std::string next = folder(roma::partialDir(mine), true, "next").string();
+            threw = false;
+            try {
+                roma::publishDir(next, mine);
+            } catch (const std::exception&) {
+                threw = true;
+            }
+            check(threw && slurp(fs::path(theirs) / "marker") == "theirs" && slurp(fs::path(mine) / "marker") == "mine",
+                  "publish: a .old folder in the way that is not a densify output stops it, both untouched");
+
+            // The crash window: m-roma is missing and m-roma.old holds the model.
+            const std::string gone = (d / "n-roma").string();
+            folder(roma::asideDir(gone), true, "kept");
+            std::unique_ptr<roma::WriterLock> lock;
+            check(roma::claimOut(gone, false, lock) == roma::Claim::Exists && slurp(fs::path(gone) / "marker") == "kept" &&
+                      !fs::exists(roma::asideDir(gone)),
+                  "claim: a crashed publish is recovered before --overwrite is judged, so a refusal sees the model");
+            check(!lock && !fs::exists(roma::WriterLock::pathOf(gone)), "claim: a refusal gives the lock back");
+            check(roma::claimOut(gone, true, lock) == roma::Claim::Ok && lock && fs::exists(roma::WriterLock::pathOf(gone)),
+                  "claim: --overwrite on a densify output is allowed and holds the lock");
+            lock.reset();
+            check(roma::claimOut(images, true, lock) == roma::Claim::NotDensify && !lock,
+                  "claim: --overwrite on a folder that is not a densify output is refused");
+            check(roma::claimOut((d / "fresh-roma").string(), false, lock) == roma::Claim::Ok && lock,
+                  "claim: a name that is free is claimed");
+            lock.reset();
+            fs::remove_all(d, ec);
+        }
+
+        // ---- one writer per folder, threads included ---------------------------------
+        {
+            const std::string out = (f.dense.parent_path() / "threads-roma").string();
+            roma::WriterLock mine(out);
+            long busy_pid = 0;
+            std::thread t([&] {
+                try {
+                    roma::WriterLock theirs(out);
+                } catch (const roma::WriterBusy& b) {
+                    busy_pid = b.pid;
+                }
+            });
+            t.join();
+            check(busy_pid != 0 && busy_pid == roma::WriterLock::holder(out),
+                  "lock: a second thread of the holding process is refused, naming the process");
+            roma::WriterLock again(out);
+            check(true, "lock: the holding thread may still take it again");
+        }
 
 #ifndef _WIN32
         // ---- the writer lock ------------------------------------------------------
@@ -335,6 +432,30 @@ int main() {
             }
             check(took, "lock: a dead holder's lock is taken over, and this process may take it twice");
             check(!fs::exists(roma::WriterLock::pathOf(out)), "lock: released when the last holder lets go");
+        }
+        {
+            // A dead owner's lock, replaced by a live one after we judged it stale.
+            const std::string out = (f.dense.parent_path() / "race-roma").string();
+            {
+                Holder h(out);
+                h.die();
+            }
+            g_lock_to_steal = roma::WriterLock::pathOf(out);
+            roma::setPublishProbe(liveLockAppears);
+            long busy_pid = 0;
+            try {
+                roma::WriterLock lk(out);
+            } catch (const roma::WriterBusy& b) {
+                busy_pid = b.pid;
+            }
+            roma::setPublishProbe(nullptr);
+            check(busy_pid == (long)getppid(), "lock: a stale lock that a live process replaced meanwhile is not taken");
+            check(roma::WriterLock::holder(out) == (long)getppid(), "lock: the live process's lock file is still in place");
+            int strays = 0;
+            for (const fs::directory_entry& e : fs::directory_iterator(f.dense.parent_path()))
+                strays += e.path().filename().string().find("race-roma.lock.") != std::string::npos;
+            check(strays == 0, "lock: a takeover leaves no renamed lock files behind");
+            fs::remove(roma::WriterLock::pathOf(out));
         }
         {
             // `densify`'s own publish takes the same lock.
