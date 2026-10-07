@@ -2301,8 +2301,8 @@ void refine_counts_source_images_once() {
 }
 
 // A cycle + refine run dumped and replayed gives the same cloud. Mutants: no
-// precision or no B -> A in the dump, match_both ignored, the reverse taken
-// from match(A, B), auto resolved to on.
+// precision or no B -> A in the dump, a reverse overwriting a forward file,
+// match_both ignored, the reverse taken from match(A, B), auto resolved to on.
 void dump_matches_reproduce_the_run() {
     const fs::path d = tempDir("dumprun");
     writeStairDataset(stairScene(), d.string(), 192, 384, 1000);
@@ -2326,9 +2326,13 @@ void dump_matches_reproduce_the_run() {
     OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 96, 0.1, 0.02, 1);
     job.matcher = &om;
     int both_calls = 0;
+    // The reverse is marked (certainty 0.5, which nothing downstream reads) so a
+    // forward file overwritten by another pair's reverse shows.
     job.match_both = [&](const MatchImage& a, const MatchImage& b) {
         both_calls++;
-        return std::make_pair(om.match(a, b), om.match(b, a));
+        Warp back = om.match(b, a);
+        for (float& c : back.certainty) c *= 0.5f;
+        return std::make_pair(om.match(a, b), back);
     };
     job.dump_dir = (d / "dump").string();
     fs::create_directories(job.dump_dir);
@@ -2341,9 +2345,23 @@ void dump_matches_reproduce_the_run() {
     const std::string b0 = pl.views[(size_t)pl.ref_views[0].nbr_views[0]].name;
     const Warp back = readWarp(DumpMatcher::pairFile(job.dump_dir, b0, a0));
     const Warp fwd = readWarp(DumpMatcher::pairFile(job.dump_dir, a0, b0));
-    check(back.precision.size() == back.certainty.size() * 3 && fwd.precision.size() == fwd.certainty.size() * 3,
-          "dumped precision " + std::to_string(fwd.precision.size()));
+    check(fwd.precision.size() == fwd.certainty.size() * 3, "dumped precision " + std::to_string(fwd.precision.size()));
     check(back.warp != fwd.warp, "B -> A dumped as A -> B");
+    std::set<std::pair<std::string, std::string>> plan_pairs;
+    for (const auto& rv : pl.ref_views)
+        for (int b : rv.nbr_views) plan_pairs.insert({pl.views[(size_t)rv.view].name, pl.views[(size_t)b].name});
+    int both_ways = 0, overwritten = 0, zero = 0;
+    for (const auto& pr : plan_pairs) {
+        if (!plan_pairs.count({pr.second, pr.first})) continue;
+        both_ways++;
+        const Warp w = readWarp(DumpMatcher::pairFile(job.dump_dir, pr.first, pr.second));
+        const float mx = *std::max_element(w.certainty.begin(), w.certainty.end());
+        zero += mx == 0;
+        overwritten += mx > 0 && mx < 0.75f;
+    }
+    std::printf("  pairs both ways %d, of them all-zero certainty (indistinguishable) %d\n", both_ways, zero);
+    check(both_ways - zero > 20 && overwritten == 0, std::to_string(overwritten) + " of " + std::to_string(both_ways) +
+                                                 " forward files hold another pair's reverse");
 
     DumpMatcher dm(job.dump_dir, 96);
     DensifyJob replay = job;

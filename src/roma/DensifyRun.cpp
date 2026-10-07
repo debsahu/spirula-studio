@@ -655,9 +655,11 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
                 }
                 if (!job.dump_dir.empty()) {
                     writeWarp(DumpMatcher::pairFile(job.dump_dir, A.name, B.name), w, w.precision.empty() ? 0 : 2);
-                    if (o.cycle_px > 0)
-                        writeWarp(DumpMatcher::pairFile(job.dump_dir, B.name, A.name), back,
-                                  back.precision.empty() ? 0 : 2);
+                    // A pair matched both ways keeps its forward warp: matchBoth's
+                    // reverse differs from match(B, A) by token order (0.02 px p50).
+                    // Nothing reads a reverse's precision; leaving it out saves 5 MB a pair.
+                    const std::string rp = DumpMatcher::pairFile(job.dump_dir, B.name, A.name);
+                    if (o.cycle_px > 0 && !fs::exists(rp)) writeWarp(rp, back, 0);
                 }
                 if (m.w == 0) { m.w = w.width; m.h = w.height; }
                 if (w.width != m.w || w.height != m.h)
