@@ -3921,7 +3921,7 @@ void GuiApp::cancel_dataset_job() {
     _colmap.cancel();
 }
 
-// gui.conf is read once per frame, not per question: densify_ready asks every frame.
+// gui.conf is read once per frame, not per question: a screen may ask every frame.
 bool GuiApp::license_accepted(const std::string& family) const {
     const int frame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : -1;
     if (frame < 0 || frame != _accepted_frame) {
