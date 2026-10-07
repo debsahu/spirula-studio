@@ -54,6 +54,13 @@ std::vector<float> permute_qk_rows(const std::vector<float>& src, int64_t width,
     return dst;
 }
 
+std::vector<float> fold_qkv_bias(const std::vector<float>& bias,
+                                 const std::vector<float>& mask, int64_t width, int heads) {
+    std::vector<float> v(bias);
+    for (size_t i = 0; i < v.size() && i < mask.size(); ++i) v[i] *= mask[i];
+    return permute_qk_rows(v, width, heads, 1);
+}
+
 float to_bf16(float f) {
     uint32_t u;
     std::memcpy(&u, &f, 4);

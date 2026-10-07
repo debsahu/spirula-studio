@@ -17,6 +17,11 @@ float to_bf16(float f);
 std::vector<float> permute_qk_rows(const std::vector<float>& src, int64_t width, int heads,
                                    int64_t cols);
 
+// DINOv3's qkv bias as the device wants it: times its K-bias mask (the
+// reference's LinearKMaskedBias), then permuted as the weight rows are.
+std::vector<float> fold_qkv_bias(const std::vector<float>& bias,
+                                 const std::vector<float>& mask, int64_t width, int heads);
+
 // The backbone's, in fp32 (pos_embed_rope_dtype="fp32").
 std::vector<float> backbone_rope(const std::vector<float>& periods, int64_t H, int64_t W);
 

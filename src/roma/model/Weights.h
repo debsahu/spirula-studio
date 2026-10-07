@@ -54,6 +54,7 @@ public:
     const std::string& path() const { return path_; }
     uint64_t deviceBytes() const { return device_bytes_; }
     uint64_t inexactF16() const { return f16_inexact_; }
+    uint64_t totalF16() const { return f16_total_; }   // values sent as f16
 
     const BackboneHparams& backbone() const { return bb_; }
     const MatcherHparams&  matcher() const { return mt_; }
@@ -76,13 +77,13 @@ private:
     std::vector<nn::DevicePtr> blobs_;
     std::string path_;
     uint64_t device_bytes_ = 0;
-    uint64_t f16_inexact_ = 0;
+    uint64_t f16_inexact_ = 0, f16_total_ = 0;
     bool loaded_ = false;
 };
 
-// The backbone's bf16 matrices go to the device as f16, exact but for the 4.6e-4
-// below f16's normal range (inexactF16()); the matcher's fp32 ones stay fp32, as
-// f16 moved the overlap logit 4e-2, twice the bar. SS_ROMA_F32_WEIGHTS=1: all f32.
+// The backbone's bf16 matrices go to the device as f16 only where tensor cores
+// will use them (exact but for the 4.6e-4 below f16's normal range); the
+// matcher's stay fp32. SS_ROMA_F32_WEIGHTS=1: all f32.
 bool f16_weights();
 
 }  // namespace roma
