@@ -62,6 +62,7 @@ void usage() {
     help_row("--image-dir <dir>", D::opt_image_dir);
     help_row("--mask-dir <dir> | --no-masks", D::opt_mask_dir);
     help_row("--flip-mask", D::opt_flip_mask);
+    help_row("--preset turbo|fast|base|high|precise", D::opt_preset);
     help_row("--matches <dir>", D::opt_matches);
     help_row("--export-pairs <dir>", D::opt_export_pairs);
     help_row("--plugin-exact", D::opt_plugin_exact);
@@ -130,6 +131,7 @@ int spirula_densify_main(int argc, char** argv) {
     int check_size = check_opt.match_size;
     bool rule_set = false;
     std::string device;
+    roma::Preset preset = roma::Preset::Base;
     bool device_set = false;   // an explicit `--device ""` is Auto and beats SS_VK_DEVICE
 
     for (int i = 1; i < argc; ++i) {
@@ -170,6 +172,10 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--check-size") check_size = (int)real(16);
         else if (a == "--check-no-masks") check_opt.masks = false;
         else if (a == "--device") { device = next(); device_set = true; }
+        else if (a == "--preset") {
+            const std::string v = next();
+            if (!roma::parse_preset(v, preset)) bad(v);
+        }
         else if (a == "--model") model = next();
         else if (a == "--out") job.out_dir = next();
         else if (a == "--image-dir") image_dir = next();
@@ -273,9 +279,10 @@ int spirula_densify_main(int argc, char** argv) {
         if (job.export_dir.empty() && matches.empty())
             nn::configure_device(spirula::vkselect::requestFrom(device, device_set).text);
         std::unique_ptr<roma::Matcher> matcher;
-        if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, 640);
+        const roma::PresetSpec& spec = roma::preset_spec(preset);
+        if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, spec.hr ? spec.hr : spec.lr);
         else if (job.export_dir.empty())
-            matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), roma::Preset::Base);
+            matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), preset);
         job.matcher = matcher.get();
         if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
             throw std::runtime_error(job.out_dir + ": " + why);
