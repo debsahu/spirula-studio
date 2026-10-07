@@ -4,7 +4,8 @@
 //
 // .rwm, little endian: "RWM1", int32 width, height, encoding; then the warp
 // and the certainty. Encoding 0 is float32 for both; 1 stores the warp as
-// int16 of u * 32767 (0.01 px at 640) and the certainty as uint16 of c * 65535.
+// int16 of u * 32767 (0.01 px at 640) and the certainty as uint16 of c * 65535;
+// 2 is encoding 0 followed by Warp::precision, float32, three per pixel.
 #pragma once
 
 #include "roma/Matcher.h"

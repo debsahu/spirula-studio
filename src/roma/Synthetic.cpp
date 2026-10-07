@@ -395,6 +395,8 @@ Warp OracleMatcher::match(const MatchImage& a, const MatchImage& b) {
     w.width = w.height = S;
     w.warp.assign((size_t)S * S * 2, 0.0f);
     w.certainty.assign((size_t)S * S, 0.0f);
+    // The jitter's own information, isotropic; none for an exact oracle.
+    if (noise_ > 0) w.precision.assign((size_t)S * S * 3, 0.0f);
     std::mt19937_64 rng(seed_ ^ std::hash<std::string>()(a.name + "|" + b.name));
     std::normal_distribution<double> gauss(0.0, noise_);
     std::uniform_real_distribution<double> uni(-1.0, 1.0), coin(0.0, 1.0);
@@ -420,6 +422,9 @@ Warp OracleMatcher::match(const MatchImage& a, const MatchImage& b) {
             w.warp[2 * i] = (float)u;
             w.warp[2 * i + 1] = (float)v;
             w.certainty[i] = 1.0f;
+            if (noise_ > 0) {
+                w.precision[3 * i] = w.precision[3 * i + 2] = (float)(1.0 / (noise_ * noise_));
+            }
         }
     return w;
 }

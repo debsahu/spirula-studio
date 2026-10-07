@@ -51,9 +51,9 @@ struct SyntheticDepth {
 };
 void writeStairDepths(const Scene& scene, const std::string& dir, const SyntheticDepth& sd);
 
-// Matches from the geometry: certainty 1 where B sees the point A's pixel
-// ray hits, else 0. `noise_px` (match pixels) jitters each warp; a share
-// `outliers` of them is sent somewhere random with certainty 1.
+// Matches from the geometry where B sees what A's pixel ray hits. `noise_px`
+// (match px) jitters each warp and is its precision, 1 / noise_px^2 (none at 0);
+// a share `outliers` is sent somewhere random, certainty 1, same precision.
 class OracleMatcher : public Matcher {
 public:
     OracleMatcher(const Scene* scene, std::vector<View> views, int size, double noise_px,

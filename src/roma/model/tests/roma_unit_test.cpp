@@ -6,6 +6,7 @@
 
 #include "roma/Roma.h"
 #include "roma/model/Dump.h"
+#include "roma/model/RomaMatcher.h"
 #include "roma/model/Rope.h"
 
 #include <algorithm>
@@ -164,6 +165,23 @@ void test_dump_dir_cleanup() {
     fs::remove_all(dir);
 }
 
+// Catches: precision left empty, read from the logit's channel or one channel
+// off, the axes reordered, or squared on the way out.
+void test_warp_precision() {
+    DenseMatch d;
+    d.w = 3;
+    d.h = 2;
+    d.warp.assign(12, 0.25f);
+    for (int i = 0; i < 6; ++i)
+        for (int c = 0; c < 4; ++c) d.confidence.push_back((float)(10 * i + c) + 0.5f);
+    const Warp w = warpOf(d);
+    bool same = w.precision.size() == 18;
+    for (size_t i = 0; same && i < 6; ++i)
+        for (int c = 0; c < 3; ++c) same = same && w.precision[3 * i + c] == d.confidence[4 * i + 1 + c];
+    check(same, "warp_precision", "%zu values, (p00, p01, p11) = confidence[1:4] as stored",
+          w.precision.size());
+}
+
 }  // namespace
 
 int main() {
@@ -171,6 +189,7 @@ int main() {
     test_resize();
     test_rope_nonsquare();
     test_qkv_fold();
+    test_warp_precision();
     std::printf("\n%d checks, %d failures\n%s\n", g_checks, g_failures,
                 g_failures ? "FAIL" : "PASS");
     return g_failures ? 1 : 0;

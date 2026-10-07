@@ -15,6 +15,7 @@ struct CheckOptions {
     std::string source = "roma";  // roma, moge or hybrid; moge and hybrid synthesise depths/
     bool masks = true;        // mask the empty background, as a sky mask would
     bool keep = false;        // leave the dataset behind
+    double cycle_px = 0, refine_huber = 0;   // DensifyOptions' own, auto by default
 };
 
 // 0 when every gate passes.

@@ -24,7 +24,7 @@ namespace {
 
 // Entry, little-endian: "SPWC", byte order, version, flags, key[32], w, h, seconds (f64) and
 // the two counts (u64) end the 80-byte header; then warp f32[], certainty f32[], checksum u64.
-constexpr size_t kHead = 80, kTail = 8;
+constexpr size_t kHead = 88, kTail = 8;
 constexpr uint32_t kOrder = 0x01020304u;
 constexpr int kMaxSide = 65536;
 constexpr auto kStaleTemp = std::chrono::hours(1);
@@ -90,8 +90,8 @@ uint64_t entryChecksum(const uint8_t* p, size_t n) {
 }
 
 std::vector<uint8_t> encodeEntry(const std::string& key, const Warp& w, double seconds) {
-    const size_t nw = w.warp.size(), nc = w.certainty.size();
-    std::vector<uint8_t> b(kHead + (nw + nc) * 4 + kTail, 0);
+    const size_t nw = w.warp.size(), nc = w.certainty.size(), np = w.precision.size();
+    std::vector<uint8_t> b(kHead + (nw + nc + np) * 4 + kTail, 0);
     std::memcpy(b.data(), "SPWC", 4);
     putAt<uint32_t>(b, 4, kOrder);
     putAt<uint32_t>(b, 8, kEntryVersion);
@@ -104,8 +104,10 @@ std::vector<uint8_t> encodeEntry(const std::string& key, const Warp& w, double s
     putAt<double>(b, 56, seconds);
     putAt<uint64_t>(b, 64, nw);
     putAt<uint64_t>(b, 72, nc);
+    putAt<uint64_t>(b, 80, np);
     if (nw) std::memcpy(b.data() + kHead, w.warp.data(), nw * 4);
     if (nc) std::memcpy(b.data() + kHead + nw * 4, w.certainty.data(), nc * 4);
+    if (np) std::memcpy(b.data() + kHead + (nw + nc) * 4, w.precision.data(), np * 4);
     putAt<uint64_t>(b, b.size() - kTail, entryChecksum(b.data(), b.size() - kTail));
     return b;
 }
@@ -128,10 +130,10 @@ bool decodeEntry(const std::vector<uint8_t>& b, const std::string& key, Warp* ou
     if (w < 1 || h < 1 || w > kMaxSide || h > kMaxSide) return no("size out of range");
     const double secs = getAt<double>(b, 56);
     if (!std::isfinite(secs) || secs < 0) return no("bad recorded time");
-    const uint64_t nw = getAt<uint64_t>(b, 64), nc = getAt<uint64_t>(b, 72);
+    const uint64_t nw = getAt<uint64_t>(b, 64), nc = getAt<uint64_t>(b, 72), np = getAt<uint64_t>(b, 80);
     const uint64_t px = (uint64_t)w * (uint64_t)h;
-    if (nw != 2 * px || nc != px) return no("counts do not match the size");
-    if (b.size() != kHead + (nw + nc) * 4 + kTail) return no("length does not match the counts");
+    if (nw != 2 * px || nc != px || (np != 0 && np != 3 * px)) return no("counts do not match the size");
+    if (b.size() != kHead + (nw + nc + np) * 4 + kTail) return no("length does not match the counts");
     if (getAt<uint64_t>(b, b.size() - kTail) != entryChecksum(b.data(), b.size() - kTail))
         return no("checksum");
     if (out) {
@@ -145,6 +147,10 @@ bool decodeEntry(const std::vector<uint8_t>& b, const std::string& key, Warp* ou
         std::memcpy(out->certainty.data(), b.data() + kHead + nw * 4, nc * 4);
         for (float c : out->certainty)
             if (!(c >= 0.0f && c <= 1.0f)) return no("certainty outside [0, 1]");
+        out->precision.resize(np);
+        if (np) std::memcpy(out->precision.data(), b.data() + kHead + (nw + nc) * 4, np * 4);
+        for (float v : out->precision)
+            if (!std::isfinite(v)) return no("non-finite precision");
     }
     if (seconds) *seconds = secs;
     return true;
@@ -406,6 +412,9 @@ bool usable(const MatchImage& m) { return m.rgb && m.width > 0 && m.height > 0; 
 bool usable(const Warp& w) {
     const size_t px = (size_t)std::max(w.width, 0) * (size_t)std::max(w.height, 0);
     if (w.width < 1 || w.height < 1 || w.warp.size() != 2 * px || w.certainty.size() != px) return false;
+    if (!w.precision.empty() && w.precision.size() != 3 * px) return false;
+    for (float v : w.precision)
+        if (!std::isfinite(v)) return false;
     for (float v : w.warp)
         if (!std::isfinite(v)) return false;
     for (float c : w.certainty)
@@ -471,6 +480,37 @@ Warp CachedMatcher::match(const MatchImage& a, const MatchImage& b) {
     if (!cache_.put(key, w, took)) stats_.write_failed++;
     stats_.seconds_overhead += keyed + since(t_put);
     return w;
+}
+
+std::pair<Warp, Warp> CachedMatcher::matchBoth(
+    const MatchImage& a, const MatchImage& b,
+    const std::function<std::pair<Warp, Warp>(const MatchImage&, const MatchImage&)>& both) {
+    if (!usable(a) || !usable(b)) {
+        stats_.uncacheable += 2;
+        return both(a, b);
+    }
+    const std::string kab = keyFor(a, b), kba = keyFor(b, a);
+    std::pair<Warp, Warp> r;
+    double rab = 0, rba = 0;
+    const Lookup fab = cache_.get(kab, &r.first, &rab), fba = cache_.get(kba, &r.second, &rba);
+    stats_.corrupt += (fab == Lookup::Corrupt) + (fba == Lookup::Corrupt);
+    const bool hab = fab == Lookup::Hit, hba = fba == Lookup::Hit;
+    stats_.hits += hab + hba;
+    if (hab) stats_.seconds_saved += rab;
+    if (hba) stats_.seconds_saved += rba;
+    if (hab && hba) return r;
+    if (hab) return {r.first, match(b, a)};
+    if (hba) return {match(a, b), r.second};
+    const auto t = std::chrono::steady_clock::now();
+    r = both(a, b);
+    const double took = since(t);
+    stats_.seconds_matched += took;
+    for (const auto& [key, w] : {std::pair<const std::string&, const Warp&>{kab, r.first}, {kba, r.second}}) {
+        if (!usable(w)) { stats_.uncacheable++; continue; }
+        stats_.misses++;
+        if (!cache_.put(key, w, took / 2)) stats_.write_failed++;
+    }
+    return r;
 }
 
 }  // namespace roma
