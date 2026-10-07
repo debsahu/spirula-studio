@@ -71,6 +71,10 @@ public:
     // FLOPs one submission may carry before the driver's watchdog is at risk
     // (core/SubmitBudget.h). An op whose single dispatch would exceed it splits.
     double workCap();
+    // Tests only: pins workCap() (and the flush threshold) to `cap`, so a test
+    // can show an op's result does not depend on how the budget slices it.
+    // A negative value returns to the measured budget.
+    void overrideWorkCap(double cap);
 
     // Makes the NEXT submission wait on an external timeline. Used by the video
     // decoder, whose work runs on a different queue family: the decode signals

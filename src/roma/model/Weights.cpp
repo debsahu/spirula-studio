@@ -3,6 +3,7 @@
 #include "roma/model/Rope.h"
 
 #include "core/Env.h"
+#include "nn/Ops.h"
 #include "nn/io/TorchPickle.h"
 #include "nn/vk/Memory.h"
 #include "nn/vk/Stream.h"
@@ -98,7 +99,10 @@ bool f16_weights() {
         const char* v = spirula::env("ROMA_F32_WEIGHTS");
         return v && v[0] && v[0] != '0';
     }();
-    return !f32;
+    // Without tensor cores f16 buys nothing (894 vs 889 ms a pair, M4 Max) and
+    // costs determinism: nn's timing probe picks one of two f16 tiles that differ
+    // by ~1e-5, and the bf16 RoPE turns that into 0.65 px between runs.
+    return !f32 && nn::coop_matrix_enabled();
 }
 
 Weights::~Weights() {
@@ -180,10 +184,8 @@ void Weights::load(const std::string& path) {
             bias.name = q + "attn.qkv.bias";
             bias.shape = {3 * W};
             bias.produce = [&f, q, W, heads] {
-                std::vector<float> v = f.read(q + "attn.qkv.bias").data;
-                const std::vector<float> m = f.read(q + "attn.qkv.bias_mask").data;
-                for (size_t i = 0; i < v.size(); ++i) v[i] *= m[i];
-                return permute_qk_rows(v, W, heads, 1);
+                return fold_qkv_bias(f.read(q + "attn.qkv.bias").data,
+                                     f.read(q + "attn.qkv.bias_mask").data, W, heads);
             };
             staged.push_back(std::move(bias));
         }
@@ -500,6 +502,7 @@ void Weights::load(const std::string& path) {
                 h16[k] = nn::float_to_half(data[k]);
                 f16_inexact_ += nn::half_to_float(h16[k]) != data[k];
             }
+            f16_total_ += data.size();
             vk::Stream::get().upload(ptr, h16.data(), s.bytes());
         } else {
             vk::Stream::get().upload(ptr, data.data(), s.bytes());
