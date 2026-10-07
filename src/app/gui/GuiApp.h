@@ -408,9 +408,9 @@ private:
     void draw_geometry_options();
     void draw_densify_options();
     // The checkpoint's state and its Get button or bar; true once a run can start.
-    bool draw_densify_checkpoint();
+    bool draw_densify_checkpoint(int source);
     void request_densify_download();
-    bool densify_ready() const;
+    bool densify_ready(const DensifyJob& job) const;
     bool densify_model_missing() const;
     void draw_recon_model_row(bool busy);
     std::vector<ReconModel> _recon_models;

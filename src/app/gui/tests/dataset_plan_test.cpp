@@ -543,6 +543,39 @@ int main() {
         k.densify.max_points = 500000;
         expect(plan(k)[Step::Densify].act == Act::Redo, "a points cap is part of the settings");
         k = j;
+        k.densify.source = kSourceMoge;
+        const DatasetPlan other_source = plan(k);
+        expect(other_source[Step::Densify].act == Act::Redo &&
+                   other_source[Step::Densify].why == Why::Settings &&
+                   other_source[Step::Model].act == Act::Reuse,
+               "another point source redoes dense points alone");
+        k.densify.source = kSourceHybrid;
+        expect(plan(k)[Step::Densify].act == Act::Redo, "... whichever one it is");
+        {
+            // A record from before the option exists says nothing about the source.
+            StepFields old = densify_fields(j.densify);
+            old.erase(std::remove_if(old.begin(), old.end(),
+                                     [](const StepField& f) { return f.key == "densify_source"; }),
+                      old.end());
+            StepRecorder legacy(ws.string(), read_dataset_record(ws.string()));
+            legacy.begin(Step::Densify, old);
+            legacy.finish(Step::Densify);
+            expect(plan(j)[Step::Densify].act == Act::Reuse,
+                   "a record with no source is auto, so an auto run still reuses it");
+            expect(plan(k)[Step::Densify].act == Act::Redo,
+                   "... and a chosen source does not");
+            expect(densify_source_of(read_dataset_record(ws.string())) == kSourceAuto,
+                   "the source read back from such a record is auto");
+            StepRecorder again_rec(ws.string(), read_dataset_record(ws.string()));
+            again_rec.begin(Step::Densify, densify_fields(k.densify));
+            again_rec.finish(Step::Densify);
+            expect(densify_source_of(read_dataset_record(ws.string())) == kSourceHybrid,
+                   "the source a run recorded is the one read back");
+            StepRecorder restore(ws.string(), read_dataset_record(ws.string()));
+            restore.begin(Step::Densify, densify_fields(j.densify));
+            restore.finish(Step::Densify);
+        }
+        k = j;
         k.densify.device_uuid = "other";
         expect(plan(k)[Step::Densify].act == Act::Reuse, "the device is not");
 

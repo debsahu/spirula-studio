@@ -109,6 +109,7 @@ static void test_dataset_preset() {
     s.sfm.densify.enable = true;
     s.sfm.densify.model = "sparse/3";   // the capture's own, so no preset carries it
     s.sfm.densify.preset = 4;
+    s.sfm.densify.source = 2;   // moge: not the default, so a dropped key shows
     s.sfm.densify.refs = 37;
     s.sfm.densify.neighbours = 7;
     s.sfm.densify.rule = 2;
@@ -237,6 +238,7 @@ static void test_dataset_preset() {
 
     CHECK_EQ(b.sfm.densify.enable, s.sfm.densify.enable);
     CHECK_EQ(b.sfm.densify.preset, s.sfm.densify.preset);
+    CHECK_EQ(b.sfm.densify.source, s.sfm.densify.source);
     CHECK_EQ(b.sfm.densify.refs, s.sfm.densify.refs);
     CHECK_EQ(b.sfm.densify.neighbours, s.sfm.densify.neighbours);
     CHECK_EQ(b.sfm.densify.rule, s.sfm.densify.rule);
@@ -367,11 +369,13 @@ static void test_sanitize() {
     s.colmap.matcher = 0;
     s.colmap.camera_model = "NONSENSE";
     s.sfm.densify.preset = 99;
+    s.sfm.densify.source = 40;
     s.sfm.densify.rule = -1;
     s.sfm.densify.neighbours = 4000;
     s.sfm.densify.max_points = -5;
     gui::sanitize_dataset_settings(s);
     CHECK(s.sfm.densify.preset >= 0 && s.sfm.densify.preset < gui::kNumDensifyPresets);
+    CHECK_EQ(s.sfm.densify.source, gui::kNumDensifySources - 1);
     CHECK_EQ(s.sfm.densify.rule, 0);
     CHECK_EQ(s.sfm.densify.neighbours, 64);
     CHECK_EQ(s.sfm.densify.max_points, 0);

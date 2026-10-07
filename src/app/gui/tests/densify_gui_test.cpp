@@ -109,6 +109,59 @@ int main() {
                "the preset table is the one the combo and the record both read");
     }
 
+    // ---- the point source -----------------------------------------------------------
+    {
+        const DensifyJob stock;
+        expect(!has(densify_args(stock, "/ds", "/ds/images", "", false, true), "--source"),
+               "auto sends no --source: the tool resolves it from the dataset");
+        const char* want[] = {nullptr, "roma", "moge", "hybrid"};
+        for (int s = 1; s < kNumDensifySources; s++) {
+            DensifyJob j;
+            j.source = s;
+            expect(value_of(densify_args(j, "/ds", "/ds/images", "", false, true), "--source") ==
+                       want[s],
+                   std::string("source ") + want[s] + " reaches --source as that word");
+        }
+        DensifyJob wild;
+        wild.source = 99;
+        expect(value_of(densify_args(wild, "/ds", "/ds/images", "", false, true), "--source") ==
+                   "hybrid",
+               "an index out of range is clamped, not read past the table");
+        // The CLI's own spellings, which `densify_main.cpp` parses.
+        expect(std::string(kDensifySources[kSourceMoge]) == "moge" &&
+                   std::string(kDensifySources[kSourceRoma]) == "roma" &&
+                   std::string(kDensifySources[kSourceHybrid]) == "hybrid" &&
+                   std::string(kDensifySources[kSourceAuto]) == "auto",
+               "the source table spells what the CLI parses");
+
+        DensifyJob moge, roma, hybrid, autoj;
+        moge.source = kSourceMoge;
+        roma.source = kSourceRoma;
+        hybrid.source = kSourceHybrid;
+        expect(!densify_needs_roma(moge), "MoGe depth needs no RoMa checkpoint or licence");
+        expect(densify_needs_roma(roma) && densify_needs_roma(hybrid) && densify_needs_roma(autoj),
+               "RoMa, hybrid and auto (roma or hybrid) all do");
+        expect(densify_resolved_source(kSourceAuto, true) == kSourceHybrid &&
+                   densify_resolved_source(kSourceAuto, false) == kSourceRoma &&
+                   densify_resolved_source(kSourceMoge, false) == kSourceMoge &&
+                   densify_resolved_source(kSourceRoma, true) == kSourceRoma,
+               "auto is hybrid with depth maps and roma without; a chosen source stays");
+        const fs::path ds = fs::temp_directory_path() / "spirula_densify_gui_source";
+        fs::remove_all(ds);
+        fs::create_directories(ds / "depths");
+        expect(!densify_has_depth_maps(ds.string()), "an empty depths/ is no depth maps");
+        { std::ofstream(ds / "depths" / "a.png") << "x"; }
+        expect(densify_has_depth_maps(ds.string()), "a file in depths/ is");
+        fs::remove_all(ds);
+        expect(!densify_has_depth_maps(ds.string()), "no folder is none");
+
+        DensifyJob cur, incoming;
+        incoming.source = kSourceMoge;
+        expect(densify_after_settings(cur, incoming, ModelCarry::Reset).source == kSourceMoge &&
+                   densify_after_settings(cur, incoming, ModelCarry::Keep).source == kSourceMoge,
+               "a preset's source is taken, the model is what it leaves alone");
+    }
+
     // ---- state that must not leak between captures ---------------------------------
     {
         DensifyJob cur, incoming;

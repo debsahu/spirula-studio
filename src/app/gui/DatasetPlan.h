@@ -45,6 +45,8 @@ StepFields model_fields(const ColmapJob& job, const PrepJob& prep);
 StepFields densify_fields(const DensifyJob& job);
 // The source model a finished dense step was made from, "" for the tool's own pick.
 std::string densify_model_of(const DatasetRecord& rec);
+// Its `--source` as a kDensifySources index; auto for a record that names none.
+int densify_source_of(const DatasetRecord& rec);
 StepFields geometry_fields(const GeometryJob& job);
 std::vector<std::string> geometry_kinds(const GeometryJob& job);
 

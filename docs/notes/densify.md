@@ -137,8 +137,12 @@ surface, against 0 without it) and removed.
 
 `--source auto|roma|moge|hybrid`. Auto is `hybrid` when the dataset has depth maps and a
 matcher is available, `moge` with depth maps only, else `roma`; the choice is printed. The
-licence gate applies to RoMa only. The GUI does not pass `--source` yet (it runs the CLI, so
-it gets auto); wiring a combo is left for WS-5.
+licence gate applies to RoMa only. The GUI has a "Points from" combo (dataset step and the
+training screen's Add Dense Points row) that sends `--source`; Auto sends nothing and says which it will
+pick for the dataset. Only moge skips the RoMa/DINOv3 licences and the checkpoint, so the readiness gate,
+the Run button and a batch's up-front licence prompt all read the chosen source. The source is a preset
+field and a recorded densify field (a record from before it counts as auto). Gate:
+`tools/roma/densify_source_gate.py`.
 
 **Depth maps** (`DepthSource.h`): the `spirula geometry` maps in `--depth-dir` (default
 `depths/`), 16-bit, relative or millimetres (both linear in depth, so the fit absorbs which),

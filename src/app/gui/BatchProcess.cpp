@@ -367,7 +367,8 @@ bool batch_model_needs(const BatchRow& row, BatchModelNeeds& out) {
     out.mask_detector_id = s.mask_detector_id;
     out.geometry = s.sfm.geometry.enable;
     out.geometry_model = s.sfm.geometry.model;
-    out.densify = s.sfm.densify.enable;
+    out.densify = s.sfm.densify.enable && densify_needs_roma(s.sfm.densify);
+    out.densify_job = s.sfm.densify;
     return true;
 }
 
@@ -453,7 +454,7 @@ void check_dataset_stage(const BatchRow& row, const BatchCapabilities& caps,
     if (s.sfm.densify.enable) {
         if (!caps.densify)
             out.push_back(issue_of(spirula::i18n::msg::densegui::chk_unavailable, kSt, true));
-        else if (caps.densify_ready && !caps.densify_ready())
+        else if (caps.densify_ready && !caps.densify_ready(s.sfm.densify))
             out.push_back(issue_of(spirula::i18n::msg::densegui::chk_not_ready, kSt, true));
     }
 
