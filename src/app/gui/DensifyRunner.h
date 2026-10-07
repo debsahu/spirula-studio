@@ -45,7 +45,8 @@ struct DensifyJob {
 // The arguments after `spirula --lang <x>`. `masks` empty means no mask folder.
 std::vector<std::string> densify_args(const DensifyJob& job, const std::string& dataset,
                                       const std::string& images, const std::string& masks,
-                                      bool masks_flipped, bool preset_supported);
+                                      bool masks_flipped, bool preset_supported,
+                                      const std::string& progress_dir = {});
 
 // Auto as the CLI resolves it: hybrid when the dataset has depth maps, else roma.
 // A fixed source resolves to itself.
@@ -76,9 +77,13 @@ const std::vector<std::string>& densify_license_families();
 bool densify_model_cached();
 std::vector<PendingDownload> densify_model_downloads();
 
+// `progress_dir`: where the child may write model.bin snapshots of the growing
+// cloud, for the screen's model view. After the child exits the cloud it wrote
+// is checked against the checksums densify.json recorded.
 bool run_densify_step(const DensifyJob& job, const std::string& dataset,
                       const std::string& images, const std::string& masks,
                       bool masks_flipped, RunProgress& prog,
-                      const std::atomic<bool>& cancel, std::string& error);
+                      const std::atomic<bool>& cancel, std::string& error,
+                      const std::string& progress_dir = {});
 
 }  // namespace gui

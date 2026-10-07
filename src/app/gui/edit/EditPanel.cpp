@@ -592,7 +592,8 @@ void EditSession::draw_panel() {
         _train_after_save = false;
     }
     ImGui::EndDisabled();
-    if (!home.empty()) ui::help_on_hover(msg::save_over_help, {home});
+    const bool derived = d.save_is_derived(_save_target);
+    if (!home.empty()) ui::help_on_hover(derived ? msg::dense_save_help : msg::save_over_help, {home});
     ImGui::SameLine();
     ImGui::BeginDisabled(!target.copy || !_pick_save);
     if (ui::Button(msg::save_copy, ImVec2(half, 0))) {
@@ -602,6 +603,7 @@ void EditSession::draw_panel() {
     ImGui::EndDisabled();
     if (d.kind() == EditDoc::Kind::Points && target.folder)
         ui::TextDisabledWrapped(msg::sparse_edit_help);
+    if (const Msg* note = d.save_note(_save_target)) ui::TextDisabledWrapped(*note);
     if (d.dirty()) ui::TextDisabled(msg::save_unsaved);
     if (!_status.empty())
         ui::TextColoredWrappedRaw(_status_err ? ImVec4(1, 0.5f, 0.5f, 1)
@@ -619,7 +621,8 @@ void EditSession::draw_panel() {
     // one that asks.
     if (_ask_overwrite) {
         _ask_overwrite = false;
-        if (!home.empty()) ui::OpenPopup(msg::save_confirm_title);
+        if (!home.empty() && derived) save_in_place();
+        else if (!home.empty()) ui::OpenPopup(msg::save_confirm_title);
         // Nothing to write back to: Ctrl+S can only mean a copy.
         else if (can_save_copy()) ask_save_copy();
     }

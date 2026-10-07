@@ -3,6 +3,7 @@
 #include "app/gui/DensifyRunner.h"
 
 #include "app/AppPaths.h"
+#include "app/gui/ReconModels.h"
 #include "app/gui/Subprocess.h"
 #include "i18n/Locale.h"
 #include "i18n/catalog/DenseGui.h"
@@ -80,7 +81,8 @@ bool densify_model_cached() {
 bool run_densify_step(const DensifyJob& job, const std::string& dataset,
                       const std::string& images, const std::string& masks,
                       bool masks_flipped, RunProgress& prog,
-                      const std::atomic<bool>& cancel, std::string& error) {
+                      const std::atomic<bool>& cancel, std::string& error,
+                      const std::string& progress_dir) {
     if (std::string why = densify_availability(); !why.empty()) {
         error = why;
         return false;
@@ -98,6 +100,10 @@ bool run_densify_step(const DensifyJob& job, const std::string& dataset,
     }
 #endif
 
+    std::string model_dir;
+#ifdef SS_TOOL_DENSIFY
+    model_dir = job.model.empty() ? find_colmap_poses(dataset) : (fs::path(dataset) / job.model).string();
+#endif
     DensifyJob j = job;
 #ifdef SS_TOOL_DENSIFY
     if (j.device_uuid.empty()) j.device_uuid = nn::configured_device_selector();
@@ -105,7 +111,7 @@ bool run_densify_step(const DensifyJob& job, const std::string& dataset,
     std::vector<std::string> argv = {app::exe_path(), "--lang",
                                      spirula::i18n::code(spirula::i18n::current())};
     for (std::string& a : densify_args(j, dataset, images, masks, masks_flipped,
-                                       densify_has_flag("--preset")))
+                                       densify_has_flag("--preset"), progress_dir))
         argv.push_back(std::move(a));
     std::string cmd;
     for (const std::string& a : argv) cmd += (cmd.empty() ? "$ " : " ") + a;
@@ -131,6 +137,13 @@ bool run_densify_step(const DensifyJob& job, const std::string& dataset,
     }
     if (rc != 0) {
         error = dg::err_failed.get();
+        return false;
+    }
+    // The child's own output, read back: a cloud that is not the one it recorded is not offered.
+    if (!model_dir.empty() &&
+        cloud_check((fs::path(model_dir).parent_path() / (fs::path(model_dir).filename().string() + "-roma")).string()) ==
+            CloudCheck::Mismatch) {
+        error = dg::err_cloud_mismatch.get();
         return false;
     }
     prog.mark(Stage::Densify, StageStatus::Done);

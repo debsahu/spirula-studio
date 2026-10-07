@@ -301,7 +301,34 @@ error, noise and three images with the risers 5 % too deep): roma 83,808 points 
   `gui.conf`.
 - **Presets**: the combo is sent as `--preset` only when `spirula densify --help` lists
   the flag, and is disabled with a tooltip until then.
+- **Edit Dense Cloud** (`PointsDoc`, `src/roma/DensifyEdit.cpp`): the button beside
+  "Edit Reconstruction" and the Model combo opens `sparse/<m>-roma` (or its edit, when
+  there is one) in the point editor. Save writes `sparse/<m>-roma-edit/` and never the
+  model it opened: `cameras.bin` and `images.bin` byte for byte, `points3D.bin`,
+  `points3D_tracks.bin` and the normals file filtered to the points that stay, and a
+  `densify.json` with `edited_from` (the first model, its name and checksums) and `edit`
+  (what this save removed). Only points can go: a moved scene or a removed camera is
+  refused, because the poses are the model. Nothing removed, or nothing left, writes
+  nothing. Opening the edit and saving rewrites it. The edit is picked by neither the
+  parser nor densify; pick it in the Model combo (`colmap_recon_dir`). Design after
+  spirula-studio#154 (`LICENSES/NOTICE-spirula-studio-PR154.txt`).
+- **Cloud checksums**: `densify.json` records SHA-256s of `points3D.bin` and
+  `points3D_tracks.bin`. The step checks them when the child exits, and the Model combo
+  marks each dense entry `[checksum ok]` or `[checksum mismatch]`.
+- **Writer lock and publication** (`src/roma/Publish.h`): a file `.<m>-roma.lock` beside
+  the model holds the writer's pid. `spirula densify` takes it before matching, the
+  edit takes it before reading, and a live holder refuses the second writer with its pid;
+  a dead holder's lock is taken over. A folder is written as `<out>.partial` and swapped
+  in: an existing one is set aside as `<out>.old` first and dropped after, and
+  `recoverPublish` puts it back if a crash left the swap half done. Neither suffix is
+  listed as a model.
+- **Live preview**: the dataset screen's densify step passes `--progress-dir`; the child
+  writes `model.bin` snapshots (the cameras and a strided slice of at most 50 000 points
+  of the cloud so far) through `CloudPreview`, at most one every 1.5 s and never more
+  than one for each eight times a write takes. The model view the screen already has
+  draws them, and the last one is the filtered cloud. A write that fails costs nothing.
 - Gate: `tools/roma/densify_gui_gate.py` (`tools/guictl.py` on a 6-image fixture).
+- Gate for the edit and the preview: `tools/roma/densify_edit_gui_gate.py`.
 
 ## Checks
 

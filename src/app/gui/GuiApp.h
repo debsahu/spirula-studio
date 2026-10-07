@@ -413,9 +413,15 @@ private:
     bool densify_ready(const DensifyJob& job) const;
     bool densify_model_missing() const;
     void draw_recon_model_row(bool busy);
+    // The dense model of `dataset` that "Edit Dense Cloud" opens: its -roma-edit
+    // if one exists, else its -roma, "" for none. Listed once a second.
+    std::string dense_model_to_edit(const std::string& dataset);
+    void draw_dense_edit_button(const std::string& dataset);
     std::vector<ReconModel> _recon_models;
     std::string _recon_models_for;
     double _recon_models_at = -10.0;
+    std::string _dense_edit_for, _dense_edit_dir;
+    double _dense_edit_at = -10.0;
     void draw_dense_row(bool busy);
     // Opens the geometry preview on the output folder when it already holds a
     // reconstruction -- the only case where the real cameras are known -- and
