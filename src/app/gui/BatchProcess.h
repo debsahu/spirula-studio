@@ -180,6 +180,7 @@ struct BatchCapabilities {
     bool colmap = false;
     bool masking = false;         // segmentation is compiled in and usable
     bool geometry = false;        // `spirula geometry` is available
+    bool densify = false;         // `spirula densify` is available
     // Is that checkpoint (and its text detector) already on disk? A batch cannot
     // stop to accept a licence or wait on a 2 GB download, so a missing one is
     // found here.
@@ -187,6 +188,8 @@ struct BatchCapabilities {
     // Does it read the text prompt? BiRefNet needs none, and runs without one.
     std::function<bool(const std::string&)> mask_model_prompted;
     std::function<bool(const std::string&)> geometry_model_ready;
+    // Checkpoint on disk and both licences accepted.
+    std::function<bool()> densify_ready;
 };
 
 // Check one row. `all`/`index` are for the checks that are about the list

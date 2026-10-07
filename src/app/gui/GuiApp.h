@@ -322,9 +322,10 @@ private:
                           const spirula::i18n::Msg& get, const std::function<void()>& request);
     bool license_accepted(const std::string& family) const;
     // Raises one modal per family not yet accepted, in order, then runs `then`.
-    // Cancelling any of them drops the rest and `then` never runs. No caller yet:
-    // the densify step's RoMa v2 download (dinov3 + romav2) is the first.
-    void request_licenses(std::vector<std::string> families, std::function<void()> then);
+    // Cancelling any of them drops the rest and `then` never runs.
+    // `declined` runs when the user cancels one of them instead.
+    void request_licenses(std::vector<std::string> families, std::function<void()> then,
+                          std::function<void()> declined = nullptr);
     void advance_license_queue();
 
     // ---- screens ----
@@ -384,6 +385,14 @@ private:
     // The job's mask_* fields from the shared settings; `mask_enable` excepted.
     void fill_masking(PrepJob& prep) const;
     void draw_geometry_options();
+    void draw_densify_options();
+    // The checkpoint's state and its Get button or bar; true once a run can start.
+    bool draw_densify_checkpoint();
+    void request_densify_download();
+    bool densify_ready() const;
+    bool densify_model_missing() const;
+    void draw_recon_model_row(bool busy);
+    void draw_dense_row(bool busy);
     // Opens the geometry preview on the output folder when it already holds a
     // reconstruction -- the only case where the real cameras are known -- and
     // on the input the mask combo points at otherwise.
@@ -801,6 +810,7 @@ private:
     // to skip. Separate from GeometryJob::overwrite so pressing the button
     // does not leave the option ticked for every run after it.
     bool _redo_geometry = false;
+    bool _redo_densify = false;
     // Panel-level state, copied into whichever job runs. The inputs are kept as
     // the struct both runners take (PrepInput), so the panel edits the thing
     // that runs instead of a parallel copy of it: a video file or photo folder
@@ -879,6 +889,9 @@ private:
     // One job for both engines (SfmJob / ColmapJob carry a copy), the panel
     // that tries it on one frame, and the checkpoint fetch.
     GeometryJob _geometry;
+    DensifyJob _densify;
+    DownloadQueue _dense_download;
+    std::function<void()> _license_declined;
     GeometryPanel _geometry_panel;
     PartitionPanel _partition_panel;
     void open_partition_panel(const DatasetFolders& f);
@@ -891,6 +904,7 @@ private:
     std::string _roi_files_for;
     // "Recompute Sparse Pointcloud", between Change... and the region row.
     RecomputePanel _recompute;
+    RecomputePanel _dense_panel{RecomputePanel::Kind::Dense};
     void draw_recompute_row(bool busy);
     void take_recomputed();
     // Queueing a partition's parts: the modal with the run's settings, the

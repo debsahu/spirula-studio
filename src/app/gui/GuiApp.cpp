@@ -25,6 +25,9 @@
 #include "i18n/Locale.h"
 #include "i18n/catalog/Brand.h"
 #include "i18n/catalog/Dataset.h"
+#include "i18n/catalog/DenseGui.h"
+#include "i18n/catalog/Densify.h"
+#include "app/gui/ReconModels.h"
 #include "i18n/catalog/Lidar.h"
 #include "i18n/catalog/Geometry.h"
 #include "data/SparseEdit.h"
@@ -85,6 +88,7 @@ namespace tmsg = spirula::i18n::msg::train;
 namespace rmsg = spirula::i18n::msg::render;
 namespace mmsg = spirula::i18n::msg::maskedit;
 namespace rcmsg = spirula::i18n::msg::recompute;
+namespace dgmsg = spirula::i18n::msg::densegui;
 using spirula::i18n::Msg;
 using spirula::format_duration;
 
@@ -335,6 +339,7 @@ void GuiApp::shutdown() {
     _source_probe.stop();
     _download.cancel();
     _geom_download.cancel();
+    _dense_download.cancel();
     _feat_download.cancel();
     _font_download.cancel();
     _runner.shutdown();
@@ -711,6 +716,11 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("max_size", std::to_string(_geometry.max_size));
     line("face_res", _geometry.face_res == 1 ? "source" : "output");
 
+    section(dgmsg::step_name.get());
+    line("enabled", cfg_str(_densify.enable));
+    line("model", _densify.model.empty() ? "auto" : _densify.model);
+    line("preset", kDensifyPresets[std::clamp(_densify.preset, 0, kNumDensifyPresets - 1)]);
+
     // The training config, grouped the way the options editor groups it.
     for (int si = 0; si < kTrainNumSections; si++) {
         const TrainConfig& c = _cfg;
@@ -756,6 +766,7 @@ void GuiApp::append_logs() {
     for (auto& s : _compare.drain_log()) log(s);
     for (auto& s : _mesh.drain_log()) log(s);
     for (auto& [s, detail] : _recompute.drain_log()) log(s, detail);
+    for (auto& [s, detail] : _dense_panel.drain_log()) log(s, detail);
     take_recomputed();
     poll_batch_command();
     for (auto& s : _download.drain_log()) log(s);
@@ -925,6 +936,7 @@ DatasetSettings GuiApp::capture_dataset_settings() const {
     s.sfm.prep.mask_memory_frames = _mask_memory_frames;
     s.sfm.mask_features = _mask_features;
     s.sfm.geometry = _geometry;
+    s.sfm.densify = _densify;
     return s;
 }
 
@@ -958,6 +970,12 @@ void GuiApp::apply_dataset_settings(const DatasetSettings& in) {
     _mask_memory_frames = s.sfm.prep.mask_memory_frames;
     _mask_features = s.sfm.mask_features;
     _geometry = s.sfm.geometry;
+    {
+        // The model is the capture's own, so a preset leaves it alone.
+        const std::string model = _densify.model;
+        _densify = s.sfm.densify;
+        _densify.model = model;
+    }
     // A colour space the preset spelled out is a decision, so the EXR probe
     // must not overwrite it later.
     _color_space_touched =
@@ -1445,6 +1463,8 @@ BatchCapabilities GuiApp::batch_capabilities() const {
     caps.colmap = colmap_available();
     caps.masking = backends().builtin_masking;
     caps.geometry = geometry_availability().empty();
+    caps.densify = densify_availability().empty();
+    caps.densify_ready = [this] { return densify_ready(); };
     caps.mask_model_ready = [](const std::string& id, const std::string& detector_id) {
         return !cached_mask_model(id, detector_id).empty();
     };
@@ -2458,6 +2478,7 @@ void GuiApp::clear_sources() {
     // are remembered nowhere: a run must never quietly cost an hour of
     // inference nobody asked for. (Not mid-run: that would disable it.)
     if (!dataset_busy()) _geometry = GeometryJob{};
+    if (!dataset_busy()) _densify = DensifyJob{};
     // ... and a different capture is a different colour space.
     _sfm_job.image_gamut.clear();
     _sfm_job.image_is_linear.reset();
@@ -2973,6 +2994,7 @@ void GuiApp::frame() {
     // vit-giant2 is two files, and so is ALIKED with LightGlue: both fetches
     // are queues, stepped on from somewhere that runs whatever screen is up.
     _geom_download.pump();
+    _dense_download.pump();
     _feat_download.pump();
     if (!_download_model_id.empty() && _download.state() == FileDownload::State::Done) {
         const ModelEntry* e = find_model(_download_model_id);
@@ -3740,7 +3762,7 @@ bool GuiApp::dataset_busy() const {
 }
 bool GuiApp::native_work_busy() const {
     const TrainRunner::Phase phase = _runner.phase();
-    return _mesh.busy() || dataset_busy() || _recompute.running() ||
+    return _mesh.busy() || dataset_busy() || _recompute.running() || _dense_panel.running() ||
            phase == TrainRunner::Phase::Loading ||
            phase == TrainRunner::Phase::Preparing ||
            phase == TrainRunner::Phase::Training;
@@ -3769,10 +3791,12 @@ bool GuiApp::license_accepted(const std::string& family) const {
 }
 
 void GuiApp::request_licenses(std::vector<std::string> families,
-                              std::function<void()> then) {
+                              std::function<void()> then,
+                              std::function<void()> declined) {
     if (!_license_prompt.empty()) return;
     _license_queue = std::move(families);
     _license_then = std::move(then);
+    _license_declined = std::move(declined);
     advance_license_queue();
 }
 
@@ -3789,6 +3813,7 @@ void GuiApp::advance_license_queue() {
     // Taken out first: `then` may call request_licenses and set a new one.
     std::function<void()> then = std::move(_license_then);
     _license_then = nullptr;
+    _license_declined = nullptr;
     if (then) then();
 }
 
@@ -3959,6 +3984,7 @@ void GuiApp::sync_dataset_jobs() {
     req.redo_masks = _redo_masks;
     req.redo_model = _redo_model;
     req.redo_geometry = _redo_geometry;
+    req.redo_densify = _redo_densify;
     req.keep_built = _keep_built && _keep_built_for == _workspace;
     if (_part_choice_for == _workspace)
         std::copy(std::begin(_part_choice), std::end(_part_choice), std::begin(req.parts));
@@ -3966,6 +3992,10 @@ void GuiApp::sync_dataset_jobs() {
     _sfm_job.mask_features = _colmap_job.mask_features = _mask_features;
     // The same step either way: `spirula geometry` over the finished dataset.
     _sfm_job.geometry = _colmap_job.geometry = _geometry;
+    _sfm_job.densify = _colmap_job.densify = _densify;
+    _sfm_job.densify.device_uuid = _colmap_job.densify.device_uuid = _native_device_uuid;
+    _sfm_job.densify.enable = _colmap_job.densify.enable =
+        _densify.enable && densify_availability().empty();
     // The frozen choice survives the copy above, so a later panel edit cannot
     // drop the UUID a run already committed to.
     _sfm_job.geometry.device_uuid = _colmap_job.geometry.device_uuid =
@@ -5244,6 +5274,9 @@ void GuiApp::propagate_frozen_device() {
     _sfm_job.geometry.device_uuid = uuid;
     _colmap_job.geometry.device_uuid = uuid;
     _geometry.device_uuid = uuid;
+    _densify.device_uuid = uuid;
+    _sfm_job.densify.device_uuid = uuid;
+    _colmap_job.densify.device_uuid = uuid;
     _mesh_job.device_uuid = uuid;
 }
 
@@ -5556,6 +5589,166 @@ void GuiApp::draw_masking_options(const MaskingPanel& p) {
 }
 
 // ---------------------------------------------------------------------------
+// Dense points
+// ---------------------------------------------------------------------------
+
+bool GuiApp::densify_ready() const {
+    if (!densify_availability().empty() || !densify_model_cached()) return false;
+    for (const std::string& f : densify_license_families())
+        if (!license_accepted(f)) return false;
+    return true;
+}
+
+bool GuiApp::densify_model_missing() const {
+    return _densify.enable && densify_availability().empty() && !densify_ready();
+}
+
+// Consent first, the checkpoint's licences then the download, and a refusal
+// stops there: nothing is fetched and nothing is run.
+void GuiApp::request_densify_download() {
+    request_licenses(
+        densify_license_families(),
+        [this] { _dense_download.start(densify_model_downloads()); },
+        [this] { log(dgmsg::licence_declined.get()); });
+}
+
+bool GuiApp::draw_densify_checkpoint() {
+    FileDownload& dl = _dense_download.current();
+    if (_dense_download.running()) {
+        ui::ProgressBarRaw(std::max(dl.progress(), 0.0f), ImVec2(px(260.0f), 0),
+                           dl.status().c_str());
+        ImGui::SameLine();
+        ImGui::PushID("densedl");
+        if (ui::Button(dmsg::stop)) _dense_download.cancel();
+        ImGui::PopID();
+        return false;
+    }
+    if (densify_ready()) {
+        ui::TextColored(kOk, dgmsg::ckpt_ready);
+        return true;
+    }
+    if (ui::Button(dgmsg::ckpt_get)) request_densify_download();
+    uint64_t bytes = 0;
+    for (const PendingDownload& d : densify_model_downloads()) bytes += d.bytes;
+    if (bytes) {
+        ImGui::SameLine();
+        ui::TextDisabledRaw(human_bytes(bytes));
+    }
+    if (dl.state() == FileDownload::State::Failed)
+        ui::TextColoredWrappedRaw(kErr, dl.status());
+    return false;
+}
+
+void GuiApp::draw_densify_options() {
+    const std::string why = densify_availability();
+    if (!why.empty()) {
+        ui::TextDisabledWrapped(dgmsg::unavailable);
+        ui::help_on_hover_raw(why.c_str());
+        return;
+    }
+    ui::Checkbox(dgmsg::enable, &_densify.enable);
+    ui::help_on_hover(dgmsg::enable_help);
+    if (!_densify.enable) return;
+
+    ImGui::Indent();
+    draw_densify_checkpoint();
+
+    ImGui::SetNextItemWidth(px(320.0f));
+    if (ui::BeginCombo(dgmsg::model, _densify.model.empty() ? dgmsg::model_auto.get()
+                                                           : _densify.model.c_str())) {
+        if (ui::Selectable(dgmsg::model_auto, _densify.model.empty())) _densify.model.clear();
+        for (const ReconModel& m : list_recon_models(_workspace)) {
+            const std::string label =
+                m.images < 0 ? m.rel
+                             : i18n::format(dgmsg::model_entry,
+                                            {m.rel, format_count((double)std::max<int64_t>(m.points, 0)),
+                                             (long long)m.images});
+            if (ui::SelectableRaw(label, m.rel == _densify.model)) _densify.model = m.rel;
+        }
+        ImGui::EndCombo();
+    }
+    ui::help_on_hover(spirula::i18n::msg::densify::opt_model);
+
+    const bool presets = densify_has_flag("--preset");
+    ImGui::BeginDisabled(!presets);
+    ImGui::SetNextItemWidth(px(220.0f));
+    ui::ComboRaw(ui::detail::label(dgmsg::preset), &_densify.preset, kDensifyPresets,
+                 kNumDensifyPresets);
+    ImGui::EndDisabled();
+    ui::help_on_hover(presets ? dgmsg::preset_help : dgmsg::preset_missing);
+
+    if (ui::CollapsingHeader(dgmsg::advanced)) {
+        namespace dn = spirula::i18n::msg::densify;
+        struct Knob {
+            const Msg* label;
+            int* value;
+            const Msg* help;
+            int hi;
+        };
+        const Knob knobs[] = {{&dgmsg::refs, &_densify.refs, &dn::opt_refs, 100000},
+                              {&dgmsg::neighbours, &_densify.neighbours, &dn::opt_neighbours, 64},
+                              {&dgmsg::matches, &_densify.matches_per_ref, &dn::opt_matches_per_ref,
+                               1000000},
+                              {&dgmsg::max_points, &_densify.max_points, &dn::opt_max_points,
+                               200000000},
+                              {&dgmsg::min_track, &_densify.min_track, &dn::opt_min_track, 64}};
+        for (const Knob& k : knobs) {
+            ImGui::SetNextItemWidth(px(220.0f));
+            if (ui::InputInt(*k.label, k.value)) *k.value = std::clamp(*k.value, 0, k.hi);
+            ui::help_on_hover(*k.help);
+        }
+        ImGui::SetNextItemWidth(px(220.0f));
+        ui::ComboRaw(ui::detail::label(dgmsg::rule), &_densify.rule, kDensifyRules, 3);
+        ui::help_on_hover(dn::opt_neighbour_rule);
+        ui::Checkbox(dgmsg::use_masks, &_densify.use_masks);
+    }
+    ImGui::Unindent();
+}
+
+// The training screen's chooser of which of the dataset's models it trains on.
+void GuiApp::draw_recon_model_row(bool busy) {
+    if (_cfg.data.empty()) return;
+    const std::vector<ReconModel> models = list_recon_models(_cfg.data);
+    if (models.empty()) return;
+    ImGui::BeginDisabled(busy);
+    ImGui::SetNextItemWidth(px(320.0f));
+    const std::string current =
+        _cfg.colmap_recon_dir.empty() ? dgmsg::model_auto_entry.get() : _cfg.colmap_recon_dir;
+    if (ui::BeginCombo(dgmsg::model_combo, current.c_str())) {
+        auto pick = [&](const std::string& rel) {
+            if (rel == _cfg.colmap_recon_dir) return;
+            _cfg.colmap_recon_dir = rel;
+            _cfg_ui.touched.insert("colmap_recon_dir");
+            _parse_dirty = true;
+        };
+        if (ui::Selectable(dgmsg::model_auto_entry, _cfg.colmap_recon_dir.empty())) pick("");
+        for (const ReconModel& m : models) {
+            const std::string label =
+                m.images < 0 ? m.rel
+                             : i18n::format(dgmsg::model_entry,
+                                            {m.rel, format_count((double)std::max<int64_t>(m.points, 0)),
+                                             (long long)m.images});
+            if (ui::SelectableRaw(label, m.rel == _cfg.colmap_recon_dir)) pick(m.rel);
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+    ui::help_on_hover(dgmsg::model_combo_help);
+}
+
+void GuiApp::draw_dense_row(bool busy) {
+    if (_cfg.data.empty() || !densify_availability().empty()) return;
+    RecomputePanel::Source src{_cfg.data, _cfg.image_dir, _cfg.mask_dir, _cfg.flip_mask};
+    src.recon_dir = _cfg.colmap_recon_dir;
+    src.draw_checkpoint = [this] { return draw_densify_checkpoint(); };
+    _dense_panel.draw(src, busy, [this](std::string& device) {
+        if (native_work_busy() || !freeze_native_device()) return false;
+        device = _native_device_uuid;
+        return true;
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Depth and normals
 // ---------------------------------------------------------------------------
 
@@ -5750,6 +5943,7 @@ const Msg& step_name(Stage s) {
         case Stage::Matching:  return dmsg::step_matching;
         case Stage::Mapping:   return dmsg::step_mapping;
         case Stage::Align:     return spirula::i18n::msg::lidar::step_align;
+        case Stage::Densify:   return dgmsg::step_name;
         case Stage::Geometry:  return dmsg::step_geometry;
         case Stage::Finishing: return dmsg::step_finishing;
     }
@@ -5926,6 +6120,7 @@ int GuiApp::preview_for_stage() {
         case Stage::Matching:  return 3;
         case Stage::Align:
         case Stage::Geometry:  return 5;
+        case Stage::Densify:
         case Stage::Mapping:
         case Stage::Finishing: return 4;
     }
@@ -6190,6 +6385,14 @@ void GuiApp::draw_dataset_rerun(const WorkspaceState& prior) {
         ui::help_on_hover_disabled(need_geom_model ? dmsg::geom_model_first
                                                    : dmsg::rerun_geometry_help);
     }
+    if (prior.densify) {
+        ImGui::SameLine();
+        const bool need_dense_model = densify_model_missing();
+        ImGui::BeginDisabled(!_densify.enable || need_dense_model);
+        if (ui::Button(dgmsg::rerun)) _redo_densify = go = true;
+        ImGui::EndDisabled();
+        ui::help_on_hover_disabled(need_dense_model ? dgmsg::ckpt_first : dgmsg::rerun_help);
+    }
     ImGui::NewLine();
     ImGui::Unindent();
     // Every route but the last re-reconstructs: a model built from frames or
@@ -6426,6 +6629,7 @@ void GuiApp::reset_recon_options() {
     _sfm_job = SfmJob{};
     _colmap_job = ColmapJob{};
     _geometry = GeometryJob{};
+    _densify = DensifyJob{};
     _sfm_job.image_gamut = gamut;
     _sfm_job.image_is_linear = linear;
     _sfm_job.keep_intermediate = keep;
@@ -6558,6 +6762,7 @@ const Msg& plan_step_name(Step s) {
         case Step::Frames:   return dmsg::step_frames;
         case Step::Masks:    return dmsg::step_masks;
         case Step::Model:    return dmsg::plan_step_model;
+        case Step::Densify:  return dgmsg::step_name;
         case Step::Geometry: return dmsg::view_geometry;
     }
     return dmsg::step_frames;
@@ -6660,6 +6865,7 @@ std::string plan_key_label(const std::string& key) {
         {"mask_negative_prompt", &dmsg::mask_but_keep},
         {"feature_prompt", &dmsg::mask_features_only},
         {"mask_threshold", &dmsg::mask_threshold}, {"geometry_model", &dmsg::geom_model},
+        {"densify_model", &dgmsg::model}, {"densify_preset", &dgmsg::preset},
         {"geometry_max_size", &dmsg::geom_max_size},
         {"geometry_tokens", &dmsg::geom_num_tokens},
         {"jpeg_quality", &dmsg::geom_jpeg_quality},
@@ -6859,7 +7065,7 @@ void GuiApp::restore_from_record(bool announce) {
 }
 
 void GuiApp::forget_redo_requests() {
-    _redo_frames = _redo_masks = _redo_model = _redo_geometry = false;
+    _redo_frames = _redo_masks = _redo_model = _redo_geometry = _redo_densify = false;
     std::fill(std::begin(_part_choice), std::end(_part_choice), PartChoice::Auto);
 }
 
@@ -7378,6 +7584,11 @@ void GuiApp::draw_dataset_form(float height, bool running) {
     ImGui::EndDisabled();
     ImGui::Spacing();
 
+    ImGui::BeginDisabled(dataset_locked(Stage::Densify) || !_lidar.empty());
+    draw_densify_options();
+    ImGui::EndDisabled();
+    ImGui::Spacing();
+
     ImGui::BeginDisabled(dataset_locked(Stage::Features));
     if (effective_engine() == Engine::BuiltIn) draw_sfm_advanced();
     else                                       draw_colmap_options();
@@ -7401,7 +7612,9 @@ void GuiApp::draw_dataset_form(float height, bool running) {
         const bool need_mask_model = mask_model_missing();
         const bool need_feat_model = feature_model_missing();
         const bool need_geom_model = geometry_model_missing();
-        const bool need_model = need_mask_model || need_feat_model || need_geom_model;
+        const bool need_dense_model = densify_model_missing();
+        const bool need_model = need_mask_model || need_feat_model || need_geom_model ||
+                                need_dense_model;
         if (ready) draw_dataset_plan(dataset_plan());
         // The button names what pressing it does: a folder that already holds
         // a reconstruction is added to, not built.
@@ -7424,18 +7637,22 @@ void GuiApp::draw_dataset_form(float height, bool running) {
             // checkpoint at a time; the next takes its place once this lands.
             FileDownload& dl = need_mask_model ? _download
                                : need_feat_model ? _feat_download.current()
-                                                 : _geom_download.current();
+                               : need_geom_model ? _geom_download.current()
+                                                 : _dense_download.current();
             draw_model_fetch(dl,
                              need_mask_model   ? dmsg::mask_model_first
                              : need_feat_model ? dmsg::feat_model_first
-                                               : dmsg::geom_model_first,
+                             : need_geom_model ? dmsg::geom_model_first
+                                               : dgmsg::ckpt_first,
                              need_mask_model   ? dmsg::mask_get_model
                              : need_feat_model ? dmsg::feat_get_model
-                                               : dmsg::geom_get_model,
+                             : need_geom_model ? dmsg::geom_get_model
+                                               : dgmsg::ckpt_get,
                              [&] {
                                  if (need_mask_model)      request_model_download(_model_id, _mask_detector_id);
                                  else if (need_feat_model) request_feature_download();
-                                 else                      request_geometry_download();
+                                 else if (need_geom_model) request_geometry_download();
+                                 else                      request_densify_download();
                              });
         }
         if (ready) {
@@ -7674,6 +7891,8 @@ void GuiApp::draw_license_modal() {
         _license_prompt.clear();
         _license_queue.clear();
         _license_then = nullptr;
+        if (std::function<void()> declined = std::exchange(_license_declined, nullptr))
+            declined();
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -9534,7 +9753,8 @@ void GuiApp::draw_train_settings() {
     TrainRunner::Phase ph = _runner.phase();
     bool busy = ph == TrainRunner::Phase::Loading ||
                 ph == TrainRunner::Phase::Preparing ||
-                ph == TrainRunner::Phase::Training || _recompute.running();
+                ph == TrainRunner::Phase::Training || _recompute.running() ||
+                _dense_panel.running();
 
     // ---- dataset ----
     ui::SeparatorText(msg::section_dataset);
@@ -9570,6 +9790,8 @@ void GuiApp::draw_train_settings() {
     ImGui::EndDisabled();
     if (!_batch_active) {
         draw_recompute_row(busy);
+        draw_dense_row(busy);
+        draw_recon_model_row(busy);
         draw_roi_row(busy);
     }
 

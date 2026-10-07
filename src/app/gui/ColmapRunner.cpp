@@ -265,6 +265,11 @@ void ColmapRunner::take_geometry(ColmapJob& job) {
     job.geometry = _live.geometry;
 }
 
+void ColmapRunner::take_densify(ColmapJob& job) {
+    std::lock_guard<std::mutex> lk(_mu);
+    job.densify = _live.densify;
+}
+
 void ColmapRunner::take_masking(PrepJob& prep) {
     std::lock_guard<std::mutex> lk(_mu);
     prep.mask_enable = _live.mask_enable;
@@ -959,6 +964,20 @@ void ColmapRunner::run(ColmapJob job) {
         write_unregistered_list(ws, images);
 
         if (!reuse_model) record.finish(Step::Model);
+
+        // ---- dense points ----------------------------------------------------
+        take_densify(job);
+        plan = plan_dataset(plan_job(job, pj), prior, rec, req, &plan, Step::Densify);
+        say(Step::Densify);
+        if (makes(plan[Step::Densify].act)) {
+            const DensifyJob d = densify_for_plan(job.densify, plan[Step::Densify]);
+            record.begin(Step::Densify, densify_fields(job.densify));
+            std::string derr;
+            if (!run_densify_step(d, ws.string(), images, prep.mask_dir,
+                                  prep.mask_dir_flipped, _prog, _cancel, derr))
+                return fail(derr);
+            record.finish(Step::Densify);
+        }
 
         // ---- depth and normals ---------------------------------------------
         take_geometry(job);

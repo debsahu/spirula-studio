@@ -943,6 +943,12 @@ WorkspaceState probe_workspace(const std::string& workspace,
                fs::exists(ws / "transforms.json", ec) ||
                colmap_model_here(ws) || metashape_export_here(ws);
     st.geometry = has_content(ws / "normals") || has_content(ws / "depths");
+    for (const char* parent : {"sparse", "colmap/sparse"})
+        for (fs::directory_iterator it(ws / parent, ec), end; !ec && it != end; it.increment(ec)) {
+            const std::string name = it->path().filename().string();
+            st.densify = st.densify || (name.size() > 5 && name.compare(name.size() - 5, 5, "-roma") == 0 &&
+                                        fs::exists(it->path() / "points3D.bin", ec));
+        }
     st.record = fs::exists(ws / kDatasetRecordFile, ec);
     const fs::path resume = ws / sfm::resume::kDir;
     st.extracted = has_content(ws / "features") &&
