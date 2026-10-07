@@ -386,7 +386,7 @@ int spirula_densify_main(int argc, char** argv) {
            << ", \"reproj\": " << st.reproj << ", \"cheirality\": " << st.cheirality << ", \"parallax\": " << st.parallax
            << ", \"candidates\": " << st.candidates << ", \"ref_reproj\": " << st.ref_reproj << ", \"fused\": " << st.fused
            << ", \"short_track\": " << st.short_track << ", \"inconsistent\": " << st.inconsistent << ", \"uncertain\": " << st.uncertain
-           << ", \"two_image_kept\": " << st.two_image_kept << ", \"two_image_bar\": " << jnum(st.two_image_bar)
+           << ", \"two_image_kept\": " << st.two_image_kept << ", \"seen_through\": " << st.seen_through << ", \"two_image_bar\": " << jnum(st.two_image_bar)
            << ", \"voxel_merged\": " << st.voxel_merged << ", \"capped\": " << st.capped << "},\n"
            << "  \"track_hist\": {";
         bool first = true;

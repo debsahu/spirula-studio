@@ -660,7 +660,7 @@ bool FreeSpace::seesThrough(const DensePoint& p) const {
         // the far side's points but not always the occluder's.
         const Map& m = maps_[i];
         const int cx = (int)(at % (size_t)m.w), cy = (int)(at / (size_t)m.w);
-        float near = INFINITY;
+        float nearest = INFINITY;
         for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++) {
                 int x = cx + dx;
@@ -668,9 +668,9 @@ bool FreeSpace::seesThrough(const DensePoint& p) const {
                 if (y < 0 || y >= m.h) continue;
                 if (pl_.images[i].cam.isSpherical()) x = (x + m.w) % m.w;
                 else if (x < 0 || x >= m.w) continue;
-                near = std::min(near, m.d[(size_t)y * m.w + x]);
+                nearest = std::min(nearest, m.d[(size_t)y * m.w + x]);
             }
-        if (std::isfinite(near) && dist < (double)near * (1.0 - margin_)) return true;
+        if (std::isfinite(nearest) && dist < (double)nearest * (1.0 - margin_)) return true;
     }
     return false;
 }
