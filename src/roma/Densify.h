@@ -33,6 +33,11 @@ struct DensifyOptions {
     bool depth_agreement = true;    // false: every fitted depth sample is a point (no vote)
     bool depth_align = true;
     bool hybrid_local_check = true;
+    bool depth_normal_files = true;     // false: normals always from the fitted depth
+    double depth_normal_min_cos = 0.9;  // a normal map's median cosine against its own depth
+    double depth_normal_deg = 55;       // normal agreement, degrees: measured (docs/notes/densify.md)
+    bool depth_normal_check = true;     // against the images that agree on the depth
+    bool hybrid_normal_check = true;    // a hybrid fill against the plane of its neighbours
 
     double refs = 0.8;              // <= 1: a fraction of the images, else a count
     int neighbours = 3;
@@ -93,6 +98,7 @@ struct DensePoint {
     double parallax_deg = 0;
     int distinct_images = 1;
     bool from_depth = false;        // a depth-source point; `error` is then relative depth
+    float normal[3] = {0, 0, 0};    // world, unit, from the depth source; 0 0 0 = none
     std::vector<Observation> track;
 };
 
@@ -102,7 +108,11 @@ struct DensifyStats {
             reproj = 0, cheirality = 0, parallax = 0, candidates = 0, ref_reproj = 0, inconsistent = 0, uncertain = 0,
             fused = 0, short_track = 0, two_image_kept = 0, seen_through = 0, voxel_merged = 0,
             capped = 0, depth_samples = 0, depth_nodata = 0, depth_disagree = 0,
-            depth_through = 0, depth_local = 0, depth_covered = 0, depth_kept = 0, depth_edge = 0;
+            depth_through = 0, depth_local = 0, depth_covered = 0, depth_kept = 0, depth_edge = 0,
+            depth_normal = 0, depth_local_normal = 0;
+    // 5-degree bins: candidate normal against the agreeing images' (agree), against
+    // a random pixel of the same image (null), and a hybrid fill against its neighbourhood.
+    std::array<int64_t, 36> normal_agree_hist{}, normal_null_hist{}, local_normal_hist{};
     double two_image_bar = -1;           // the auto min-track error bar, -1 unused
     std::map<int, int64_t> track_hist;   // distinct images per output point
     void add(const DensifyStats& o);
@@ -149,7 +159,8 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
 std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_track,
                                        double voxel, int64_t max_points,
                                        const DensifyOptions& opt, DensifyStats& stats,
-                                       const std::function<bool(const DensePoint&)>& veto = {});
+                                       const std::function<bool(const DensePoint&)>& veto = {},
+                                       int64_t max_fill = -1);   // >= 0: depth points capped apart
 
 // The plugin's per-voxel choice: longest track, then lower error; surviving
 // points keep their input order. Track length counts views (plugin) or

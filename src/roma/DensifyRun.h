@@ -55,6 +55,7 @@ struct DensifyPlan {
     int min_track = 0;
     double voxel = 0;
     int64_t max_points = 0;
+    int64_t max_fill = -1;                       // hybrid, auto cap: the fill's own budget; -1 shared
     DensifySource source = DensifySource::Roma;
     double median_pair_angle_deg = 0;            // ref-neighbour, at their shared points
     double match_focal = 0;                      // median view focal, match pixels
@@ -114,9 +115,34 @@ std::string detachPoints(const std::string& images_bin, std::vector<size_t>* id_
 std::string outDirProblem(const std::string& dataset_dir, const std::string& model_dir,
                           const std::string& out_dir);
 
-void writeSibling(const std::string& model_dir, const std::string& out_dir,
-                  const DensifyPlan& plan, const std::vector<DensePoint>& cloud,
-                  const std::string& settings_json);
+// points3D.bin has no normal field: when any point has one, the sibling also
+// holds kNormalsPly, binary little-endian x y z nx ny nz (float) and the
+// point3D_id (uint), one vertex per point, 0 0 0 for none.
+inline constexpr const char* kNormalsPly = "points3D_normals.ply";
+void writeNormalsPly(const std::string& path, const std::vector<DensePoint>& cloud);
+
+// Each written point through its image's own camera and pose at the pixels
+// points3D_tracks.bin holds, read back from `model_dir`: independent of the
+// triangulation and of the face-to-panorama mapping that wrote them.
+struct ReprojStats {
+    int64_t observations = 0, invalid = 0;   // invalid: behind, outside, unknown image, non-finite
+    double mean_px = NAN, p95_px = NAN;
+};
+ReprojStats reprojectWritten(const std::string& model_dir);
+
+// Throws, writing nothing, for an empty cloud: a sibling sorts after its
+// source, so a trainer could pick it. densify.json gains "reprojection".
+ReprojStats writeSibling(const std::string& model_dir, const std::string& out_dir,
+                         const DensifyPlan& plan, const std::vector<DensePoint>& cloud,
+                         const std::string& settings_json);
+
+// Depth maps in place before a depth run: those present are kept, `compute`
+// (when given) runs once if any are missing, and must leave every present map
+// untouched (size and time), or this throws.
+struct DepthInventory { int reused = 0, computed = 0, missing = 0; };
+DepthInventory ensureDepths(const std::vector<std::string>& names,
+                            const std::function<std::string(const std::string&)>& find,
+                            const std::function<void()>& compute);
 
 // A panorama face (or a whole image) resampled to `size` square, supersampled
 // so a large downscale does not alias; and its keep-mask by nearest.

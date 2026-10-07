@@ -45,6 +45,9 @@ struct SyntheticDepth {
     double noise = 0.002, copy_scale = 1.05;
     int copies = 3;
     uint64_t seed = 5;
+    bool normals = false;             // normals/ too, the first `tilted` images' all off by `tilt_deg`
+    int tilted = 0;
+    double tilt_deg = 70;
 };
 void writeStairDepths(const Scene& scene, const std::string& dir, const SyntheticDepth& sd);
 

@@ -12,7 +12,20 @@ image pairs come from RoMa v2 (`src/roma/Matcher.h` is the seam). The output is 
 | `gauge.txt`, `rigs.txt`, `rigs.bin`, `frames.bin` | copied when the source has them |
 | `points3D.bin` | the dense cloud, tracks empty; `colmap model_analyzer` reads it as a consistent model with no observations |
 | `points3D_tracks.bin` | every observation: `"RTK1"`, u64 count, then per point u64 id, u32 n, n x (u32 image id, f32 x, f32 y) in the source image's pixels |
-| `densify.json` | every setting as resolved, the per-filter counts, the source files' SHA-256 |
+| `points3D_normals.ply` | when the depth source ran: binary PLY, float x y z nx ny nz and the uint `point3D_id`, one vertex per point; unit world normals from the depth source, `0 0 0` where none (COLMAP's `points3D.bin` has no normal field) |
+| `densify.json` | every setting as resolved, the per-filter counts, the source files' SHA-256, and `reprojection` (below) |
+
+**An empty cloud is an error**: nothing is written and the exit is non-zero, whatever
+the source. A sibling sorts after its source, so an empty one could be picked and
+trained from nothing.
+
+**`reprojection`** is measured on the files as written: each point of `points3D.bin`
+through its image's own camera and pose (`cameras.bin`, `images.bin`) at the pixels of
+`points3D_tracks.bin` (`reprojectWritten`). It shares nothing with the triangulation and
+covers the face-to-panorama mapping, which only happens at write time. `--check` gates it
+(no invalid observation, p95 at most 2 source pixels). It found a real defect on its first
+basement run: a depth point's track was the projection of the reference's own point, not of
+the averaged one written, and reprojected at p95 49.5 px; after the fix, 0.0004 px.
 
 The trainer reads it with `--colmap-recon-dir sparse/0-roma`. The parser's
 automatic pick never lands on it: models are sorted by image count, then by path,
@@ -81,7 +94,11 @@ Every automatic setting is printed, and recorded in `densify.json`:
 
 ## Ported from the Lichtfeld densification plugin
 
-GPL-3.0-or-later, commit `ab0b04e` (LICENSES/NOTICE-Lichtfeld-Densification-Plugin.txt).
+GPL-3.0-or-later, commit `ab0b04e3` (LICENSES/NOTICE-Lichtfeld-Densification-Plugin.txt).
+`--plugin-exact` means that commit's behaviour and the parity test stays pinned to it.
+Upstream has moved since: at v0.10.1 the certainty floor is a zeroing `where` rather than
+the `clamp(min=)` reproduced here. A review of `ab0b04e3..v0.10.1` (2026-10-07) found none
+of the defects listed below fixed upstream, so every departure stands.
 The matcher is not ported from the plugin: it is upstream RoMa v2 (`src/roma/model/`).
 
 | plugin | here |
@@ -116,6 +133,101 @@ The plan proposed letting a short track survive alone in its voxel past 2 degree
 parallax. It was measured on S-1 (it kept 49 two-view floaters more than 5 cm off a
 surface, against 0 without it) and removed.
 
+## Depth source: MoGe-2 maps, and the hybrid (WS-4d, 2026-10-07)
+
+`--source auto|roma|moge|hybrid`. Auto is `hybrid` when the dataset has depth maps and a
+matcher is available, `moge` with depth maps only, else `roma`; the choice is printed. The
+licence gate applies to RoMa only. The GUI does not pass `--source` yet (it runs the CLI, so
+it gets auto); wiring a combo is left for WS-5.
+
+**Depth maps** (`DepthSource.h`): the `spirula geometry` maps in `--depth-dir` (default
+`depths/`), 16-bit, relative or millimetres (both linear in depth, so the fit absorbs which),
+ray depth where geometry splits the lens into faces. 0 is no data and stays no data, so a
+sky-blanked `depths_nosky/` works through `--depth-dir`. **Reuse**: maps present are kept; when
+some are missing and the folder is geometry's own `depths/`, `spirula geometry --depth
+--no-normal` runs once for the missing ones, and `ensureDepths` refuses the run if any present
+map changed size or time. The count reused / computed / still missing is printed. Another
+folder is never extended (a sky-blanked copy cannot be). With no maps at all, `auto` stays
+`roma`; asking for `moge` or `hybrid` computes them. *Choice, not asked for*: auto does not start
+a 40-minute MoGe run on a dataset that has no maps.
+
+**Fit**, per image, to its own sparse points: `1/d_true = a / d_raw + b` (disparity affine),
+2-point RANSAC on relative depth error (10 %), Huber IRLS. Refused with fewer than 30 anchors,
+20 inliers, half the anchors, a rank correlation under 0.5, or more than 5 % of the pixels lost
+to a non-positive disparity.
+
+**Normals**: from `--normal-dir` (default `normals/`, geometry's 8-bit encoding, black = none)
+where an image has one, else from the fitted depth with the engine's stencil
+(`(x+ - x-) x (y- - y+)`, `ScanDepth.cpp`). Every normal is faced to **its own pixel's ray**,
+never by `n.z`: on a 90-degree face the `n.z` rule inverts most of a grazing wall
+(`normals_face_their_own_ray` is that wall). A normal map is used only when its median cosine
+against the image's own depth normals is at least 0.9, **measured before facing**: faced, any
+field lands in the camera's hemisphere and an unrelated map scores about 0.5. Measured on the
+basement (vitl): 21 geometry normal maps 0.995 to 0.999 (the convention matches: camera frame,
+OpenCV axes); a real map of the panorama 7 frames away 0.57 to 0.97 (a handheld rig sees the same
+room the same way up, so a misnamed map is not reliably caught; the convention is); a photo
+passed off as a normal map -0.58 to 0.13. The count from files, from depth, and rejected is printed.
+
+**Candidates** per reference view, at the samples of a `match_size` grid: the fitted point,
+then a vote of every other usable image, each comparing its own fitted map at the point's
+projection (relative): **agree** within `tol`, **see through** past `2 tol` in front, **hide a
+copy** when the map is up to 25 % behind the point. Kept with at least 2 agreeing and more agreeing
+than either other vote. `tol` is 2.5 x the median fit residual, within 1 to 5 % (4.77 % on the
+basement). *Deviation*: the brief asked for a hard "seen through" veto; it deleted the true
+stairs whenever one image's map was a doubled copy too deep, since that image sees through every
+true point in front of it. A vote, not a veto. An **edge filter** drops a sample whose 5 x 5 map
+neighbourhood has no-data or spreads more than `4 tol` (silhouettes against the void, grazing
+floors). The point is the mean of the agreeing images' fitted points; its **track is where that
+mean lands** in each agreeing image (the written-reprojection check found the earlier
+reference-ray track at p95 49.5 px).
+
+**Normal agreement** (`--normal-check <deg>|off`, default 55): a candidate whose normal is
+further than that from the median of the agreeing images' normals at it is dropped. 55 is the
+angle where the agreeing-pair angle density falls to the null's, the null being the same
+image's normal at a random pixel (basement vitl, 32 M pairs, 5-degree bins, `densify.json`
+`normals.agree_5deg` / `null_5deg`): the ratio is 5.6 at 0-5 degrees, 2.5 at 30-35, 1.09 at 50-55,
+0.88 at 55-60. The null is Manhattan (13 % of random pairs at 85-90 degrees), which is why it
+is not a uniform sphere.
+
+**Hybrid** = the matches, plus depth points only where no neighbour's warp is certain for that
+reference, and only where the fill agrees with the matched and sparse points near it: the
+median relative residual of the fitted map at those points (+-8 match cells) within `tol`, and
+the fill's normal within the normal threshold of the plane through those points within 6 % of
+the range (+-24 cells; 6 or more points, flat: least spread under a tenth of the next). On the
+basement the plane test sees 26,357 of 4.45 M fill samples. In the voxel select **a matched
+point beats a depth point** (the depth's track is every agreeing image, not a measurement).
+Depth points are **not free-space evidence**: an image's map too deep there would veto true
+two-image matches in front of it. With the automatic cap the **fill gets its own budget**, a
+quarter of the matches' (the matches alone fill 1 M on the basement, which left the first hybrid
+with no fill at all); an explicit `--max-points` is one budget, matches first. Normals of every
+written point that has one go to `points3D_normals.ply`.
+
+### Measured: basement steps ROI (vitl maps, 2048 x 1024, 146 panoramas, holdout every 8)
+
+| arm | stair points | anchor p50 / p90 mm | anchors within 5 cm | free-space violations | thickness p50 mm |
+|---|---|---|---|---|---|
+| moge | 30,700 | 51.8 / 429.7 | 0.487 | 1.13 % | 9.17 |
+| moge, normal check off | 35,049 | 47.3 / 431.7 | 0.513 | 1.16 % | 9.68 |
+| **hybrid** | **49,777** | **19.9 / 53.5** | **0.885** | 0.38 % | 9.24 |
+| hybrid, normal check off | 50,776 | 20.2 / 52.8 | 0.885 | 0.44 % | 8.99 |
+| roma | 40,744 | 20.9 / 55.8 | 0.879 | 0.31 % | 8.90 |
+| DA360 seed (M) | 355,760 | 15.9 / 28.7 | 0.991 | 1.82 % | |
+| DA360 3-view (M3) | 168,771 | 20.3 / | | 2.50 % | |
+| sparse | 2,174 | (the anchors) | | | |
+
+The vitb maps (1064 x 532) were worse for moge (p50 81.7 mm, within 5 cm 0.377). Side profile
+(`render_profile`): DA360 shows the doubled stair line; hybrid and roma show one; **moge shows
+none, because it has almost no stairs**: the MoGe stairs do not survive the vote at this
+tolerance. So moge alone is not usable on this scene and the doubled-line gate is passed by
+absence there, not by quality. The hybrid is the arm to use: 22 % more stair points than roma
+and anchors as good or better, at 0.07 pp more violations. The normal check is within noise on
+anchors in both arms; it lowers hybrid violations (0.44 -> 0.38 %) and raises plane thickness
+(8.99 -> 9.24 mm): mixed, kept on as specified, open.
+
+S-1 through each source (stand-in matches, synthetic maps with a per-image disparity-affine
+error, noise and three images with the risers 5 % too deep): roma 83,808 points / 0.996 within
+1 cm / riser 0.953 / 0 beyond; moge 75,985 / 0.997 / 0.912 / 0; hybrid 87,639 / 0.996 / 0.945 / 0.
+
 ## In the GUI
 
 - **New Dataset screen**: "Add dense points (RoMa v2)", after the depth-and-normals
@@ -146,6 +258,13 @@ surface, against 0 without it) and removed.
 - `roma_plugin_parity_test <fixture>`: gate P-4, against the plugin's own host stage on
   the same matches (`reference/python/roma_plugin_parity.py` writes the fixture).
 - `densify_autopick_test`: gate H-3.
+- WS-4d mutation run (each fails the test named): normals faced by `n.z` (derived and
+  `faceCamera`), normal maps ignored, depth computed with nothing missing, a present map
+  rewritten, normal agreement off, hybrid plane test off, alignment off, vote off, sentinel
+  taken as depth, hybrid fill everywhere, hidden-copy vote off, depth track at the reference
+  ray, depth point winning a voxel, depth points as free-space evidence, fill sharing the cap,
+  empty cloud written, face mapping turned the wrong way, sample `nonzero` clamp dropped,
+  certainty threshold strict, mask before the plugin floor, neighbour certainty ignored.
 - `spirula densify --check`: S-1, the synthetic staircase end to end, through the
   plan, the run and the writer. It uses a geometric oracle by default; `--matches`
   runs it on real RoMa matches of the same scene (export the pairs with

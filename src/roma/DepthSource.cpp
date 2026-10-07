@@ -14,8 +14,10 @@ using sfm::Vec2;
 using sfm::Vec3;
 
 DepthFiles::DepthFiles(std::function<std::string(const std::string&)> path,
-                       std::function<bool(const SourceImage&)> ray, std::string dir)
-    : path_(std::move(path)), ray_(std::move(ray)), dir_(std::move(dir)) {}
+                       std::function<bool(const SourceImage&)> ray, std::string dir,
+                       std::function<std::string(const std::string&)> normal_path)
+    : path_(std::move(path)), normal_path_(std::move(normal_path)), ray_(std::move(ray)),
+      dir_(std::move(dir)) {}
 
 bool DepthFiles::load(const SourceImage& img, RawDepth& out) {
     const std::string p = path_(img.name);
@@ -28,6 +30,132 @@ bool DepthFiles::load(const SourceImage& img, RawDepth& out) {
     out.value.assign(d, d + (size_t)w * h);
     stbi_image_free(d);
     out.ray = ray_(img);
+    out.normal.clear();
+    const std::string np = normal_path_ ? normal_path_(img.name) : std::string();
+    if (!np.empty()) {
+        int nw = 0, nh = 0;
+        uint8_t* n = stbi_load(np.c_str(), &nw, &nh, &c, 3);
+        if (!n) throw std::runtime_error("cannot read normal map " + np);
+        out.normal_width = nw;
+        out.normal_height = nh;
+        out.normal.assign((size_t)nw * nh * 3, 0.0f);
+        // geometry's encoding; black (length under 0.5) is "no normal here".
+        for (size_t i = 0; i < (size_t)nw * nh; i++) {
+            float v[3], l2 = 0;
+            for (int k = 0; k < 3; k++) {
+                v[k] = n[i * 3 + k] / 127.5f - 1.0f;
+                l2 += v[k] * v[k];
+            }
+            if (l2 < 0.25f) continue;
+            const float inv = 1.0f / std::sqrt(l2);
+            for (int k = 0; k < 3; k++) out.normal[i * 3 + k] = v[k] * inv;
+        }
+        stbi_image_free(n);
+    }
+    return true;
+}
+
+Vec3 mapRay(const SourceImage& img, int w, int h, int x, int y, bool ray) {
+    const Vec3 b = img.cam.bearing({(x + 0.5) * img.cam.width / w, (y + 0.5) * img.cam.height / h});
+    if (ray) return b.normalized();
+    return b.z > 1e-6 ? b * (1.0 / b.z) : Vec3{0, 0, 0};
+}
+
+void normalsFromDepth(const SourceImage& img, int w, int h, bool ray,
+                      const std::vector<float>& dist, std::vector<float>& normal) {
+    normal.assign((size_t)w * h * 3, 0.0f);
+    const bool wraps = img.cam.isSpherical();
+    const int r = std::max(1, (int)std::lround(std::max(w, h) / 800.0));
+    std::vector<Vec3> rays((size_t)w * h);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) rays[(size_t)y * w + x] = mapRay(img, w, h, x, y, ray);
+    auto at = [&](int x, int y, Vec3* p) {
+        if (y < 0 || y >= h) return false;
+        if (wraps) x = (x % w + w) % w;
+        else if (x < 0 || x >= w) return false;
+        const float d = dist[(size_t)y * w + x];
+        if (!(d > 0)) return false;
+        *p = rays[(size_t)y * w + x] * (double)d;
+        return true;
+    };
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const float d0 = dist[(size_t)y * w + x];
+            if (!(d0 > 0)) continue;
+            Vec3 p[4], c;
+            if (!at(x - r, y, &p[0]) || !at(x + r, y, &p[1]) || !at(x, y - r, &p[2]) ||
+                !at(x, y + r, &p[3]) || !at(x, y, &c))
+                continue;
+            // Only where the stencil stays on one surface (ScanDepth's 10 %).
+            bool one = true;
+            for (const Vec3& q : p) one = one && std::fabs(q.norm() - c.norm()) <= 0.1 * c.norm();
+            if (!one) continue;
+            Vec3 n = (p[1] - p[0]).cross(p[2] - p[3]);
+            const double len = n.norm();
+            if (!(len > 0)) continue;
+            n = n * ((n.dot(c) > 0 ? -1.0 : 1.0) / len);
+            float* out = &normal[((size_t)y * w + x) * 3];
+            out[0] = (float)n.x;
+            out[1] = (float)n.y;
+            out[2] = (float)n.z;
+        }
+}
+
+int64_t faceCamera(const SourceImage& img, int w, int h, std::vector<float>& normal) {
+    int64_t flipped = 0;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            float* n = &normal[((size_t)y * w + x) * 3];
+            if (n[0] == 0 && n[1] == 0 && n[2] == 0) continue;
+            const Vec3 r = mapRay(img, w, h, x, y, true);
+            if (n[0] * r.x + n[1] * r.y + n[2] * r.z <= 0) continue;
+            for (int k = 0; k < 3; k++) n[k] = -n[k];
+            flipped++;
+        }
+    return flipped;
+}
+
+bool planeNormal(const std::vector<Vec3>& pts, Vec3* n) {
+    if (pts.size() < 6) return false;
+    Vec3 m{0, 0, 0};
+    for (const Vec3& p : pts) m = m + p;
+    m = m * (1.0 / (double)pts.size());
+    double C[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0}, w[3], V[9];
+    for (const Vec3& p : pts) {
+        const double d[3] = {p.x - m.x, p.y - m.y, p.z - m.z};
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++) C[r * 3 + c] += d[r] * d[c];
+    }
+    sfm::jacobiEigenSymmetric(C, 3, w, V);
+    int o[3] = {0, 1, 2};
+    std::sort(o, o + 3, [&](int a, int b) { return w[a] < w[b]; });
+    if (!(w[o[0]] < 0.1 * w[o[1]]) || !(w[o[1]] > 0.05 * w[o[2]])) return false;
+    *n = Vec3{V[0 * 3 + o[0]], V[1 * 3 + o[0]], V[2 * 3 + o[0]]}.normalized();
+    return true;
+}
+
+double normalAngleDeg(const Vec3& a, const Vec3& b) {
+    return std::acos(std::clamp(a.dot(b), -1.0, 1.0)) * 180.0 / M_PI;
+}
+
+bool DepthField::normalAtPixel(int x, int y, Vec3* n) const {
+    if (normal.empty() || x < 0 || y < 0 || x >= width || y >= height) return false;
+    const int8_t* v = &normal[((size_t)y * width + x) * 3];
+    if (v[0] == 0 && v[1] == 0 && v[2] == 0) return false;
+    *n = Vec3{(double)v[0], (double)v[1], (double)v[2]}.normalized();
+    return true;
+}
+
+bool DepthField::normalAt(const SourceImage& img, const Vec3& X, Vec3* n) const {
+    if (!ok || normal.empty()) return false;
+    const Vec3 Xc = sfm::mul(img.pose.R, X) + img.pose.t;
+    if (!img.cam.isSpherical() && !(Xc.z > 0)) return false;
+    const Vec2 px = img.cam.project(Xc);
+    Vec3 nc;
+    if (!normalAtPixel((int)std::floor(px.x * width / img.cam.width),
+                       (int)std::floor(px.y * height / img.cam.height), &nc))
+        return false;
+    *n = sfm::mul(sfm::transpose(img.pose.R), nc);
     return true;
 }
 
@@ -176,6 +304,44 @@ DepthField fitDepth(const SourceImage& img, const sfm::Reconstruction& rec, cons
         return f;
     }
     f.ok = true;
+    std::vector<float> derived;
+    normalsFromDepth(img, f.width, f.height, f.ray, f.dist, derived);
+    const std::vector<float>* use = &derived;
+    f.normal_from = NormalFrom::Depth;
+    std::vector<float> file;
+    if (o.normal_files && !raw.normal.empty()) {
+        // To the depth's grid (nearest), checked against the depth's own normals
+        // for the convention, then faced to each pixel's ray.
+        file.assign(derived.size(), 0.0f);
+        for (int y = 0; y < f.height; y++)
+            for (int x = 0; x < f.width; x++) {
+                const size_t s = ((size_t)(y * raw.normal_height / f.height) * raw.normal_width +
+                                  (size_t)(x * raw.normal_width / f.width)) * 3;
+                for (int k = 0; k < 3; k++) file[((size_t)y * f.width + x) * 3 + k] = raw.normal[s + k];
+            }
+        // Checked BEFORE facing: faced, any field lands in the camera's hemisphere
+        // and an unrelated map scores ~0.5 against the depth's.
+        std::vector<double> cs;
+        for (size_t i = 0; i < derived.size(); i += 3) {
+            const double c = (double)file[i] * derived[i] + (double)file[i + 1] * derived[i + 1] +
+                             (double)file[i + 2] * derived[i + 2];
+            const bool both = (file[i] != 0 || file[i + 1] != 0 || file[i + 2] != 0) &&
+                              (derived[i] != 0 || derived[i + 1] != 0 || derived[i + 2] != 0);
+            if (both) cs.push_back(c);
+        }
+        if (!cs.empty()) {
+            std::nth_element(cs.begin(), cs.begin() + (long)(cs.size() / 2), cs.end());
+            f.normal_file_cos = cs[cs.size() / 2];
+        }
+        f.normal_flipped = faceCamera(img, f.width, f.height, file);
+        if (f.normal_file_cos >= o.normal_min_cos) {
+            use = &file;
+            f.normal_from = NormalFrom::File;
+        }
+    }
+    f.normal.assign(use->size(), 0);
+    for (size_t i = 0; i < use->size(); i++)
+        f.normal[i] = (int8_t)std::lround(std::clamp((*use)[i], -1.0f, 1.0f) * 127.0f);
     return f;
 }
 
@@ -184,7 +350,7 @@ std::vector<DensePoint> depthPointsForView(
     const std::vector<DepthField>& fields, const std::vector<int>& others, int ref, int W,
     int H, const std::vector<int64_t>& samples, const DepthAgreeOptions& o,
     const std::function<std::array<float, 3>(double, double)>& colour_at,
-    const std::function<bool(int64_t, double)>& local_ok, DensifyStats& st) {
+    const std::function<bool(int64_t, const Vec3&, const Vec3*)>& local_ok, DensifyStats& st) {
     const View& A = views[(size_t)ref];
     const SourceImage& imA = images[(size_t)A.image];
     const DepthField& fA = fields[(size_t)A.image];
@@ -223,13 +389,18 @@ std::vector<DensePoint> depthPointsForView(
         if (!fA.ray && !(bcam.z > 1e-6)) { st.depth_nodata++; continue; }
         const double along = fA.ray ? d : d / bcam.z;
         const Vec3 X = imA.centre + sfm::mul(Rt, bcam.normalized()) * along;
-        if (local_ok && !local_ok(s, along)) { st.depth_local++; continue; }
+        Vec3 nA;
+        const bool has_n = fA.normalAtPixel(mx, my, &nA);
+        if (has_n) nA = sfm::mul(Rt, nA);
+        if (local_ok && !local_ok(s, X, has_n ? &nA : nullptr)) { st.depth_local++; continue; }
         DensePoint p;
         p.from_depth = true;
-        p.track.push_back({ref, x, y});
+        std::vector<int> agreeing;
         Vec3 sum = X;
         int n = 1, agree = 0, through = 0, front = 0;
         double worst = 0;
+        std::vector<double> angles;
+        uint64_t h = (uint64_t)s * 0x9E3779B97F4A7C15ull + (uint64_t)ref;
         for (int v : others) {
             if (v == A.image) continue;
             double field, own;
@@ -240,24 +411,54 @@ std::vector<DensePoint> depthPointsForView(
             if (std::fabs(rel) > o.tol) continue;
             agree++;
             worst = std::max(worst, std::fabs(rel));
+            const DepthField& fv = fields[(size_t)v];
+            Vec3 nv;
+            if (has_n && fv.normalAt(images[(size_t)v], X, &nv)) {
+                const double ang = normalAngleDeg(nA, nv);
+                angles.push_back(ang);
+                st.normal_agree_hist[std::min<size_t>(35, (size_t)(ang / 5))]++;
+                // The null: the same image's normal at an unrelated pixel.
+                for (int tries = 0; tries < 8; tries++) {
+                    h ^= h >> 31; h *= 0xBF58476D1CE4E5B9ull; h ^= h >> 29;
+                    Vec3 nr;
+                    if (!fv.normalAtPixel((int)(h % (uint64_t)fv.width), (int)((h >> 32) % (uint64_t)fv.height), &nr)) continue;
+                    nr = sfm::mul(sfm::transpose(images[(size_t)v].pose.R), nr);
+                    st.normal_null_hist[std::min<size_t>(35, (size_t)(normalAngleDeg(nA, nr) / 5))]++;
+                    break;
+                }
+            }
             const Vec3 C = images[(size_t)v].centre;
             sum = sum + (C + (X - C) * (field / own));
             n++;
-            for (int u : views_of[(size_t)v]) {
-                const View& U = views[(size_t)u];
-                const Vec3 Xc = sfm::mul(U.R, X) + U.t;
-                if (!U.cam.isSpherical() && !(Xc.z > 0)) continue;
-                const Vec2 q = U.cam.project(Xc);
-                if (q.x < 0 || q.y < 0 || q.x >= U.cam.width || q.y >= U.cam.height) continue;
-                p.track.push_back({u, q.x, q.y});
-                break;
-            }
+            agreeing.push_back(v);
         }
         // A vote, not a veto: one image whose map is too deep there (a doubled
         // copy) sees through every true point in front of it.
         if (o.vote && (agree < o.min_agree || agree <= front)) { st.depth_disagree++; continue; }
         if (o.vote && agree <= through) { st.depth_through++; continue; }
+        if (o.normal_check && !angles.empty()) {
+            std::nth_element(angles.begin(), angles.begin() + (long)(angles.size() / 2), angles.end());
+            if (angles[angles.size() / 2] > o.normal_deg) { st.depth_normal++; continue; }
+        }
+        if (has_n)
+            for (int k = 0; k < 3; k++) p.normal[k] = (float)(k == 0 ? nA.x : k == 1 ? nA.y : nA.z);
         p.xyz = sum * (1.0 / n);
+        // The track is where the AVERAGED point lands, the reference first: the
+        // average leaves every ray it came from.
+        auto observe = [&](int image) {
+            for (int u : views_of[(size_t)image]) {
+                const View& U = views[(size_t)u];
+                const Vec3 Xc = sfm::mul(U.R, p.xyz) + U.t;
+                if (!U.cam.isSpherical() && !(Xc.z > 0)) continue;
+                const Vec2 q = U.cam.project(Xc);
+                if (q.x < 0 || q.y < 0 || q.x >= U.cam.width || q.y >= U.cam.height) continue;
+                p.track.push_back({u, q.x, q.y});
+                return;
+            }
+        };
+        observe(A.image);
+        if (p.track.empty()) p.track.push_back({ref, x, y});
+        for (int v : agreeing) observe(v);
         p.distinct_images = 1 + agree;
         p.error = worst;
         if (colour_at) {

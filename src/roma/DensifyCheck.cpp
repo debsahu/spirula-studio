@@ -11,6 +11,13 @@
 
 namespace roma {
 
+namespace {
+// The oracle's 0.1 match px at up to 2x the match size; generous so only a
+// wrong camera mapping trips it (docs/notes/densify.md).
+constexpr double kCheckReprojP95 = 2.0;
+}  // namespace
+
+
 namespace fs = std::filesystem;
 
 int densifyCheck(const CheckOptions& co) {
@@ -74,7 +81,10 @@ int densifyCheck(const CheckOptions& co) {
                 matcher ? matcher->describe().c_str() : "no matcher", co.source.c_str(), plan.images.size(), plan.views.size(),
                 plan.ref_views.size(), (long long)plan.pairs, plan.voxel, plan.min_track);
     const DensifyResult r = runDensify(job, plan, nullptr);
-    writeSibling(job.model_dir, job.out_dir, plan, r.cloud, "{\"check\": true}\n");
+    ReprojStats rp;
+    if (!r.cloud.empty()) rp = writeSibling(job.model_dir, job.out_dir, plan, r.cloud, "{\"check\": true}\n");
+    std::printf("check: written points reprojected: %lld observations, mean %.3f px, p95 %.3f px, invalid %lld\n",
+                (long long)rp.observations, rp.mean_px, rp.p95_px, (long long)rp.invalid);
 
     const CloudScore s = scoreCloud(scene, r.cloud, 0.01, 0.05, 0.02, 0.02);
     const DensifyStats& st = r.stats;
@@ -117,6 +127,8 @@ int densifyCheck(const CheckOptions& co) {
     gate(s.within >= 0.95, "share within 1 cm of a surface", s.within, ">= 0.95");
     gate(s.riser_cover >= 0.90, "riser area covered at 2 cm", s.riser_cover, ">= 0.90");
     gate(s.beyond == 0, "points farther than 5 cm", (double)s.beyond, "== 0");
+    gate(rp.observations > 0 && rp.invalid == 0, "written observations that do not reproject", (double)rp.invalid, "== 0");
+    gate(rp.p95_px <= kCheckReprojP95, "written reprojection p95, source px", rp.p95_px, "<= 2");
     if (!co.keep && co.dir.empty()) {
         std::error_code ec;
         fs::remove_all(dir, ec);
