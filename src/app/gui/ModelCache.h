@@ -85,8 +85,15 @@ struct LicenseInfo {
     const ::spirula::i18n::Msg* summary;  // 2-3 short lines, plain language
     const char* url;
     bool        needs_tick;  // Apache-2.0 does not; the SAM 3 licence does
+    // The terms in full, shown in the dialog; null when the link is all there is.
+    const char* full_text = nullptr;
 };
 const LicenseInfo& license_for(const std::string& family);
+
+// The one place the GUI records an acceptance: the accepted_license= key of
+// gui.conf, which the CLI reads too (core/LicenseConsent.h). False when it
+// could not be written, and the family is then not accepted.
+bool accept_license(const std::string& family);
 
 // Where a model would live, whether or not it is there yet.
 std::string model_path(const ModelEntry& e);

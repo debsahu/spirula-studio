@@ -14840,6 +14840,35 @@ SS_MSG(license_romav2_summary,
        "gösterilir. Kabul edilecek olağandışı bir şey yok. Model dosyası, "
        "uygulamayla birlikte verilmek yerine yazarlarının sürümünden indirilir."));
 
+// {0} is the settings file.
+SS_MSG(license_not_saved,
+    EN("Could not save your acceptance to {0}, so the licence is not accepted."),
+    JA("同意を {0} に保存できなかったため、ライセンスには同意していない扱いです。"),
+    ZH_HANS("无法把你的接受记录保存到 {0}，因此该许可协议尚未被接受。"),
+    ZH_HANT("無法把你的接受記錄儲存到 {0}，因此該授權條款尚未被接受。"),
+    KO("동의를 {0}에 저장하지 못해 라이선스에 동의하지 않은 것으로 처리됩니다."),
+    DE("Die Zustimmung ließ sich nicht in {0} speichern, die Lizenz gilt daher "
+       "nicht als angenommen."),
+    FR("Impossible d'enregistrer votre acceptation dans {0} ; la licence n'est "
+       "donc pas acceptée."),
+    ES("No se pudo guardar tu aceptación en {0}, así que la licencia no está "
+       "aceptada."),
+    PT("Não foi possível salvar sua aceitação em {0}, então a licença não está "
+       "aceita."),
+    IT("Impossibile salvare la tua accettazione in {0}, quindi la licenza non "
+       "risulta accettata."),
+    NL("Je aanvaarding kon niet worden opgeslagen in {0}, dus de licentie is niet "
+       "aanvaard."),
+    RU("Не удалось сохранить ваше согласие в {0}, поэтому лицензия не считается "
+       "принятой."),
+    TR("Kabulünüz {0} dosyasına kaydedilemedi, bu yüzden lisans kabul edilmiş "
+       "sayılmaz."));
+
+SS_MSG(license_accept,
+    EN("Accept"), JA("同意する"), ZH_HANS("接受"), ZH_HANT("接受"), KO("동의"),
+    DE("Annehmen"), FR("Accepter"), ES("Aceptar"), PT("Aceitar"), IT("Accetta"),
+    NL("Aanvaarden"), RU("Принять"), TR("Kabul et"));
+
 SS_MSG(license_full_text,
     EN("Full text"), JA("全文"), ZH_HANS("全文"), ZH_HANT("全文"), KO("전문"),
     DE("Vollständiger Text"), FR("Texte intégral"), ES("Texto completo"),
