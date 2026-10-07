@@ -53,12 +53,14 @@ public:
     CoarseMatch coarse(const float* a, const float* b, int H, int W);
 
     // [lr_h, lr_w, 3] and [hr_h, hr_w, 3] RGB in [0, 1]; the hr pair is ignored
-    // without an hr scale. A non-empty `key_a` keeps A's backbone taps and VGG
-    // maps on the device, reused by the next call with the same key and sizes.
+    // without an hr scale. A's backbone taps and VGG maps stay on the device and
+    // are reused when the next A has the same sizes and the same bytes.
     MatchResult match(const float* a_lr, const float* b_lr, const float* a_hr,
-                      const float* b_hr, const MatchSpec& spec, const std::string& key_a = {});
+                      const float* b_hr, const MatchSpec& spec);
     // The reference cache's arena, separate from plannedBytes()/peakBytes().
     uint64_t cacheBytes() const;
+    uint64_t cacheHits() const;
+    uint64_t cacheMisses() const;
 
     uint64_t plannedBytes() const;   // the largest arena plan so far
     uint64_t peakBytes() const;      // the arena's high water

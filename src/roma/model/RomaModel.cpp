@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 // ss_roma is a static archive: an object nothing references is not linked.
 NN_DECLARE_EMBEDDED_MODULES(roma)
@@ -30,6 +31,18 @@ std::vector<float> imagenet(const float* rgb, int64_t count) {
     std::vector<float> v((size_t)count);
     for (int64_t i = 0; i < count; ++i) v[(size_t)i] = (rgb[i] - kMean[i % 3]) / kStd[i % 3];
     return v;
+}
+
+// FNV-1a over the floats' bits, folded into `h`: rejects a different image
+// cheaply; the cache confirms a match with an exact compare.
+uint64_t content_hash(const float* v, size_t n, uint64_t h) {
+    h ^= 1469598103934665603ull;
+    for (size_t i = 0; i < n; ++i) {
+        uint32_t u;
+        std::memcpy(&u, v + i, 4);
+        h = (h ^ u) * 1099511628211ull;
+    }
+    return h;
 }
 
 // torch's antialiased cubic, a = -0.5 (UpSampleKernel.cpp's aa_filter).
@@ -115,8 +128,13 @@ struct Model::Impl {
     CoarseMatcher matcher;
     vk::Arena     arena{"roma"};
     vk::Arena     cache{"roma-ref"};   // A's features, kept across pairs
-    std::string   cache_key;
+    // A's identity: its sizes and its exact input floats (lr, then hr), the
+    // hash only to reject a different image without the compare.
     MatchSpec     cache_spec;
+    uint64_t      cache_hash = 0;
+    std::vector<float> cache_bytes;
+    bool          cache_valid = false;
+    uint64_t      hits = 0, misses = 0;
     ImageFeatures cached;
     uint64_t      planned = 0;
     StageLog      log{arena};
@@ -160,6 +178,8 @@ uint64_t Model::peakBytes() const { return impl_->log.overall(); }
 const std::vector<Model::Stage>& Model::stages() const { return impl_->log.stages(); }
 uint64_t Model::weightBytes() const { return impl_->w.deviceBytes(); }
 uint64_t Model::cacheBytes() const { return impl_->cache.highWater(); }
+uint64_t Model::cacheHits() const { return impl_->hits; }
+uint64_t Model::cacheMisses() const { return impl_->misses; }
 
 float DenseMatch::overlap(size_t i) const {
     return 1.0f / (1.0f + std::exp(-confidence[i * 4]));
@@ -252,7 +272,7 @@ CoarseMatch Model::coarse(const float* a, const float* b, int H, int W) {
 }
 
 MatchResult Model::match(const float* a_lr, const float* b_lr, const float* a_hr,
-                         const float* b_hr, const MatchSpec& spec, const std::string& key_a) {
+                         const float* b_hr, const MatchSpec& spec) {
     NN_CHECK(loaded(), "roma::Model::match before load()");
     Impl& im = *impl_;
     const Weights& w = im.w;
@@ -295,22 +315,34 @@ MatchResult Model::match(const float* a_lr, const float* b_lr, const float* a_hr
     im.planned = std::max(im.planned, plan);
     im.arena.reserve(plan);
 
-    const bool same = !key_a.empty() && key_a == im.cache_key &&
+    const size_t n_lr = (size_t)spec.lr_h * spec.lr_w * 3;
+    const size_t n_hr = scales == 2 ? (size_t)spec.hr_h * spec.hr_w * 3 : 0;
+    const uint64_t hash = content_hash(a_lr, n_lr, content_hash(a_hr, n_hr, 0));
+    const bool same = im.cache_valid && hash == im.cache_hash &&
                       spec.lr_h == im.cache_spec.lr_h && spec.lr_w == im.cache_spec.lr_w &&
-                      spec.hr_h == im.cache_spec.hr_h && spec.hr_w == im.cache_spec.hr_w;
+                      spec.hr_h == im.cache_spec.hr_h && spec.hr_w == im.cache_spec.hr_w &&
+                      im.cache_bytes.size() == n_lr + n_hr &&
+                      std::memcmp(im.cache_bytes.data(), a_lr, n_lr * 4) == 0 &&
+                      (n_hr == 0 ||
+                       std::memcmp(im.cache_bytes.data() + n_lr, a_hr, n_hr * 4) == 0);
     im.log.clear();
     vk::ArenaScope root(im.arena);
+    ++(same ? im.hits : im.misses);
     if (!same) {
-        im.cache_key.clear();
+        im.cache_valid = false;
         im.cache.reset();
         im.cache.resetHighWater();
         im.cache.reserve(one_image);
         const float* const rgb_a[2] = {a_lr, a_hr};
+        im.cached = ImageFeatures{};   // no hr handle survives an lr-only fill
         im.features(im.cached, im.cache, rgb_a, dims, scales);
         dump_tensor("dino_tap11_A", im.cached.taps[0], {h, wd, D});
         dump_tensor("dino_tap17_A", im.cached.taps[1], {h, wd, D});
-        im.cache_key = key_a;
+        im.cache_bytes.assign(a_lr, a_lr + n_lr);
+        if (n_hr) im.cache_bytes.insert(im.cache_bytes.end(), a_hr, a_hr + n_hr);
+        im.cache_hash = hash;
         im.cache_spec = spec;
+        im.cache_valid = true;
     }
     const ImageFeatures& A = im.cached;
     ImageFeatures B;

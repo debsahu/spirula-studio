@@ -97,7 +97,14 @@ struct RefineUpdateParams {
     uint   groups_per_row;
 };
 
-float softplus20(float x) { return x > 20.0f ? x : log(1.0f + exp(x)); }
+// F.softplus(beta 1, threshold 20) = log1p(exp(x)). Slang has no log1p, and
+// log(1 + t) near 1 lost 8% of t at x = -12 on MoltenVK, compensated or not;
+// below t = 1e-3 the cubic series is exact to f32.
+float softplus20(float x) {
+    if (x > 20.0f) return x;
+    float t = exp(x);
+    return t < 1e-3f ? t * (1.0f - t * (0.5f - t * (1.0f / 3.0f))) : log(1.0f + t);
+}
 
 // warp = prev + d / (4 (W, H)); confidence = prev + (c0, l00^2, l00 l10,
 // l10^2 + l11^2), l00 and l11 softplus + 1e-6 (refiner.py's Cholesky head).

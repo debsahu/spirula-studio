@@ -180,7 +180,8 @@ things a port gets wrong:
    reference must be run with each refiner `Block.enable_amp` off: it enters a
    bf16 autocast of its own that `--ref fp32` would otherwise keep.
 3. **Before the hr scale the precision is zeroed**, logit kept
-   (`zero_out_precision`). Without it the P-3 p99 reads 56 px.
+   (`zero_out_precision`). Without it only the certain-pixel precision row
+   sees it, at 60x its bar.
 4. **The local correlation has two paths.** `shaders/roma_local_corr.slang`'s fused
    kernel samples and dots in one pass; `SS_ROMA_LOCAL_CORR=unfused` is the
    reference's own shape, every window sample through `nn::grid_sample_points`.
@@ -192,48 +193,104 @@ Presets (`RomaMatcher.h`): `turbo` 320, `fast` 512, `base` 640, `precise`
 800 + 1280 hr (upstream's `apply_setting`), and the plugin's `high`, 640 +
 960 hr. A into B does not depend on whether B into A is computed, so
 `match()` never computes B into A; `matchBoth()` does. A's backbone taps and
-VGG maps stay on the device keyed by `MatchImage::name`, so a reference matched
+VGG maps stay on the device keyed by its own bytes and sizes, so a reference matched
 against several neighbours runs its backbone once.
 
 ## Full-match parity (P-3)
 
 `compare_torch.py --full` runs `RoMaV2.forward` at the dump's lr (and hr) sizes,
 bidirectional when the dump has B into A, and reads every refiner stage and the
-final warp and certainty. 15 cells (5 presets x 3 fixtures), both directions,
-measured on the M4 Max:
+final warp and certainty. Each gated row's bar is max(plan bar, 2x floor), where
+the floor is the worst of four draws of torch against itself: torch on MPS, and
+torch on the CPU with the inputs perturbed by N(0, 1e-6), three seeds (plan
+section 9's n >= 3). Gated: EPE p50 and p99 over all pixels and over pixels the
+reference is certain of (> 0.5), certainty max abs, the share crossing 0.2 or 0.9,
+and the p99 of the certain-pixel precision error relative to max(|ref|, 1).
 
-- **Rounding on, against max(plan bar, 2x torch MPS-vs-CPU, 2x torch CPU on
-  1e-6-perturbed inputs): 30 of 30 cell-weight pairs pass** (f32 and f16
-  weights). Torch MPS against torch CPU misses the plan's fp32 P-3 bars itself
-  in every cell, chiefly certainty max abs (2e-2 to 1e-1 against 2e-3).
-- **Rounding off on both sides** (`SS_ROMA_ROPE_F32=1`, `--ref rope32`), against
-  its own MPS floor: 10 of 15 pass. The five misses are single-pixel maxima:
-  certainty max abs 2.8e-3 to 1.2e-2 against 2.0e-3 to 5.5e-3, and once the
-  certain-pixel precision, 1.08e-2 against 1e-2. The C_high one was traced: an
-  occlusion edge where the reference warp jumps 74 px between neighbours, at
-  certainty 0.03, where a 1e-3 px input difference moves which side of the
-  edge bilinear sampling lands on. The unfused path misses at the same pixel by
-  the same amount, so it is not the fused kernel.
-- **Where the reference is certain (> 0.5)**, our EPE against torch CPU tracks
-  torch MPS against torch CPU in every cell, mostly within 2x: e.g. `precise`
-  on the basement faces 0.0017 / 0.071 px (p50 / p99) against torch's own
-  0.0018 / 0.079.
+15 cells (5 presets x 3 fixtures, both directions), M4 Max, on the build after
+WS-2's split-K fix. Two draws of every cell are bit-identical. Fixtures by SHA-256
+of the source files: toronto `40270c22`/`a2c07550`, basement faces
+`b30319e1`/`2a3e377f`, aerial `fcd77cf7`/`522ffa63`. "On" is as shipped, with the
+matcher's bf16 RoPE rounding; "off" is `SS_ROMA_ROPE_F32=1` against
+`--ref rope32`, each against its own floor. The MPS-only columns re-score the same
+rows against 2x the MPS draw alone:
 
-All-pixel EPE is dominated by pixels where the warp is ill-posed (toronto's
-B into A is 1.5% certain), so on those cells the floor-widened p99 bar runs to
-tens of pixels; the p50 bars stay at 0.01-0.022 px. Precision is gated over
-reference-certain pixels only: elsewhere it is arbitrary and torch misses 1e-2
-against itself (0.25 on toronto B into A).
+| cell | on: 4-draw | on: MPS-only | off: 4-draw | off: MPS-only | certain p50 AB, BA (ours/bar) | certain p99 AB, BA | prec p99 AB, BA |
+|---|---|---|---|---|---|---|---|
+| C turbo | pass | pass | pass | pass | 0.0018/0.011, 0.037/0.24 | 0.045/0.91, 0.57/3.2 | 0.014/0.055, 0.0044/0.02 |
+| C fast | pass | pass | pass | pass | 0.0015/0.01, 0.029/0.061 | 0.06/0.19, 0.89/2.3 | 0.0069/0.017, 0.0039/0.012 |
+| C base | pass | pass | pass | pass | 0.0031/0.01, 0.044/0.088 | 0.055/0.11, 2.5/3.9 | 0.015/0.029, 0.012/0.027 |
+| C high | pass | **miss** | **miss** | **miss** | 0.0044/0.01, 0.11/0.13 | 0.68/1.1, 9.6/34 | 0.082/0.086, 0.035/0.11 |
+| C precise | pass | pass | pass | **miss** | 0.001/0.01, 0.042/0.11 | 0.034/0.17, 2.5/8.9 | 0.007/0.03, 0.021/0.049 |
+| A turbo | pass | pass | pass | pass | 0.0031/0.01, 0.0022/0.01 | 0.084/0.25, 0.043/0.11 | 0.03/0.069, 0.037/0.094 |
+| A fast | pass | pass | pass | pass | 0.0011/0.01, 0.0008/0.01 | 0.017/0.1, 0.017/0.1 | 0.014/0.04, 0.022/0.056 |
+| A base | pass | pass | pass | **miss** | 0.0012/0.01, 0.001/0.01 | 0.034/0.1, 0.028/0.1 | 0.012/0.043, 0.017/0.042 |
+| A high | pass | **miss** | pass | pass | 0.0012/0.01, 0.00082/0.01 | 0.084/0.15, 0.047/0.12 | 0.018/0.046, 0.0093/0.024 |
+| A precise | pass | pass | pass | **miss** | 0.0022/0.01, 0.0015/0.01 | 0.11/0.33, 0.062/0.17 | 0.023/0.059, 0.013/0.03 |
+| B turbo | pass | pass | pass | pass | 0.00049/0.01, 0.00041/0.01 | 0.0079/0.1, 0.012/0.1 | 0.068/0.27, 0.047/0.16 |
+| B fast | pass | pass | pass | pass | 0.00019/0.01, 0.00019/0.01 | 0.011/0.1, 0.019/0.1 | 0.029/0.067, 0.04/0.067 |
+| B base | pass | pass | pass | pass | 0.00033/0.01, 0.00032/0.01 | 0.012/0.1, 0.0096/0.1 | 0.031/0.07, 0.052/0.13 |
+| B high | pass | pass | pass | pass | 9e-05/0.01, 6.4e-05/0.01 | 0.016/0.1, 0.018/0.1 | 0.02/0.045, 0.0096/0.045 |
+| B precise | pass | **miss** | pass | pass | 0.00017/0.01, 0.00012/0.01 | 0.014/0.1, 0.013/0.1 | 0.025/0.044, 0.018/0.045 |
+
+What the table says:
+
+- **As shipped, against the four-draw floor: 15 of 15 pass.** Against the MPS
+  draw alone, three miss. All three are A into B or B into A certainty maxima
+  or tails: C high (worst: certain-pixel p99 0.68 px against 0.12), A high,
+  and B precise (certainty max abs 0.0605 against 0.0585).
+- **C high is traced to the coarse matcher, not the refiners.** Our coarse
+  warp already differs from torch's CPU reference 6.5x more than MPS does
+  (EPE p50 0.0073 against 0.0011 px). That ratio then holds through all six
+  refiner stages. One of the perturbed draws differs by the same amount
+  (coarse 0.0036 px, certain p99 0.54 px). With the rounding off, C high A into
+  B passes even the MPS-only bars. Read: the bf16 RoPE amplifies fp32
+  differences upstream of the refiners (convention 2 above).
+- **Rounding off, against the four-draw floor: 14 of 15 pass.** The miss is
+  C high B into A, certain-pixel p99 0.788 against 0.784, in toronto's B into A,
+  which is 1.5% certain. Against MPS alone, four miss: C high B into A by 2.4x
+  (0.788 against 0.325), and C precise, A base and A precise by 4-13% at a
+  certainty max or an all-pixel p99.
+- **C turbo**, flagged in review: A into B certain-pixel precision max is
+  0.0262. Its worst pixel has certainty 0.66, sits near no warp discontinuity,
+  and has an EPE of 0.004 px. The three perturbed draws of torch reach
+  0.042-0.051 on the same row. It is not an error of ours.
+
+Why these rows: all-pixel EPE is dominated by pixels where the warp is
+ill-posed. On toronto's B into A its p50 bar runs to 3.6 px and gates little,
+while the certain-pixel rows stay at the plan's 0.01 / 0.1 px nearly
+everywhere. Precision is read where the reference is certain: elsewhere it is
+arbitrary, and torch misses 1e-2 against itself there. It is read at p99, not
+the max, because the max is one pixel: the traced case was a single
+occlusion-edge pixel at certainty 0.03. Every P-3 mutant below is caught at
+p99 (rows in `mut3b*.log`), two of them only by that row.
+
+| mutant | caught by |
+|---|---|
+| local correlation fed the warped map (pre-#47) | the EPE, certainty and precision rows, both directions |
+| refiner grid_sample `align_corners=True` | the same, except A into B's all-pixel p99 |
+| hr precision not zeroed | certain-pixel precision p99 only (2.8 against 0.046) |
+| refiner input order swapped | the EPE, certainty and precision rows, both directions |
+| softplus -> relu in the Cholesky head | certain-pixel precision p99 only (0.73 against 0.043) |
+| softplus without its log1p tail | not at P-3; `refine_update_softplus_tail` |
+
+Superseded: the 2026-10-07 matrix before this one ("30 of 30") read a floor of
+two draws, MPS and one perturbed seed, on a build whose first match in a process
+was not reproducible, and its f16 single-draw verdicts are void. The Macs now
+hold the backbone in f32 (no cooperative matrix), so this run has no f16 arm.
+`mut.log` of that round predates the final bars.
 
 ```bash
-SS_ROMA_F32_WEIGHTS=1 SS_ROMA_BENCH_BOTH=1 SS_ROMA_DUMP=/tmp/d \
-    ./build/roma_model_test --bench precise --pair A.png B.png --repeat 0
+SS_ROMA_BENCH_BOTH=1 SS_ROMA_DUMP=/tmp/d ./build/roma_model_test --bench precise \
+    --pair A.png B.png --repeat 0
 uv run tools/roma/compare_torch.py --dump /tmp/d --weights f32 --full
 ```
 
 ## Memory and speed of the full match
 
-Basement cube faces, f16 backbone, neither Mac has cooperative matrices. A
+Basement cube faces. Neither Mac has cooperative matrices; the times below were
+taken with the backbone in f16, before it went f32 on such devices (894 against
+889 ms a pair, WS-2's measurement). A
 pair is "cold" when A is new, "warm" when A's features are cached (densify's
 case after a reference's first neighbour). The arena is the plan, which the
 peak stays inside at every stage; A's cache is its own arena. Both Macs plan
@@ -249,8 +306,9 @@ the same bytes.
 | precise | 1734 MB | 1069 MB | 4.78 / 3.43 | 2.95 / 2.06 |
 | precise, both directions | 1813 MB | 1069 MB | 5.26 / 4.10 | 3.66 / 2.77 |
 
-`precise` in both directions holds 2.88 GB of arena and cache beside 0.95 GB of
-weights (1.40 GB with `SS_ROMA_F32_WEIGHTS=1`), against the plan's 4 GB gate.
-The process peak footprint `/usr/bin/time -l` measured is 4.64 GB on the M5 Pro
-and 4.72 GB on the M4 Max, which agrees.
+**The 4 GB gate is the arena plus A's cache: `precise` in both directions holds
+2.88 GB, on either Mac.** Weights are on top of that: 1.40 GB with the f32
+backbone the Macs now load (0.95 GB in f16). So is host memory. The process
+peak footprint `/usr/bin/time -l` reports is therefore larger: 5.09 GB on the
+M5 Pro with the f32 backbone, 4.64 GB with the f16 one.
 PyTorch on MPS needs 17.1 GB for the same preset.

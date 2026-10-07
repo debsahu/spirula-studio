@@ -61,7 +61,7 @@ MatchResult RomaMatcher::run(const MatchImage& a, const MatchImage& b, bool both
         bh = to_input(b, ps.hr);
     }
     return model_.match(al.data(), bl.data(), ps.hr ? ah.data() : nullptr,
-                        ps.hr ? bh.data() : nullptr, ms, a.name);
+                        ps.hr ? bh.data() : nullptr, ms);
 }
 
 Warp RomaMatcher::match(const MatchImage& a, const MatchImage& b) {
