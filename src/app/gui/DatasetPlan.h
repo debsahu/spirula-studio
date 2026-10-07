@@ -6,6 +6,7 @@
 // The rules and why they are what they are: docs/notes/dataset-rerun.md
 
 #include "app/gui/DatasetRecord.h"
+#include "app/gui/DensifyRunner.h"
 #include "app/gui/GeometryRunner.h"
 
 #include <string>
@@ -30,6 +31,7 @@ enum class PartChoice { Auto, Keep, Run };
 struct PlanRequest {
     bool redo_frames = false, redo_masks = false, redo_model = false;
     bool redo_geometry = false;
+    bool redo_densify = false;
     // Keep frames and a reconstruction whose settings differ from the panel's.
     bool keep_built = false;
     PartChoice parts[kNumModelParts] = {};
@@ -40,6 +42,7 @@ StepFields frames_fields(const PrepJob& job);
 StepFields masks_fields(const PrepJob& job);
 StepFields model_fields(const SfmJob& job);
 StepFields model_fields(const ColmapJob& job, const PrepJob& prep);
+StepFields densify_fields(const DensifyJob& job);
 StepFields geometry_fields(const GeometryJob& job);
 std::vector<std::string> geometry_kinds(const GeometryJob& job);
 
@@ -56,6 +59,7 @@ struct PlanJob {
     StepFields model;
     bool mask_features = true;
     GeometryJob geometry;
+    DensifyJob densify;
     // The built-in engine, whose reconstruction is planned stage by stage.
     bool staged = false;
     std::vector<std::string> lidar_clouds;
@@ -157,6 +161,8 @@ DatasetRecord read_legacy_settings(const std::string& workspace, SfmJob& job,
 
 // The masks step's answer, as DatasetPrep reads it.
 void apply_masks_plan(const StepPlan& s, PrepJob& job);
+// The job to run for the dense-points step: overwrite when redoing.
+DensifyJob densify_for_plan(DensifyJob d, const StepPlan& s);
 // The job to run for the geometry step: overwrite when redoing, and only the
 // kinds of map the plan names.
 GeometryJob geometry_for_plan(GeometryJob g, const StepPlan& s);

@@ -25,6 +25,7 @@
 #include "sfm/core/Manifest.h"
 #endif
 #include "app/gui/FilmReel.h"
+#include "app/gui/DensifyRunner.h"
 #include "app/gui/GeometryRunner.h"
 #include "app/gui/LidarStep.h"
 #include "app/gui/PrepProgress.h"
@@ -117,6 +118,7 @@ struct SfmJob {
     // ... and so is this: the depth and normal maps are written after the
     // reconstruction, from the dataset it produced, whichever engine made it.
     GeometryJob geometry;
+    DensifyJob densify;
     // Laser scans the model is aligned with; they replace the geometry step.
     LidarJob lidar;
 
@@ -301,6 +303,7 @@ private:
     void take_reconstruction(SfmJob& job);
     void take_masking(PrepJob& prep);
     void take_geometry(SfmJob& job);
+    void take_densify(SfmJob& job);
     void log(const std::string& line, bool detail = true);
     void set_stage(Stage st, const std::string& s);
     // Stage changes driven by the child's output, which repeats a
