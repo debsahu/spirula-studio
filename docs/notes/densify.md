@@ -321,8 +321,9 @@ pull request #154 (D1odeKing); the code, the key and the tests are ours
   are renamed in, so a crash leaves a stale temporary (swept after an hour), never a partial entry.
   A cache that cannot be written is reported and the run continues.
 - **Where and how big**: `<dataset>/densify_cache/<2 hex>/<key>.rwc`, 16 GiB by default, least
-  recently used first (a hit refreshes the file's time, so recency survives a restart). The newest
-  entry is never evicted, so the directory can exceed the budget by one entry. **A pair set larger
+  recently used first (a hit refreshes the file's time, so recency survives a restart). A budget lowered
+  below what the folder holds trims it on open. The newest written entry is never evicted, so the
+  directory can exceed the budget by one entry. **A pair set larger
   than the budget gets no hits on a repeat run** (a sequential scan over an LRU of smaller size
   evicts each entry just before its turn): the summary line shows `evicted`, and
   `--cache-budget` raises it. 2,056 pairs at `base` are about 10 GB; `high` is 9 MB a pair.
@@ -352,6 +353,12 @@ warm cache beside it, without reading a pair or touching an entry.
 | basement, every 8th held out, cold | 2,056 | 0 | 2,056 | 5,352 s (matching 5,073 s) | 0 |
 | the same, warm | 2,056 | 2,056 (100 %) | 0 | 262.6 s (loading 38.2 s) | 5,035 s |
 
+Once the licence had been accepted on the machine, the real CLI (`spirula densify`, 59 pairs of
+the staircase) gave: cold 2:02 with 3 hits (views that were masked to the same bytes), warm 3.2 s with
+59 of 59 hits and 2:05 of matcher time saved, `--cache off` byte-identical to both,
+`--cache-budget 100M` on a 262 MiB cache trimmed it to 21 entries on open, and `--clear-cache`
+removed those 21 and ran cold.
+
 The cache held 9.4 GiB (4.9 MB an entry). The cold run shared the GPU with other jobs on the
 machine, so its absolute time is slower than an idle one; the saving is the recorded matcher time
 of what the hits replaced, less what each hit cost. `points3D.bin`, `points3D_tracks.bin` and
@@ -360,7 +367,7 @@ staircase (100 pairs, 91 distinct) the cache off, cold and warm outputs are byte
 warm run took 4.95 s against 184 s, and 9 pairs hit inside the cold run because two views had the
 same masked bytes.
 
-Mutation run of `warp_cache_test`, 57 mutants, every one failing the test that names it: the key made
+Mutation run of `warp_cache_test`, 58 mutants, every one failing the test that names it: the key made
 from the image names with the pixels ignored (the stale name key), warp stored as half floats, certainty
 stored as uint16, key without image B, without the last byte, with the names, symmetric in A and B,
 without the sizes, without the identity or the input size, identity and size joined as text, each
@@ -370,7 +377,8 @@ name, old temporaries never swept or live ones swept, a hit not refreshing recen
 or the newest evicted, `clear` removing the directory, lookup through the open-time index, unusable
 output going through the cache, seconds saved dropped or taken from the hit, hits or misses not
 counted, a damaged entry reported as a plain miss, a failed write throwing, an empty identity
-accepted, entries ordered by name on reopen, a hit's time without the hashing, zero accepted as a size, decimal units.
+accepted, entries ordered by name on reopen, a lowered budget not trimming on open, a hit's time
+without the hashing, zero accepted as a size, decimal units.
 A damaged entry left on disk is caught only by the direct `WarpCache::get` check, since a miss
 writes over it.
 

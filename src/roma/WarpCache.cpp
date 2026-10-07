@@ -224,6 +224,7 @@ WarpCache::WarpCache(const WarpCacheOptions& o) : dir_(o.dir), budget_(o.budget_
         tag << "Signature: 8a477f597d28d172789f06886806bc55\n# Dense matcher output; safe to delete.\n";
     }
     scan();
+    evictLocked("");
 }
 
 std::string WarpCache::entryPath(const std::string& key) const {

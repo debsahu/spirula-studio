@@ -544,6 +544,28 @@ void recency_is_kept_on_disk() {
     fs::remove_all(d);
 }
 
+// Mutant: opening a cache over its budget (a lowered --cache-budget) leaving it as it was, so
+// a run of hits would never shrink it.
+void lowered_budget_trims_on_open() {
+    const fs::path d = tempDir("trim");
+    Fake probe;
+    const Img x = makeImg("x", 99), y = makeImg("y", 98);
+    const uint64_t one = encodeEntry(std::string(64, '0'), probe.match(x.view(), y.view()), 0).size();
+    std::vector<Img> imgs;
+    for (int i = 0; i < 6; i++) imgs.push_back(makeImg("i" + std::to_string(i), 80 + i));
+    {
+        WarpCache cache(opts(d));
+        Fake fake;
+        CachedMatcher cm(fake, cache, "id");
+        for (int i = 0; i < 5; i++) cm.match(imgs[(size_t)i].view(), imgs[(size_t)i + 1].view());
+        check(cache.info().entries == 5, "five entries to start");
+    }
+    WarpCache small(opts(d, 2 * one + one / 2));
+    check(small.info().entries == 2 && dirBytes(d) <= 2 * one + one / 2, "a smaller budget left " + std::to_string(small.info().entries) + " entries");
+    check(small.info().evicted == 3, "evicted " + std::to_string(small.info().evicted));
+    fs::remove_all(d);
+}
+
 // Mutant: looking entries up in the index built at open instead of on disk.
 void another_process_sees_new_entries() {
     const fs::path d = tempDir("two");
@@ -888,6 +910,7 @@ static int body(int argc, char** argv) {
         {"cold_then_warm_counts", cold_then_warm_counts},
         {"budget_evicts_least_recently_used", budget_evicts_least_recently_used},
         {"recency_is_kept_on_disk", recency_is_kept_on_disk},
+        {"lowered_budget_trims_on_open", lowered_budget_trims_on_open},
         {"another_process_sees_new_entries", another_process_sees_new_entries},
         {"clear_removes_only_entries", clear_removes_only_entries},
         {"entries_appear_whole", entries_appear_whole},
