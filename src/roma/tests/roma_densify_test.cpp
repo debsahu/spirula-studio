@@ -2121,6 +2121,8 @@ void cycle_measure_bins_without_rejecting() {
           "0.52 and 3.52 px in bins 10 and 63: " + std::to_string(st.cycle_kept_hist[10]) + ", " +
               std::to_string(st.cycle_kept_hist[63]));
     check(st.cycle_kept_hist[63] >= f.lo / 2, "open bin " + std::to_string(st.cycle_kept_hist[63]));
+    check(st.cycle_kept_hist[10] > kept / 2, "0.52 px bin holds the clean majority: " +
+                                                 std::to_string(st.cycle_kept_hist[10]) + " of " + std::to_string(kept));
     check(!pts.empty(), "no points");
 }
 
@@ -2282,6 +2284,24 @@ void refine_is_invariant_to_precision_scale() {
         const double s = maxShift(base, g.run(1.345));
         check(s < 1e-7, "precision x" + std::to_string(k) + " moved points by " + std::to_string(s) + " m");
     }
+}
+
+// c at 1280 px instead of 640, same field of view: warps and precision are in
+// match pixels, so nothing may change. Mutant: residuals in the view's own pixels
+// (equivalent while every view has one size, so only this fixture sees it).
+void refine_residuals_in_match_pixels() {
+    std::vector<std::vector<DensePoint>> out;
+    for (int nc : {640, 1280}) {
+        RefineFixture f;
+        f.views[2] = pinView("c", 2, {0, -0.5, 0}, {3, 0, 0}, nc, nc, nc / 2.0);
+        f.bias(0, 0.1);
+        f.bias(1, -0.6);
+        f.precision(0, 100.0f, 0.0f, 0.01f);
+        f.precision(1, 1.0f / 0.36f, 0.0f, 100.0f);
+        out.push_back(f.run(1.345));
+    }
+    check(!out[0].empty() && maxShift(out[0], out[1]) < 1e-7,
+          "a 1280 px c moved points by " + std::to_string(maxShift(out[0], out[1])) + " m");
 }
 
 // b2 is another face of b's image, same pose, same 0.3 px error: one image,
@@ -2452,6 +2472,7 @@ static int body(int argc, char** argv) {
         {"refine_downweights_an_outlier", refine_downweights_an_outlier},
         {"refine_is_invariant_to_precision_scale", refine_is_invariant_to_precision_scale},
         {"refine_counts_source_images_once", refine_counts_source_images_once},
+        {"refine_residuals_in_match_pixels", refine_residuals_in_match_pixels},
         {"dump_matches_reproduce_the_run", dump_matches_reproduce_the_run},
     };
     int ran = 0;
