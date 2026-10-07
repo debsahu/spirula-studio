@@ -33,6 +33,9 @@ struct DensifyJob {
     std::function<void(const SourceImage&, const DepthField&)> on_depth_fit;
     // Called once if the warps come back coarser than the matcher's input.
     std::function<void(int warp_size, int input_size)> on_warp_scale;
+    // The cloud as it grows, after each reference view (`filtered` false), and
+    // once more as written (true). Called on the run's own thread: keep it short.
+    std::function<void(const std::vector<DensePoint>& cloud, bool filtered)> on_cloud;
 };
 
 // What the run will do, every automatic choice resolved, and why.
@@ -133,7 +136,8 @@ struct ReprojStats {
 ReprojStats reprojectWritten(const std::string& model_dir);
 
 // Throws, writing nothing, for an empty cloud: a sibling sorts after its
-// source, so a trainer could pick it. densify.json gains "reprojection".
+// source, so a trainer could pick it. densify.json gains "reprojection" and
+// the cloud's SHA-256s. Holds the writer lock and publishes by publishDir.
 ReprojStats writeSibling(const std::string& model_dir, const std::string& out_dir,
                          const DensifyPlan& plan, const std::vector<DensePoint>& cloud,
                          const std::string& settings_json);

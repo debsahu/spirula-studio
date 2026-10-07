@@ -239,6 +239,11 @@ public:
     // What "Save" (as opposed to "Save a copy") would overwrite in this
     // target's format, "" when there is no such file to write back to.
     virtual std::string default_save_path(int target) const { (void)target; return {}; }
+    // True when Save writes a model of its own and nothing is overwritten, so
+    // there is nothing to confirm.
+    virtual bool save_is_derived(int target) const { (void)target; return false; }
+    // Said under the save buttons for this target, null for nothing.
+    virtual const spirula::i18n::Msg* save_note(int target) const { (void)target; return nullptr; }
 
     const std::string& source_path() const { return _source; }
 

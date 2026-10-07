@@ -1044,7 +1044,8 @@ void SfmRunner::run(SfmJob job) {
             record.begin(Step::Densify, densify_fields(job.densify));
             std::string err;
             if (!run_densify_step(d, ws.string(), prep.image_dir, prep.mask_dir,
-                                  prep.mask_dir_flipped, _prog, _cancel, err))
+                                  prep.mask_dir_flipped, _prog, _cancel, err,
+                                  (ws / ".progress").string()))
                 return fail(err);
             record.finish(Step::Densify);
         }

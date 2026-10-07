@@ -16,11 +16,14 @@
 #include "nn/Device.h"
 #include "nn/io/Fetch.h"
 #include "roma/DensifyCheck.h"
+#include "roma/DensifyPreview.h"
 #include "roma/DensifyRun.h"
 #include "roma/DepthSource.h"
+#include "roma/Publish.h"
 #include "roma/DumpMatcher.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/RomaMatcher.h"
+#include "sfm/core/Progress.h"
 
 #include <cmath>
 #include <cstdio>
@@ -97,6 +100,7 @@ void usage() {
     help_row("--max-points auto|<n>|off", D::opt_max_points);
     help_row("--max-baseline auto|<d>|off", D::opt_max_baseline);
     help_row("--seed <n>", D::opt_seed);
+    help_row("--progress-dir <dir>", D::opt_progress_dir);
     help_row("--overwrite", D::opt_overwrite);
     help_row("--force", D::opt_force);
     help_row("--accept-license dinov3,romav2", D::opt_accept_license);
@@ -138,7 +142,7 @@ int spirula_densify_main(int argc, char** argv) {
     app::set_program_name(argc > 0 ? argv[0] : nullptr, "spirula densify");
     roma::DensifyJob job;
     roma::DensifyOptions& o = job.opt;
-    std::string dataset, model, image_dir = "images", mask_dir = "masks", matches, check_dir;
+    std::string dataset, model, image_dir = "images", mask_dir = "masks", matches, check_dir, progress_dir;
     bool no_masks = false, check = false;
     roma::CheckOptions check_opt;
     double check_noise = check_opt.noise_px, check_outliers = check_opt.outliers;
@@ -266,6 +270,7 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--max-points") o.max_points = (int64_t)autoOff();
         else if (a == "--max-baseline") o.max_baseline = autoOff();
         else if (a == "--seed") o.seed = (uint64_t)real(0);
+        else if (a == "--progress-dir") progress_dir = next();
         else if (a == "--overwrite") job.overwrite = true;
         else if (a == "--force") job.force = true;
         else if (!a.empty() && a[0] == '-') {
@@ -360,8 +365,23 @@ int spirula_densify_main(int argc, char** argv) {
             return 2;
         }
 
+        // Held from here to the end: two runs would match for half an hour and then fight over the folder.
+        std::unique_ptr<roma::WriterLock> out_lock;
+        if (job.export_dir.empty()) {
+            out_lock = std::make_unique<roma::WriterLock>(job.out_dir);
+            roma::recoverPublish(job.out_dir);
+        }
+
         const roma::DensifyPlan pl = roma::planDensify(job);
         const roma::DensifyOptions& r = pl.opt;
+        std::unique_ptr<roma::CloudPreview> preview;
+        if (!progress_dir.empty() && job.export_dir.empty()) {
+            sfm::progress::set_dir(progress_dir);
+            preview = std::make_unique<roma::CloudPreview>(job.model_dir);
+            job.on_cloud = [&preview](const std::vector<roma::DensePoint>& cloud, bool filtered) {
+                preview->update(cloud, filtered);
+            };
+        }
         std::printf("%s\n", format(D::model, {job.model_dir, (long long)pl.images.size(),
                                               (long long)pl.sparse_points, num(pl.sparse_spacing)})
                                 .c_str());
@@ -577,6 +597,9 @@ int spirula_densify_main(int argc, char** argv) {
                                              spirula::i18n::format_duration(res.seconds_match)})
                                 .c_str());
         return 0;
+    } catch (const roma::WriterBusy& b) {
+        std::fprintf(stderr, "%s\n", format(D::writer_busy, {b.lock, (long long)b.pid}).c_str());
+        return 2;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", format(D::error, {e.what()}).c_str());
         return 1;

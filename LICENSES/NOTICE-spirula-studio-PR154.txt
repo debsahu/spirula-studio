@@ -1,0 +1,35 @@
+spirula-studio pull request 154, "Dense point clouds with RoMa v2, progressive training resolution, resume, and performance logging"
+https://github.com/harry7557558/spirula-studio/pull/154
+Author: D1odeKing <D1odeKing@users.noreply.github.com>
+Reviewed head: ac48bb1a
+SPDX-License-Identifier: GPL-3.0-or-later
+
+Spirula Studio's densify stage took ideas from this pull request. The pull
+request itself was not merged and none of its model or pipeline code is built
+here: each item below is written fresh against roma::Matcher and the sibling
+model `sparse/<model>-roma/`, with tests of its own. Both trees are distributed
+under the GNU General Public License version 3 (LICENSE at the repository root).
+
+What was taken, and from where. "Design" means the idea only; no line was copied.
+
+  src/roma/Publish.{h,cpp}
+      The writer lock and the finished-folder-or-nothing publication, after
+      the pull request's workspace lock and generation manifest
+      (src/dense/Artifact.h). Design only.
+
+  src/roma/DensifyEdit.{h,cpp}, densify.json "points3D_sha256" / "tracks_sha256" / "edited_from" / "edit"
+      The Edit Dense Cloud round trip: an edit is a new generation beside the
+      original, which is never rewritten, and the cloud's checksums are recorded
+      so a consumer can verify them (the pull request's dense edit and manifest
+      checksums). Here the edit is a COLMAP sibling, `<model>-roma-edit`.
+      Design only.
+
+  src/roma/DensifyPreview.{h,cpp}
+      The live preview of a growing cloud: the child publishes snapshots and the
+      screen polls (the pull request's preview checkpoints). Here the snapshots
+      are model.bin in the run's --progress-dir, read by the dataset screen's
+      existing model view. Design only.
+
+Items of the pull request that were not taken: its RoMa model and pipeline, its
+dense output tree and CLI, its training changes. See
+docs/superpowers/plans/2026-10-07-integrate-pr154.md for what was decided and why.

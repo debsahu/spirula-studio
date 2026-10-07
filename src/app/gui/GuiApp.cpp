@@ -28,6 +28,7 @@
 #include "i18n/catalog/DenseGui.h"
 #include "i18n/catalog/Densify.h"
 #include "app/gui/ReconModels.h"
+#include "app/gui/edit/PointsDoc.h"
 #include "i18n/catalog/Lidar.h"
 #include "i18n/catalog/Geometry.h"
 #include "data/SparseEdit.h"
@@ -3008,6 +3009,20 @@ std::string GuiApp::state_json() {
     out += _batch_fetching ? "true" : "false";
     out += ",\"recon_dir\":" + quoted(_cfg.colmap_recon_dir);
     out += ",\"preview_points\":" + std::to_string(_viewport.preview_points());
+    out += ",\"dense_edit_dir\":" + quoted(_dense_edit_dir);
+    out += ",\"live_model_points\":" + std::to_string(_live_model.ds.points.num());
+    out += ",\"live_model_cameras\":" + std::to_string(_live_model.n_registered);
+    {
+        EditDoc* ed = _compare.edit().doc();
+        const bool dense = ed && ed->kind() == EditDoc::Kind::Points &&
+                           static_cast<PointsDoc*>(ed)->dense_edit();
+        out += ",\"edit_dense\":";
+        out += dense ? "true" : "false";
+        out += ",\"edit_alive\":" + std::to_string(ed ? ed->alive_count_of(0) : (int64_t)-1);
+        out += ",\"edit_total\":" + std::to_string(ed ? (int64_t)ed->alive_of(0).size() : (int64_t)-1);
+        out += ",\"edit_dirty\":";
+        out += ed && ed->dirty() ? "true" : "false";
+    }
     out += ",\"densify_missing\":";
     out += densify_model_missing() ? "true" : "false";
     out += ",\"densify_enable\":";
@@ -5868,6 +5883,35 @@ void GuiApp::draw_densify_options() {
     ImGui::Unindent();
 }
 
+std::string GuiApp::dense_model_to_edit(const std::string& dataset) {
+    if (_dense_edit_for != dataset || ImGui::GetTime() - _dense_edit_at > 1.0) {
+        _dense_edit_for = dataset;
+        _dense_edit_at = ImGui::GetTime();
+        _dense_edit_dir.clear();
+        std::string edited, original;
+        for (const ReconModel& m : list_recon_models(dataset)) {
+            if (!is_dense_model(m.rel) || m.points < 0) continue;
+            (m.rel.size() > 10 && m.rel.compare(m.rel.size() - 10, 10, "-roma-edit") == 0 ? edited : original) =
+                (fs::path(dataset) / m.rel).string();
+        }
+        _dense_edit_dir = !edited.empty() ? edited : original;
+    }
+    return _dense_edit_dir;
+}
+
+void GuiApp::draw_dense_edit_button(const std::string& dataset, bool same_line) {
+    const std::string model = dense_model_to_edit(dataset);
+    if (model.empty()) return;
+    if (same_line) ImGui::SameLine();
+    ImGui::BeginDisabled(dataset_busy() || native_work_busy());
+    if (ui::Button(emsg::dense_edit)) {
+        _edit_after_open = true;
+        request_open_splat(model);
+    }
+    ImGui::EndDisabled();
+    ui::help_on_hover(emsg::dense_edit_help);
+}
+
 // The training screen's chooser of which of the dataset's models it trains on.
 void GuiApp::draw_recon_model_row(bool busy) {
     if (_cfg.data.empty()) return;
@@ -5891,9 +5935,14 @@ void GuiApp::draw_recon_model_row(bool busy) {
         };
         if (ui::Selectable(dgmsg::model_auto_entry, _cfg.colmap_recon_dir.empty())) pick("");
         for (const ReconModel& m : models) {
+            const CloudCheck check =
+                is_dense_model(m.rel) ? cloud_check((fs::path(_cfg.data) / m.rel).string()) : CloudCheck::None;
+            const Msg& entry = check == CloudCheck::Mismatch ? dgmsg::model_entry_bad
+                               : check == CloudCheck::Ok     ? dgmsg::model_entry_ok
+                                                             : dgmsg::model_entry;
             const std::string label =
                 m.images < 0 ? m.rel
-                             : i18n::format(dgmsg::model_entry,
+                             : i18n::format(entry,
                                             {m.rel, format_count((double)std::max<int64_t>(m.points, 0)),
                                              (long long)m.images});
             if (ui::SelectableRaw(label, m.rel == _cfg.colmap_recon_dir)) pick(m.rel);
@@ -5902,6 +5951,7 @@ void GuiApp::draw_recon_model_row(bool busy) {
     }
     ImGui::EndDisabled();
     ui::help_on_hover(dgmsg::model_combo_help);
+    if (!busy) draw_dense_edit_button(_cfg.data, /*same_line=*/false);
 }
 
 void GuiApp::draw_dense_row(bool busy) {
@@ -6612,6 +6662,7 @@ void GuiApp::draw_dataset_open_buttons(const DatasetFolders& f, bool model) {
             request_open_splat(f.dir);
         }
         ui::help_on_hover(emsg::sparse_edit_help);
+        draw_dense_edit_button(f.dir, /*same_line=*/true);
         ImGui::SameLine();
         if (ui::Button(spirula::i18n::msg::partition::open_button)) open_partition_panel(f);
         ui::help_on_hover(spirula::i18n::msg::partition::open_button_help);

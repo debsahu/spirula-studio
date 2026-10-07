@@ -33,6 +33,8 @@ public:
     void save(int target, const std::string& path,
               std::atomic<int>* progress) override;
     std::string default_save_path(int target) const override;
+    bool save_is_derived(int target) const override { return _dense && target == 0; }
+    const spirula::i18n::Msg* save_note(int target) const override;
     void revert_display() override;
     bool live_centers(dsparse::CenterTable& out) const override;
     spirula::Sim3 view_frame() const override;
@@ -50,6 +52,9 @@ public:
         return _fmt == spirula::SparseFormat::Colmap;
     }
 
+    // A dense model `spirula densify` wrote (or an edit of one): Save writes
+    // its -roma-edit sibling and never the model itself.
+    bool dense_edit() const { return _dense; }
     spirula::SparseFormat format() const { return _fmt; }
     const std::string& dataset_dir() const { return _dataset_dir; }
 
@@ -71,6 +76,8 @@ private:
     int64_t _live_cameras = -1;            // what the display was baked for
     std::string _dataset_dir;
     spirula::SparseFormat _fmt = spirula::SparseFormat::None;
+    bool _dense = false;
+    bool _dense_saved = false;   // this session has written the edit, so it may rewrite it
     // The files as this session found them; every save filters these again.
     spirula::SparseBaseline _baseline;
     mutable spirula::SparseStats _stats;

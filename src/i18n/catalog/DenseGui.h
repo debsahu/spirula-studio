@@ -953,6 +953,60 @@ SS_MSG(model_entry,
     RU("{0}  ({1} точек, {2} снимков)"),
     TR("{0}  ({1} nokta, {2} görüntü)"));
 
+SS_MSG(err_cloud_mismatch,
+    EN("the dense cloud written does not match the checksums densify.json recorded for it, so it was not "
+       "used (see the log)."),
+    JA("書き込まれた密な点群が densify.json に記録されたチェックサムと一致しないため、使われませんでした（ログを参照）。"),
+    ZH_HANS("写出的稠密点云与 densify.json 中记录的校验和不一致，因此未被使用（见日志）。"),
+    ZH_HANT("寫出的稠密點雲與 densify.json 中記錄的檢查碼不一致，因此未被使用（見記錄）。"),
+    KO("기록된 조밀한 점군이 densify.json에 적힌 체크섬과 맞지 않아 사용하지 않았습니다(로그 참조)."),
+    DE("Die geschriebene dichte Wolke stimmt nicht mit den in densify.json vermerkten Prüfsummen überein und "
+       "wurde nicht verwendet (siehe Protokoll)."),
+    FR("le nuage dense écrit ne correspond pas aux sommes de contrôle notées dans densify.json ; il n'a pas "
+       "été utilisé (voir le journal)."),
+    ES("la nube densa escrita no coincide con las sumas de comprobación de densify.json, así que no se usó "
+       "(mira el registro)."),
+    PT("a nuvem densa escrita não coincide com as somas de verificação de densify.json, por isso não foi "
+       "usada (veja o registo)."),
+    IT("la nuvola densa scritta non corrisponde ai checksum registrati in densify.json, quindi non è stata "
+       "usata (vedi il registro)."),
+    NL("de geschreven dichte wolk komt niet overeen met de controlesommen in densify.json en is niet "
+       "gebruikt (zie het logboek)."),
+    RU("записанное плотное облако не совпадает с контрольными суммами из densify.json, поэтому оно не "
+       "использовано (см. журнал)."),
+    TR("yazılan yoğun bulut densify.json'daki sağlama toplamlarıyla uyuşmuyor, bu yüzden kullanılmadı "
+       "(günlüğe bakın)."));
+
+SS_MSG(model_entry_bad,
+    EN("{0}  ({1} points, {2} images)  [checksum mismatch]"),
+    JA("{0}  （{1} 点、画像 {2} 枚）  [チェックサム不一致]"),
+    ZH_HANS("{0}  （{1} 个点，{2} 张图像）  [校验和不符]"),
+    ZH_HANT("{0}  （{1} 個點，{2} 張影像）  [檢查碼不符]"),
+    KO("{0}  (점 {1}개, 이미지 {2}장)  [체크섬 불일치]"),
+    DE("{0}  ({1} Punkte, {2} Bilder)  [Prüfsumme stimmt nicht]"),
+    FR("{0}  ({1} points, {2} images)  [somme de contrôle incorrecte]"),
+    ES("{0}  ({1} puntos, {2} imágenes)  [suma de comprobación distinta]"),
+    PT("{0}  ({1} pontos, {2} imagens)  [soma de verificação diferente]"),
+    IT("{0}  ({1} punti, {2} immagini)  [checksum non corrispondente]"),
+    NL("{0}  ({1} punten, {2} beelden)  [controlesom komt niet overeen]"),
+    RU("{0}  ({1} точек, {2} снимков)  [контрольная сумма не совпадает]"),
+    TR("{0}  ({1} nokta, {2} görüntü)  [sağlama toplamı uyuşmuyor]"));
+
+SS_MSG(model_entry_ok,
+    EN("{0}  ({1} points, {2} images)  [checksum ok]"),
+    JA("{0}  （{1} 点、画像 {2} 枚）  [チェックサム一致]"),
+    ZH_HANS("{0}  （{1} 个点，{2} 张图像）  [校验和相符]"),
+    ZH_HANT("{0}  （{1} 個點，{2} 張影像）  [檢查碼相符]"),
+    KO("{0}  (점 {1}개, 이미지 {2}장)  [체크섬 일치]"),
+    DE("{0}  ({1} Punkte, {2} Bilder)  [Prüfsumme stimmt]"),
+    FR("{0}  ({1} points, {2} images)  [somme de contrôle correcte]"),
+    ES("{0}  ({1} puntos, {2} imágenes)  [suma de comprobación correcta]"),
+    PT("{0}  ({1} pontos, {2} imagens)  [soma de verificação correta]"),
+    IT("{0}  ({1} punti, {2} immagini)  [checksum corretto]"),
+    NL("{0}  ({1} punten, {2} beelden)  [controlesom klopt]"),
+    RU("{0}  ({1} точек, {2} снимков)  [контрольная сумма совпала]"),
+    TR("{0}  ({1} nokta, {2} görüntü)  [sağlama toplamı doğru]"));
+
 SS_MSG(model_auto_entry,
     EN("Auto (most images)"),
     JA("自動（画像が最も多いもの）"),
