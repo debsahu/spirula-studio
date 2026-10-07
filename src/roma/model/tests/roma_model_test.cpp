@@ -550,9 +550,9 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
           "match_cache_hit_exact", "warp %.2e vs the miss", max_diff(hit.ab.warp, one.ab.warp));
     check(max_diff(again.ab.warp, both.ab.warp) == 0 && max_diff(again.ba.warp, both.ba.warp) == 0,
           "match_cache_content_keyed", "A after B: warp %.2e", max_diff(again.ab.warp, both.ab.warp));
-    // One hr spec whose lr bytes equal an lr-only call's: the hr call after the
-    // lr-only one must miss and equal a fresh hr call. Catches a key without the
-    // sizes (the lr-only cache has no hr VGG maps).
+    // An hr call after an lr-only call with the same lr bytes must miss: a key
+    // without the sizes reuses hr maps the lr-only fill left behind, B's here
+    // (with A's own there it passes by coincidence, measured).
     {
         const int hs = size * 3 / 2;
         const std::vector<float> fah = resize_rgb(qa.data(), size, size, hs, hs);
@@ -560,8 +560,8 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
         MatchSpec mh;
         mh.lr_h = mh.lr_w = size;
         mh.hr_h = mh.hr_w = hs;
-        (void)m.match(fb.data(), fa.data(), fbh.data(), fah.data(), mh);
         const MatchResult fresh = m.match(fa.data(), fb.data(), fah.data(), fbh.data(), mh);
+        (void)m.match(fb.data(), fa.data(), fbh.data(), fah.data(), mh);
         MatchSpec ml;
         ml.lr_h = ml.lr_w = size;
         (void)m.match(fa.data(), fb.data(), nullptr, nullptr, ml);
