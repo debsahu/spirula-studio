@@ -192,7 +192,7 @@ Presets (`RomaMatcher.h`): `turbo` 320, `fast` 512, `base` 640, `precise`
 800 + 1280 hr (upstream's `apply_setting`), and the plugin's `high`, 640 +
 960 hr. A into B does not depend on whether B into A is computed, so
 `match()` never computes B into A; `matchBoth()` does. A's backbone taps and
-VGG maps stay on the device keyed by `MatchImage::name`, so a reference matched
+VGG maps stay on the device keyed by its own bytes and sizes, so a reference matched
 against several neighbours runs its backbone once.
 
 ## Full-match parity (P-3)

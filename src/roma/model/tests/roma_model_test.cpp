@@ -355,6 +355,8 @@ void test_refine_kernels(vk::Arena& arena) {
         const std::vector<float> conf = randn((size_t)(prev_c * n), 42 + prev_c);
         std::vector<float> dw = randn((size_t)(2 * n), 43), dc = randn((size_t)(4 * n), 44, 3.0f);
         dc[1] = 25.0f;   // softplus' linear branch
+        // Deep in the exponential tail log(1 + exp(x)) loses digits; log1p does not.
+        for (int64_t i = 1; i < 17; ++i) dc[(size_t)(4 * i + 1)] = -12.0f - (float)(i % 5);
         Tensor tw = upload(arena, warp, n, 2), tc = upload(arena, conf, n, prev_c);
         Tensor tdw = upload(arena, dw, n, 2), tdc = upload(arena, dc, n, 4);
         Tensor ow = nn::arena_tensor(arena, DType::F32, n, 2);
@@ -384,6 +386,16 @@ void test_refine_kernels(vk::Arena& arena) {
                                         std::max(1.0, std::fabs(want)));
             }
         }
+        double etail = 0;
+        for (int64_t i = 1; i < 17; ++i) {
+            const double l00 = sp(dc[(size_t)(4 * i + 1)]) + 1e-6;
+            const double want = (prev_c == 4 ? conf[(size_t)(4 * i + 1)] : 0.0) + l00 * l00;
+            if (prev_c == 1)
+                etail = std::max(etail, std::fabs(gc[(size_t)(4 * i + 1)] - want) / want);
+        }
+        if (prev_c == 1)
+            check(etail < 1e-4, "refine_update_softplus_tail",
+                  "p00 relative error at x <= -12: %.2e (log(1+exp(x)) gave 8e-2 on MoltenVK)", etail);
         check(ew < 1e-6, "refine_update_warp", "prev_c %d: max abs %.2e", prev_c, ew);
         check(ecv < 1e-5, "refine_update_conf", "prev_c %d: max rel %.2e", prev_c, ecv);
     }
@@ -495,9 +507,8 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
               st.name, st.peak / 1e6, st.plan / 1e6, 100.0 * (double)st.peak / (double)st.plan);
     std::printf("  weights on device: %.2f GB\n", m.weightBytes() / 1e9);
 
-    // ---- AB is independent of BA, a cache hit equals a miss, BA(A,B) = AB(B,A),
-    // the adapter is match() + sigmoid. Catches BA aliasing AB's state, a stale
-    // cache, the directions' VGG maps swapped, a missing sigmoid.
+    // ---- AB is independent of BA, BA(A,B) = AB(B,A), the cache, the adapter.
+    // Catches BA aliasing AB's state, swapped VGG maps, a missing sigmoid.
     std::vector<uint8_t> qa(A.size()), qb(B.size());
     std::vector<float> fa(A.size()), fb(B.size());
     for (size_t i = 0; i < A.size(); ++i) {
@@ -508,11 +519,15 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
     }
     MatchSpec ms;
     ms.lr_h = ms.lr_w = size;
+    const uint64_t hits0 = m.cacheHits(), miss0 = m.cacheMisses();
     const MatchResult one = m.match(fa.data(), fb.data(), nullptr, nullptr, ms);
     ms.bidirectional = true;
-    const MatchResult both = m.match(fa.data(), fb.data(), nullptr, nullptr, ms, "a");
-    const MatchResult hit = m.match(fa.data(), fb.data(), nullptr, nullptr, ms, "a");
-    const MatchResult swapped = m.match(fb.data(), fa.data(), nullptr, nullptr, ms, "b");
+    const MatchResult both = m.match(fa.data(), fb.data(), nullptr, nullptr, ms);
+    const MatchResult hit = m.match(fa.data(), fb.data(), nullptr, nullptr, ms);
+    const MatchResult swapped = m.match(fb.data(), fa.data(), nullptr, nullptr, ms);
+    // A's cache is keyed on content: after B took it, A again must miss and
+    // reproduce A's own match. Catches a key on sizes alone (a stale hit).
+    const MatchResult again = m.match(fa.data(), fb.data(), nullptr, nullptr, ms);
     auto max_diff = [](const std::vector<float>& x, const std::vector<float>& y) {
         if (x.size() != y.size()) return 1e30;
         double e = 0;
@@ -531,9 +546,36 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
               max_diff(one.ab.confidence, both.ab.confidence) == 0,
           "match_ab_independent_of_ba", "warp %.2e, confidence %.2e",
           max_diff(one.ab.warp, both.ab.warp), max_diff(one.ab.confidence, both.ab.confidence));
-    check(max_diff(hit.ab.warp, both.ab.warp) == 0 && max_diff(hit.ba.warp, both.ba.warp) == 0 &&
-              max_diff(hit.ab.confidence, both.ab.confidence) == 0,
-          "match_cache_hit_exact", "warp %.2e", max_diff(hit.ab.warp, both.ab.warp));
+    check(max_diff(hit.ab.warp, one.ab.warp) == 0 && max_diff(hit.ab.confidence, one.ab.confidence) == 0,
+          "match_cache_hit_exact", "warp %.2e vs the miss", max_diff(hit.ab.warp, one.ab.warp));
+    check(max_diff(again.ab.warp, both.ab.warp) == 0 && max_diff(again.ba.warp, both.ba.warp) == 0,
+          "match_cache_content_keyed", "A after B: warp %.2e", max_diff(again.ab.warp, both.ab.warp));
+    // One hr spec whose lr bytes equal an lr-only call's: the hr call after the
+    // lr-only one must miss and equal a fresh hr call. Catches a key without the
+    // sizes (the lr-only cache has no hr VGG maps).
+    {
+        const int hs = size * 3 / 2;
+        const std::vector<float> fah = resize_rgb(qa.data(), size, size, hs, hs);
+        const std::vector<float> fbh = resize_rgb(qb.data(), size, size, hs, hs);
+        MatchSpec mh;
+        mh.lr_h = mh.lr_w = size;
+        mh.hr_h = mh.hr_w = hs;
+        (void)m.match(fb.data(), fa.data(), fbh.data(), fah.data(), mh);
+        const MatchResult fresh = m.match(fa.data(), fb.data(), fah.data(), fbh.data(), mh);
+        MatchSpec ml;
+        ml.lr_h = ml.lr_w = size;
+        (void)m.match(fa.data(), fb.data(), nullptr, nullptr, ml);
+        const MatchResult after = m.match(fa.data(), fb.data(), fah.data(), fbh.data(), mh);
+        check(after.ab.w == hs && max_diff(after.ab.warp, fresh.ab.warp) == 0 &&
+                  max_diff(after.ab.confidence, fresh.ab.confidence) == 0,
+              "match_cache_size_keyed", "hr after lr-only: warp %.2e",
+              max_diff(after.ab.warp, fresh.ab.warp));
+    }
+    // one, swapped, again, and the four size calls miss; both and hit hit.
+    // Catches a cache that never hits (each check above would still pass).
+    check(m.cacheHits() - hits0 == 2 && m.cacheMisses() - miss0 == 7, "match_cache_counts",
+          "%llu hits, %llu misses (want 2, 7)", (unsigned long long)(m.cacheHits() - hits0),
+          (unsigned long long)(m.cacheMisses() - miss0));
     // BA of (A, B) is AB of (B, A) only up to token order, which the bf16 RoPE
     // amplifies; upstream torch itself, BA-certain pixels, worst of 3 pairs:
     // p50 0.022 px, p99 1.5 px (toronto). The mutants this catches: >= 1 px p50.
@@ -574,6 +616,10 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
     if (found) {
         RomaMatcher rm(ckpt, pr);
         const Warp wp = rm.match({"a", size, size, qa.data()}, {"b", size, size, qb.data()});
+        // The reviewer's repro: one name, other pixels; a name key returned A's features.
+        const Warp wx = rm.match({"a", size, size, qb.data()}, {"b", size, size, qa.data()});
+        check(max_diff(wx.warp, swapped.ab.warp) == 0, "matcher_same_name_other_pixels",
+              "warp %.2e vs match(B, A)", max_diff(wx.warp, swapped.ab.warp));
         const size_t n = (size_t)size * size;
         double ec = 0;
         size_t certain = 0;
