@@ -54,6 +54,7 @@ constexpr const char* kToolMesh  = "mesh";
 constexpr const char* kToolSfm   = "sfm";
 constexpr const char* kToolSam   = "sam";
 constexpr const char* kToolGeometry = "geometry";
+constexpr const char* kToolDensify = "densify";
 constexpr const char* kToolGui   = "gui";
 constexpr const char* kToolEncode = "encode";
 constexpr const char* kToolE57 = "e57";
@@ -76,6 +77,9 @@ int spirula_sam_main(int argc, char** argv);
 #endif
 #ifdef SS_TOOL_GEOMETRY
 int spirula_geometry_main(int argc, char** argv);
+#endif
+#ifdef SS_TOOL_DENSIFY
+int spirula_densify_main(int argc, char** argv);
 #endif
 #ifdef SS_TOOL_GUI
 int spirula_gui_main(int argc, char** argv);

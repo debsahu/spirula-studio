@@ -1,51 +1,83 @@
 #include "roma/model/RomaMatcher.h"
 
-#include <cmath>
 #include <stdexcept>
 
 namespace roma {
 namespace {
 
+const PresetSpec kPresets[] = {
+    {"turbo", 320, 0, false},
+    {"fast", 512, 0, false},
+    {"base", 640, 0, false},
+    {"high", 640, 960, true},
+    {"precise", 800, 1280, true},
+};
+
 std::vector<float> to_input(const MatchImage& m, int size) {
     if (!m.rgb || m.width <= 0 || m.height <= 0)
         throw std::runtime_error("roma: empty image '" + m.name + "'");
-    // At the same size torch's antialiased bicubic is the identity.
-    if (m.width == size && m.height == size) {
-        std::vector<float> v((size_t)size * size * 3);
-        for (size_t i = 0; i < v.size(); ++i) v[i] = m.rgb[i] / 255.0f;
-        return v;
-    }
     return resize_rgb(m.rgb, m.width, m.height, size, size);
+}
+
+Warp to_warp(const DenseMatch& d) {
+    Warp w;
+    w.width = d.w;
+    w.height = d.h;
+    w.warp = d.warp;
+    w.certainty.resize((size_t)d.w * d.h);
+    for (size_t i = 0; i < w.certainty.size(); ++i) w.certainty[i] = d.overlap(i);
+    return w;
 }
 
 }  // namespace
 
-RomaMatcher::RomaMatcher(const std::string& checkpoint, int size) : size_(size) {
-    if (size <= 0 || size % 16 != 0)
-        throw std::runtime_error("roma: match size " + std::to_string(size) +
-                                 " is not a positive multiple of 16");
+const PresetSpec& preset_spec(Preset p) { return kPresets[(int)p]; }
+
+bool parse_preset(const std::string& s, Preset& out) {
+    for (int i = 0; i < 5; ++i)
+        if (s == kPresets[i].name) {
+            out = (Preset)i;
+            return true;
+        }
+    return false;
+}
+
+RomaMatcher::RomaMatcher(const std::string& checkpoint, Preset preset) : preset_(preset) {
     model_.load(checkpoint);
 }
 
-Warp RomaMatcher::match(const MatchImage& a, const MatchImage& b) {
-    const std::vector<float> ia = to_input(a, size_), ib = to_input(b, size_);
-    const CoarseMatch c = model_.coarse(ia.data(), ib.data(), size_, size_);
-    Warp w;
-    w.width = c.w;
-    w.height = c.h;
-    const size_t n = (size_t)c.w * c.h;
-    w.warp.resize(n * 2);
-    w.certainty.resize(n);
-    for (size_t i = 0; i < n; ++i) {
-        w.warp[i * 2] = c.data[i * 3];
-        w.warp[i * 2 + 1] = c.data[i * 3 + 1];
-        w.certainty[i] = 1.0f / (1.0f + std::exp(-c.data[i * 3 + 2]));
+int RomaMatcher::inputSize() const { return spec().hr ? spec().hr : spec().lr; }
+
+MatchResult RomaMatcher::run(const MatchImage& a, const MatchImage& b, bool both) {
+    const PresetSpec& ps = spec();
+    MatchSpec ms;
+    ms.lr_h = ms.lr_w = ps.lr;
+    ms.hr_h = ms.hr_w = ps.hr;
+    ms.bidirectional = both;
+    const std::vector<float> al = to_input(a, ps.lr), bl = to_input(b, ps.lr);
+    std::vector<float> ah, bh;
+    if (ps.hr) {
+        ah = to_input(a, ps.hr);
+        bh = to_input(b, ps.hr);
     }
-    return w;
+    return model_.match(al.data(), bl.data(), ps.hr ? ah.data() : nullptr,
+                        ps.hr ? bh.data() : nullptr, ms, a.name);
+}
+
+Warp RomaMatcher::match(const MatchImage& a, const MatchImage& b) {
+    return to_warp(run(a, b, false).ab);
+}
+
+std::pair<Warp, Warp> RomaMatcher::matchBoth(const MatchImage& a, const MatchImage& b) {
+    const MatchResult r = run(a, b, true);
+    return {to_warp(r.ab), to_warp(r.ba)};
 }
 
 std::string RomaMatcher::describe() const {
-    return "RoMa v2 coarse (stride 4, no refiners) at " + std::to_string(size_) + "px";
+    const PresetSpec& ps = spec();
+    std::string s = std::string("RoMa v2 ") + ps.name + " (" + std::to_string(ps.lr) + "px";
+    if (ps.hr) s += " + " + std::to_string(ps.hr) + "px";
+    return s + ", refined)";
 }
 
 }  // namespace roma

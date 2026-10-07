@@ -152,6 +152,13 @@ if(SS_BUILD_SAM)
          ${SS_SRC}/app/DepthPng.cpp)
     list(APPEND SS_TOOL_DEFS SS_TOOL_GEOMETRY=1)
     list(APPEND SS_TOOL_LIBS ss_metric3d ss_moge)
+
+    # ---- dense points for a solved model (src/roma/, docs/notes/densify.md) ----
+    if(SS_BUILD_SFM)
+        list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/densify_main.cpp)
+        list(APPEND SS_TOOL_DEFS SS_TOOL_DENSIFY=1)
+        list(APPEND SS_TOOL_LIBS ss_roma_host ss_roma)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -396,6 +403,13 @@ add_executable(lidar_align_test
     ${SS_SRC}/app/ScanDepth.cpp
     ${SS_SRC}/app/DepthPng.cpp)
 ss_configure_app(lidar_align_test)
+
+# Gate H-3: a densified sibling model never wins the parser's automatic pick.
+if(SS_BUILD_SFM AND SS_BUILD_SAM)
+    add_executable(densify_autopick_test ${SS_SRC}/app/tests/densify_autopick_test.cpp)
+    ss_configure_app(densify_autopick_test)
+    target_link_libraries(densify_autopick_test PRIVATE ss_roma_host)
+endif()
 
 # The stencil shapes, spelling and fill, with no GUI: FrameMask.cpp is compiled
 # into the CLI too, so this must link without imgui.
