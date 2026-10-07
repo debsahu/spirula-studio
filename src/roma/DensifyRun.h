@@ -5,6 +5,7 @@
 #pragma once
 
 #include <functional>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,10 @@ struct DensifyJob {
     bool overwrite = false;
     std::string export_dir;             // write the views and pairs.txt, match nothing
     Matcher* matcher = nullptr;
+    // A -> B and B -> A in one call, when the matcher computes both for less than
+    // two match() calls (RomaMatcher::matchBoth); unset: two calls.
+    std::function<std::pair<Warp, Warp>(const MatchImage&, const MatchImage&)> match_both;
+    std::string dump_dir;               // every warp matched, as <A>__<B>.rwm (DumpMatcher.h)
     DepthSource* depth = nullptr;
     DensifyOptions opt;
     // Each image's depth fit as it is made, refused or not.
@@ -70,6 +75,7 @@ struct DensifyResult {
     DensifyStats stats;
     int64_t points = 0;
     double seconds_match = 0, seconds_total = 0;
+    int64_t reverse_matches = 0;                 // B -> A warps the cycle check asked for
     double depth_tol = 0;                        // the depth agreement tolerance used
     double depth_share = -1;                     // usable maps among the matched images, -1 unused
     std::string depth_dropped;                   // auto: why the depth source was not used

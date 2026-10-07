@@ -19,17 +19,21 @@ std::vector<float> to_input(const MatchImage& m, int size) {
     return resize_rgb(m.rgb, m.width, m.height, size, size);
 }
 
-Warp to_warp(const DenseMatch& d) {
+}  // namespace
+
+Warp warpOf(const DenseMatch& d) {
     Warp w;
     w.width = d.w;
     w.height = d.h;
     w.warp = d.warp;
     w.certainty.resize((size_t)d.w * d.h);
-    for (size_t i = 0; i < w.certainty.size(); ++i) w.certainty[i] = d.overlap(i);
+    w.precision.resize(3 * w.certainty.size());
+    for (size_t i = 0; i < w.certainty.size(); ++i) {
+        w.certainty[i] = d.overlap(i);
+        for (size_t c = 0; c < 3; ++c) w.precision[3 * i + c] = d.confidence[4 * i + 1 + c];
+    }
     return w;
 }
-
-}  // namespace
 
 const PresetSpec& preset_spec(Preset p) { return kPresets[(int)p]; }
 
@@ -65,12 +69,12 @@ MatchResult RomaMatcher::run(const MatchImage& a, const MatchImage& b, bool both
 }
 
 Warp RomaMatcher::match(const MatchImage& a, const MatchImage& b) {
-    return to_warp(run(a, b, false).ab);
+    return warpOf(run(a, b, false).ab);
 }
 
 std::pair<Warp, Warp> RomaMatcher::matchBoth(const MatchImage& a, const MatchImage& b) {
     const MatchResult r = run(a, b, true);
-    return {to_warp(r.ab), to_warp(r.ba)};
+    return {warpOf(r.ab), warpOf(r.ba)};
 }
 
 std::string RomaMatcher::describe() const {

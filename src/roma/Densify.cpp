@@ -6,6 +6,7 @@
 #include <numeric>
 #include <random>
 #include <set>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "sfm/geometry/Fundamental.h"
@@ -34,6 +35,14 @@ void DensifyStats::add(const DensifyStats& o) {
         normal_null_hist[i] += o.normal_null_hist[i];
         local_normal_hist[i] += o.local_normal_hist[i];
     }
+    cycle += o.cycle; refined += o.refined; refine_fallback += o.refine_fallback;
+    refine_no_precision += o.refine_no_precision;
+    for (size_t i = 0; i < cycle_kept_hist.size(); i++) {
+        cycle_kept_hist[i] += o.cycle_kept_hist[i];
+        cycle_rejected_hist[i] += o.cycle_rejected_hist[i];
+    }
+    for (size_t i = 0; i < refine_residual_hist.size(); i++) refine_residual_hist[i] += o.refine_residual_hist[i];
+    refine_scales.insert(refine_scales.end(), o.refine_scales.begin(), o.refine_scales.end());
     if (o.two_image_bar >= 0) two_image_bar = o.two_image_bar; voxel_merged += o.voxel_merged; capped += o.capped;
     for (const auto& kv : o.track_hist) track_hist[kv.first] += kv.second;
 }
@@ -61,6 +70,21 @@ std::vector<float> collectCertainty(const Warp& raw, const std::vector<uint8_t>&
         }
     }
     return c;
+}
+
+double cycleError(const std::vector<float>& rev, int w, int h, float u, float v, int j, int i) {
+    // Bilinear on pixel centres, align_corners=false, clamped at the border.
+    const double bx = std::clamp(((double)u + 1.0) * 0.5 * w - 0.5, 0.0, (double)(w - 1));
+    const double by = std::clamp(((double)v + 1.0) * 0.5 * h - 0.5, 0.0, (double)(h - 1));
+    const int x0 = std::min((int)bx, w - 2 < 0 ? 0 : w - 2), y0 = std::min((int)by, h - 2 < 0 ? 0 : h - 2);
+    const int x1 = std::min(x0 + 1, w - 1), y1 = std::min(y0 + 1, h - 1);
+    const double fx = bx - x0, fy = by - y0;
+    double back[2];
+    for (int c = 0; c < 2; c++) {
+        auto at = [&](int x, int y) { return (double)rev[((size_t)y * w + x) * 2 + c]; };
+        back[c] = (1 - fy) * ((1 - fx) * at(x0, y0) + fx * at(x1, y0)) + fy * ((1 - fx) * at(x0, y1) + fx * at(x1, y1));
+    }
+    return std::hypot((back[0] + 1.0) * 0.5 * w - (j + 0.5), (back[1] + 1.0) * 0.5 * h - (i + 0.5));
 }
 
 double referenceX(int j, int w, bool plugin_exact) {
@@ -197,7 +221,89 @@ struct Candidate {
     double depth_per_px;    // relative depth change per match pixel, coarser view
     int view;
     double xb, yb;
+    float prec[3] = {0, 0, 0};
+    bool has_prec = false;
 };
+
+// What a fused point's refinement sees of one image: where it landed in that
+// view and RoMa's information there, match pixels.
+struct RefineObs {
+    const View* v;
+    double xb, yb, sx, sy;
+    double p00, p01, p11;
+};
+
+bool precisionUsable(const float* p) {
+    return std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]) && p[0] > 0 && p[2] > 0 &&
+           (double)p[0] * p[2] - (double)p[1] * p[1] > 0;
+}
+
+// Match-pixel residual in the observation's view; false behind the camera.
+bool residualAt(const RefineObs& o, const Vec3& X, double r[2]) {
+    const Vec3 Xc = toView(*o.v, X);
+    if (isPinhole(o.v->cam) || !o.v->cam.wideFov()) {
+        if (!(Xc.z > 0)) return false;
+    } else if (!(Xc.dot(o.v->cam.bearing({o.xb, o.yb})) > 0)) {
+        return false;
+    }
+    const Vec2 p = o.v->cam.project(Xc);
+    r[0] = (p.x - o.xb) / o.sx;
+    r[1] = (p.y - o.yb) / o.sy;
+    return std::isfinite(r[0]) && std::isfinite(r[1]);
+}
+
+double mahalanobis(const RefineObs& o, const double r[2]) {
+    return std::sqrt(std::max(0.0, o.p00 * r[0] * r[0] + 2 * o.p01 * r[0] * r[1] + o.p11 * r[1] * r[1]));
+}
+
+double huberCost(const std::vector<RefineObs>& obs, const Vec3& C, const Vec3& dir, double t, double delta) {
+    double cost = 0;
+    for (const RefineObs& o : obs) {
+        double r[2];
+        if (!residualAt(o, C + dir * t, r)) return INFINITY;
+        const double d = mahalanobis(o, r);
+        cost += d <= delta ? 0.5 * d * d : delta * (d - 0.5 * delta);
+    }
+    return cost;
+}
+
+// The depth along the reference ray C + t dir that minimises the Huber cost
+// of the Mahalanobis residuals; IRLS by Gauss-Newton with a halving line
+// search. The reference pixel is where RoMa's warp is defined, so it is exact.
+bool refineAlongRay(const std::vector<RefineObs>& obs, const Vec3& C, const Vec3& dir, double delta, double& t) {
+    for (int it = 0; it < 12; it++) {
+        double H = 0, g = 0;
+        const double h = 1e-6 * t;
+        for (const RefineObs& o : obs) {
+            double r[2], rp[2], rm[2];
+            if (!residualAt(o, C + dir * t, r) || !residualAt(o, C + dir * (t + h), rp) ||
+                !residualAt(o, C + dir * (t - h), rm))
+                return false;
+            const double J[2] = {(rp[0] - rm[0]) / (2 * h), (rp[1] - rm[1]) / (2 * h)};
+            const double d = mahalanobis(o, r);
+            const double w = d <= delta ? 1.0 : delta / d;
+            const double PJ[2] = {o.p00 * J[0] + o.p01 * J[1], o.p01 * J[0] + o.p11 * J[1]};
+            H += w * (J[0] * PJ[0] + J[1] * PJ[1]);
+            g += w * (r[0] * PJ[0] + r[1] * PJ[1]);
+        }
+        if (!(H > 0) || !std::isfinite(g)) return false;
+        const double step = -g / H;
+        if (!(std::fabs(step) > 1e-12 * t)) break;
+        const double c0 = huberCost(obs, C, dir, t, delta);
+        bool moved = false;
+        for (int k = 0; k < 12 && !moved; k++) {
+            const double tn = t + std::ldexp(step, -k);
+            if (tn > 0 && huberCost(obs, C, dir, tn, delta) < c0) { t = tn; moved = true; }
+        }
+        if (!moved) break;
+    }
+    return std::isfinite(t) && t > 0;
+}
+
+size_t residualBin(double d) {
+    if (!(d > 0)) return 0;
+    return (size_t)std::clamp((std::log2(d) + 6.0) * 2.0, 0.0, 39.0);
+}
 
 // The plugin's colour: bilinear in the match-resolution reference, its own
 // clipping kept (the weights are not renormalised at the last row/column).
@@ -242,7 +348,13 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
     if (m.record_candidates) m.record_candidates->assign(S, {});
     const sfm::Mat34 PA = projection(A, exact);
 
+    const bool cycle_on = !exact && opt.cycle_px > 0;
+    if (cycle_on && m.rev.size() != m.nbrs.size())
+        throw std::runtime_error("the cycle check needs every neighbour's B -> A warp");
     for (size_t k = 0; k < m.nbrs.size(); k++) {
+        if (cycle_on && m.rev[k].size() != (size_t)W * H * 2)
+            throw std::runtime_error("a B -> A warp is not the size of its A -> B warp");
+        const bool has_prec = k < m.prec.size() && m.prec[k].size() == (size_t)W * H * 3;
         const View& B = views[(size_t)m.nbrs[k]];
         const double sxB = (double)B.cam.width / W, syB = (double)B.cam.height / H;
         const sfm::Mat34 PB = projection(B, exact);
@@ -267,6 +379,16 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
                 if (m.cert[k][i] < opt.min_certainty) { st.below_certainty++; continue; }
                 if (!(std::fabs(u) <= 1.0f && std::fabs(v) <= 1.0f)) { st.outside++; continue; }
             }
+            double cyc = -1;
+            if (cycle_on) {
+                cyc = cycleError(m.rev[k], W, H, u, v, (int)(i % (size_t)W), (int)(i / (size_t)W));
+                if (!(cyc <= opt.cycle_px)) { st.cycle++; continue; }
+            }
+            auto bin = [](double e) { return std::min<size_t>(63, (size_t)(e / 0.05)); };
+            auto reject = [&](int64_t& counter) {
+                counter++;
+                if (cyc >= 0) st.cycle_rejected_hist[bin(cyc)]++;
+            };
             double xb = warpX(u, W, exact) * sxB, yb = warpX(v, H, exact) * syB;
             if (exact) { xb = (float)xb; yb = (float)yb; }
             Vec3 bA, bB;
@@ -280,7 +402,7 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
             if (sampson_on) {
                 const double se = exact ? sfm::sampsonSq(F, {xa[s], ya[s]}, {xb, yb})
                                         : sfm::sampsonSqBearing(E, bA, bB);
-                if (!(se < (exact ? opt.sampson_px2 : sampson_rad2))) { st.sampson++; continue; }
+                if (!(se < (exact ? opt.sampson_px2 : sampson_rad2))) { reject(st.sampson); continue; }
             }
             const Vec3 X = exact ? dltSvd(PA, PB, bA, bB) : sfm::triangulateDLT(PA, PB, bA, bB);
             const bool finite = std::isfinite(X.x) && std::isfinite(X.y) && std::isfinite(X.z);
@@ -291,25 +413,30 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
                 err = std::max(reprojMatch(A, X, xa[s], ya[s], sxA, syA),
                                reprojMatch(B, X, xb, yb, sxB, syB));
             const double par = finite ? sfm::triangulationAngle(X, CA, CB) * kRadToDeg : 0.0;
-            if (!finite) { st.nonfinite++; continue; }
+            if (!finite) { reject(st.nonfinite); continue; }
             if (!std::isfinite(err)) {
                 // Default mode projects through the lens: inf is behind the camera.
-                if (exact || opt.no_filter) st.nonfinite++;
-                else st.cheirality++;
+                reject(exact || opt.no_filter ? st.nonfinite : st.cheirality);
                 continue;
             }
             if (!opt.no_filter) {
-                if (!(err <= opt.reproj_px)) { st.reproj++; continue; }
+                if (!(err <= opt.reproj_px)) { reject(st.reproj); continue; }
                 if (!cheiral(A, X, A.cam.bearing({xa[s], ya[s]})) ||
-                    !cheiral(B, X, B.cam.bearing({xb, yb}))) { st.cheirality++; continue; }
+                    !cheiral(B, X, B.cam.bearing({xb, yb}))) { reject(st.cheirality); continue; }
                 if (opt.min_parallax_deg > 0 && !(par >= opt.min_parallax_deg)) {
-                    st.parallax++;
+                    reject(st.parallax);
                     continue;
                 }
             }
             st.candidates++;
+            if (cyc >= 0) st.cycle_kept_hist[bin(cyc)]++;
             const double dpp = 1.0 / (fm_pair * std::max(1e-12, std::sin(par / kRadToDeg)));
-            cand[s].push_back({X, err, par, dpp, m.nbrs[k], xb, yb});
+            Candidate cd{X, err, par, dpp, m.nbrs[k], xb, yb};
+            if (has_prec) {
+                for (int c = 0; c < 3; c++) cd.prec[c] = m.prec[k][3 * i + (size_t)c];
+                cd.has_prec = true;
+            }
+            cand[s].push_back(cd);
             if (m.record_candidates) (*m.record_candidates)[s].push_back({(int)k, X, err});
         }
     }
@@ -319,7 +446,13 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
         return reprojMatch(v, X, x, y, (double)v.cam.width / W, (double)v.cam.height / H);
     };
 
-    std::vector<DensePoint> out;
+    struct Fused {
+        std::vector<Candidate> cs;
+        Vec3 X;
+        double par = 0, max_err = 0;
+        bool ok = false;
+    };
+    std::vector<Fused> fused(S);
     for (size_t s = 0; s < S; s++) {
         std::vector<Candidate> cs = cand[s];
         if (cs.empty()) continue;
@@ -359,7 +492,67 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
             par = std::max(par, c.parallax);
             if (std::isfinite(c.err)) max_err = std::max(max_err, c.err);
         }
-        const Vec3 X = sum * (1.0 / std::max(wsum, 1e-8));
+        fused[s] = {std::move(cs), sum * (1.0 / std::max(wsum, 1e-8)), par, max_err, true};
+    }
+
+    // Refinement: one observation per source image, the most consistent one.
+    const bool refine_on = !exact && !opt.no_filter && opt.refine_huber > 0;
+    std::vector<std::vector<RefineObs>> robs(refine_on ? S : 0);
+    if (refine_on) {
+        std::vector<double> ds;
+        for (size_t s = 0; s < S; s++) {
+            if (!fused[s].ok) continue;
+            std::map<int, std::pair<double, RefineObs>> best;
+            bool any = false;
+            for (const Candidate& c : fused[s].cs) {
+                if (!c.has_prec) continue;
+                any = true;
+                if (!precisionUsable(c.prec)) continue;
+                const View& v = views[(size_t)c.view];
+                const RefineObs o{&v, c.xb, c.yb, (double)v.cam.width / W, (double)v.cam.height / H,
+                                  c.prec[0], c.prec[1], c.prec[2]};
+                double r[2];
+                if (!residualAt(o, fused[s].X, r)) continue;
+                const double d = mahalanobis(o, r);
+                auto it = best.find(v.image);
+                if (it == best.end() || d < it->second.first) best[v.image] = {d, o};
+            }
+            if (!any) { st.refine_no_precision++; continue; }
+            for (const auto& kv : best) {
+                robs[s].push_back(kv.second.second);
+                ds.push_back(kv.second.first);
+                st.refine_residual_hist[residualBin(kv.second.first)]++;
+            }
+            if (robs[s].empty()) st.refine_fallback++;
+        }
+        double scale = 1;
+        if (!ds.empty()) {
+            std::nth_element(ds.begin(), ds.begin() + (long)(ds.size() / 2), ds.end());
+            // A 2-D Gaussian's Mahalanobis median is sqrt(2 ln 2): the precision's own sigma.
+            if (ds[ds.size() / 2] > 0) scale = ds[ds.size() / 2] / 1.1774100225154747;
+            st.refine_scales.push_back((float)scale);
+        }
+        const double delta = opt.refine_huber * scale;
+        const Mat3 RtA = sfm::transpose(A.R);
+        for (size_t s = 0; s < S; s++) {
+            if (robs[s].empty()) continue;
+            const Vec3 dir = sfm::mul(RtA, A.cam.bearing({xa[s], ya[s]})).normalized();
+            double t = (fused[s].X - A.centre).dot(dir);
+            if (t > 0 && refineAlongRay(robs[s], A.centre, dir, delta, t)) {
+                fused[s].X = A.centre + dir * t;
+                st.refined++;
+            } else {
+                st.refine_fallback++;
+            }
+        }
+    }
+
+    std::vector<DensePoint> out;
+    for (size_t s = 0; s < S; s++) {
+        if (!fused[s].ok) continue;
+        const std::vector<Candidate>& cs = fused[s].cs;
+        const Vec3 X = fused[s].X;
+        const double par = fused[s].par, max_err = fused[s].max_err;
         const double ref_err = reproj(A, X, xa[s], ya[s]);
         if (!opt.no_filter && (!std::isfinite(ref_err) || ref_err > opt.reproj_px)) {
             st.ref_reproj++;

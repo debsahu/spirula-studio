@@ -52,9 +52,13 @@ Warp readWarp(const std::string& path) {
     const size_t n = (size_t)w.width * (size_t)w.height;
     w.warp.resize(2 * n);
     w.certainty.resize(n);
-    if (hdr[2] == 0) {
+    if (hdr[2] == 0 || hdr[2] == 2) {
         get(f, w.warp.data(), 2 * n, path);
         get(f, w.certainty.data(), n, path);
+        if (hdr[2] == 2) {
+            w.precision.resize(3 * n);
+            get(f, w.precision.data(), 3 * n, path);
+        }
     } else if (hdr[2] == 1) {
         std::vector<int16_t> q(2 * n);
         std::vector<uint16_t> c(n);
@@ -73,11 +77,16 @@ void writeWarp(const std::string& path, const Warp& w, int encoding) {
     const int32_t hdr[3] = {w.width, w.height, encoding};
     f.write("RWM1", 4);
     f.write(reinterpret_cast<const char*>(hdr), sizeof hdr);
-    if (encoding == 0) {
+    if (encoding == 2 && w.precision.size() != 3 * w.certainty.size())
+        throw std::runtime_error(path + ": encoding 2 needs a precision per pixel");
+    if (encoding == 0 || encoding == 2) {
         f.write(reinterpret_cast<const char*>(w.warp.data()),
                 (std::streamsize)(w.warp.size() * sizeof(float)));
         f.write(reinterpret_cast<const char*>(w.certainty.data()),
                 (std::streamsize)(w.certainty.size() * sizeof(float)));
+        if (encoding == 2)
+            f.write(reinterpret_cast<const char*>(w.precision.data()),
+                    (std::streamsize)(w.precision.size() * sizeof(float)));
     } else {
         std::vector<int16_t> q(w.warp.size());
         std::vector<uint16_t> c(w.certainty.size());

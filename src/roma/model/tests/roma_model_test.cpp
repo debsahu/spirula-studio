@@ -630,6 +630,20 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
         check(wp.width == size && max_diff(wp.warp, one.ab.warp) == 0 && ec < 1e-7,
               "matcher_adapter", "%s: warp %.2e, certainty %.2e vs match()",
               rm.describe().c_str(), max_diff(wp.warp, one.ab.warp), ec);
+        // Catches the adapter dropping RoMa's precision, or BA's taking AB's.
+        auto prec_diff = [&](const std::vector<float>& p, const DenseMatch& dm) {
+            if (p.size() != 3 * n || dm.confidence.size() != 4 * n) return 1e30;
+            double e = 0;
+            for (size_t i = 0; i < n; ++i)
+                for (int c = 0; c < 3; ++c) e = std::max(e, (double)std::fabs(p[3 * i + c] - dm.confidence[4 * i + 1 + c]));
+            return e;
+        };
+        const std::pair<Warp, Warp> wb = rm.matchBoth({"a", size, size, qa.data()}, {"b", size, size, qb.data()});
+        check(prec_diff(wp.precision, one.ab) == 0 && prec_diff(wb.first.precision, both.ab) == 0 &&
+                  prec_diff(wb.second.precision, both.ba) == 0 && prec_diff(wb.second.precision, both.ab) > 0,
+              "matcher_adapter_precision", "AB %.2e, both AB %.2e, BA %.2e vs the model's confidence[1:4]",
+              prec_diff(wp.precision, one.ab), prec_diff(wb.first.precision, both.ab),
+              prec_diff(wb.second.precision, both.ba));
         std::printf("  adapter: %.1f%% of pixels certain > 0.5\n",
                     100.0 * (double)certain / (double)std::max<size_t>(n, 1));
     }

@@ -1,0 +1,46 @@
+Spirula Studio pull request #154, "Dense point clouds with RoMa v2, progressive
+training resolution, resume, and performance logging"
+https://github.com/harry7557558/spirula-studio/pull/154
+Author: D1odeKing <D1odeKing@users.noreply.github.com>
+Head commit read: ac48bb1a (8 commits, f33c7331..ac48bb1a)
+SPDX-License-Identifier: GPL-3.0-or-later
+
+Spirula Studio's densify stage takes design ideas from this pull request. It
+does not merge, cherry-pick or apply any of its commits. Each idea below was
+re-implemented on the roma::Matcher seam (src/roma/Matcher.h) with its own
+tests; nothing in src/nn/ comes from the pull request. Both trees are GPLv3
+(LICENSE at the repository root).
+
+Bidirectional cycle check
+  Taken as a design:   rejecting a match whose reverse prediction does not
+                       return to the source pixel, the threshold in matcher
+                       cells, applied only when B -> A exists
+                       (src/dense/DenseConfig.h max_cycle_error / cycle_check,
+                       src/dense/Reconstruction.cpp direction()).
+  Written here:        roma::cycleError and the per-neighbour filter in
+                       src/roma/Densify.cpp, the B -> A plumbing (matchBoth or a
+                       second match) in src/roma/DensifyRun.cpp, --cycle in
+                       src/app/cli/densify_main.cpp, tests in
+                       src/roma/tests/roma_densify_test.cpp. Our threshold comes
+                       from a measured distribution (--cycle measure), not
+                       their default of 1; a missing reverse refuses instead of
+                       passing; the reverse's certainty is not read.
+
+Precision-weighted robust point refinement
+  Taken as a design:   refining a fused point with RoMa's 2x2 precision as the
+                       residual's information, under a Huber loss by
+                       iteratively reweighted Gauss-Newton, one observation per
+                       source image (src/dense/Geometry.cpp optimize(),
+                       refine_point()).
+  Written here:        refineAlongRay and the refinement pass in
+                       src/roma/Densify.cpp; Warp::precision on the seam
+                       (src/roma/Matcher.h), filled from the model's own
+                       confidence in src/roma/model/RomaMatcher.cpp; .rwm
+                       encoding 2 in src/roma/DumpMatcher.cpp. Ours is
+                       one-dimensional along the reference ray (the reference
+                       pixel is where the warp is defined, so it carries no
+                       error), its Huber threshold is in sigmas of each view's
+                       own residuals rather than in pixels, weights are the
+                       precision alone (not times the overlap), and it runs
+                       after our largest-consistent-set fusion, before every
+                       per-point filter, which then judge the refined point.

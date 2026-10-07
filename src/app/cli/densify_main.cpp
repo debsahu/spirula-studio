@@ -22,6 +22,7 @@
 #include "roma/model/Fetch.h"
 #include "roma/model/RomaMatcher.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -78,6 +79,9 @@ void usage() {
     help_row("--preset turbo|fast|base|high|precise", D::opt_preset);
     help_row("--matches <dir>", D::opt_matches);
     help_row("--export-pairs <dir>", D::opt_export_pairs);
+    help_row("--dump-matches <dir>", D::opt_dump_matches);
+    help_row("--cycle auto|<px>|measure|off", D::opt_cycle);
+    help_row("--refine auto|<sigmas>|off", D::opt_refine);
     help_row("--plugin-exact", D::opt_plugin_exact);
     help_row("--refs <fraction|n>", D::opt_refs);
     help_row("--neighbours <k>", D::opt_neighbours);
@@ -225,6 +229,12 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--flip-mask") job.flip_mask = true;
         else if (a == "--matches") matches = next();
         else if (a == "--export-pairs") job.export_dir = next();
+        else if (a == "--dump-matches") job.dump_dir = next();
+        else if (a == "--cycle") {
+            if (i + 1 < argc && std::string(argv[i + 1]) == "measure") { ++i; o.cycle_px = INFINITY; }
+            else o.cycle_px = autoOff();
+        }
+        else if (a == "--refine") o.refine_huber = autoOff();
         else if (a == "--plugin-exact") o.plugin_exact = true;
         else if (a == "--refs") { o.refs = real(1e-9); }
         else if (a == "--neighbours") o.neighbours = (int)real(1);
@@ -284,6 +294,8 @@ int spirula_densify_main(int argc, char** argv) {
             co.noise_px = check_noise;
             co.outliers = check_outliers;
             co.match_size = check_size;
+            co.cycle_px = o.cycle_px;
+            co.refine_huber = o.refine_huber;
             return roma::densifyCheck(co);
         }
         if (dataset.empty()) { usage(); return 2; }
@@ -353,6 +365,9 @@ int spirula_densify_main(int argc, char** argv) {
         else if (job.export_dir.empty() && o.source != roma::DensifySource::Depth)
             matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), preset);
         job.matcher = matcher.get();
+        if (auto* rm = dynamic_cast<roma::RomaMatcher*>(matcher.get()))
+            job.match_both = [rm](const roma::MatchImage& a, const roma::MatchImage& b) { return rm->matchBoth(a, b); };
+        if (!job.dump_dir.empty()) fs::create_directories(job.dump_dir);
         if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
             throw std::runtime_error(job.out_dir + ": " + why);
         if (job.export_dir.empty() && fs::exists(job.out_dir) && !job.overwrite) {
@@ -494,6 +509,20 @@ int spirula_densify_main(int argc, char** argv) {
                                                  (long long)st.voxel_merged})
                                 .c_str());
 
+        auto setting = [](double v, bool inf_word) {
+            return v < 0 ? std::string("off") : std::isinf(v) && inf_word ? std::string("measure") : num(v);
+        };
+        std::printf("%s\n", format(D::cycle_refine, {setting(r.cycle_px, true), (long long)st.cycle,
+                                                     (long long)res.reverse_matches, setting(r.refine_huber, false),
+                                                     (long long)st.refined, (long long)st.refine_fallback,
+                                                     (long long)st.refine_no_precision}).c_str());
+        auto arr = [](const auto& h) {
+            std::string o = "[";
+            for (size_t i = 0; i < h.size(); i++) o += (i ? ", " : "") + std::to_string(h[i]);
+            return o + "]";
+        };
+        std::vector<float> scales = st.refine_scales;
+        std::sort(scales.begin(), scales.end());
         std::ostringstream js;
         js << "{\n  \"tool\": \"spirula densify\",\n"
            << "  \"source_model\": \"" << jsonEscape(job.model_dir) << "\",\n"
@@ -540,6 +569,13 @@ int spirula_densify_main(int argc, char** argv) {
            << ", \"depth_share\": " << jnum(res.depth_share) << ", \"depth_fit_holdout\": " << o.depth_fit_holdout << ", \"depth_dropped\": \"" << jsonEscape(res.depth_dropped) << "\""
            << ", \"two_image_kept\": " << st.two_image_kept << ", \"seen_through\": " << st.seen_through << ", \"two_image_bar\": " << jnum(st.two_image_bar)
            << ", \"voxel_merged\": " << st.voxel_merged << ", \"capped\": " << st.capped << "},\n"
+           << "  \"cycle\": {\"px\": " << (std::isinf(r.cycle_px) ? std::string("\"measure\"") : jnum(r.cycle_px))
+           << ", \"rejected\": " << st.cycle << ", \"reverse_matches\": " << res.reverse_matches
+           << ", \"kept_005px\": " << arr(st.cycle_kept_hist) << ", \"rejected_005px\": " << arr(st.cycle_rejected_hist) << "},\n"
+           << "  \"refine\": {\"huber_sigmas\": " << jnum(r.refine_huber) << ", \"refined\": " << st.refined
+           << ", \"kept_mean\": " << st.refine_fallback << ", \"no_precision\": " << st.refine_no_precision
+           << ", \"scale_p50\": " << (scales.empty() ? std::string("null") : jnum(scales[scales.size() / 2]))
+           << ", \"residual_half_octaves_from_2^-6\": " << arr(st.refine_residual_hist) << "},\n"
            << "  \"track_hist\": {";
         bool first = true;
         for (const auto& kv : st.track_hist) { js << (first ? "" : ", ") << '"' << kv.first << "\": " << kv.second; first = false; }
