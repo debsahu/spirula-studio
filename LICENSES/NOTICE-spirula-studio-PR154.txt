@@ -1,0 +1,29 @@
+Spirula Studio pull request #154, "Dense point clouds with RoMa v2, progressive
+training resolution, resume, and performance logging"
+https://github.com/harry7557558/spirula-studio/pull/154
+Author: D1odeKing <D1odeKing@users.noreply.github.com>
+Head commit read: ac48bb1a (8 commits, f33c7331..ac48bb1a)
+SPDX-License-Identifier: GPL-3.0-or-later
+
+Spirula Studio's densify stage takes design ideas from this pull request. It
+does not merge, cherry-pick or apply any of its commits. Each idea below was
+re-implemented on the roma::Matcher seam (src/roma/Matcher.h) with its own
+tests; nothing in src/nn/ or src/roma/model/ comes from the pull request.
+Both trees are GPLv3 (LICENSE at the repository root).
+
+Warp cache
+  Taken as a design:   a prediction cache for dense pair matches, so that
+                       changing a filter or a threshold does not re-match every
+                       pair, with an identity that covers the checkpoint and
+                       the precision mode (docs/dense.md, "Verified pair
+                       predictions", and src/dense/DenseProcessing.cpp).
+  Written here:        src/roma/WarpCache.{h,cpp} and src/roma/tests/
+                       warp_cache_test.cpp. The key is a SHA-256 of the pixel
+                       bytes both matchers see, not the file size and time
+                       stamp of src/dense/Artifact.h (input_stamp), which a
+                       touched file defeats. Storage, eviction and the
+                       verification of entries are our own.
+  Not taken:           the generation manifest, the artifact stamps, and every
+                       file under src/dense/.
+
+Later ports from the same pull request will be added to this file as they land.
