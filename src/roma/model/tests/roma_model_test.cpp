@@ -7,6 +7,7 @@
 // file still runs the rest.
 
 #include "roma/Roma.h"
+#include "roma/model/Dump.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/Model.h"
 #include "roma/model/RomaMatcher.h"
@@ -616,7 +617,8 @@ void bench(const std::string& ckpt, const std::string& a, const std::string& b,
             double t0 = nn::now_ms();
             out = both ? rm.matchBoth(ma, mb).first : rm.match(ma, mb);
             const double t1 = nn::now_ms();
-            out = both ? rm.matchBoth(ma, mb).first : rm.match(ma, mb);
+            // A dump is of one match() per process, on a cold cache.
+            if (!dump_enabled()) out = both ? rm.matchBoth(ma, mb).first : rm.match(ma, mb);
             const double t2 = nn::now_ms();
             if (r) {
                 cold += (t1 - t0) / repeat;
@@ -632,6 +634,11 @@ void bench(const std::string& ckpt, const std::string& a, const std::string& b,
                     name.c_str(), both ? "AB+BA" : "AB", cold / 1e3, warm / 1e3, arena / 1e6,
                     m.peakBytes() / 1e6, cache / 1e6, m.weightBytes() / 1e6, out.width,
                     out.height, 100.0 * (double)certain / (double)std::max<size_t>(out.certainty.size(), 1));
+        check(out.width == rm.inputSize() && out.height == rm.inputSize() &&
+                  out.warp.size() == (size_t)out.width * out.height * 2 &&
+                  out.certainty.size() == (size_t)out.width * out.height,
+              "bench_warp_at_input_size", "%s: %dx%d, inputSize %d", name.c_str(), out.width,
+              out.height, rm.inputSize());
         check(m.peakBytes() <= arena, "bench_arena_within_plan", "%s", name.c_str());
         for (const Model::Stage& st : m.stages())
             check(st.peak <= st.plan, "bench_stage_within_plan", "%s %s: %.1f of %.1f MB",

@@ -281,13 +281,18 @@ def main_full(a, dump, img, bars, floor_of, row, missing):
             cross |= (co > t) != (cr > t)
         row(st, "cert crosses 0.2/0.9", float(cross.mean()),
             bar(st, "cert crosses 0.2/0.9", "p3_cross"))
-        # The precision (p00, p10, p11) is in match pixels^-2 and can run to
-        # thousands, so it is read relative to the reference's own scale.
+        # Precision (p00, p10, p11) is in match px^-2, relative to max(|ref|, 1).
+        # Gated where the reference is certain: elsewhere it is arbitrary and
+        # torch misses the bar against itself (MPS vs CPU, rounding off: 0.25).
         dp = np.abs(oc_[..., 1:] - rc[..., 1:]).astype(np.float64)
-        scale = np.maximum(np.abs(rc[..., 1:]), 1.0)
+        rel = (dp / np.maximum(np.abs(rc[..., 1:]), 1.0)).reshape(-1, 3)
         row(st, "precision max abs", float(dp.max()), None)
-        row(st, "precision max rel", float((dp / scale).max()),
-            bar(st, "precision max rel", "p3_prec"))
+        row(st, "precision max rel", float(rel.max()), None)
+        if sure.any():
+            row(st, "prec max rel, cert>0.5", float(rel[sure].max()),
+                bar(st, "prec max rel, cert>0.5", "p3_prec"))
+        else:
+            missing(st + " has no certain pixel")
         row(st, "reference certain > 0.5", float((cr > 0.5).mean()), None)
 
 
