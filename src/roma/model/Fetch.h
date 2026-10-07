@@ -19,6 +19,7 @@ inline const nn::FetchFile& checkpoint_file() {
         x.sha256 = "1557dec0d21b62366465f7ff4d5fdf228cc695d0582e196ad2b80e05230828b7";
         x.bytes = 1095883548ull;
         x.license_family = "dinov3,romav2";
+        x.license_gates_load = true;
         x.no_mirror = true;
         return x;
     }();

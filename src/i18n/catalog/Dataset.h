@@ -12283,20 +12283,66 @@ SS_MSG(license_download_size,
     RU("Загрузка: около {0}, сохраняется на будущее."),
     TR("İndirme: yaklaşık {0}, bir dahaki sefere saklanır."));
 
+// {0} is the licence's name, e.g. "SAM 3 License (Meta)". The tick every family
+// needs before Accept is enabled.
 SS_MSG(license_accept_tick,
-    EN("I have read and accept these terms"),
-    JA("これらの条件を読み、同意します"),
-    ZH_HANS("我已阅读并接受这些条款"),
-    ZH_HANT("我已閱讀並接受這些條款"),
-    KO("이 조건을 읽었고 이에 동의합니다"),
-    DE("Ich habe diese Bedingungen gelesen und nehme sie an"),
-    FR("J'ai lu et j'accepte ces conditions"),
-    ES("He leído y acepto estos términos"),
-    PT("Li e aceito estes termos"),
-    IT("Ho letto e accetto queste condizioni"),
-    NL("Ik heb deze voorwaarden gelezen en aanvaard ze"),
-    RU("Я прочитал эти условия и принимаю их"),
-    TR("Bu koşulları okudum ve kabul ediyorum"));
+    EN("I have read and accept the terms of {0}"),
+    JA("{0} の条件を読み、同意します"),
+    ZH_HANS("我已阅读并接受 {0} 的条款"),
+    ZH_HANT("我已閱讀並接受 {0} 的條款"),
+    KO("{0}의 조건을 읽었고 이에 동의합니다"),
+    DE("Ich habe die Bedingungen von {0} gelesen und nehme sie an"),
+    FR("J'ai lu et j'accepte les conditions de {0}"),
+    ES("He leído y acepto los términos de {0}"),
+    PT("Li e aceito os termos de {0}"),
+    IT("Ho letto e accetto i termini di {0}"),
+    NL("Ik heb de voorwaarden van {0} gelezen en aanvaard ze"),
+    RU("Я прочитал условия {0} и принимаю их"),
+    TR("{0} koşullarını okudum ve kabul ediyorum"));
+
+// What the user is told after cancelling a licence dialog that a download was
+// waiting on.
+SS_MSG(license_declined_download,
+    EN("The licence was not accepted, so nothing was downloaded."),
+    JA("ライセンスに同意していないため、何もダウンロードしていません。"),
+    ZH_HANS("未接受许可协议，因此没有下载任何内容。"),
+    ZH_HANT("未接受授權條款，因此沒有下載任何內容。"),
+    KO("라이선스에 동의하지 않았으므로 아무것도 내려받지 않았습니다."),
+    DE("Die Lizenz wurde nicht angenommen, deshalb wurde nichts heruntergeladen."),
+    FR("La licence n'a pas été acceptée ; rien n'a donc été téléchargé."),
+    ES("No se aceptó la licencia, así que no se descargó nada."),
+    PT("A licença não foi aceita, então nada foi baixado."),
+    IT("La licenza non è stata accettata, quindi non è stato scaricato nulla."),
+    NL("De licentie is niet aanvaard, dus er is niets gedownload."),
+    RU("Лицензия не принята, поэтому ничего не было загружено."),
+    TR("Lisans kabul edilmedi, bu yüzden hiçbir şey indirilmedi."));
+
+// The same, for a batch: it asks for every licence it needs before it starts.
+SS_MSG(batch_licence_declined,
+    EN("The batch was not started: a licence it needs was not accepted, so nothing "
+       "was downloaded."),
+    JA("バッチは開始されませんでした。必要なライセンスに同意していないため、"
+       "何もダウンロードしていません。"),
+    ZH_HANS("批处理未启动：未接受其所需的许可协议，因此没有下载任何内容。"),
+    ZH_HANT("批次未啟動：未接受其所需的授權條款，因此沒有下載任何內容。"),
+    KO("일괄 작업을 시작하지 않았습니다. 필요한 라이선스에 동의하지 않았으므로 "
+       "아무것도 내려받지 않았습니다."),
+    DE("Der Stapel wurde nicht gestartet: Eine benötigte Lizenz wurde nicht "
+       "angenommen, deshalb wurde nichts heruntergeladen."),
+    FR("Le lot n'a pas démarré : une licence requise n'a pas été acceptée ; "
+       "rien n'a donc été téléchargé."),
+    ES("No se inició el lote: no se aceptó una licencia que necesita, así que "
+       "no se descargó nada."),
+    PT("O lote não foi iniciado: uma licença necessária não foi aceita, então "
+       "nada foi baixado."),
+    IT("Il batch non è stato avviato: una licenza necessaria non è stata "
+       "accettata, quindi non è stato scaricato nulla."),
+    NL("De batch is niet gestart: een benodigde licentie is niet aanvaard, dus "
+       "er is niets gedownload."),
+    RU("Пакет не запущен: нужная лицензия не принята, поэтому ничего не было "
+       "загружено."),
+    TR("Toplu iş başlatılmadı: gereken bir lisans kabul edilmedi, bu yüzden "
+       "hiçbir şey indirilmedi."));
 
 SS_MSG(license_download,
     EN("Download"),      JA("ダウンロード"),  ZH_HANS("下载"),     ZH_HANT("下載"),

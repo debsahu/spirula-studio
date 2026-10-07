@@ -41,10 +41,28 @@ const Terms* terms_for(const std::string& family) {
     static const Terms kRoma{
         "romav2", "RoMa v2 License (MIT)",
         "https://github.com/Parskatt/RoMaV2/blob/main/LICENSE", kRomaV2Mit};
+    static const Terms kSam3{
+        "sam3", "SAM License (Meta)",
+        "https://github.com/facebookresearch/sam3/blob/main/LICENSE", kSam3License};
+    static const Terms kSam2{
+        "sam2", "Apache License 2.0 (SAM 2.1, Meta)",
+        "https://github.com/facebookresearch/sam2/blob/main/LICENSE", kSam2Apache};
+    static const Terms kGdino{
+        "gdino", "Apache License 2.0 (Grounding DINO, IDEA Research)",
+        "https://github.com/IDEA-Research/GroundingDINO/blob/main/LICENSE", kGdinoApache};
+    static const Terms kBirefnet{
+        "birefnet", "MIT License (BiRefNet)",
+        "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE", kBirefnetMit};
+    if (family == "sam3") return &kSam3;
+    if (family == "sam2") return &kSam2;
+    if (family == "gdino") return &kGdino;
+    if (family == "birefnet") return &kBirefnet;
     if (family == "dinov3") return &kDinov3;
     if (family == "romav2") return &kRoma;
     return nullptr;
 }
+
+std::string known_families() { return "sam3, sam2, gdino, birefnet, dinov3, romav2"; }
 
 std::string settings_path() {
 #ifdef _WIN32
@@ -92,6 +110,24 @@ std::vector<std::string> missing(const std::string& families) {
         if (!accepted(t)) out.push_back(t);
     }
     return out;
+}
+
+std::vector<std::string> unique_families(const std::vector<std::string>& lists) {
+    std::vector<std::string> out;
+    for (const std::string& list : lists) {
+        std::stringstream ss(list);
+        for (std::string t; std::getline(ss, t, ',');) {
+            const size_t a = t.find_first_not_of(" \t"), b = t.find_last_not_of(" \t");
+            if (a == std::string::npos) continue;
+            t = t.substr(a, b - a + 1);
+            if (std::find(out.begin(), out.end(), t) == out.end()) out.push_back(t);
+        }
+    }
+    return out;
+}
+
+bool accept_enabled(const std::string& family, bool ticked) {
+    return ticked && terms_for(family) != nullptr;
 }
 
 bool record(const std::string& family) {

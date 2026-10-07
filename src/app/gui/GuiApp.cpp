@@ -1381,7 +1381,7 @@ void GuiApp::run_pending_if_stopped() {
         case Pending::OpenDataset: open_dataset(_pending_path); break;
         case Pending::OpenSplat:  open_splat(_pending_path); break;
         case Pending::Quit:       _quit = true; break;
-        case Pending::StartBatch: start_batch(_pending_batch_skip); break;
+        case Pending::StartBatch: begin_batch(_pending_batch_skip); break;
         default: break;
     }
 }
@@ -1507,7 +1507,108 @@ void GuiApp::request_start_batch(bool skip_invalid) {
         return;
     }
     if (native_work_busy()) return;
-    start_batch(skip_invalid);
+    begin_batch(skip_invalid);
+}
+
+// Every checkpoint the enabled rows read, over what is on disk now.
+GuiApp::BatchFetchPlan GuiApp::batch_fetch_plan() const {
+    BatchFetchPlan plan;
+    std::vector<std::string> lists;
+    for (const BatchRow& row : _batch) {
+        BatchModelNeeds n;
+        if (!batch_model_needs(row, n)) continue;
+        if (n.mask) {
+            const ModelEntry* e = find_model(n.mask_model_id);
+            const auto pick = std::make_pair(n.mask_model_id, n.mask_detector_id);
+            if (e && cached_mask_model(pick.first, pick.second).empty() &&
+                std::find(plan.masks.begin(), plan.masks.end(), pick) == plan.masks.end()) {
+                plan.masks.push_back(pick);
+                const TextDetector* d = detector_for(*e, pick.second);
+                if (!model_is_cached(*e)) lists.push_back(e->family);
+                if (d && !detector_is_cached(*d)) lists.push_back("gdino");
+            }
+        }
+        if (n.geometry && !geometry_model_cached(n.geometry_model) &&
+            std::find(plan.geometries.begin(), plan.geometries.end(), n.geometry_model) ==
+                plan.geometries.end()) {
+            plan.geometries.push_back(n.geometry_model);
+            for (const PendingDownload& d : geometry_model_downloads(n.geometry_model))
+                lists.push_back(d.license_family);
+        }
+        if (n.densify && !densify_ready() && !plan.densify) {
+            plan.densify = true;
+            for (const std::string& f : densify_license_families()) lists.push_back(f);
+        }
+    }
+    for (const std::string& f : spirula::license::unique_families(lists))
+        if (!license_accepted(f)) plan.families.push_back(f);
+    return plan;
+}
+
+// The one place a batch can ask a question: here, before anything has run.
+void GuiApp::begin_batch(bool skip_invalid) {
+    const BatchFetchPlan plan = batch_fetch_plan();
+    if (plan.empty()) {
+        start_batch(skip_invalid);
+        return;
+    }
+    _license_notice.clear();
+    request_licenses(
+        plan.families,
+        [this, plan, skip_invalid] {
+            _batch_fetch = plan;
+            _batch_fetch_skip = skip_invalid;
+            _batch_fetching = true;
+        },
+        [this] {
+            _batch_msg = dmsg::batch_licence_declined.get();
+            _batch_msg_err = true;
+            _license_notice = _batch_msg;
+            log(_batch_msg);
+        });
+}
+
+// Steps the fetches one at a time, then starts the batch. A model that failed to
+// arrive is not handled here: start_batch's own pre-flight names it per row.
+void GuiApp::pump_batch_fetch() {
+    if (!_batch_fetching) return;
+    FileDownload* running = nullptr;
+    if (_download.state() == FileDownload::State::Running || !_download_model_id.empty())
+        running = &_download;
+    else if (_geom_download.running() || _geom_download.pending())
+        running = &_geom_download.current();
+    else if (_dense_download.running() || _dense_download.pending())
+        running = &_dense_download.current();
+    if (running) {
+        _batch_msg = running->status();
+        _batch_msg_err = false;
+        return;
+    }
+    BatchFetchPlan& p = _batch_fetch;
+    while (!p.masks.empty()) {
+        const auto pick = p.masks.front();
+        p.masks.erase(p.masks.begin());
+        const ModelEntry* e = find_model(pick.first);
+        if (e && _download.start(*e, detector_for(*e, pick.second))) {
+            _download_model_id = pick.first;
+            _download_detector_id = pick.second;
+            return;
+        }
+    }
+    if (!p.geometries.empty()) {
+        const std::string id = p.geometries.front();
+        p.geometries.erase(p.geometries.begin());
+        _geom_download.start(geometry_model_downloads(id));
+        return;
+    }
+    if (p.densify) {
+        p.densify = false;
+        _dense_download.start(densify_model_downloads());
+        return;
+    }
+    _batch_fetching = false;
+    _batch_msg.clear();
+    start_batch(_batch_fetch_skip);
 }
 
 void GuiApp::start_batch(bool skip_invalid) {
@@ -2899,6 +3000,11 @@ std::string GuiApp::state_json() {
     out += ",\"model_download\":\"";
     out += kDownload[(int)_download.state()];
     out += "\",\"license_prompt\":" + quoted(_license_prompt);
+    out += ",\"license_tick\":";
+    out += _license_tick ? "true" : "false";
+    out += ",\"license_notice\":" + quoted(_license_notice);
+    out += ",\"batch_fetching\":";
+    out += _batch_fetching ? "true" : "false";
     out += ",\"recon_dir\":" + quoted(_cfg.colmap_recon_dir);
     out += ",\"preview_points\":" + std::to_string(_viewport.preview_points());
     out += ",\"densify_missing\":";
@@ -3002,6 +3108,7 @@ void GuiApp::frame() {
     _geom_download.pump();
     _dense_download.pump();
     _feat_download.pump();
+    pump_batch_fetch();
     if (!_download_model_id.empty() && _download.state() == FileDownload::State::Done) {
         const ModelEntry* e = find_model(_download_model_id);
         if (!e || !_download.start(*e, detector_for(*e, _download_detector_id)))
@@ -3823,6 +3930,22 @@ void GuiApp::advance_license_queue() {
     if (then) then();
 }
 
+void GuiApp::note_license_declined(const Msg& what) {
+    _license_notice = what.get();
+    log(_license_notice);
+}
+
+void GuiApp::start_downloads_with_consent(DownloadQueue& queue,
+                                          std::vector<PendingDownload> files) {
+    std::vector<std::string> lists;
+    for (const PendingDownload& f : files) lists.push_back(f.license_family);
+    _license_notice.clear();
+    request_licenses(
+        spirula::license::unique_families(lists),
+        [&queue, files = std::move(files)]() mutable { queue.start(std::move(files)); },
+        [this] { note_license_declined(dmsg::license_declined_download); });
+}
+
 MaskModelFiles GuiApp::selected_mask_model() const {
     return cached_mask_model(_model_id, _mask_detector_id);
 }
@@ -3833,6 +3956,7 @@ MaskModelFiles GuiApp::selected_mask_model() const {
 void GuiApp::request_model_download(const std::string& id, const std::string& detector_id) {
     const ModelEntry* e = find_model(id);
     if (!e || _download.state() == ModelDownload::State::Running) return;
+    _license_notice.clear();
     const TextDetector* d = detector_for(*e, detector_id);
     const std::string families[] = {model_is_cached(*e) ? "" : e->family,
                                     d && !detector_is_cached(*d) ? "gdino" : ""};
@@ -3878,6 +4002,10 @@ void GuiApp::draw_model_fetch(FileDownload& dl, const Msg& missing, const Msg& g
                            dl.status().c_str());
     else if (ui::Button(get))
         request();
+    if (!_license_notice.empty()) {
+        ImGui::SameLine();
+        ui::TextDisabledRaw(_license_notice.c_str());
+    }
 }
 
 const WorkspaceState& GuiApp::workspace_state() {
@@ -5613,10 +5741,14 @@ bool GuiApp::densify_model_missing() const {
 // Consent first, the checkpoint's licences then the download, and a refusal
 // stops there: nothing is fetched and nothing is run.
 void GuiApp::request_densify_download() {
+    _license_notice.clear();
     request_licenses(
         densify_license_families(),
         [this] { _dense_download.start(densify_model_downloads()); },
-        [this] { log(dgmsg::licence_declined.get()); });
+        [this] {
+            _license_notice = dgmsg::licence_declined.get();
+            log(_license_notice);
+        });
 }
 
 bool GuiApp::draw_densify_checkpoint() {
@@ -5772,7 +5904,7 @@ bool GuiApp::geometry_model_missing() const {
 }
 
 void GuiApp::request_geometry_download() {
-    _geom_download.start(geometry_model_downloads(_geometry.model));
+    start_downloads_with_consent(_geom_download, geometry_model_downloads(_geometry.model));
 }
 
 void GuiApp::open_geometry_preview() {
@@ -7191,8 +7323,8 @@ bool GuiApp::feature_model_missing() const {
 }
 
 void GuiApp::request_feature_download() {
-    _feat_download.start(
-        sfm_feature_downloads(_sfm_job.features, _sfm_job.matcher));
+    start_downloads_with_consent(
+        _feat_download, sfm_feature_downloads(_sfm_job.features, _sfm_job.matcher));
 }
 
 // The detector and, with LightGlue, the matcher: what they cost and a button
@@ -7838,7 +7970,7 @@ void GuiApp::draw_license_modal() {
     ui::OpenPopup(dmsg::license_modal_title);
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(li.full_text ? 720.0f : 540.0f, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(720.0f, 0), ImGuiCond_Always);
     if (!ui::BeginPopupModal(dmsg::license_modal_title, nullptr,
                              ImGuiWindowFlags_AlwaysAutoResize))
         return;
@@ -7853,14 +7985,12 @@ void GuiApp::draw_license_modal() {
     ImGui::Spacing();
 
     // The terms in full, not a summary of them: the tick below is acceptance of
-    // THIS text. Embedded, so it is on screen with no network.
-    if (li.full_text) {
-        ui::TextDisabled(dmsg::license_full_text);
-        ImGui::BeginChild("##license_text", ImVec2(0, 260), ImGuiChildFlags_Borders);
-        ui::TextWrappedRaw(std::string(li.full_text));
-        ImGui::EndChild();
-        ImGui::Spacing();
-    }
+    // THIS text, for every family alike. Embedded, so it is on screen with no network.
+    ui::TextDisabled(dmsg::license_full_text);
+    ImGui::BeginChild("##license_text", ImVec2(0, 260), ImGuiChildFlags_Borders);
+    ui::TextWrappedRaw(std::string(li.full_text));
+    ImGui::EndChild();
+    ImGui::Spacing();
 
     // The link is a button, not decoration: the tick below says the user has
     // read the terms, so getting to them has to be one obvious click. Copying
@@ -7885,11 +8015,11 @@ void GuiApp::draw_license_modal() {
                              *e, detector_for(*e, _license_detector_id)))});
     ImGui::Spacing();
 
-    if (li.needs_tick)
-        ui::Checkbox(dmsg::license_accept_tick, &_license_tick);
+    // Every family, none exempt: Accept stays off until the user says they have read it.
+    ui::Checkbox(dmsg::license_accept_tick, {li.title->get()}, &_license_tick);
     ImGui::Spacing();
 
-    ImGui::BeginDisabled(li.needs_tick && !_license_tick);
+    ImGui::BeginDisabled(!spirula::license::accept_enabled(_license_prompt, _license_tick));
     const bool downloads = find_model(_license_model_id) != nullptr;
     if (ui::Button(downloads ? dmsg::license_download : dmsg::license_accept,
                    ImVec2(150, 0))) {
@@ -7906,11 +8036,14 @@ void GuiApp::draw_license_modal() {
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ui::Button(dmsg::cancel, ImVec2(120, 0))) {
+        const bool model_flow = find_model(_license_model_id) != nullptr;
         _license_prompt.clear();
         _license_queue.clear();
         _license_then = nullptr;
         if (std::function<void()> declined = std::exchange(_license_declined, nullptr))
             declined();
+        else if (model_flow)
+            note_license_declined(dmsg::license_declined_download);
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();

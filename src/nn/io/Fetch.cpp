@@ -4,6 +4,8 @@
 #include "core/LicenseConsent.h"
 #include "core/ModelMirror.h"
 #include "core/Sha256.h"
+#include "i18n/Message.h"
+#include "i18n/catalog/Cli.h"
 #include "nn/core/Error.h"
 #include "nn/core/Log.h"
 
@@ -25,6 +27,8 @@
 #endif
 
 namespace fs = std::filesystem;
+
+namespace cmsg = spirula::i18n::msg::cli;
 
 namespace nn {
 namespace {
@@ -97,21 +101,60 @@ std::vector<std::string> split_commas(const std::string& s) {
 
 }  // namespace
 
-void require_license(const char* family) {
-    if (!family || !*family) return;
-    const std::vector<std::string> missing = spirula::license::missing(family);
-    if (missing.empty()) return;
-    const std::string& fam = missing.front();
-    const spirula::license::Terms* t = spirula::license::terms_for(fam);
-    const bool no_home = spirula::license::settings_path().empty();
-    nn::fail("the licence '%s' has not been accepted, so this model cannot be "
-             "downloaded or loaded.\n  Read it and accept it with\n    "
-             "--accept-license %s\n  (add =yes to accept without a prompt, in a "
-             "script), or accept it in the application's download dialog.\n  Terms: %s%s",
-             t ? t->title : fam.c_str(), fam.c_str(), t ? t->url : "(unknown family)",
-             no_home ? "\n  (Neither XDG_CONFIG_HOME nor HOME is set, so no acceptance can "
-                       "be read or recorded.)" : "");
+ConsentIO stdio_consent() {
+    ConsentIO io;
+    io.tty = SS_ISATTY(0) && SS_ISATTY(1);
+    io.read_line = [] {
+        std::string a;
+        std::getline(std::cin, a);
+        return a;
+    };
+    return io;
 }
+
+namespace {
+
+// The whole agreement on the terminal, then the one question. A reader who
+// scrolls past it still answers for the full text: it is all printed.
+void print_terms(const spirula::license::Terms& t, const ConsentIO& io) {
+    std::fprintf(io.out, "\n==== %s ====\n%s\n\n%s\n==== end of %s ====\n\n", t.title, t.url,
+                 t.text, t.title);
+}
+
+// Asks, and records only on a literal "yes". The caller has printed the terms.
+void ask_and_record(const spirula::license::Terms& t, const ConsentIO& io) {
+    std::fprintf(io.out, "%s", spirula::i18n::format(cmsg::license_ask_confirm, {t.title}).c_str());
+    std::fflush(io.out);
+    const std::string answer = io.read_line();
+    if (answer != "yes")
+        nn::fail("%s", spirula::i18n::format(cmsg::license_ask_declined, {t.title, answer}).c_str());
+    NN_CHECK(spirula::license::record(t.family), "cannot record the acceptance of %s in %s",
+             t.title, spirula::license::settings_path().c_str());
+    std::fprintf(io.out, "[license] accepted %s; recorded in %s\n", t.title,
+                 spirula::license::settings_path().c_str());
+}
+
+}  // namespace
+
+void require_license(const char* family, const ConsentIO& io) {
+    if (!family || !*family) return;
+    for (const std::string& fam : spirula::license::missing(family)) {
+        const spirula::license::Terms* t = spirula::license::terms_for(fam);
+        const bool no_home = spirula::license::settings_path().empty();
+        NN_CHECK(t, "unknown licence family '%s' (known: %s)", fam.c_str(),
+                 spirula::license::known_families().c_str());
+        if (!io.tty || !io.read_line || no_home) {
+            std::string m = spirula::i18n::format(cmsg::license_no_terminal, {t->title, t->url, fam});
+            if (no_home) m += "\n  " + std::string(cmsg::license_no_home.get());
+            nn::fail("%s", m.c_str());
+        }
+        std::fprintf(io.out, "%s\n", spirula::i18n::format(cmsg::license_ask_header, {t->title}).c_str());
+        print_terms(*t, io);
+        ask_and_record(*t, io);
+    }
+}
+
+void require_license(const char* family) { require_license(family, stdio_consent()); }
 
 void accept_licenses(const std::string& spec, const ConsentIO& io) {
     NN_CHECK(!spirula::license::settings_path().empty(),
@@ -122,24 +165,21 @@ void accept_licenses(const std::string& spec, const ConsentIO& io) {
         const std::string fam = token.substr(0, eq);
         const std::string how = eq == std::string::npos ? "" : token.substr(eq + 1);
         const spirula::license::Terms* t = spirula::license::terms_for(fam);
-        NN_CHECK(t, "--accept-license: unknown licence '%s' (known: dinov3, romav2)", fam.c_str());
+        NN_CHECK(t, "--accept-license: unknown licence '%s' (known: %s)", fam.c_str(),
+                 spirula::license::known_families().c_str());
         NN_CHECK(how.empty() || how == "yes", "--accept-license %s: only '=yes' follows a family",
                  fam.c_str());
         if (spirula::license::accepted(fam)) {
             std::fprintf(io.out, "[license] %s is already accepted.\n", t->title);
             continue;
         }
-        std::fprintf(io.out, "\n==== %s ====\n%s\n\n%s\n==== end of %s ====\n\n", t->title,
-                     t->url, t->text, t->title);
+        print_terms(*t, io);
         if (how.empty()) {
             NN_CHECK(io.tty && io.read_line,
                      "--accept-license %s: there is no terminal to ask on. After reading the "
                      "terms above, pass --accept-license %s=yes.", fam.c_str(), fam.c_str());
-            std::fprintf(io.out, "Type 'yes' to accept the %s: ", t->title);
-            std::fflush(io.out);
-            const std::string answer = io.read_line();
-            NN_CHECK(answer == "yes", "the %s was not accepted (answered '%s').", t->title,
-                     answer.c_str());
+            ask_and_record(*t, io);
+            continue;
         }
         NN_CHECK(spirula::license::record(fam), "cannot record the acceptance of %s in %s",
                  t->title, spirula::license::settings_path().c_str());
@@ -150,13 +190,7 @@ void accept_licenses(const std::string& spec, const ConsentIO& io) {
 
 int consume_accept_license_args(int& argc, char** argv) {
     int found = 0, w = 1;
-    ConsentIO io;
-    io.tty = SS_ISATTY(0) && SS_ISATTY(1);
-    io.read_line = [] {
-        std::string a;
-        std::getline(std::cin, a);
-        return a;
-    };
+    const ConsentIO io = stdio_consent();
     for (int r = 1; r < argc; ++r) {
         const std::string a = argv[r];
         std::string spec;
@@ -177,7 +211,9 @@ int consume_accept_license_args(int& argc, char** argv) {
 }
 
 std::string ensure_file(const FetchFile& f, const char* tag) {
-    require_license(f.license_family);
+    // A family that only gates the DOWNLOAD must not break a user whose copy was
+    // cached before consent was recorded; one that gates loading refuses first.
+    if (f.license_gates_load) require_license(f.license_family);
     const fs::path dst = cached_path(f);
     std::error_code ec;
 
@@ -191,6 +227,8 @@ std::string ensure_file(const FetchFile& f, const char* tag) {
         fs::remove(dst, ec);
     }
 
+    // Past a verified cached copy: what follows is a download.
+    if (!f.license_gates_load) require_license(f.license_family);
     NN_CHECK(!spirula::env_on("NO_AUTO_FETCH"),
              "%s is not in the model cache, and this process may not download "
              "it.\n  Get it from the application's own download button, or "

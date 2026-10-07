@@ -169,8 +169,18 @@ def main():
         check(not state()["densify_ready"], "not ready before any licence or checkpoint")
         ctl("click", "ckpt_get")
         check(state()["license_prompt"] == "romav2", "the RoMa v2 terms come first")
+        # Every family wants the tick, the MIT one included: Accept does nothing without it.
+        ctl("click", "license_accept")
+        check(state()["license_prompt"] == "romav2" and not state()["license_tick"],
+              "Accept without the tick does nothing (RoMa v2, MIT)")
+        ctl("click", "license_accept_tick")
+        check(state()["license_tick"], "the tick takes")
         ctl("click", "license_accept")
         check(state()["license_prompt"] == "dinov3", "then the DINOv3 agreement")
+        ctl("click", "license_accept")
+        check(state()["license_prompt"] == "dinov3" and "accepted_license=dinov3" not in
+              (gui_conf.read_text() if gui_conf.exists() else ""),
+              "Accept without the tick does nothing (DINOv3 either)")
         ctl("click", "cancel")
         time.sleep(4)   # a download started by mistake needs a moment to show
         s = state()
@@ -178,6 +188,7 @@ def main():
         check(s["license_prompt"] == "" and not s["densify_ready"],
               "cancelling the second one leaves the step not ready")
         check("accepted_license=dinov3" not in conf, "... and nothing recorded for DINOv3")
+        check(s["license_notice"] != "", "... and the user is told nothing was downloaded")
         check(not models.exists() or not list(models.glob("romav2*")),
               "... and nothing downloaded")
 

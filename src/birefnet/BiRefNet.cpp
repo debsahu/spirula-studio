@@ -29,12 +29,12 @@ const ModelSource kSources[] = {
      {"birefnet-lite.safetensors",
       "https://huggingface.co/ZhengPeng7/BiRefNet_lite/resolve/main/model.safetensors",
       "4417d89795250e698c3cb0ae8df15743810065f646f48a694fdfa7ca052d0815", 177634392ull,
-      "https://modelscope.cn/models/1038lab/BiRefNet/resolve/master/BiRefNet_lite.safetensors"}},
+      "https://modelscope.cn/models/1038lab/BiRefNet/resolve/master/BiRefNet_lite.safetensors", "birefnet"}},
     {"birefnet",
      {"birefnet-general.safetensors",
       "https://huggingface.co/ZhengPeng7/BiRefNet/resolve/main/model.safetensors",
       "9ab37426bf4de0567af6b5d21b16151357149139362e6e8992021b8ce356a154", 444473596ull,
-      "https://modelscope.cn/models/modelscope/BiRefNet/resolve/master/model.safetensors"}},
+      "https://modelscope.cn/models/modelscope/BiRefNet/resolve/master/model.safetensors", "birefnet"}},
 };
 
 std::string fmt(const char* f, int a) {

@@ -84,9 +84,8 @@ struct LicenseInfo {
     const ::spirula::i18n::Msg* title;    // "SAM 3 License (Meta)"
     const ::spirula::i18n::Msg* summary;  // 2-3 short lines, plain language
     const char* url;
-    bool        needs_tick;  // Apache-2.0 does not; the SAM 3 licence does
-    // The terms in full, shown in the dialog; null when the link is all there is.
-    const char* full_text = nullptr;
+    // The terms in full, shown in the dialog and ticked for: every family has them.
+    const char* full_text;
 };
 const LicenseInfo& license_for(const std::string& family);
 
@@ -133,9 +132,9 @@ public:
 
     ~FileDownload();
 
-    // `expected_bytes` only feeds the progress readout; 0 is unknown. An empty
-    // `mirror` means none. A `license_family` (comma list) not yet accepted
-    // fails the download at once, before any network.
+    // `expected_bytes` feeds the progress readout (0: unknown); empty `mirror`: none.
+    // A `license_family` not yet accepted fails at once: a backstop, the GUI asks
+    // first (GuiApp::request_licenses).
     void start(const std::string& url, const std::string& dest,
                uint64_t expected_bytes, const std::string& mirror = "",
                const std::string& license_family = "");
@@ -188,6 +187,8 @@ public:
     void cancel();
 
     bool running() const { return _dl.state() == FileDownload::State::Running; }
+    // Files still waiting behind the one in flight.
+    bool pending() const { return !_rest.empty(); }
     // The file in flight, or the last one -- what the progress bar reads.
     FileDownload& current() { return _dl; }
 

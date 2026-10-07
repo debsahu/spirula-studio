@@ -12,14 +12,19 @@ namespace spirula::license {
 // A licence displayed in full before a download. `text` is the agreement as
 // published, byte for byte (LICENSES/), for offline display.
 struct Terms {
-    const char* family;   // "dinov3", "romav2"
+    const char* family;   // "sam3", "sam2", "gdino", "birefnet", "dinov3", "romav2"
     const char* title;    // English, for the terminal; the GUI uses its Msg
     const char* url;      // the current text, which may be newer than `text`
     const char* text;
 };
 
-// Null for a family whose terms are not shown in full (the SAM families).
+// Null for a family that is not one of ours. Every family we gate has its terms
+// embedded, so every consent dialog and terminal prompt shows the whole text.
 const Terms* terms_for(const std::string& family);
+
+// Every family terms_for() knows, in a stable order, comma separated: what an
+// "unknown licence" error names as the choices.
+std::string known_families();
 
 // <config>/gui.conf, where app::config_dir() puts it. Empty when neither
 // XDG_CONFIG_HOME nor HOME is set (APPDATA on Windows): app::config_dir() falls
@@ -33,5 +38,14 @@ bool record(const std::string& family);
 std::vector<std::string> accepted_all();
 // The families of a comma list that are not accepted, in order. Empty means go.
 std::vector<std::string> missing(const std::string& families);
+
+// The families named by several comma lists, each once, in first-seen order: what
+// a batch asks for up front, whatever number of files name the same licence.
+std::vector<std::string> unique_families(const std::vector<std::string>& lists);
+
+// Whether a consent dialog may enable its Accept button. Every family needs the
+// "I have read and accept" tick, none is exempt (the SAM and Grounding DINO
+// licences included), and a family we hold no terms for cannot be accepted at all.
+bool accept_enabled(const std::string& family, bool ticked);
 
 }  // namespace spirula::license

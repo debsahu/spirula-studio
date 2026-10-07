@@ -125,6 +125,28 @@ int main() {
     check(r.code == 2 && has(r.out, "XDG_CONFIG_HOME") && fs::is_empty(g_root / "cwd"),
           "no XDG_CONFIG_HOME and no HOME: refused, nothing written to the working directory");
 
+    // The SAM tool is gated too: a SAM checkpoint named on the command line needs
+    // its licence, whatever the file's contents. With no terminal it refuses BEFORE
+    // opening the file, so a nonexistent path is enough to tell the gate from a load.
+    for (const char* verb : {"segment --image x.png --text cat", "track --frames frames --text cat",
+                             "extract clip.mp4"}) {
+        fresh();
+        r = run(std::string("sam ") + verb + " --model sam3-f16.ggml");
+        check(r.code == 2 && has(r.out, "--accept-license sam3=yes") && has(r.out, "no terminal") &&
+                  !fs::exists(gui_conf()),
+              std::string("sam ") + verb + ": refused without consent, naming --accept-license");
+        r = run("--accept-license sam3=yes sam " + std::string(verb) + " --model sam3-f16.ggml");
+        check(!has(r.out, "has not been accepted") && has(slurp(gui_conf()), "accepted_license=sam3\n"),
+              std::string("sam ") + verb + ": with consent the gate is passed (any later failure is the file's)");
+    }
+    fresh();
+    r = run("sam segment --image x.png --text cat --model sam2.1_hiera_tiny_f16.ggml");
+    check(r.code == 2 && has(r.out, "--accept-license sam2=yes"),
+          "a SAM 2.1 checkpoint is gated under its own family, sam2");
+    fresh();
+    r = run("sam segment --image x.png --text cat --model my-own-model.safetensors");
+    check(!has(r.out, "has not been accepted"), "control: a file with no SAM family name is not gated");
+
     std::error_code ec;
     fs::remove_all(g_root, ec);
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "PASSED", g_failures,

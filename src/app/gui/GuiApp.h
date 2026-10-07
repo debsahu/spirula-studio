@@ -329,6 +329,25 @@ private:
     void request_licenses(std::vector<std::string> families, std::function<void()> then,
                           std::function<void()> declined = nullptr);
     void advance_license_queue();
+    // Starts a queue of files after the consent every one of them names: the dialog
+    // first when a licence is missing, the download then, nothing on a refusal.
+    // The one door for a download that is not a SAM / detector checkpoint.
+    void start_downloads_with_consent(DownloadQueue& queue, std::vector<PendingDownload> files);
+    // Said when a licence dialog is cancelled: the log, and a line by the fetch button.
+    void note_license_declined(const spirula::i18n::Msg& what);
+
+    // A batch asks for every licence its rows need, once, before the first row
+    // starts, then fetches what is missing, then starts. Never mid-batch.
+    struct BatchFetchPlan {
+        std::vector<std::string> families;                           // unaccepted, each once
+        std::vector<std::pair<std::string, std::string>> masks;      // model id, detector id
+        std::vector<std::string> geometries;
+        bool densify = false;
+        bool empty() const { return families.empty() && masks.empty() && geometries.empty() && !densify; }
+    };
+    BatchFetchPlan batch_fetch_plan() const;
+    void begin_batch(bool skip_invalid);
+    void pump_batch_fetch();
 
     // ---- screens ----
     void draw_menu_bar();
@@ -978,6 +997,10 @@ private:
     FontSet _fonts;
     FileDownload _font_download;
     const CjkFace* _font_fetching = nullptr;
+    std::string _license_notice;      // what a cancelled dialog left undone
+    BatchFetchPlan _batch_fetch;      // what the batch is fetching before it starts
+    bool _batch_fetching = false;
+    bool _batch_fetch_skip = false;
     std::string _license_prompt;      // family whose modal is open
     std::vector<std::string> _license_queue;
     std::function<void()> _license_then;

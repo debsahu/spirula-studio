@@ -131,7 +131,8 @@ target_include_directories(ss_nn PUBLIC ${SS_SRC})
 if(SS_ENABLE_PATENTED)
     target_compile_definitions(ss_nn PUBLIC SS_HAVE_VIDEO=1)
 endif()
-target_link_libraries(ss_nn PUBLIC ss_vulkan Threads::Threads)
+# ss_i18n: the consent prompt a terminal shows is translated (nn/io/Fetch.cpp).
+target_link_libraries(ss_nn PUBLIC ss_vulkan ss_i18n Threads::Threads)
 target_compile_options(ss_nn PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>
     $<$<COMPILE_LANGUAGE:C>:${SPLAT_C_FLAGS}>)

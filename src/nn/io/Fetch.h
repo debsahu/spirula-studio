@@ -32,6 +32,10 @@ struct FetchFile {
     // Licences the user must have accepted before this file is fetched or
     // loaded (core/LicenseConsent.h): one family or a comma list; null for none.
     const char* license_family = nullptr;
+    // True when even a verified cached copy may not be LOADED until the licence is
+    // accepted (the RoMa v2 file). False: only the download is gated, so a copy
+    // cached before consent was recorded keeps working.
+    bool license_gates_load = false;
     // True for a file that must come from `url` alone: re-hosting it would be
     // distributing it.
     bool no_mirror = false;
@@ -52,16 +56,17 @@ std::string cached_path(const FetchFile& f);
 std::string ensure_file(const FetchFile& f, const char* tag);
 
 // ---- Licence consent (the CLI half of the GUI's accept dialog) ----
-//
-// ensure_file() on a file with a `license_family` throws, before it touches the
-// network or the cache, unless the family is in gui.conf's accepted_license=
-// list. A tool accepts on the user's behalf only through `--accept-license`.
+// A terminal prints the terms and wants `yes`; without one it throws, naming
+// `--accept-license <family>=yes`.
 
 struct ConsentIO {
     std::FILE*                       out = stdout;  // the terms are printed here
     bool                             tty = false;   // may ask on stdin
     std::function<std::string()>     read_line;     // one answer; used when `tty`
 };
+
+// stdin/stdout, asking only when both are a terminal.
+ConsentIO stdio_consent();
 
 // A `--accept-license` value: a comma list of `family` (asks "yes" on a TTY,
 // refuses otherwise) or `family=yes` (no question; for scripts). Prints each
@@ -73,11 +78,12 @@ void accept_licenses(const std::string& spec, const ConsentIO& io);
 // argv, accepts what they name on stdin/stdout, and returns how many it found.
 int consume_accept_license_args(int& argc, char** argv);
 
-// Throws nn::Error naming the family and the flag that accepts it, unless
-// `family` is accepted. A null or empty family needs nothing.
+// Asks for each unaccepted family of a comma list (null or empty: none) and
+// records a "yes". Throws nn::Error without a terminal, on any other answer, or
+// for an unknown family. The one-argument form uses stdio_consent().
+void require_license(const char* family, const ConsentIO& io);
 void require_license(const char* family);
 
-// Lowercase hex SHA-256 of a file's contents. Empty when it cannot be read.
 std::string sha256_file(const std::string& path);
 
 }  // namespace nn

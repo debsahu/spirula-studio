@@ -106,32 +106,29 @@ const ModelEntry* find_model(const std::string& id) {
 }
 
 const LicenseInfo& license_for(const std::string& family) {
-    // Written for someone who has not read a licence before. What they need to
-    // know is (a) it is not ours, (b) whether they are agreeing to anything
-    // beyond the ordinary, and (c) where the actual text is.
-    static const LicenseInfo kSam3{
-        "sam3", &dmsg::license_sam3_title, &dmsg::license_sam3_summary,
-        "https://github.com/facebookresearch/sam3/blob/main/LICENSE", true};
-    static const LicenseInfo kSam2{
-        "sam2", &dmsg::license_sam2_title, &dmsg::license_sam2_summary,
-        "https://github.com/facebookresearch/sam2/blob/main/LICENSE", false};
-    static const LicenseInfo kGdino{
-        "gdino", &dmsg::license_gdino_title, &dmsg::license_gdino_summary,
-        "https://github.com/IDEA-Research/GroundingDINO/blob/main/LICENSE", false};
-    static const LicenseInfo kBirefnet{
-        "birefnet", &dmsg::license_birefnet_title, &dmsg::license_birefnet_summary,
-        "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE", false};
+    // Written for someone who has not read a licence before: whose it is, and where
+    // the text is. The text itself is the licensor's, embedded (core/LicenseConsent),
+    // and every family's dialog shows all of it and wants the same tick.
+    namespace lic = spirula::license;
+    static const auto make = [](const char* fam, const ::spirula::i18n::Msg* title,
+                                const ::spirula::i18n::Msg* summary) {
+        const lic::Terms* t = lic::terms_for(fam);
+        return LicenseInfo{fam, title, summary, t->url, t->text};
+    };
+    static const LicenseInfo kSam3 = make("sam3", &dmsg::license_sam3_title,
+                                          &dmsg::license_sam3_summary);
+    static const LicenseInfo kSam2 = make("sam2", &dmsg::license_sam2_title,
+                                          &dmsg::license_sam2_summary);
+    static const LicenseInfo kGdino = make("gdino", &dmsg::license_gdino_title,
+                                           &dmsg::license_gdino_summary);
+    static const LicenseInfo kBirefnet = make("birefnet", &dmsg::license_birefnet_title,
+                                              &dmsg::license_birefnet_summary);
     // Both go with the one RoMa v2 file, which carries Meta's DINOv3 weights, so a
-    // request for it raises both. The Agreement is the one thing here a user
-    // must tick; it adds no term to Meta's own.
-    static const LicenseInfo kDinov3{
-        "dinov3", &dmsg::license_dinov3_title, &dmsg::license_dinov3_summary,
-        spirula::license::terms_for("dinov3")->url, true,
-        spirula::license::terms_for("dinov3")->text};
-    static const LicenseInfo kRomaV2{
-        "romav2", &dmsg::license_romav2_title, &dmsg::license_romav2_summary,
-        spirula::license::terms_for("romav2")->url, false,
-        spirula::license::terms_for("romav2")->text};
+    // request for it raises both. Each adds no term to the licensor's own.
+    static const LicenseInfo kDinov3 = make("dinov3", &dmsg::license_dinov3_title,
+                                            &dmsg::license_dinov3_summary);
+    static const LicenseInfo kRomaV2 = make("romav2", &dmsg::license_romav2_title,
+                                            &dmsg::license_romav2_summary);
     if (family == "dinov3") return kDinov3;
     if (family == "romav2") return kRomaV2;
     if (family == "gdino") return kGdino;

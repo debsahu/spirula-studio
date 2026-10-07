@@ -50,5 +50,19 @@ else
 fi
 has 1 $G 'ImGui::BeginChild("##license_text"'
 has 1 $G 'ui::TextWrappedRaw(std::string(li.full_text));'
-has 1 src/app/gui/ModelCache.cpp 'spirula::license::terms_for("dinov3")->text'
+has 1 src/app/gui/ModelCache.cpp 'return LicenseInfo{fam, title, summary, t->url, t->text};'
+# Accept is gated on the tick for every family, through the one policy function.
+has 1 $G 'ImGui::BeginDisabled(!spirula::license::accept_enabled(_license_prompt, _license_tick));'
+none $G 'needs_tick'
+none src/app/gui/ModelCache.h 'needs_tick'
+# A download that names a licence goes through the consent door, not a bare start().
+has 1 $G '_feat_download, sfm_feature_downloads(_sfm_job.features, _sfm_job.matcher));'
+has 1 $G 'start_downloads_with_consent(_geom_download, geometry_model_downloads(_geometry.model));'
+none $G '_geom_download.start(geometry_model_downloads(_geometry.model));'
+# The CLI's SAM entry points ask before they open a checkpoint.
+has 2 src/app/cli/sam_main.cpp 'if (!app::require_model_license(o.model)) return 2;'
+has 1 src/app/cli/sam_extract.cpp 'app::require_model_license(o.model)'
+# A batch asks up front, in one place, before its first row.
+has 2 $G 'begin_batch('
+none $G 'case Pending::StartBatch: start_batch('
 exit $FAILS

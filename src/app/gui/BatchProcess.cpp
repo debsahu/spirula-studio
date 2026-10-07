@@ -347,6 +347,30 @@ std::string batch_dataset_workspace(const BatchRow& row) {
 }
 
 
+bool batch_model_needs(const BatchRow& row, BatchModelNeeds& out) {
+    if (!row.enabled || !row.does(BatchStage::Dataset)) return false;
+    DatasetSettings s;
+    std::error_code ec;
+    if (!row.dataset_preset.path.empty()) {
+        if (!fs::is_regular_file(row.dataset_preset.path, ec)) return false;
+        try {
+            s = load_dataset_preset(row.dataset_preset.path).s;
+        } catch (const std::exception&) {
+            return false;
+        }
+    } else if (!dataset_apply_preset(s, builtin_dataset_name(row))) {
+        return false;
+    }
+    out = BatchModelNeeds{};
+    out.mask = s.sfm.prep.mask_enable;
+    out.mask_model_id = s.mask_model_id;
+    out.mask_detector_id = s.mask_detector_id;
+    out.geometry = s.sfm.geometry.enable;
+    out.geometry_model = s.sfm.geometry.model;
+    out.densify = s.sfm.densify.enable;
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // The pre-flight
 // ---------------------------------------------------------------------------
