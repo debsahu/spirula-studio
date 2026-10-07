@@ -549,6 +549,85 @@ void coarse_warp_thresholds_scale() {
     fs::remove_all(d);
 }
 
+// Mutants: the visibility test off, its margin ignored, or the point's own
+// images allowed to veto it. A floater on the line of sight from an image
+// to a surface that image saw must go; a two-image point on a surface stays.
+void visibility_drops_seen_through_pairs() {
+    const fs::path d = tempDir("vis");
+    // Dense enough that an occluder is sampled wherever one is in the way.
+    writeStairDataset(stairScene(), d.string(), 96, 192, 30000);
+    DensifyJob job;
+    job.model_dir = (d / "sparse" / "0").string();
+    const DensifyPlan pl = planDensify(job);
+    const sfm::Reconstruction rec = sfm::Reconstruction::readBinary(job.model_dir);
+    std::map<uint32_t, int> index;
+    for (size_t i = 0; i < pl.images.size(); i++) index[pl.images[i].id] = (int)i;
+    std::vector<DensePoint> trusted;
+    std::vector<std::vector<int>> seen_by;
+    for (const auto& kv : rec.points3D) {
+        if (kv.second.track.size() < 3) continue;
+        DensePoint p;
+        p.xyz = kv.second.xyz;
+        std::vector<int> imgs;
+        for (const sfm::TrackElement& e : kv.second.track) {
+            const int im = index.at(e.image_id);
+            imgs.push_back(im);
+            p.track.push_back({pl.views_of[(size_t)im][0], 0, 0});
+        }
+        p.distinct_images = (int)imgs.size();
+        trusted.push_back(p);
+        seen_by.push_back(imgs);
+    }
+    check(trusted.size() > 300, "trusted points: " + std::to_string(trusted.size()));
+    const FreeSpace fs_(pl, trusted, 3, 0.05);
+    int floaters = 0, vetoed = 0, surface = 0, wrongly = 0;
+    for (size_t i = 0; i < trusted.size() && floaters < 200; i++) {
+        const std::vector<int>& im = seen_by[i];
+        // On the surface, observed by two of its images.
+        DensePoint on;
+        on.xyz = trusted[i].xyz;
+        on.track = {trusted[i].track[0], trusted[i].track[1]};
+        on.distinct_images = 2;
+        surface++;
+        wrongly += fs_.seesThrough(on);
+        // 40% of the way from image im[0] to it, observed by two other images.
+        const Vec3 C = pl.images[(size_t)im[0]].centre;
+        DensePoint fl;
+        fl.xyz = C + (trusted[i].xyz - C) * 0.6;
+        fl.track = {trusted[i].track[1], trusted[i].track[2]};
+        fl.distinct_images = 2;
+        floaters++;
+        vetoed += fs_.seesThrough(fl);
+    }
+    check(vetoed > floaters * 9 / 10, "floaters seen through: " + std::to_string(vetoed) + " of " + std::to_string(floaters));
+    check(wrongly < surface / 20, "surface points vetoed: " + std::to_string(wrongly) + " of " + std::to_string(surface));
+    // Where no image saw anything there is no evidence, and nothing is vetoed.
+    const FreeSpace blind(pl, {}, 3, 0.05);
+    int blind_vetoes = 0;
+    for (size_t i = 0; i < 200 && i < trusted.size(); i++) {
+        DensePoint fl;
+        fl.xyz = pl.images[(size_t)seen_by[i][0]].centre * 0.4 + trusted[i].xyz * 0.6;
+        fl.track = {trusted[i].track[1], trusted[i].track[2]};
+        fl.distinct_images = 2;
+        blind_vetoes += blind.seesThrough(fl);
+    }
+    check(blind_vetoes == 0, "vetoed with no evidence: " + std::to_string(blind_vetoes));
+    // Through the filter itself: auto min-track drops the floater, keeps the pair.
+    std::vector<DensePoint> pts = trusted;
+    for (DensePoint& p : pts) p.error = 0.1;
+    DensePoint fl;
+    fl.xyz = pl.images[(size_t)seen_by[0][0]].centre + (trusted[0].xyz - pl.images[(size_t)seen_by[0][0]].centre) * 0.6;
+    fl.track = {trusted[0].track[1], trusted[0].track[2]};
+    fl.distinct_images = 2;
+    fl.error = 0.05;
+    pts.push_back(fl);
+    DensifyOptions opt;
+    DensifyStats st;
+    const std::vector<DensePoint> out = finalizePoints(pts, 0, 0, 0, opt, st, [&](const DensePoint& p) { return fs_.seesThrough(p); });
+    check(out.size() == trusted.size() && st.seen_through == 1, "the floater survived the filter");
+    fs::remove_all(d);
+}
+
 // Mutant: shortest track kept, or the error tie-break reversed.
 void voxel_select_keeps_longest_then_best() {
     auto pt = [](double x, int images, double err) {
@@ -984,6 +1063,7 @@ static int body(int argc, char** argv) {
         {"colour_channels_in_order", colour_channels_in_order},
         {"consistency_counts_images_not_faces", consistency_counts_images_not_faces},
         {"coarse_warp_thresholds_scale", coarse_warp_thresholds_scale},
+        {"visibility_drops_seen_through_pairs", visibility_drops_seen_through_pairs},
         {"holdout_is_every_nth_and_never_matched", holdout_is_every_nth_and_never_matched},
         {"cut_view_is_pixel_exact", cut_view_is_pixel_exact},
         {"flip_mask_inverts_keep", flip_mask_inverts_keep},

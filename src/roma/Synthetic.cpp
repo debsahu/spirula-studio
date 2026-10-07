@@ -359,7 +359,7 @@ Warp OracleMatcher::match(const MatchImage& a, const MatchImage& b) {
 }
 
 CloudScore scoreCloud(const Scene& sc, const std::vector<DensePoint>& cloud, double tol,
-                      double far, double step, double cover) {
+                      double beyond_tol, double step, double cover) {
     CloudScore s;
     s.points = (int64_t)cloud.size();
     int64_t within = 0;
@@ -373,7 +373,7 @@ CloudScore scoreCloud(const Scene& sc, const std::vector<DensePoint>& cloud, dou
     for (const DensePoint& p : cloud) {
         const double d = sc.distance(p.xyz);
         within += d <= tol;
-        s.far += d > far;
+        s.beyond += d > beyond_tol;
         grid[key(p.xyz)].push_back(p.xyz);
     }
     s.within = cloud.empty() ? 0 : (double)within / (double)cloud.size();
