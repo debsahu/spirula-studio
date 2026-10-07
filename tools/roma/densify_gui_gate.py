@@ -225,8 +225,12 @@ def main():
         until(lambda: state()["busy"], "the run to start", 30)
         live = []
         end = time.time() + 900
+        shot_live = False
         while time.time() < end and state()["busy"]:
             live.append(state()["live_model_points"])
+            if a_shots and not shot_live and live[-1] > 0:
+                shot_live = True
+                ctl("shot", str(pathlib.Path(a_shots) / "preview_during_run.png"))
             time.sleep(0.5)
         check(not state()["busy"], "the run to finish")
         check(max(live) > 0, "the model view showed the growing cloud while the run went on "

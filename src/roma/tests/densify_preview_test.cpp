@@ -116,7 +116,7 @@ int main() {
                 last = s.points;
             }
             check(grows, "preview: each snapshot holds more points than the last as the cloud grows");
-            check(exact, "preview: a few cloud is written whole");
+            check(exact, "preview: a modest cloud is written whole");
             const Snapshot s = parse(file);
             check(s.registered > 0, "preview: the model's cameras are in the snapshot");
             check(prev.writes() == 3, "preview: one write per update when each is due");
