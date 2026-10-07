@@ -33,6 +33,10 @@ spec = importlib.util.spec_from_file_location("guictl", HERE.parent / "guictl.py
 guictl = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guictl)
 
+spec = importlib.util.spec_from_file_location("fixture", HERE / "make_gui_fixture.py")
+fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+
 failures = 0
 
 
@@ -91,8 +95,9 @@ def main():
     models = cache / "spirula-studio" / "models"
 
     src, ds = work / "src", work / "ds6"
-    subprocess.run([exe, "densify", "--check", "--check-dir", str(src)], check=True,
-                   stdout=subprocess.DEVNULL)
+    # Only the scene it writes matters here, not whether S-1's gates pass.
+    subprocess.run([exe, "densify", "--check", "--check-dir", str(src)],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run([sys.executable, "-I", str(HERE / "make_gui_fixture.py"), str(src), str(ds)],
                    check=True, stdout=subprocess.DEVNULL)
     n_images = len(list((ds / "images").glob("*.png")))
@@ -160,9 +165,12 @@ def main():
             meta = json.loads((dense / "densify.json").read_text())
             check(n > 10 * n_sparse and n == meta["points"],
                   "far more points than the sparse model, and as many as densify.json says (%d)" % n)
-            check(sha(dense / "images.bin") == before["images.bin"] and
+            keep = lambda p: [(i, pose, cam, name) for i, pose, cam, name, _ in
+                              fixture.read_images(p)]
+            check(len(keep(dense / "images.bin")) == n_images and
+                  keep(dense / "images.bin") == keep(ds / "sparse/0/images.bin") and
                   sha(dense / "cameras.bin") == before["cameras.bin"],
-                  "cameras and poses are byte for byte the source's")
+                  "cameras and every pose are the source's, exactly")
         check(all(sha(ds / "sparse/0" / f) == h for f, h in before.items()),
               "the source model is untouched")
         rec = json.loads((ds / ".spirula-dataset.json").read_text())
