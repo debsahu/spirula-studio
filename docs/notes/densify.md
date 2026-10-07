@@ -120,3 +120,38 @@ the S-1 staircase with 3 % random matches and no noise, it kept 49 points more t
   runs it on real RoMa matches of the same scene (export the pairs with
   `spirula densify <check dir> --refs 1 --export-pairs`, match them with
   `reference/python/roma_dump_matches.py`).
+
+## Measured (2026-10-07, upstream RoMa v2 `base` matches dumped on an M4 Max)
+
+**P-4, against the plugin (54 basement face pairs, 18 reference faces, 163,422 samples).**
+Certainty after collect: bit-identical. Point decisions agree on 99.994 % of samples, the
+candidate decisions (sample x neighbour) on 99.998 %, and the count is within +0.025 %.
+Per-candidate xyz p99.9 2.0e-5 m (scene 10.5 units). The **fused** points miss the
+pre-registered 1e-5 x diameter bar (max 5.4 mm, p99.9 0.47 mm), and the fixture shows
+why: the plugin's fusion of its *own* candidates reproduces its points to 7.6e-6, and ours
+fused with *its* error weights to 3.2e-4. The weight `1 / max(err, 1e-4)` turns a
+two-view residual that a DLT drives to rounding noise into the averaging weight, so a
+millipixel of float32 noise moves a point by millimetres. The default mode weighs by depth
+precision instead.
+
+**S-1, the synthetic staircase.** With the geometric oracle (0.1 px noise at 640, 3 %
+random matches), every gate passes: 99.8 % of points within 1 cm, 0 beyond 5 cm, riser cover
+0.906. Upstream RoMa v2 on the rendered views passes 99.46 % within 1 cm and riser cover
+0.934. It **misses** "zero beyond 5 cm" with 30 points (0.045 %). Unmasked, the same matches
+put 4,059 points beyond 5 cm, 99.5 % of them within 4 px of the empty background: RoMa
+fattens silhouettes into a textureless void, and masks (a sky mask on a real capture) are
+what remove it.
+
+**Basement, every 8th panorama held out, 102 references x 6 faces, 2,056 pairs, the steps ROI.**
+At the automatic settings (2,000 samples per view, minimum track 3) the cloud has 200k points.
+Three seeds give anchor p50 41.6, 42.0 and 43.3 mm. Those are coverage figures, not
+accuracy: DA360 plus 1 cm of noise moves the p50 by 1-4 %, so this metric cannot see accuracy
+at all. At 10,000 samples the anchor p50 is 24.7 mm (DA360, all frames: 15.9; DA360, same
+references: 20.3). With `--min-track 2` the anchor p50 is 15.8 mm, and it is the only setting
+that keeps the lower flight: a minimum track of 3 drops 87k of the 111k points in the ROI,
+because with 3 neighbours, one of them held out, most of the stairs are seen by two panoramas.
+At `--min-track 2` the free-space violation rate is 0.40 % against DA360's 1.88 %, and the
+synthetic floater null reads +0.82 pp for 1 % floaters. The local-plane thickness is 7.6 mm
+against 10.2 mm, and its 1 cm noise null moves it by only 1.5 mm. On S-1 the same change costs
+130 points beyond 5 cm against 30. The default stays 3, as the plan has it, and this tradeoff
+is the operator's call.
