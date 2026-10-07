@@ -4,23 +4,42 @@ arms: 'R=<sibling dir>', 'M' (DA360 seed only) and 'M3' (DA360 same refs) are bu
 Deviation from the plan, forced by the data: M/M3 points carry no pixel association, so every arm is read through a z-buffer
 of its OWN cloud in the reference face (nearest point, holes filled out to 6 px), the same way for every arm; 'same pixels' = the
 pixels where all arms have a depth."""
-import sys, os, json, glob, numpy as np
+import os, json, glob, numpy as np
 from scipy import ndimage
 from PIL import Image
-from cloudlib import *
-exec(open('epi.py').read().split("if __name__")[0])
+import evalcfg, cloudlib as CL
+from epi import poses, rd, view, sampson, FACE
+ap = evalcfg.parser(__doc__)
+evalcfg.add_spike(ap); evalcfg.add_m3(ap)
+ap.add_argument('arms', nargs='*', metavar='label=path', help='extra arms: label=<sibling dir> or label=<points3D.txt>')
+ap.add_argument('--out', required=True, help='output json')
+ap.add_argument('--matches', default=None, help='dir of held-out-pair .rwm files (default <root>/g3d_matches)')
+ap.add_argument('--export', default=None, help='export dir with views/<face>.png (default <root>/export_all)')
+ap.add_argument('--g3d-meta', default=None, help='meta.json of the g3d export, key "held" (default <root>/g3d_export/meta.json)')
+ap.add_argument('--poses-model', default=None, help='COLMAP model dir whose images.bin gives the poses (default <root>/basement_ds/sparse/0)')
+ap.add_argument('--nsamp', type=int, default=20000, help='samples per pair')
+ap.add_argument('--limit-pairs', type=int, default=0, help='use only the first N pairs (sorted by name); 0 = all. A reduced run does not reproduce the published numbers.')
+a = evalcfg.parse(ap)
+R = CL.init(a); MPU = CL.MPU; read_points = CL.read_points
 W = 640; F = 320.
-args = [a for a in sys.argv[1:] if '=' in a and not a.startswith('--')]
-opt = lambda k, d=None: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
-outp = opt('--out'); MD = opt('--matches', 'g3d_matches'); EX = opt('--export', 'export_all'); NSAMP = int(opt('--nsamp', 20000))
-ids, Psp, PCsp, Tr, imgs = model(); POS = poses('/private/tmp/claude-502/-Users-debsahu-Workspace-slam/8bf7354b-69a0-4115-87fb-3a148414b12e/scratchpad/ws4/basement_ds/sparse/0')
+outp = a.out; evalcfg.check_outdir(outp, '--out')
+MD = str(evalcfg.resolve(a, 'matches', '--matches', 'g3d_matches', 'dir', 'held-out match dir')); EX = str(evalcfg.resolve(a, 'export', '--export', 'export_all', 'dir', 'export dir'))
+META = evalcfg.resolve(a, 'g3d_meta', '--g3d-meta', 'g3d_export/meta.json', 'file', 'g3d export meta.json')
+PM = evalcfg.resolve(a, 'poses_model', '--poses-model', 'basement_ds/sparse/0', 'dir', 'poses model dir')
+evalcfg.check_path(PM / 'images.bin', '--poses-model', 'file', 'poses model images.bin')
+evalcfg.check_path(EX + '/views', '--export', 'dir', 'export views dir')
+m3p = evalcfg.resolve(a, 'm3', '--m3', 'spike/m3_points3D.txt', 'file', 'M3 cloud (points3D.txt)')
+NSAMP = a.nsamp
+args = [x for x in a.arms if '=' in x]
+for x in args: evalcfg.check_any(x.split('=', 1)[1], f'arm {x.split("=", 1)[0]}=<path>', f'cloud for arm {x.split("=", 1)[0]}')
+ids, Psp, PCsp, Tr, imgs = CL.model(); POS = poses(str(PM))
 clouds = {}
-for a in args:
-    k, v = a.split('=', 1)
+for x in args:
+    k, v = x.split('=', 1)
     if os.path.isdir(v): X, C, _ = read_points(v + '/points3D.bin'); clouds[k] = (X, C)
     else: d = np.loadtxt(v, usecols=(1, 2, 3, 4, 5, 6)); clouds[k] = (d[:, :3], d[:, 3:6].astype(np.uint8))
-M = np.load(SP + '/da360_seed_only.npy'); clouds['M'] = (M[:, :3].astype(float), M[:, 3:6].astype(np.uint8))
-m3 = np.loadtxt('/private/tmp/claude-502/-Users-debsahu-Workspace-slam/8bf7354b-69a0-4115-87fb-3a148414b12e/scratchpad/ws4/m3/out/points3D.txt', usecols=(1, 2, 3, 4, 5, 6))
+M = CL.da360(); clouds['M'] = (M[:, :3].astype(float), M[:, 3:6].astype(np.uint8))
+m3 = np.loadtxt(m3p, usecols=(1, 2, 3, 4, 5, 6))
 clouds['M3'] = (m3[:, :3], m3[:, 3:6].astype(np.uint8))
 ARMS = list(clouds)
 def project(X, Rv, tv):
@@ -39,6 +58,8 @@ def in_band(X):
     u, w, h = R.to_stair(X); d = np.abs(h - (BAND['line_h0'] + BAND['slope'] * (u - BAND['line_u0']))) / np.sqrt(1 + BAND['slope'] ** 2)
     return (w >= BAND['w'][0]) & (w <= BAND['w'][1]) & (u >= BAND['u'][0]) & (u <= BAND['u'][1]) & (d <= BAND['perp'])
 pairs = sorted(os.path.basename(p)[:-4] for p in glob.glob(MD + '/*.rwm'))
+if not pairs: evalcfg.die(f'no .rwm files in {MD} (--matches)')
+if a.limit_pairs: pairs = pairs[:a.limit_pairs]
 rng = np.random.default_rng(0)
 cache = {}
 res_geo = {k: dict(err=[]) for k in ARMS}; null_geo = {k: [] for k in ARMS}
@@ -90,14 +111,14 @@ def stats(e, n_region):
     f = e[np.isfinite(e)]
     return dict(n_region=int(n_region), n_valid=int(len(f)), coverage=float(len(f) / max(1, n_region)), p50=float(np.median(f)) if len(f) else None, p90=float(np.percentile(f, 90)) if len(f) else None,
                 frac_within_3px_of_region=float((f < 3).sum() / max(1, n_region)), frac_within_10px_of_region=float((f < 10).sum() / max(1, n_region)))
-out = dict(n_pairs_used=len(res_geo[ARMS[0]]['err']), arms=ARMS, geometric={})
+out = dict(n_pairs_used=len(res_geo[ARMS[0]]['err']), arms=ARMS, geometric={}, limit_pairs=a.limit_pairs or None)
 for k in ARMS:
     e = np.concatenate(res_geo[k]['err']); nl = np.concatenate(null_geo[k]); out['geometric'][k] = {}
     for r in ('all', 'roi', 'band'):
         m = np.concatenate(res_geo[k]['reg_' + r]); out['geometric'][k][r] = stats(e[m], m.sum()); out['geometric'][k]['null_' + r] = stats(nl[m], m.sum())
 # --- (ii) photometric, steps ROI points of each arm, visible in a held-out face of its own z-buffer at 1/4 res
 import json as _j
-held = _j.load(open('g3d_export/meta.json'))['held']
+held = _j.load(open(META))['held']
 phot = {k: dict(err=[], null=[]) for k in ARMS}
 Q = W // 4
 for h in held:

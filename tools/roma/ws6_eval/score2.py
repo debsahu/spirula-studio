@@ -1,4 +1,4 @@
-"""score2.py --arms label=siblingdir ... --out out.json
+"""score2.py [--arms] label=siblingdir ... --out out.json [--half-b-ids halfB_ids.npy]
 Independent anchors + equal-budget + stairs-only measures (coordinator request 2026-10-07).
 * anchors = half B of the sparse points (random 50/50 by id, seed 7). The moge/hybrid arms in `dsh` were fitted to half A only; the
   roma arms never used sparse point positions. So every arm is scored on points it never saw.
@@ -7,12 +7,23 @@ Independent anchors + equal-budget + stairs-only measures (coordinator request 2
 * planes: sequential RANSAC, 12 planes (6 treads + 6 risers) over the band points of each arm; inlier fraction at 1 and 2 cm and RMS,
   against the same thing on uniform random points in the band volume (chance).
 Units: sparse_final/0 gauge, 0.9521 m/unit."""
-import sys, json, numpy as np
+import os, json, numpy as np
 from scipy.spatial import cKDTree
-from cloudlib import *
-arms = dict(a.split('=', 1) for a in sys.argv[1:] if '=' in a and not a.startswith('--'))
-outp = sys.argv[sys.argv.index('--out') + 1]
-ids, P, PC, Tr, imgs = model(); B = np.isin(ids, np.load('dsh/sparse/halfB_ids.npy')); AB = P[B]
+import evalcfg, cloudlib as CL
+ap = evalcfg.parser(__doc__)
+evalcfg.add_spike(ap)
+ap.add_argument('arms_pos', nargs='*', metavar='label=path', help='arms: label=<sibling dir | .npy | points3D.txt>')
+ap.add_argument('--arms', nargs='+', default=[], metavar='label=path', help='same, as a flag')
+ap.add_argument('--out', required=True, help='output json')
+ap.add_argument('--half-b-ids', default=None, help='npy of the held-out half-B point ids written by make_half.py (default <root>/halfB_ids.npy)')
+a = evalcfg.parse(ap)
+R = CL.init(a); MPU = CL.MPU; read_points = CL.read_points
+arms = dict(x.split('=', 1) for x in a.arms_pos + a.arms if '=' in x)
+if not arms: evalcfg.die('no arms given: pass label=path ... (positional or after --arms)')
+for k, v in arms.items(): evalcfg.check_any(v, f'arm {k}=<path>', f'cloud for arm {k}')
+outp = a.out; evalcfg.check_outdir(outp, '--out')
+hb = evalcfg.resolve(a, 'half_b_ids', '--half-b-ids', 'halfB_ids.npy', 'file', 'half-B anchor ids')
+ids, P, PC, Tr, imgs = CL.model(); B = np.isin(ids, np.load(hb)); AB = P[B]
 rng = np.random.default_rng(0)
 # stairs band: slab w, line in (u,h), perpendicular distance, u range -- picked from the profile render of the uncapped roma cloud (stairs_slab.png)
 BAND = dict(w=(-0.35, 0.15), u=(-0.7, 2.6), line_h0=-1.45, line_u0=-0.5, slope=1.02, perp=0.17)

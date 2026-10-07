@@ -1,5 +1,8 @@
-import json, sys
-d = json.load(open(sys.argv[1])); A = d['arms']
+"""tab2.py <score2.json>: the score2.py table."""
+import json, argparse
+import evalcfg
+ap = argparse.ArgumentParser(description=__doc__); ap.add_argument('score2_json'); a = ap.parse_args()
+d = json.load(open(evalcfg.check_path(a.score2_json, 'positional <score2.json>', 'file', 'score2.py output'))); A = d['arms']
 print('anchors', d['anchors'], 'equal-budget n', d['equal_budget_n'])
 hdr = ['arm', 'total', 'ROI n', 'ROI frac', 'ROI p50', 'p90', 'c5', 'matched p50', 'matched c5', 'noise null %', '| band n', 'band frac', 'band p50', 'c5', 'matched p50', 'matched c5', 'planes 1cm', 'rms', '| scene p50', 'scene c5']
 print(' | '.join(hdr))

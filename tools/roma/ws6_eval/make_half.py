@@ -1,7 +1,13 @@
 """make_half.py <src model dir> <dst model dir> <seed>: split the sparse points 50/50 by id. dst keeps half A (images.bin's references to
 half B are set to the invalid id); half B ids are written to <dst>/../halfB_ids.npy. The fit inside moge/hybrid then never sees half B."""
-import sys, struct, os, shutil, numpy as np
-src, dst, seed = sys.argv[1], sys.argv[2], int(sys.argv[3])
+import struct, os, shutil, numpy as np
+import evalcfg
+ap = evalcfg.parser(__doc__)
+ap.add_argument('src'); ap.add_argument('dst'); ap.add_argument('seed', type=int)
+a = evalcfg.parse(ap)
+src, dst, seed = a.src, a.dst, a.seed
+for f in ('images.bin', 'points3D.bin'): evalcfg.check_path(f'{src}/{f}', 'positional <src>', 'file', f'source model {f}')
+if os.path.exists(dst + '/points3D.bin'): evalcfg.die(f'refusing to overwrite an existing model: {dst}/points3D.bin (positional <dst>)')
 os.makedirs(dst, exist_ok=True)
 for f in os.listdir(src):
     if f not in ('images.bin', 'points3D.bin'): shutil.copy(f'{src}/{f}', f'{dst}/{f}')

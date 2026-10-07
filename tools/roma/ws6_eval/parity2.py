@@ -2,11 +2,20 @@
 Pose-aware stratification of the match parity. For every pair: Sampson error against the COLMAP poses for BOTH arms
 (independent of either matcher), then native-vs-torch EPE only on pixels the torch arm itself places on the epipolar
 line (Sampson < 1 px at 640, cert > 0.5 in both): the pixels densify can use. Also the inlier rate of each arm."""
-import sys, glob, os, json, numpy as np
-exec(open('epi.py').read().split("if __name__")[0])
-nat, tor, mdl, outp = sys.argv[1:5]
+import glob, os, json, numpy as np
+import evalcfg
+from epi import poses, rd, view, FACE
+ap = evalcfg.parser(__doc__)
+ap.add_argument('native', help='dir of native .rwm'); ap.add_argument('torch', help='dir of torch-side .rwm')
+ap.add_argument('model', help='COLMAP model dir (images.bin) for the poses'); ap.add_argument('out', help='output json')
+a = evalcfg.parse(ap)
+nat, tor, mdl, outp = a.native, a.torch, a.model, a.out
+evalcfg.check_outdir(outp, 'positional <out.json>')
+evalcfg.check_path(nat, 'positional <native_dir>', 'dir', 'native match dir'); evalcfg.check_path(tor, 'positional <torch_dir>', 'dir', 'torch match dir')
+evalcfg.check_path(mdl + '/images.bin', 'positional <model_dir>', 'file', 'poses model images.bin')
 P = poses(mdl)
 names = sorted(os.path.basename(p) for p in glob.glob(nat + '/*.rwm') if os.path.exists(tor + '/' + os.path.basename(p)))
+if not names: evalcfg.die(f'no common .rwm names between {nat} and {tor}')
 def pct(x, q): return float(np.percentile(x, q)) if len(x) else float('nan')
 def samp_full(Pz, pair, wp, W=640):
     a, b = pair[:-4].split('__'); Ra, ta = view(Pz, a); Rb, tb = view(Pz, b)

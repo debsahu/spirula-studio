@@ -29,9 +29,19 @@ def sampson(P, pair, wp, cert, thr=0.5, W=640):
     Ex = xa@E.T; Etx = xb@E
     num = np.einsum('ij,ij->i',xb,Ex)**2; den = Ex[:,0]**2+Ex[:,1]**2+Etx[:,0]**2+Etx[:,1]**2
     return np.sqrt(num/np.maximum(den,1e-30))*(W/2)
-if __name__ == '__main__':
-    P = poses(sys.argv[1]); pair = sys.argv[2]
-    for lab_dir in sys.argv[3:]:
+def main():
+    import evalcfg
+    ap = evalcfg.parser(__doc__)
+    ap.add_argument('model', help='COLMAP model dir (images.bin) giving the poses')
+    ap.add_argument('pair', help='pair file name, e.g. A__B.rwm')
+    ap.add_argument('arms', nargs='+', help='label=dir holding the .rwm files')
+    a = evalcfg.parse(ap)
+    evalcfg.check_path(a.model + '/images.bin', 'positional <model>', 'file', 'poses model images.bin')
+    P = poses(a.model)
+    for lab_dir in a.arms:
         lab, d = lab_dir.split('=')
-        wp, c = rd(f'{d}/{pair}'); s = sampson(P, pair, wp, c)
+        evalcfg.check_path(f'{d}/{a.pair}', f'arm {lab}=<dir>', 'file', 'match file')
+        wp, c = rd(f'{d}/{a.pair}'); s = sampson(P, a.pair, wp, c)
         print(f'{lab:8s} n={len(s):7d} Sampson px p50 {np.median(s):.3f} p90 {np.percentile(s,90):.3f} p99 {np.percentile(s,99):.3f}')
+if __name__ == '__main__':
+    main()

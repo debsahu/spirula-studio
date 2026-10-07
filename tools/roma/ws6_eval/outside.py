@@ -1,12 +1,20 @@
-"""outside.py <sibling dir> <out.json> [--render dir]: classify the points outside the sparse model's p0.5-p99.5 box + 0.5 m."""
-import sys, json, numpy as np
+"""outside.py <sibling dir> <out.json> [--render dir]: classify the points outside the sparse model's p0.5-p99.5 box + 0.5 m.
+Needs <sibling>/points3D.bin AND <sibling>/points3D_tracks.bin. Writes <out.json> and <out>.npz."""
+import json, numpy as np
 from scipy.spatial import cKDTree
-from cloudlib import *
-sib, outp = sys.argv[1], sys.argv[2]
-rd = sys.argv[sys.argv.index('--render') + 1] if '--render' in sys.argv else None
-X, C, E = read_points(sib + '/points3D.bin'); T = read_tracks(sib + '/points3D_tracks.bin')
-ids, P, PC, Tr, imgs = model()
-M = np.load(SP + '/da360_seed_only.npy')[:, :3].astype(float)
+import evalcfg, cloudlib as CL
+ap = evalcfg.parser(__doc__)
+evalcfg.add_spike(ap)
+ap.add_argument('sibling'); ap.add_argument('out')
+ap.add_argument('--render', default=None, help='dir for renders (accepted for compatibility; render_outside.py makes the image)')
+a = evalcfg.parse(ap)
+sib, outp = a.sibling, a.out
+evalcfg.check_outdir(outp, 'positional <out.json>')
+for f in ('points3D.bin', 'points3D_tracks.bin'): evalcfg.check_path(f'{sib}/{f}', 'positional <sibling>', 'file', f'sibling {f}')
+R = CL.init(a); MPU = CL.MPU
+X, C, E = CL.read_points(sib + '/points3D.bin'); T = CL.read_tracks(sib + '/points3D_tracks.bin')
+ids, P, PC, Tr, imgs = CL.model()
+M = CL.da360()[:, :3].astype(float)
 lo, hi = np.percentile(P, .5, 0) - .5 / MPU, np.percentile(P, 99.5, 0) + .5 / MPU
 out = ((X < lo) | (X > hi)).any(1); idx = np.where(out)[0]
 res = dict(n=len(X), n_out=int(out.sum()), frac_out=float(out.mean()))

@@ -1,12 +1,16 @@
 """torch_dump.py <export_dir> <out_dir> --device cpu|mps [--setting base]: upstream RoMaV2 on the exported views,
 float32 .rwm (encoding 0). Same call as reference/python/roma_dump_matches.py but patches romav2's module-level
 `device` so CPU really runs on the CPU (compare_torch.py build_model does the same)."""
-import sys, argparse, struct, time, sys
+import sys, argparse, struct, time
 from pathlib import Path
-import numpy as np, torch
+import numpy as np
+import evalcfg
+ap = argparse.ArgumentParser(description=__doc__); ap.add_argument('export', help='dir with pairs.txt and views/<name>.png'); ap.add_argument('out', help='dir for the .rwm files (created; existing files are kept)')
+ap.add_argument('--device', default='cpu'); ap.add_argument('--setting', default='base'); a = ap.parse_args()
+evalcfg.check_path(Path(a.export) / 'pairs.txt', 'positional <export_dir>', 'file', 'export pairs.txt')
+evalcfg.check_path(Path(a.export) / 'views', 'positional <export_dir>', 'dir', 'export views dir')
+import torch
 from PIL import Image
-ap = argparse.ArgumentParser(); ap.add_argument('export'); ap.add_argument('out'); ap.add_argument('--device', default='cpu')
-ap.add_argument('--setting', default='base'); a = ap.parse_args()
 import romav2
 dev = torch.device(a.device)
 for name, mod in list(sys.modules.items()):

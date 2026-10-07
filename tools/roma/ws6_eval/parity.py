@@ -1,7 +1,6 @@
 """WS-6 Phase A step 1: match-level parity, native RomaMatcher vs PyTorch dumps, on identical views.
 
-usage: parity.py <native_dir> <torch_dir> <out.json> [--ref2 <dir2>]  (ref2: a second torch-side set,
-used to measure a torch-vs-torch floor on the pairs both dirs hold)
+usage: parity.py <native_dir> <torch_dir> <out.json>
 
 Both dirs hold <A>__<B>.rwm. torch_dir is int16/uint16 encoded (the WS-4 dumps): the quantisation floor is
 reported separately. EPE is in px at the match size (warp is normalised over B, so px = u * W / 2).
@@ -30,10 +29,17 @@ def pct(x, q):
 
 
 def main():
-    nat, tor, outp = sys.argv[1:4]
+    import evalcfg
+    ap = evalcfg.parser(__doc__)
+    ap.add_argument('native', help='dir of native .rwm (float32)'); ap.add_argument('torch', help='dir of torch-side .rwm')
+    ap.add_argument('out', help='output json')
+    a = evalcfg.parse(ap)
+    nat, tor, outp = a.native, a.torch, a.out
+    evalcfg.check_outdir(outp, 'positional <out.json>')
+    evalcfg.check_path(nat, 'positional <native_dir>', 'dir', 'native match dir'); evalcfg.check_path(tor, 'positional <torch_dir>', 'dir', 'torch match dir')
     names = sorted(os.path.basename(p) for p in glob.glob(nat + '/*.rwm'))
     names = [n for n in names if os.path.exists(os.path.join(tor, n))]
-    assert names, 'no common pairs'
+    if not names: evalcfg.die(f'no common .rwm names between {nat} and {tor}')
     rows = []
     pool = {k: [] for k in ('all', 'c05', 'c02', 'c09')}
     for n in names:
@@ -95,4 +101,5 @@ def main():
     print(json.dumps({k: v for k, v in out.items() if k not in ('rows', 'worst_by_epe_c05_p99', 'worst_by_cross_c02')}, indent=1))
 
 
-main()
+if __name__ == '__main__':
+    main()

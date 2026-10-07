@@ -1,10 +1,17 @@
 """render_scene.py <outdir> arm=path ... : whole-scene cloud from 3 fixed views (top-down cut at camera height, two interior perspectives).
 Paths: sibling dir (points3D.bin), da360_seed_only.npy, or points3D.txt. Same views for every arm; positions in views_scene.json."""
-import sys, os, json, numpy as np
+import os, json, numpy as np
 from PIL import Image, ImageDraw
-from cloudlib import *
-out = sys.argv[1]; arms = dict(a.split('=', 1) for a in sys.argv[2:]); os.makedirs(out, exist_ok=True)
-ids, P, PC, Tr, imgs = model()
+import evalcfg, cloudlib as CL
+ap = evalcfg.parser(__doc__)
+evalcfg.add_spike(ap)
+ap.add_argument('outdir'); ap.add_argument('arms', nargs='+', metavar='arm=path')
+a = evalcfg.parse(ap)
+CL.init(a); read_points = CL.read_points
+out = a.outdir; arms = dict(x.split('=', 1) for x in a.arms)
+for k, v in arms.items(): evalcfg.check_any(v, f'arm {k}=<path>', f'cloud for arm {k}')
+os.makedirs(out, exist_ok=True)
+ids, P, PC, Tr, imgs = CL.model()
 cen = np.array([imgs[i]['c'] for i in sorted(imgs)]); name2c = {imgs[i]['name']: imgs[i]['c'] for i in imgs}
 def load(p):
     if os.path.isdir(p): X, C, _ = read_points(p + '/points3D.bin'); return X, C

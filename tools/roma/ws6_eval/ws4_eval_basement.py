@@ -1,16 +1,26 @@
 """WS-4 basement evaluation (plan §9.4 subset, geometry only), every metric beside its null.
-usage: eval_basement.py <sibling model dir> <source model dir> <out.json> [--m3 points3D.txt]
+usage: ws4_eval_basement.py <sibling model dir> <source model dir> <out.json> [--m3 points3D.txt | --no-m3] [--anchor-mod N]
 Units: sparse_final/0 gauge; mm via 0.9521 m/unit (SHOWS, basement_brush/scale_config.json)."""
-import json, struct, sys, pickle, hashlib, os
+import json, struct, pickle, hashlib, os
 import numpy as np
 from scipy.spatial import cKDTree
-SP = '/private/tmp/claude-502/-Users-debsahu-Workspace-slam/8bf7354b-69a0-4115-87fb-3a148414b12e/scratchpad/rv2spike'
-sys.path.insert(0, SP)
-import roi as R
-J = json.load(open(SP + '/steps_roi.json')); R.ROI.update(dict(u=J['u'], w=J['w'], h=J['h']))
+import evalcfg
+ap = evalcfg.parser(__doc__)
+evalcfg.add_spike(ap); evalcfg.add_m3(ap)
+ap.add_argument('sibling', help='densify output dir (cameras.bin, images.bin, points3D.bin, points3D_tracks.bin, densify.json)')
+ap.add_argument('source', help='the model it was densified from (cameras.bin, images.bin)')
+ap.add_argument('out', help='output json')
+ap.add_argument('--no-m3', action='store_true', help='score without the M3 arm (the R_over_M3 rows are then absent)')
+ap.add_argument('--anchor-mod', type=int, default=0, help='also score independent anchors: sparse ids with id %% N == 0')
+a = evalcfg.parse(ap)
+sib, src, outp = a.sibling, a.source, a.out
+for d, w in ((sib, 'sibling'), (src, 'source model')):
+    for f in ('cameras.bin', 'images.bin'): evalcfg.check_path(f'{d}/{f}', f'positional <{w}>', 'file', f'{w} {f}')
+for f in ('points3D.bin', 'points3D_tracks.bin', 'densify.json'): evalcfg.check_path(f'{sib}/{f}', 'positional <sibling>', 'file', f'sibling {f}')
+evalcfg.check_outdir(outp, 'positional <out>')
+R, SP, J = evalcfg.load_spike(a)
+m3p = None if a.no_m3 else str(evalcfg.resolve(a, 'm3', '--m3', 'spike/m3_points3D.txt', 'file', 'M3 cloud (points3D.txt)'))
 MPU = 0.9521
-sib, src, outp = sys.argv[1], sys.argv[2], sys.argv[3]
-m3p = sys.argv[sys.argv.index('--m3') + 1] if '--m3' in sys.argv else None
 rng = np.random.default_rng(0)
 mm = lambda x: float(x * MPU * 1000)
 
@@ -34,18 +44,17 @@ dj = json.loads(open(sib + '/densify.json').read().replace(': inf', ': null')); 
 # --- §9.5 integrity: any failure voids the run
 I = out['integrity']
 I['cameras_bin_identical'] = sha(sib + '/cameras.bin') == sha(src + '/cameras.bin')
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import integrity as _ig
 _ia, _ra = _ig.parse(open(sib + '/images.bin', 'rb').read()); _ib, _rb = _ig.parse(open(src + '/images.bin', 'rb').read())
 I['images_bin_identical'] = _ra == _rb and all(i == 2**64 - 1 for i in _ia)
 Rx, Rc = rd_points(sib + '/points3D.bin'); T = rd_tracks(sib + '/points3D_tracks.bin')
-ids, P, PC, Tr, imgs = pickle.load(open(SP + '/model.pkl', 'rb'))
+ids, P, PC, Tr, imgs = pickle.load(open(SP / 'model.pkl', 'rb'))
 name2id = {v['name']: k for k, v in imgs.items()}
 held = {name2id[n] for n in dj['held_out']}
 I['held_out_in_tracks'] = int(sum(bool(set(t['id'].tolist()) & held) for t in T))
 I['mask_keep'] = dj['mask_keep']; I['mask_keep_in_range'] = 0.05 <= dj['mask_keep'] <= 0.995
 I['nonfinite'] = int((~np.isfinite(Rx)).any(1).sum())
-M = np.load(SP + '/da360_seed_only.npy')[:, :3].astype(np.float64)
+M = np.load(SP / 'da360_seed_only.npy')[:, :3].astype(np.float64)
 I['M_min_dist_to_anchor'] = float(cKDTree(M).query(P[:5000])[0].min())
 I['M_contains_anchors'] = I['M_min_dist_to_anchor'] == 0.0
 I['void'] = not (I['cameras_bin_identical'] and I['images_bin_identical'] and I['held_out_in_tracks'] == 0
@@ -67,7 +76,7 @@ def anchor(c, A):
     return dict(p50_mm=mm(np.median(d)), p90_mm=mm(np.percentile(d, 90)),
                 c1=float((d * MPU < .01).mean()), c2=float((d * MPU < .02).mean()), c5=float((d * MPU < .05).mean()))
 # Independent anchors: sparse points held out of the depth fit (id % mod == 0, --anchor-mod)
-amod = int(sys.argv[sys.argv.index('--anchor-mod') + 1]) if '--anchor-mod' in sys.argv else 0
+amod = a.anchor_mod
 if amod:
     ind = inR & (np.asarray(ids) % amod == 0)
     out['G3b_independent'] = {k: dict(n_anchors=int(ind.sum()), **anchor(c, P[ind])) for k, c in roi_c.items()}

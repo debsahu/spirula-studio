@@ -1,11 +1,18 @@
-import numpy as np, json, pickle
+"""render_blind.py <outdir> arm=path ... : per-arm renders (oblique, profile, topdown of the steps ROI) under randomised codes.
+Paths: points3D.bin, .npz (xyz, rgb), .npy (xyz+rgb rows), points3D.txt, or the word 'sparse'. The code map is written to
+MAPPING_do_not_open_before_ranking.json; open it only after ranking."""
+import numpy as np, json, os, struct
 from PIL import Image, ImageDraw
-import sys, struct, os
-sys.path.insert(0,'/private/tmp/claude-502/-Users-debsahu-Workspace-slam/8bf7354b-69a0-4115-87fb-3a148414b12e/scratchpad/rv2spike')
-import roi as R
-OUT=sys.argv[1]; ARMS_IN=dict(a.split('=',1) for a in sys.argv[2:])
-J=json.load(open('/private/tmp/claude-502/-Users-debsahu-Workspace-slam/8bf7354b-69a0-4115-87fb-3a148414b12e/scratchpad/rv2spike/steps_roi.json')); R.ROI.update(dict(u=J['u'],w=J['w'],h=J['h']))
-ids,P,C,T,imgs=pickle.load(open('/private/tmp/claude-502/-Users-debsahu-Workspace-slam/8bf7354b-69a0-4115-87fb-3a148414b12e/scratchpad/rv2spike/model.pkl','rb'))
+import evalcfg, cloudlib as CL
+ap = evalcfg.parser(__doc__)
+evalcfg.add_spike(ap)
+ap.add_argument('outdir'); ap.add_argument('arms', nargs='+', metavar='arm=path')
+a = evalcfg.parse(ap)
+R = CL.init(a)
+OUT = a.outdir; ARMS_IN = dict(x.split('=', 1) for x in a.arms)
+for k, v in ARMS_IN.items():
+    if v != 'sparse': evalcfg.check_any(v, f'arm {k}=<path>', f'cloud for arm {k}')
+ids, P, C, T, imgs = CL.model()
 def rd_bin(p):
     b=open(p,'rb').read(); n=struct.unpack_from('<Q',b,0)[0]; o=8; X=np.empty((n,3)); Cc=np.empty((n,3),np.uint8)
     for i in range(n):

@@ -1,6 +1,13 @@
+"""cmp_eval.py NAME ... : side-by-side table of <eval-dir>/NAME.json from ws4_eval_basement.py."""
 import json, sys
-names = sys.argv[1:]
-D = {n: json.load(open(f'eval/{n}.json')) for n in names}
+import evalcfg
+ap = evalcfg.parser(__doc__)
+ap.add_argument('--eval-dir', default=None, help='dir of ws4_eval_basement.py outputs (default <root>/eval)')
+ap.add_argument('names', nargs='+', metavar='NAME')
+a = evalcfg.parse(ap)
+ed = evalcfg.resolve(a, 'eval_dir', '--eval-dir', 'eval', 'dir', 'eval directory')
+names = a.names
+D = {n: json.load(open(evalcfg.check_path(ed / f'{n}.json', 'positional NAME (looked up in --eval-dir)', 'file', 'eval json'))) for n in names}
 def row(lbl, f): print(lbl.ljust(34), *[str(f(D[n])).ljust(16) for n in names])
 print(' '.ljust(34), *[n.ljust(16) for n in names])
 row('void', lambda d: d['integrity']['void'])
