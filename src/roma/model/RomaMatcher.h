@@ -21,6 +21,9 @@ struct PresetSpec {
 };
 
 const PresetSpec& preset_spec(Preset p);
+// The seam's Warp of one direction: certainty is sigmoid(logit), precision the
+// confidence's last three channels as they are.
+Warp warpOf(const DenseMatch& d);
 // "turbo" ... "precise"; false on anything else.
 bool parse_preset(const std::string& s, Preset& out);
 

@@ -15,6 +15,7 @@
 #include <random>
 #include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 
 #include "core/ImageFile.h"
@@ -22,6 +23,7 @@
 #include "external/stb_image_write.h"
 #include "core/Sha256.h"
 #include "roma/DepthSource.h"
+#include "roma/DumpMatcher.h"
 #include "roma/Publish.h"
 #include "roma/Sample.h"
 #include "sfm/core/FixedPoses.h"
@@ -394,6 +396,9 @@ DensifyPlan planDensify(const DensifyJob& job) {
             bar = std::max(bar, 1.0 / (pl.match_focal * std::sin(0.5 * pl.median_pair_angle_deg / 57.29577951308232)));
         o.max_depth_error = bar;
     }
+    // Auto is off for both until the equal-budget gate passes (docs/notes/densify.md).
+    if (o.cycle_px == 0 || o.plugin_exact || o.no_filter) o.cycle_px = -1;
+    if (o.refine_huber == 0 || o.plugin_exact || o.no_filter) o.refine_huber = -1;
     pl.voxel = o.voxel > 0 ? o.voxel : o.voxel < 0 ? 0 : 0.5 * pl.sparse_spacing;
     pl.max_points = o.max_points > 0 ? o.max_points : o.max_points < 0 ? 0
                     : std::clamp<int64_t>(4 * pl.sparse_points, 1000000, 8000000);
@@ -645,14 +650,37 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
                 const std::vector<uint8_t> rgbB = cb.rgb[(size_t)sb], keepB = cb.keep[(size_t)sb];
                 const MatchImage mb{B.name, pl.match_size, pl.match_size, rgbB.data()};
                 const auto tm = clock::now();
-                Warp w = job.matcher->match(ma, mb);
+                Warp w, back;
+                if (o.cycle_px > 0 && job.match_both) {
+                    std::tie(w, back) = job.match_both(ma, mb);
+                } else {
+                    w = job.matcher->match(ma, mb);
+                    if (o.cycle_px > 0) back = job.matcher->match(mb, ma);
+                }
                 match_s += std::chrono::duration<double>(clock::now() - tm).count();
+                if (o.cycle_px > 0) {
+                    if (back.width != w.width || back.height != w.height)
+                        throw std::runtime_error("the B -> A warp of " + A.name + " " + B.name + " is another size");
+                    res.reverse_matches++;
+                }
+                if (!job.dump_dir.empty()) {
+                    writeWarp(DumpMatcher::pairFile(job.dump_dir, A.name, B.name), w, w.precision.empty() ? 0 : 2);
+                    // A pair matched both ways keeps its forward warp: matchBoth's
+                    // reverse differs from match(B, A) by token order (0.02 px p50).
+                    // Nothing reads a reverse's precision; leaving it out saves 5 MB a pair.
+                    const std::string rp = DumpMatcher::pairFile(job.dump_dir, B.name, A.name);
+                    if (o.cycle_px > 0 && !fs::exists(rp)) writeWarp(rp, back, 0);
+                }
                 if (m.w == 0) { m.w = w.width; m.h = w.height; }
                 if (w.width != m.w || w.height != m.h)
                     throw std::runtime_error("matcher returned differently sized warps for " + A.name);
                 const std::vector<uint8_t> ka = resizeKeep(keepA, pl.match_size, m.w);
                 const std::vector<uint8_t> kb = resizeKeep(keepB, pl.match_size, m.w);
                 m.cert.push_back(collectCertainty(w, ka, kb, o));
+                if (!w.precision.empty() && w.precision.size() != w.certainty.size() * 3)
+                    throw std::runtime_error("matcher returned a precision of the wrong size for " + A.name);
+                m.prec.push_back(std::move(w.precision));
+                if (o.cycle_px > 0) m.rev.push_back(std::move(back.warp));
                 m.warp.push_back(std::move(w.warp));
                 m.nbrs.push_back(b);
             }
@@ -665,6 +693,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
                 const double k = (double)m.w / pl.match_size;
                 ro.reproj_px *= k;
                 ro.sampson_px2 *= k * k;
+                if (ro.cycle_px > 0) ro.cycle_px *= k;
                 if (ro.max_depth_error > 0) ro.max_depth_error /= k;
                 if (!warned && job.on_warp_scale) job.on_warp_scale(m.w, pl.match_size);
                 warned = true;

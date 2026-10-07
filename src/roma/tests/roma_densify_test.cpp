@@ -2193,6 +2193,18 @@ void warp_files_round_trip() {
     w.height = 2;
     w.warp = {-1, 1, 0.5f, -0.25f, 0.001f, 0.999f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f};
     w.certainty = {0, 0.2f, 0.5f, 0.9f, 1.0f, 0.33f};
+    w.precision = {1, 0, 1, 2.5f, -0.5f, 3, 100, 1e-3f, 4e4f, 0, 0, 0, 7, 0.25f, 9, 1e-6f, 0, 1e-6f};
+    // Mutants: encoding 2 dropping or truncating the precision, 0 and 1 inventing one.
+    {
+        const std::string p = (d / "w2.rwm").string();
+        writeWarp(p, w, 2);
+        const Warp r = readWarp(p);
+        check(r.warp == w.warp && r.certainty == w.certainty && r.precision == w.precision, "encoding 2 not exact");
+        std::filesystem::resize_file(p, std::filesystem::file_size(p) - 4);
+        bool threw = false;
+        try { readWarp(p); } catch (const std::exception&) { threw = true; }
+        check(threw, "a truncated precision read back");
+    }
     for (int enc : {0, 1}) {
         const std::string p = (d / ("w" + std::to_string(enc) + ".rwm")).string();
         writeWarp(p, w, enc);
@@ -2200,9 +2212,396 @@ void warp_files_round_trip() {
         double e = 0, c = 0;
         for (size_t i = 0; i < w.warp.size(); i++) e = std::max(e, (double)std::fabs(r.warp[i] - w.warp[i]));
         for (size_t i = 0; i < w.certainty.size(); i++) c = std::max(c, (double)std::fabs(r.certainty[i] - w.certainty[i]));
-        check(r.width == 3 && r.height == 2, "size");
+        check(r.width == 3 && r.height == 2 && r.precision.empty(), "size, or a precision from nowhere");
         check(e <= (enc ? 2e-5 : 0.0) && c <= (enc ? 1e-5 : 0.0), "encoding " + std::to_string(enc));
     }
+    fs::remove_all(d);
+}
+
+// ===========================================================================
+// Cycle check and precision refinement
+// ===========================================================================
+
+// An identity reverse warp shifted by (dx, dy) match px, on a non-square grid.
+// Mutants: align_corners=true sampling, the error in normalised units or in
+// camera pixels, x and y swapped.
+void cycle_error_is_in_match_pixels() {
+    const int W = 8, H = 6;
+    const double dx = 0.3, dy = -0.2;
+    std::vector<float> rev((size_t)W * H * 2);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            rev[((size_t)y * W + x) * 2] = (float)((x + 0.5 + dx) * 2.0 / W - 1.0);
+            rev[((size_t)y * W + x) * 2 + 1] = (float)((y + 0.5 + dy) * 2.0 / H - 1.0);
+        }
+    auto u = [&](double px, int n) { return (float)(px * 2.0 / n - 1.0); };
+    const double at_centre = cycleError(rev, W, H, u(3.5, W), u(2.5, H), 3, 2);
+    check(std::fabs(at_centre - std::hypot(dx, dy)) < 1e-5, "at a pixel centre: " + std::to_string(at_centre));
+    // 0.3 px right of the centre: the affine field interpolates exactly.
+    const double off = cycleError(rev, W, H, u(3.8, W), u(2.5, H), 3, 2);
+    check(std::fabs(off - std::hypot(dx + 0.3, dy)) < 1e-5, "between centres: " + std::to_string(off));
+    const double ydir = cycleError(rev, W, H, u(3.5, W), u(3.1, H), 3, 2);
+    check(std::fabs(ydir - std::hypot(dx, dy + 0.6)) < 1e-5, "along y: " + std::to_string(ydir));
+}
+
+// A plane at 3840 px matched at 160: the reverse warp is 0.52 match px off
+// everywhere (12.5 camera px) and 3.52 off where B's x < 40.
+struct CycleFixture {
+    Scene sc = planeScene();
+    std::vector<View> views = {pinView("a", 0, {0, -0.3, 0}, {3, 0, 0}, 3840, 3840, 1920),
+                               pinView("b", 1, {0, 0.3, 0.1}, {3, 0, 0}, 3840, 3840, 1920)};
+    DensifyOptions opt;
+    RefMatches m;
+    std::vector<int64_t> samples;
+    int64_t lo = 0, hi = 0;   // samples landing surely / possibly where the reverse is broken
+    CycleFixture() {
+        opt.max_depth_error = 0;
+        opt.min_parallax_deg = 0;
+        const int S = 160;
+        m = oracleMatches(sc, views, 0, {1}, S, 0.0, opt);
+        OracleMatcher om(&sc, views, S, 0.0, 0.0, 5);
+        m.rev.push_back(om.match({"b", S, S, nullptr}, {"a", S, S, nullptr}).warp);
+        for (int y = 0; y < S; y++)
+            for (int x = 0; x < S; x++) {
+                const size_t q = (size_t)y * S + x;
+                m.rev[0][2 * q] += (float)(2.0 * (x < 40 ? 3.52 : 0.52) / S);
+            }
+        for (int64_t i = 0; i < (int64_t)S * S; i++) {
+            if (m.cert[0][(size_t)i] <= 0) continue;
+            const double xb = (m.warp[0][2 * (size_t)i] + 1.0) * 0.5 * S;
+            const double yb = (m.warp[0][2 * (size_t)i + 1] + 1.0) * 0.5 * S;
+            if (xb < 20 || xb > 100 || yb < 5 || yb > S - 5) continue;
+            samples.push_back(i);
+            lo += xb <= 39.5;
+            hi += xb < 40.5;
+        }
+    }
+};
+
+// Mutants: the threshold in camera pixels (12.5 > 1: everything rejected),
+// the check skipped, the reverse read at A's pixel instead of where A lands.
+void cycle_rejects_broken_round_trips() {
+    CycleFixture f;
+    f.opt.cycle_px = 1.0;
+    DensifyStats st;
+    const std::vector<DensePoint> pts = triangulateRef(f.m, f.views, f.samples, f.opt, st);
+    check(f.lo > 1000 && f.hi < (int64_t)f.samples.size() / 2, "fixture: " + std::to_string(f.lo) + " / " +
+          std::to_string(f.hi) + " of " + std::to_string(f.samples.size()));
+    check(st.cycle >= f.lo && st.cycle <= f.hi, "rejected " + std::to_string(st.cycle) + ", want " +
+          std::to_string(f.lo) + " to " + std::to_string(f.hi));
+    int bad = 0;
+    for (const DensePoint& p : pts)
+        for (const Observation& o : p.track)
+            bad += o.view == 1 && o.x / 24.0 <= 39.5;
+    check(bad == 0, "points kept where the round trip is 3.5 px: " + std::to_string(bad));
+    check(pts.size() + (size_t)st.cycle == f.samples.size(), "points " + std::to_string(pts.size()));
+}
+
+// Measure mode rejects nothing and bins every tested sample once, by its
+// fate. Mutants: inf treated as off (no histogram), the histogram filled
+// before the geometric filters, the bins in camera pixels.
+void cycle_measure_bins_without_rejecting() {
+    CycleFixture f;
+    f.opt.cycle_px = INFINITY;
+    // Rows y < 20 of A sent 6 px across B's epipolar lines (36 px^2): Sampson rejects them.
+    for (int64_t i : f.samples)
+        if (i / 160 < 20) f.m.warp[0][2 * (size_t)i + 1] += 2.0f * 6.0f / 160;
+    DensifyStats st;
+    const std::vector<DensePoint> pts = triangulateRef(f.m, f.views, f.samples, f.opt, st);
+    int64_t kept = 0, rej = 0;
+    for (int64_t v : st.cycle_kept_hist) kept += v;
+    for (int64_t v : st.cycle_rejected_hist) rej += v;
+    check(st.cycle == 0, "measure mode rejected " + std::to_string(st.cycle));
+    check(st.sampson > 500, "fixture: Sampson rejected " + std::to_string(st.sampson));
+    check(kept == st.candidates, "kept histogram " + std::to_string(kept) + " vs candidates " +
+          std::to_string(st.candidates));
+    check(rej == st.sampson + st.reproj + st.cheirality + st.parallax + st.nonfinite,
+          "rejected histogram " + std::to_string(rej) + " vs " + std::to_string(st.sampson));
+    check(st.cycle_kept_hist[10] + st.cycle_kept_hist[63] > kept * 9 / 10,
+          "0.52 and 3.52 px in bins 10 and 63: " + std::to_string(st.cycle_kept_hist[10]) + ", " +
+              std::to_string(st.cycle_kept_hist[63]));
+    check(st.cycle_kept_hist[63] >= f.lo / 2, "open bin " + std::to_string(st.cycle_kept_hist[63]));
+    check(st.cycle_kept_hist[10] > kept / 2, "0.52 px bin holds the clean majority: " +
+                                                 std::to_string(st.cycle_kept_hist[10]) + " of " + std::to_string(kept));
+    check(!pts.empty(), "no points");
+}
+
+// Mutant: a missing reverse warp passes every sample instead of refusing.
+void cycle_without_reverse_refuses() {
+    CycleFixture f;
+    f.m.rev.clear();
+    f.opt.cycle_px = 1.0;
+    DensifyStats st;
+    bool threw = false;
+    try {
+        triangulateRef(f.m, f.views, f.samples, f.opt, st);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw, "cycle check ran with no B -> A warps");
+}
+
+// Off and unresolved auto read no reverse at all. Mutant: auto (0) taken as on.
+void cycle_off_changes_nothing() {
+    CycleFixture f;
+    for (float& v : f.m.rev[0]) v = 0.9f;
+    for (double c : {-1.0, 0.0}) {
+        f.opt.cycle_px = c;
+        DensifyStats st, st0;
+        const std::vector<DensePoint> with = triangulateRef(f.m, f.views, f.samples, f.opt, st);
+        RefMatches bare = f.m;
+        bare.rev.clear();
+        const std::vector<DensePoint> without = triangulateRef(bare, f.views, f.samples, f.opt, st0);
+        bool same = with.size() == without.size() && st.cycle == 0;
+        for (size_t i = 0; same && i < with.size(); i++) same = (with[i].xyz - without[i].xyz).norm() == 0;
+        check(same, "cycle_px " + std::to_string(c) + " changed the points");
+    }
+}
+
+// a and two neighbours on a plane 3 m out, baselines along world y (image x),
+// 640 px at f 320 matched at 320: one match px of x moves depth ~0.11 m.
+struct RefineFixture {
+    Scene sc = planeScene();
+    std::vector<View> views;
+    DensifyOptions opt;
+    RefMatches m;
+    std::vector<int64_t> centre;
+    explicit RefineFixture(std::vector<View> extra = {}) {
+        views = {pinView("a", 0, {0, 0, 0}, {3, 0, 0}, 640, 640, 320),
+                 pinView("b", 1, {0, 0.5, 0}, {3, 0, 0}, 640, 640, 320),
+                 pinView("c", 2, {0, -0.5, 0}, {3, 0, 0}, 640, 640, 320)};
+        for (View& v : extra) views.push_back(v);
+        opt.max_depth_error = 0;
+        opt.min_parallax_deg = 0;
+        std::vector<int> nb;
+        for (int k = 1; k < (int)views.size(); k++) nb.push_back(k);
+        m = oracleMatches(sc, views, 0, nb, 320, 0.0, opt);
+        for (int y = 120; y < 200; y += 4)
+            for (int x = 120; x < 200; x += 4) centre.push_back((int64_t)y * 320 + x);
+    }
+    void bias(size_t k, double px) {
+        for (size_t i = 0; i < m.warp[k].size() / 2; i++) m.warp[k][2 * i] += (float)(2.0 * px / 320);
+    }
+    void precision(size_t k, float p00, float p01, float p11) {
+        m.prec.resize(m.nbrs.size());
+        m.prec[k].assign(m.warp[k].size() / 2 * 3, 0.0f);
+        for (size_t i = 0; i < m.warp[k].size() / 2; i++) {
+            m.prec[k][3 * i] = p00;
+            m.prec[k][3 * i + 1] = p01;
+            m.prec[k][3 * i + 2] = p11;
+        }
+    }
+    std::vector<DensePoint> run(double huber, DensifyStats* st = nullptr) {
+        DensifyOptions o = opt;
+        o.refine_huber = huber;
+        DensifyStats s;
+        std::vector<DensePoint> p = triangulateRef(m, views, centre, o, st ? *st : s);
+        return p;
+    }
+    double err(const std::vector<DensePoint>& p) const { return medianTruthError(sc, views[0], p); }
+};
+
+double maxShift(const std::vector<DensePoint>& a, const std::vector<DensePoint>& b) {
+    if (a.size() != b.size()) return INFINITY;
+    double e = 0;
+    for (size_t i = 0; i < a.size(); i++) e = std::max(e, (a[i].xyz - b[i].xyz).norm());
+    return e;
+}
+
+// b: 0.1 px off along x, certain of x; c: 0.6 px off, certain of y. Mutants:
+// precision as covariance, p00/p11 swapped (both follow c), no refinement
+// (the mean), the track's errors taken at the mean, not the refined point.
+void refine_weights_by_information() {
+    RefineFixture f;
+    f.bias(0, 0.1);
+    f.bias(1, -0.6);
+    f.precision(0, 100.0f, 0.0f, 0.01f);
+    f.precision(1, 1.0f / 0.36f, 0.0f, 100.0f);
+    const double e_mean = f.err(f.run(-1));
+    DensifyStats st;
+    const std::vector<DensePoint> pts = f.run(1e6, &st);
+    const double e = f.err(pts);
+    check(pts.size() > f.centre.size() * 9 / 10, "points " + std::to_string(pts.size()));
+    check(e_mean > 0.02, "fixture: the mean is " + std::to_string(e_mean) + " m off");
+    check(e < 0.45 * e_mean, "refined " + std::to_string(e) + " m, mean " + std::to_string(e_mean));
+    check(st.refined == (int64_t)pts.size(), "refined " + std::to_string(st.refined));
+    // p.error is at least every track error at the written point, in match pixels
+    // (320 of 640); it also folds in each candidate's own two-view error.
+    double worst = 0;
+    for (const DensePoint& p : pts) {
+        double mx = 0;
+        for (const Observation& o : p.track) {
+            const View& v = f.views[(size_t)o.view];
+            const Vec2 q = v.cam.project(sfm::mul(v.R, p.xyz) + v.t);
+            mx = std::max(mx, std::hypot(q.x - o.x, q.y - o.y) / 2.0);
+        }
+        worst = std::max(worst, mx - p.error);
+        check(p.error <= f.opt.reproj_px && p.track.size() == 3, "a point past the filters");
+    }
+    check(worst < 1e-6, "a track error at the written point exceeds p.error by " + std::to_string(worst) + " px");
+}
+
+// Mutant: refinement run with a stand-in precision (identity) when there is none.
+void refine_without_precision_is_the_mean() {
+    RefineFixture f;
+    f.bias(0, 0.1);
+    f.bias(1, -0.6);
+    DensifyStats st;
+    const std::vector<DensePoint> off = f.run(-1), on = f.run(1.345, &st);
+    check(maxShift(off, on) == 0, "no precision moved points by " + std::to_string(maxShift(off, on)));
+    check(st.refine_no_precision > 0 && st.refined == 0, "no-precision count " + std::to_string(st.refine_no_precision));
+    f.precision(0, 100.0f, 0.0f, 0.01f);
+    f.precision(1, 1.0f / 0.36f, 0.0f, 100.0f);
+    check(maxShift(off, f.run(1.345)) > 1e-3, "fixture: precision present changes nothing");
+}
+
+// d (a third image) is 0.8 px off; b and c are right. The sigma is calibrated
+// at the mean, which d has pulled, so Huber recovers ~20 % here (0.80 by hand).
+// Mutant: no Huber (least squares, 1.0), or a weight not reduced past the threshold.
+struct OutlierFixture : RefineFixture {
+    OutlierFixture() : RefineFixture({pinView("d", 3, {0, 0.7, 0}, {3, 0, 0}, 640, 640, 320)}) {
+        bias(2, 0.8);
+        for (size_t k = 0; k < 3; k++) precision(k, 100.0f, 0.0f, 100.0f);
+    }
+};
+
+void refine_downweights_an_outlier() {
+    OutlierFixture f;
+    const double e_ls = f.err(f.run(1e6)), e_h = f.err(f.run(1.345));
+    check(e_ls > 0.004, "fixture: least squares is " + std::to_string(e_ls) + " m off");
+    check(e_h < 0.9 * e_ls, "Huber " + std::to_string(e_h) + " m vs least squares " + std::to_string(e_ls));
+}
+
+// The threshold is in sigmas of the view's own residuals, so the precision's
+// overall scale cannot matter. Mutant: the threshold in RoMa's raw units.
+void refine_is_invariant_to_precision_scale() {
+    OutlierFixture f;
+    const std::vector<DensePoint> base = f.run(1.345);
+    check(maxShift(base, f.run(1e6)) > 1e-3, "fixture: Huber does not bite");
+    for (float k : {1e4f, 1e-4f}) {
+        OutlierFixture g;
+        for (size_t n = 0; n < 3; n++) g.precision(n, 100.0f * k, 0.0f, 100.0f * k);
+        const double s = maxShift(base, g.run(1.345));
+        check(s < 1e-7, "precision x" + std::to_string(k) + " moved points by " + std::to_string(s) + " m");
+    }
+}
+
+// c at 1280 px instead of 640, same field of view: warps and precision are in
+// match pixels, so nothing may change. Mutant: residuals in the view's own pixels
+// (equivalent while every view has one size, so only this fixture sees it).
+void refine_residuals_in_match_pixels() {
+    std::vector<std::vector<DensePoint>> out;
+    for (int nc : {640, 1280}) {
+        RefineFixture f;
+        f.views[2] = pinView("c", 2, {0, -0.5, 0}, {3, 0, 0}, nc, nc, nc / 2.0);
+        f.bias(0, 0.1);
+        f.bias(1, -0.6);
+        f.precision(0, 100.0f, 0.0f, 0.01f);
+        f.precision(1, 1.0f / 0.36f, 0.0f, 100.0f);
+        out.push_back(f.run(1.345));
+    }
+    check(!out[0].empty() && maxShift(out[0], out[1]) < 1e-7,
+          "a 1280 px c moved points by " + std::to_string(maxShift(out[0], out[1])) + " m");
+}
+
+// b2 is another face of b's image, same pose, same 0.3 px error: one image,
+// one observation. Mutant: one observation per view (b counted twice).
+void refine_counts_source_images_once() {
+    View b2 = pinView("b2", 1, {0, 0.5, 0}, {3, 0, 0}, 640, 640, 320);
+    View b3 = pinView("b3", 3, {0, 0.5, 0}, {3, 0, 0}, 640, 640, 320);
+    RefineFixture two, dup({b2}), other({b3});
+    for (RefineFixture* f : {&two, &dup, &other}) {
+        f->bias(0, 0.3);
+        if (f->m.nbrs.size() == 3) f->bias(2, 0.3);
+        for (size_t k = 0; k < f->m.nbrs.size(); k++) f->precision(k, 100.0f, 0.0f, 100.0f);
+    }
+    const std::vector<DensePoint> p2 = two.run(1e6), pd = dup.run(1e6), po = other.run(1e6);
+    check(maxShift(p2, po) > 1e-3, "fixture: a third image with b's error changes nothing");
+    check(maxShift(p2, pd) < 1e-7, "a second face of b moved points by " + std::to_string(maxShift(p2, pd)) + " m");
+}
+
+// A cycle + refine run dumped and replayed gives the same cloud. Mutants: no
+// precision or no B -> A in the dump, a reverse overwriting a forward file,
+// match_both ignored, the reverse taken from match(A, B), auto resolved to on.
+void dump_matches_reproduce_the_run() {
+    const fs::path d = tempDir("dumprun");
+    writeStairDataset(stairScene(), d.string(), 192, 384, 1000);
+    const std::string src = (d / "sparse" / "0").string();
+    const Scene scene = stairScene();
+    struct Size : Matcher {
+        int inputSize() const override { return 96; }
+        Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+        std::string describe() const override { return ""; }
+    } sizer;
+    DensifyJob job;
+    job.model_dir = src;
+    job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+    job.matcher = &sizer;
+    job.opt.refs = 1.0;
+    job.opt.max_depth_error = -1;
+    job.opt.cycle_px = 2.0;
+    job.opt.refine_huber = 1.345;
+    const DensifyPlan pl = planDensify(job);
+    check(pl.opt.cycle_px == 2.0 && pl.opt.refine_huber == 1.345, "explicit settings resolved away");
+    OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 96, 0.1, 0.02, 1);
+    job.matcher = &om;
+    int both_calls = 0;
+    // The reverse is marked (certainty 0.5, which nothing downstream reads) so a
+    // forward file overwritten by another pair's reverse shows.
+    job.match_both = [&](const MatchImage& a, const MatchImage& b) {
+        both_calls++;
+        Warp back = om.match(b, a);
+        for (float& c : back.certainty) c *= 0.5f;
+        return std::make_pair(om.match(a, b), back);
+    };
+    job.dump_dir = (d / "dump").string();
+    fs::create_directories(job.dump_dir);
+    const DensifyResult live = runDensify(job, pl, nullptr);
+    check(both_calls == (int)pl.pairs && live.reverse_matches == pl.pairs,
+          "match_both calls " + std::to_string(both_calls) + ", pairs " + std::to_string(pl.pairs));
+    check(live.stats.cycle > 0 && live.stats.refined > 0 && live.stats.refine_no_precision == 0,
+          "live: cycle " + std::to_string(live.stats.cycle) + ", refined " + std::to_string(live.stats.refined));
+    const std::string a0 = pl.views[(size_t)pl.ref_views[0].view].name;
+    const std::string b0 = pl.views[(size_t)pl.ref_views[0].nbr_views[0]].name;
+    const Warp back = readWarp(DumpMatcher::pairFile(job.dump_dir, b0, a0));
+    const Warp fwd = readWarp(DumpMatcher::pairFile(job.dump_dir, a0, b0));
+    check(fwd.precision.size() == fwd.certainty.size() * 3, "dumped precision " + std::to_string(fwd.precision.size()));
+    check(back.warp != fwd.warp, "B -> A dumped as A -> B");
+    std::set<std::pair<std::string, std::string>> plan_pairs;
+    for (const auto& rv : pl.ref_views)
+        for (int b : rv.nbr_views) plan_pairs.insert({pl.views[(size_t)rv.view].name, pl.views[(size_t)b].name});
+    int both_ways = 0, overwritten = 0, zero = 0;
+    for (const auto& pr : plan_pairs) {
+        if (!plan_pairs.count({pr.second, pr.first})) continue;
+        both_ways++;
+        const Warp w = readWarp(DumpMatcher::pairFile(job.dump_dir, pr.first, pr.second));
+        const float mx = *std::max_element(w.certainty.begin(), w.certainty.end());
+        zero += mx == 0;
+        overwritten += mx > 0 && mx < 0.75f;
+    }
+    std::printf("  pairs both ways %d, of them all-zero certainty (indistinguishable) %d\n", both_ways, zero);
+    check(both_ways - zero > 20 && overwritten == 0, std::to_string(overwritten) + " of " + std::to_string(both_ways) +
+                                                 " forward files hold another pair's reverse");
+
+    DumpMatcher dm(job.dump_dir, 96);
+    DensifyJob replay = job;
+    replay.matcher = &dm;
+    replay.match_both = nullptr;
+    replay.dump_dir.clear();
+    const DensifyResult again = runDensify(replay, pl, nullptr);
+    check(maxShift(live.cloud, again.cloud) == 0, "replayed cloud differs by " +
+                                                      std::to_string(maxShift(live.cloud, again.cloud)) + " m");
+    check(again.stats.cycle == live.stats.cycle && again.stats.refined == live.stats.refined,
+          "replay cycle " + std::to_string(again.stats.cycle) + " refined " + std::to_string(again.stats.refined));
+
+    // Auto with no gate passed: neither feature runs, so no reverse is asked for.
+    DensifyJob plain = replay;
+    plain.opt.cycle_px = 0;
+    plain.opt.refine_huber = 0;
+    const DensifyPlan pp = planDensify(plain);
+    const DensifyResult r0 = runDensify(plain, pp, nullptr);
+    check(r0.reverse_matches == 0 && r0.stats.refined == 0, "auto: reverse " + std::to_string(r0.reverse_matches) +
+                                                                ", refined " + std::to_string(r0.stats.refined));
     fs::remove_all(d);
 }
 
@@ -2268,6 +2667,18 @@ static int body(int argc, char** argv) {
         {"sparse_mask_draws_each_pixel_once", sparse_mask_draws_each_pixel_once},
         {"certainty_threshold_and_masks", certainty_threshold_and_masks},
         {"rejected_neighbour_changes_nothing", rejected_neighbour_changes_nothing},
+        {"cycle_error_is_in_match_pixels", cycle_error_is_in_match_pixels},
+        {"cycle_rejects_broken_round_trips", cycle_rejects_broken_round_trips},
+        {"cycle_measure_bins_without_rejecting", cycle_measure_bins_without_rejecting},
+        {"cycle_without_reverse_refuses", cycle_without_reverse_refuses},
+        {"cycle_off_changes_nothing", cycle_off_changes_nothing},
+        {"refine_weights_by_information", refine_weights_by_information},
+        {"refine_without_precision_is_the_mean", refine_without_precision_is_the_mean},
+        {"refine_downweights_an_outlier", refine_downweights_an_outlier},
+        {"refine_is_invariant_to_precision_scale", refine_is_invariant_to_precision_scale},
+        {"refine_counts_source_images_once", refine_counts_source_images_once},
+        {"refine_residuals_in_match_pixels", refine_residuals_in_match_pixels},
+        {"dump_matches_reproduce_the_run", dump_matches_reproduce_the_run},
     };
     int ran = 0;
     for (const auto& t : tests) {

@@ -1,17 +1,19 @@
 // A content-keyed cache of dense matcher output, as a roma::Matcher decorator:
 // it stores what the wrapped matcher returned and touches no model code. The
 // key is a SHA-256 over both images' pixels and sizes, the matcher identity and
-// its input size, never a name or a file time. Entries hold the warp and the
-// certainty as float32, so a hit equals the matcher's own output to the bit
+// its input size, never a name or a file time. Entries hold the warp, the
+// certainty and the precision as float32, so a hit is the matcher's output to the bit
 // (docs/notes/densify.md, "Warp cache").
 #pragma once
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "roma/Matcher.h"
@@ -19,10 +21,10 @@
 namespace roma {
 
 // A new Warp field must be stored too, and old entries must then miss.
-static_assert(sizeof(Warp) == 2 * sizeof(int) + 2 * sizeof(std::vector<float>),
+static_assert(sizeof(Warp) == 2 * sizeof(int) + 3 * sizeof(std::vector<float>),
               "Warp gained a field: store it in WarpCache.cpp's entry format and raise kEntryVersion");
 
-inline constexpr uint32_t kEntryVersion = 1;
+inline constexpr uint32_t kEntryVersion = 2;   // 2: precision after the certainty
 inline constexpr uint64_t kDefaultCacheBudget = 16ull << 30;
 
 // "16G", "500MiB", "1.5GB", "123": K, M, G, T are binary whatever the spelling.
@@ -130,6 +132,10 @@ public:
     CachedMatcher(Matcher& inner, WarpCache& cache, std::string identity);
     int inputSize() const override { return inner_.inputSize(); }
     Warp match(const MatchImage& a, const MatchImage& b) override;
+    // A -> B and B -> A, each its own entry: `both` runs only when neither is
+    // stored, and a single match() fills the one that is missing.
+    std::pair<Warp, Warp> matchBoth(const MatchImage& a, const MatchImage& b,
+                                    const std::function<std::pair<Warp, Warp>(const MatchImage&, const MatchImage&)>& both);
     std::string describe() const override { return inner_.describe(); }
 
     const CachedStats& stats() const { return stats_; }

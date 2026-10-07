@@ -40,6 +40,24 @@ What was taken, and from where. "Design" means the idea only; no line was copied
       file defeats. Storage, eviction and verification are our own. Design
       only.
 
+  src/roma/Densify.{h,cpp} (cycleError, the per-neighbour cycle check), --cycle
+      The bidirectional cycle check: a match whose B -> A prediction does not
+      return to A's pixel is dropped, the threshold in matcher pixels, applied
+      only when the reverse exists (the pull request's max_cycle_error and
+      cycle_check, src/dense/DenseConfig.h, src/dense/Reconstruction.cpp). Here a
+      missing reverse refuses rather than passing, the reverse's certainty is
+      not read, and the threshold comes from a measured distribution
+      (--cycle measure). Design only.
+
+  src/roma/Densify.{h,cpp} (refineAlongRay), src/roma/Matcher.h Warp::precision, --refine
+      Refining a fused point with RoMa's 2x2 precision as the residual's
+      information under a Huber loss, by iteratively reweighted Gauss-Newton,
+      one observation per source image (the pull request's robust point
+      refinement, src/dense/Geometry.cpp). Here the point moves only along the
+      reference ray, the Huber threshold is in sigmas of each view's own
+      residuals, the weights are the precision alone, and every per-point
+      filter judges the refined point. Design only.
+
 Items of the pull request that were not taken: its RoMa model and pipeline, its
 dense output tree and CLI, its training changes. See
 docs/superpowers/plans/2026-10-07-integrate-pr154.md for what was decided and why.

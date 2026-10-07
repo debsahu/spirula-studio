@@ -67,6 +67,11 @@ struct DensifyOptions {
     bool visibility_check = true;   // auto min-track: drop two-image points another image saw through
     double max_depth_error = 0;     // per match pixel, a share of the depth; 0 auto, < 0 off
     bool far_isolated = true;       // drop isolated points far outside the sparse box (default mode only)
+    // A -> B -> A round trip, match pixels of A: < 0 off, 0 auto, inf measures without rejecting.
+    double cycle_px = 0;
+    // Each fused point moved along the reference ray to RoMa's precision-weighted
+    // Huber fit: the threshold in sigmas of the view's own residuals; < 0 off, 0 auto.
+    double refine_huber = 0;
     bool no_filter = false;
 
     double voxel = 0;               // 0: auto, < 0: off
@@ -113,7 +118,14 @@ struct DensifyStats {
             capped = 0, depth_samples = 0, depth_nodata = 0, depth_disagree = 0,
             depth_through = 0, depth_local = 0, depth_left_to_matches = 0, depth_kept = 0, depth_edge = 0,
             depth_normal = 0, depth_local_normal = 0, depth_vote_close = 0, fill_near_matches = 0,
-            far_beyond = 0, far_isolated = 0;
+            far_beyond = 0, far_isolated = 0, cycle = 0, refined = 0, refine_fallback = 0,
+            refine_no_precision = 0;
+    // A -> B -> A error, 0.05 match px bins, the last one open: samples that went
+    // on to be candidates, and samples a geometric filter rejected.
+    std::array<int64_t, 64> cycle_kept_hist{}, cycle_rejected_hist{};
+    // RoMa's Mahalanobis residual at the fused mean, half-octave bins from 2^-6.
+    std::array<int64_t, 40> refine_residual_hist{};
+    std::vector<float> refine_scales;    // per reference view, the sigma the Huber threshold is in
     // 5-degree bins: candidate normal against the agreeing images' (agree), against
     // a random pixel of the same image (null), and a hybrid fill against its neighbourhood.
     std::array<int64_t, 36> normal_agree_hist{}, normal_null_hist{}, local_normal_hist{};
@@ -130,6 +142,8 @@ struct RefMatches {
     int w = 0, h = 0;
     std::vector<std::vector<float>> warp;   // per neighbour [h*w*2], B normalised
     std::vector<std::vector<float>> cert;   // per neighbour [h*w]
+    std::vector<std::vector<float>> prec;   // per neighbour [h*w*3] (Warp::precision) or empty
+    std::vector<std::vector<float>> rev;    // per neighbour B -> A [h*w*2], when the cycle check runs
     std::vector<uint8_t> rgb_match;         // the reference at w x h, masked (plugin colour)
     // Default-mode colour at a native pixel of the reference view, 0..1.
     std::function<std::array<float, 3>(double x, double y)> colour_at;
@@ -149,6 +163,10 @@ std::vector<float> collectCertainty(const Warp& raw, const std::vector<uint8_t>&
 // on RoMa's pixel-centre grid, or the continuous coordinate j + 0.5.
 double referenceX(int j, int w, bool plugin_exact);
 double warpX(float u, int w, bool plugin_exact);
+
+// Where B's warp sends A's pixel (j, i) back to in A, through `rev` bilinear at
+// B's continuous coordinate (u, v) in [-1, 1]: the distance in match pixels.
+double cycleError(const std::vector<float>& rev, int w, int h, float u, float v, int j, int i);
 
 // The points one reference view yields from the given samples (flat indices
 // into its w x h grid). `source_image_of` maps a view to its source image,

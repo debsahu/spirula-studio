@@ -25,6 +25,9 @@ struct Warp {
     int width = 0, height = 0;
     std::vector<float> warp;
     std::vector<float> certainty;
+    // Optional, empty when the implementation has none: RoMa's 2x2 information
+    // of where A's pixel lands in B, (p00, p01, p11) per pixel, 1 / B's px^2 at this size.
+    std::vector<float> precision;
 };
 
 class Matcher {

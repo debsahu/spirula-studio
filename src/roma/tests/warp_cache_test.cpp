@@ -88,7 +88,7 @@ public:
     int size = 16;
     int calls = 0;
     int sleep_ms = 0;
-    bool bad_warp = false, bad_cert = false;
+    bool bad_warp = false, bad_cert = false, prec = true;
     int inputSize() const override { return size; }
     std::string describe() const override { return "fake"; }
     Warp match(const MatchImage& a, const MatchImage& b) override {
@@ -116,6 +116,10 @@ public:
             w.warp[2 * i + 1] = (float)(0.99 * std::cos(0.53 * (double)i + ph));
             w.certainty[i] = (float)(0.5 + 0.5 * std::sin(0.11 * (double)i + 1.3 * ph));
         }
+        if (prec) {
+            w.precision.resize(3 * n);
+            for (size_t i = 0; i < 3 * n; i++) w.precision[i] = (float)(40.0 + 30.0 * std::sin(0.29 * (double)i + 0.7 * ph));
+        }
         if (bad_warp) w.warp[3] = std::nanf("");
         if (bad_cert) w.certainty[1] = 1.5f;
         return w;
@@ -142,7 +146,7 @@ WarpCacheOptions opts(const fs::path& d, uint64_t budget = kDefaultCacheBudget) 
 
 bool sameWarp(const Warp& a, const Warp& b) {
     return a.width == b.width && a.height == b.height && sameBits(a.warp, b.warp) &&
-           sameBits(a.certainty, b.certainty);
+           sameBits(a.certainty, b.certainty) && sameBits(a.precision, b.precision);
 }
 
 uint64_t dirBytes(const fs::path& d) {
@@ -156,7 +160,7 @@ uint64_t dirBytes(const fs::path& d) {
 
 // Mutants: warp stored as half floats (a lossy store reads ~1e-3 here), the
 // certainty as uint16 (off by up to 7.6e-6, which moved 3 of 78,695 points on a
-// real run); a hit that returns anything but what the matcher returned.
+// real run); precision dropped or half floats; a hit that is not the matcher's output.
 void hit_equals_miss() {
     const fs::path d = tempDir("hit");
     WarpCache cache(opts(d));
@@ -170,6 +174,10 @@ void hit_equals_miss() {
     for (float c : raw.certainty) u16err = std::max(u16err, (double)std::fabs(std::rint(c * 65535.0f) / 65535.0f - c));
     check(f16err > 1e-4, "fixture cannot tell a half-float warp from a float one: " + std::to_string(f16err));
     check(u16err > 1e-6, "fixture cannot tell a uint16 certainty from a float one: " + std::to_string(u16err));
+    double pf16 = 0;
+    for (float v : raw.precision) pf16 = std::max(pf16, (double)std::fabs(f16Round(v) - v));
+    check(raw.precision.size() == raw.certainty.size() * 3 && pf16 > 1e-3,
+          "fixture cannot tell a half-float precision from a float one: " + std::to_string(pf16));
 
     const Warp first = cm.match(a.view(), b.view());
     const Warp second = cm.match(a.view(), b.view());
@@ -410,6 +418,9 @@ void decoder_refuses_valid_looking_garbage() {
     cases.push_back({"future version", resign(put32(good, 8, kEntryVersion + 1))});
     cases.push_back({"warp count off by one", resign(put64(good, 64, 2ull * w.width * w.height + 1))});
     cases.push_back({"certainty count off", resign(put64(good, 72, (uint64_t)w.width * w.height - 1))});
+    cases.push_back({"precision count off", resign(put64(good, 80, 3ull * w.width * w.height - 3))});
+    { Warp x = w; x.precision[4] = std::nanf(""); cases.push_back({"NaN precision", encodeEntry(key, x, 0.5)}); }
+    { Warp x = w; x.precision.resize(x.precision.size() - 3); cases.push_back({"precision one pixel short, length to match", encodeEntry(key, x, 0.5)}); }
     {
         std::vector<uint8_t> longer = good, shorter = good;
         longer.insert(longer.end() - 8, 4, 0);
@@ -770,9 +781,14 @@ void entry_size_is_the_format() {
     const Img a = makeImg("a", 1), b = makeImg("b", 2);
     cm.match(a.view(), b.view());
     const uint64_t n = 64 * 64;
-    check(fs::file_size(cache.entryPath(cm.keyFor(a.view(), b.view()))) == 80 + n * 8 + n * 4 + 8,
-          "entry is not 80 + 8 B warp + 4 B certainty per pixel + 8");
-    check(cache.info().bytes == 80 + n * 8 + n * 4 + 8, "info bytes");
+    check(fs::file_size(cache.entryPath(cm.keyFor(a.view(), b.view()))) == 88 + n * 8 + n * 4 + n * 12 + 8,
+          "entry is not 88 + 8 B warp + 4 B certainty + 12 B precision per pixel + 8");
+    check(cache.info().bytes == 88 + n * 8 + n * 4 + n * 12 + 8, "info bytes");
+    fake.prec = false;
+    const Img c = makeImg("c", 3);
+    cm.match(a.view(), c.view());
+    check(fs::file_size(cache.entryPath(cm.keyFor(a.view(), c.view()))) == 88 + n * 8 + n * 4 + 8,
+          "an entry without precision is not 88 + 12 B per pixel + 8");
     fs::remove_all(d);
 }
 
@@ -896,11 +912,80 @@ void stage_output_is_unchanged_and_filters_reuse_matches() {
     fs::remove_all(d);
 }
 
+
+// A version-1 entry (header 80, warp and certainty, no precision) for the same
+// key misses for its version, is matched again and replaced. Mutant: the
+// version not raised, which a v1 entry then fails for another reason.
+void old_version_entry_misses() {
+    const fs::path d = tempDir("v1");
+    WarpCache cache(opts(d));
+    Fake fake;
+    CachedMatcher cm(fake, cache, "id");
+    const Img a = makeImg("a", 1), b = makeImg("b", 2);
+    const std::string key = cm.keyFor(a.view(), b.view());
+    const Warp w = Fake().match(a.view(), b.view());
+    const size_t nw = w.warp.size(), nc = w.certainty.size();
+    std::vector<uint8_t> v1(80 + (nw + nc) * 4 + 8, 0);
+    auto put = [&](size_t at, const void* p, size_t n) { std::memcpy(v1.data() + at, p, n); };
+    const uint32_t order = 0x01020304u, ver = 1, flags = 0;
+    put(0, "SPWC", 4); put(4, &order, 4); put(8, &ver, 4); put(12, &flags, 4);
+    const std::vector<uint8_t> v2 = encodeEntry(key, w, 0.5);
+    put(16, v2.data() + 16, 32);   // the key digest, as the current format writes it
+    put(48, &w.width, 4); put(52, &w.height, 4);
+    const double secs = 0.5;
+    const uint64_t n64w = nw, n64c = nc;
+    put(56, &secs, 8); put(64, &n64w, 8); put(72, &n64c, 8);
+    put(80, w.warp.data(), nw * 4); put(80 + nw * 4, w.certainty.data(), nc * 4);
+    const uint64_t sum = entryChecksum(v1.data(), v1.size() - 8);
+    put(v1.size() - 8, &sum, 8);
+    std::string why;
+    check(!decodeEntry(v1, key, nullptr, nullptr, &why) && why == "another entry version",
+          "a version-1 entry was refused for '" + why + "', not its version");
+    fs::create_directories(fs::path(cache.entryPath(key)).parent_path());
+    spit(cache.entryPath(key), v1);
+    const Warp got = cm.match(a.view(), b.view());
+    check(fake.calls == 1 && sameWarp(got, w), "a version-1 entry was served");
+    check(sameWarp(cm.match(a.view(), b.view()), w) && fake.calls == 1, "the rematch was not stored");
+    fs::remove_all(d);
+}
+
+// Both directions at once: each is its own entry, so a pair matched either way
+// round before is half done. Mutants: matchBoth bypassing the cache, running
+// both directions when one was stored, storing B -> A under A -> B's key.
+void match_both_is_cached_per_direction() {
+    const fs::path d = tempDir("both");
+    WarpCache cache(opts(d));
+    Fake fake;
+    CachedMatcher cm(fake, cache, "id");
+    const Img a = makeImg("a", 1), b = makeImg("b", 2), c = makeImg("c", 3);
+    int both = 0;
+    auto inner = [&](const MatchImage& x, const MatchImage& y) {
+        both++;
+        return std::make_pair(fake.match(x, y), fake.match(y, x));
+    };
+    const Warp ab = Fake().match(a.view(), b.view()), ba = Fake().match(b.view(), a.view());
+    auto r = cm.matchBoth(a.view(), b.view(), inner);
+    check(both == 1 && sameWarp(r.first, ab) && sameWarp(r.second, ba), "cold matchBoth");
+    const int calls = fake.calls;
+    r = cm.matchBoth(a.view(), b.view(), inner);
+    check(both == 1 && fake.calls == calls && sameWarp(r.first, ab) && sameWarp(r.second, ba), "warm matchBoth matched again");
+    check(sameWarp(cm.match(b.view(), a.view()), ba) && fake.calls == calls, "B -> A is not its own entry");
+    cm.match(a.view(), c.view());
+    const int before = fake.calls;
+    r = cm.matchBoth(a.view(), c.view(), inner);
+    check(both == 1 && fake.calls == before + 1 && sameWarp(r.second, Fake().match(c.view(), a.view())),
+          "one direction stored: matched " + std::to_string(fake.calls - before) + " times, matchBoth " + std::to_string(both - 1));
+    check(cm.stats().hits == 4 && cm.stats().misses == 4, "counts " + std::to_string(cm.stats().hits) + " hits, " +
+                                                               std::to_string(cm.stats().misses) + " misses (want 4, 4)");
+    fs::remove_all(d);
+}
 }  // namespace
 
 static int body(int argc, char** argv) {
     const std::vector<std::pair<const char*, void (*)()>> tests = {
         {"hit_equals_miss", hit_equals_miss},
+        {"old_version_entry_misses", old_version_entry_misses},
+        {"match_both_is_cached_per_direction", match_both_is_cached_per_direction},
         {"changed_pixels_miss", changed_pixels_miss},
         {"order_and_shape_are_keyed", order_and_shape_are_keyed},
         {"identity_and_size_are_keyed", identity_and_size_are_keyed},

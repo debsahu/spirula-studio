@@ -42,6 +42,8 @@ int densifyCheck(const CheckOptions& co) {
         };
     job.opt.refs = 1.0;
     job.opt.seed = 7;
+    job.opt.cycle_px = co.cycle_px;
+    job.opt.refine_huber = co.refine_huber;
     std::unique_ptr<DepthFiles> depth;
     if (co.source != "roma") {
         if (!fs::exists(dir / "depths")) writeStairDepths(scene, dir.string(), SyntheticDepth{});
@@ -93,6 +95,9 @@ int densifyCheck(const CheckOptions& co) {
                 (long long)st.samples, (long long)st.below_certainty, (long long)st.outside,
                 (long long)st.sampson, (long long)st.reproj, (long long)st.cheirality,
                 (long long)st.parallax, (long long)st.ref_reproj, (long long)st.short_track);
+    std::printf("check: cycle %.3g px rejected %lld; refine %.3g: refined %lld, kept the mean %lld, no precision %lld\n",
+                plan.opt.cycle_px, (long long)st.cycle, plan.opt.refine_huber, (long long)st.refined,
+                (long long)st.refine_fallback, (long long)st.refine_no_precision);
     {
         const double edges[] = {0, 3, 6, 12, 24, 1e9};
         for (int b = 0; b < 5; b++) {
