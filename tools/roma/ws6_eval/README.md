@@ -4,7 +4,7 @@ Scripts that produced the WS-6 numbers in the plan (section 10.5). They are re-r
 path relative to the current directory or names a machine-specific location. Every input is a flag, and
 every flag has a default hung off the **data root**.
 
-The densify runs themselves are the product CLI; `src/roma/model/tests/roma_match_pairs.cpp` is the one C++ tool.
+The densify runs themselves are the product CLI; `tools/roma/roma_match_pairs.cpp` is the one C++ tool.
 
 ## Data root and path rules (`evalcfg.py`)
 
