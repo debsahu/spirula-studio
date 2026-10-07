@@ -21,7 +21,9 @@ struct Terms {
 // Null for a family whose terms are not shown in full (the SAM families).
 const Terms* terms_for(const std::string& family);
 
-// <config>/gui.conf. Matches app::config_dir() (src/app/AppPaths.cpp).
+// <config>/gui.conf, where app::config_dir() puts it. Empty when neither
+// XDG_CONFIG_HOME nor HOME is set (APPDATA on Windows): app::config_dir() falls
+// back to the working directory there, and consent read from there is not consent.
 std::string settings_path();
 
 bool accepted(const std::string& family);
@@ -29,5 +31,7 @@ bool accepted(const std::string& family);
 // file could not be written, in which case the family is NOT accepted.
 bool record(const std::string& family);
 std::vector<std::string> accepted_all();
+// The families of a comma list that are not accepted, in order. Empty means go.
+std::vector<std::string> missing(const std::string& families);
 
 }  // namespace spirula::license

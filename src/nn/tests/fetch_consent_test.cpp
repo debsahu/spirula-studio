@@ -4,7 +4,9 @@
 //
 // Runs against a scratch config and cache directory, never the user's.
 
+#include "app/gui/FetchSource.h"
 #include "core/LicenseConsent.h"
+#include "core/ModelMirror.h"
 #include "nn/core/Error.h"
 #include "nn/io/Fetch.h"
 #include "roma/model/Fetch.h"
@@ -153,6 +155,7 @@ void test_refusal() {
     const std::string m4 = message_of([&] { nn::ensure_file(f, "test"); });
     check(!has(m4, "has not been accepted") && m4 != "<did not throw>",
           "accepted but absent: it proceeds to the download, which fails on its own terms");
+    check(!has(m4, "modelscope") && !has(m4, "trying"), "a no_mirror download never names a mirror");
 }
 
 void test_no_family_unaffected() {
@@ -164,6 +167,7 @@ void test_no_family_unaffected() {
     SS_UNSETENV("SS_NO_AUTO_FETCH");
     check(has(m, "may not download") && !has(m, "has not been accepted"),
           "a file with no license_family is never gated");
+    check(has(m, "modelscope.cn"), "control: an ordinary file's refusal names the project mirror");
     check(!nn::mirror_url(f).empty(), "default FetchFile keeps its project mirror");
     f.no_mirror = true;
     check(nn::mirror_url(f).empty(), "no_mirror: there is no mirror URL to fall back to");
@@ -314,6 +318,31 @@ void test_roma_checkpoint() {
     check(roma::ensure_checkpoint() == nn::cached_path(f), "roma: accepted, it loads from the cache");
 }
 
+// Every route a download takes resolves its fallback through spirula::mirror_for.
+void test_mirror_paths() {
+    const nn::FetchFile& roma_file = roma::checkpoint_file();
+    check(spirula::mirror_for(roma_file.file, roma_file.mirror, roma_file.no_mirror).empty(),
+          "mirror_for: empty for the RoMa file");
+    check(nn::mirror_url(roma_file).empty(), "nn::mirror_url: empty for the RoMa file");
+    const gui::PendingDownload p = gui::pending_download(roma_file);
+    check(p.mirror.empty() && p.url == roma_file.url && p.license_family == "dinov3,romav2" &&
+              p.dest == nn::cached_path(roma_file),
+          "GUI download queue entry: no mirror, both licences carried, the cache path");
+    // An own mirror still wins for an ordinary file, and the project's is the default.
+    nn::FetchFile own;
+    own.file = "x.bin";
+    own.url = "https://example.invalid/primary/x.bin";
+    own.mirror = "https://example.invalid/x.bin";
+    check(gui::pending_download(own).mirror == "https://example.invalid/x.bin",
+          "control: a file's own mirror is carried");
+    own.mirror = nullptr;
+    check(has(gui::pending_download(own).mirror, "modelscope.cn") &&
+              gui::pending_download(own).license_family.empty(),
+          "control: an ordinary file gets the project mirror and no licence");
+    own.no_mirror = true;
+    check(gui::pending_download(own).mirror.empty(), "no_mirror alone empties the entry");
+}
+
 }  // namespace
 
 int main() {
@@ -326,6 +355,7 @@ int main() {
         test_terms_shown();
         test_argv();
         test_roma_checkpoint();
+        test_mirror_paths();
     } catch (const std::exception& e) {
         std::printf("FAIL exception: %s\n", e.what());
         return 1;

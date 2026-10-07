@@ -436,7 +436,10 @@ void GuiApp::load_settings() {
 void GuiApp::save_settings() {
     // Read before the file is truncated: the CLI may have added to it since load.
     const std::vector<std::string> accepted = spirula::license::accepted_all();
-    FILE* f = std::fopen(settings_path().c_str(), "w");
+    // Written beside and renamed over: a crash or a full disk mid-write must not
+    // leave a truncated gui.conf, which would also forget every accepted licence.
+    const std::string tmp = settings_path() + ".tmp";
+    FILE* f = std::fopen(tmp.c_str(), "w");
     if (!f) return;
     _recent.write_settings(f);
     std::fprintf(f, "colmap_exe=%s\n", _colmap_exe.c_str());
@@ -462,7 +465,11 @@ void GuiApp::save_settings() {
         std::fprintf(f, "%s%s=%s\n", kDirPrefix, key.c_str(), dir.c_str());
     for (const auto& l : accepted)
         std::fprintf(f, "accepted_license=%s\n", l.c_str());
-    std::fclose(f);
+    const bool ok = std::ferror(f) == 0;
+    const bool closed = std::fclose(f) == 0;
+    std::error_code ec;
+    if (ok && closed) fs::rename(tmp, settings_path(), ec);
+    if (!ok || !closed || ec) fs::remove(tmp, ec);
 }
 
 void GuiApp::remember(RecentKind kind, std::string path) {
@@ -3779,8 +3786,10 @@ void GuiApp::advance_license_queue() {
             return;
         }
     _license_queue.clear();
-    if (auto then = std::move(_license_then)) then();
+    // Taken out first: `then` may call request_licenses and set a new one.
+    std::function<void()> then = std::move(_license_then);
     _license_then = nullptr;
+    if (then) then();
 }
 
 MaskModelFiles GuiApp::selected_mask_model() const {

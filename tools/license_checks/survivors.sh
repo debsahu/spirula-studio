@@ -25,9 +25,24 @@ none $G '_accepted_licenses'
 none src/app/gui/GuiApp.h '_accepted_licenses'
 has 1 $G 'const std::vector<std::string> accepted = spirula::license::accepted_all();'
 has 1 $G 'for (const auto& l : accepted)'
+# A callback that re-queues licences must not be wiped after it runs.
+has 1 $G 'std::function<void()> then = std::move(_license_then);'
+none $G 'if (auto then = std::move(_license_then)) then();'
+# save_settings writes beside and renames over.
+has 1 $G 'const std::string tmp = settings_path() + ".tmp";'
+has 1 $G 'if (ok && closed) fs::rename(tmp, settings_path(), ec);'
+none $G 'std::fopen(settings_path().c_str(), "w")'
+# The download queue refuses a licence-gated file that is not accepted.
+has 1 src/app/gui/ModelCache.cpp 'spirula::license::missing(license_family)'
+has 1 src/app/gui/ModelCache.cpp '_dl.start(d.url, d.dest, d.bytes, d.mirror, d.license_family);'
+none src/app/gui/ModelCache.cpp 'model_mirror_url'
+none src/app/gui/SfmRunner.cpp 'model_mirror_url'
+none src/app/gui/GeometryRunner.cpp 'model_mirror_url'
+# Main consumes --accept-license for every command.
+has 1 src/app/Main.cpp 'nn::consume_accept_license_args(argc, argv);'
 # accepted_all() is read BEFORE the "w" open truncates gui.conf.
 read_at=$(command grep -nF 'spirula::license::accepted_all();' $G | head -1 | cut -d: -f1)
-open_at=$(command grep -nF 'std::fopen(settings_path().c_str(), "w")' $G | head -1 | cut -d: -f1)
+open_at=$(command grep -nF 'std::fopen(tmp.c_str(), "w")' $G | head -1 | cut -d: -f1)
 if [ -n "$read_at" ] && [ -n "$open_at" ] && [ "$read_at" -lt "$open_at" ]; then
     echo "ok   accepted_all() ($read_at) precedes the truncating open ($open_at)"
 else
