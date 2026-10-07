@@ -95,6 +95,14 @@ std::string num(double v, int prec = 3) {
     return b;
 }
 
+// JSON has no inf or nan.
+std::string jnum(double v) {
+    if (!std::isfinite(v)) return "null";
+    std::ostringstream o;
+    o << v;
+    return o.str();
+}
+
 std::string jsonEscape(const std::string& s) {
     std::string o;
     for (char c : s) {
@@ -330,23 +338,27 @@ int spirula_densify_main(int argc, char** argv) {
            << "  \"matcher\": \"" << jsonEscape(job.matcher->describe()) << "\",\n"
            << "  \"plugin_exact\": " << (r.plugin_exact ? "true" : "false") << ",\n"
            << "  \"images\": " << pl.images.size() << ", \"sparse_points\": " << pl.sparse_points
-           << ", \"sparse_spacing\": " << pl.sparse_spacing << ",\n"
+           << ", \"sparse_spacing\": " << jnum(pl.sparse_spacing) << ",\n"
            << "  \"split\": " << (pl.split ? "true" : "false") << ", \"face_size\": " << pl.face_size
            << ", \"match_size\": " << pl.match_size << ",\n"
            << "  \"refs\": " << pl.refs.size() << ", \"ref_views\": " << pl.ref_views.size()
            << ", \"pairs\": " << pl.pairs << ",\n"
            << "  \"neighbour_rule\": \"" << (r.neighbour_rule == roma::NeighbourRule::Covis ? "covis" : "pose")
-           << "\", \"neighbours\": " << r.neighbours << ", \"max_baseline\": " << pl.max_baseline << ",\n"
+           << "\", \"neighbours\": " << r.neighbours << ", \"max_baseline\": " << jnum(pl.max_baseline) << ",\n"
            << "  \"held_out\": [";
         for (size_t i = 0; i < pl.held_out.size(); i++)
             js << (i ? ", " : "") << '"' << jsonEscape(pl.images[(size_t)pl.held_out[i]].name) << '"';
-        js << "],\n  \"matches_per_ref\": " << r.matches_per_ref << ", \"min_certainty\": " << r.min_certainty
-           << ", \"certainty_floor\": " << r.certainty_floor << ", \"sample_cap\": " << r.sample_cap << ",\n"
-           << "  \"reproj_px\": " << r.reproj_px << ", \"sampson_px2\": " << r.sampson_px2
-           << ", \"min_parallax_deg\": " << r.min_parallax_deg << ", \"min_track\": " << pl.min_track
-           << ", \"lone_parallax_deg\": " << r.lone_parallax_deg << ",\n"
-           << "  \"voxel\": " << pl.voxel << ", \"max_points\": " << pl.max_points << ", \"seed\": " << r.seed << ",\n"
-           << "  \"mask_keep\": " << pl.mask_keep << ", \"flip_mask\": " << (job.flip_mask ? "true" : "false") << ",\n"
+        js << "],\n  \"refs_list\": [";
+        for (size_t i = 0; i < pl.refs.size(); i++)
+            js << (i ? ", " : "") << '"' << jsonEscape(pl.images[(size_t)pl.refs[i]].name) << '"';
+        js << "],\n  \"matches_per_ref\": " << r.matches_per_ref << ", \"min_certainty\": " << jnum(r.min_certainty)
+           << ", \"certainty_floor\": " << jnum(r.certainty_floor) << ", \"sample_cap\": " << jnum(r.sample_cap) << ",\n"
+           << "  \"reproj_px\": " << jnum(r.reproj_px) << ", \"sampson_px2\": " << r.sampson_px2
+           << ", \"min_parallax_deg\": " << jnum(r.min_parallax_deg) << ", \"min_track\": " << pl.min_track
+           << ", \"lone_parallax_deg\": " << jnum(r.lone_parallax_deg)
+           << ", \"max_depth_error\": " << jnum(r.max_depth_error) << ",\n"
+           << "  \"voxel\": " << jnum(pl.voxel) << ", \"max_points\": " << pl.max_points << ", \"seed\": " << r.seed << ",\n"
+           << "  \"mask_keep\": " << jnum(pl.mask_keep) << ", \"flip_mask\": " << (job.flip_mask ? "true" : "false") << ",\n"
            << "  \"stats\": {\"samples\": " << st.samples << ", \"below_certainty\": " << st.below_certainty
            << ", \"outside\": " << st.outside << ", \"sampson\": " << st.sampson << ", \"nonfinite\": " << st.nonfinite
            << ", \"reproj\": " << st.reproj << ", \"cheirality\": " << st.cheirality << ", \"parallax\": " << st.parallax
@@ -356,8 +368,8 @@ int spirula_densify_main(int argc, char** argv) {
            << "  \"track_hist\": {";
         bool first = true;
         for (const auto& kv : st.track_hist) { js << (first ? "" : ", ") << '"' << kv.first << "\": " << kv.second; first = false; }
-        js << "},\n  \"points\": " << res.points << ", \"seconds_total\": " << res.seconds_total
-           << ", \"seconds_match\": " << res.seconds_match << "\n}\n";
+        js << "},\n  \"points\": " << res.points << ", \"seconds_total\": " << jnum(res.seconds_total)
+           << ", \"seconds_match\": " << jnum(res.seconds_match) << "\n}\n";
 
         roma::writeSibling(job.model_dir, job.out_dir, pl, res.cloud, js.str());
         std::printf("%s\n", format(D::done, {job.out_dir, (long long)res.points,
