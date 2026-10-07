@@ -107,6 +107,28 @@ of parallax. It is implemented (`DensifyOptions::lone_parallax_deg`) and **off**
 the S-1 staircase with 3 % random matches and no noise, it kept 49 points more than
 5 cm off a surface, every one of them a two-view floater, against 0 without it.
 
+## In the GUI
+
+- **New Dataset screen**: "Add dense points (RoMa v2)", after the depth-and-normals
+  box. It is a step of the run (`Step::Densify`, between the reconstruction and
+  geometry, `DensifyRunner.h`): a `spirula densify` child with the same plan row,
+  record, redo button and batch check as geometry. Every override is 0 for "the
+  tool chooses", which is also what the CLI does. A preset file carries the settings
+  but never the source model, which belongs to one capture.
+- **Training screen**: "Add Dense Points" is the generalised `RecomputePanel`
+  (`Kind::Dense`), for a dataset that is already built. The **Model** combo under it
+  lists every COLMAP model of the dataset with its image and point counts and sets
+  `colmap_recon_dir`, so `sparse/0-roma` trains with one click; the dataset reloads
+  and the preview's point count follows.
+- **Licences**: the first run, or the "Get the RoMa v2 checkpoint" button, calls
+  `GuiApp::request_licenses({"romav2", "dinov3"}, ...)`: the MIT text, then the DINOv3
+  Agreement with its tick, then the download. Cancelling either fetches nothing and
+  logs that no dense points were made. The child inherits the acceptance through
+  `gui.conf`.
+- **Presets**: the combo is sent as `--preset` only when `spirula densify --help` lists
+  the flag, and is disabled with a tooltip until then.
+- Gate: `tools/roma/densify_gui_gate.py` (`tools/guictl.py` on a 6-image fixture).
+
 ## Checks
 
 - `roma_densify_test`: the stage on inputs whose answer is known, each test naming the

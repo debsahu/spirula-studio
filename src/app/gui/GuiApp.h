@@ -17,6 +17,7 @@
 #include "app/gui/FilmReel.h"
 #include "app/gui/GeometryPanel.h"
 #include "app/gui/PartitionPanel.h"
+#include "app/gui/ReconModels.h"
 #include "app/gui/RecomputePanel.h"
 #include "app/gui/RoiEditor.h"
 #include "app/gui/ImageCompare.h"
@@ -392,6 +393,9 @@ private:
     bool densify_ready() const;
     bool densify_model_missing() const;
     void draw_recon_model_row(bool busy);
+    std::vector<ReconModel> _recon_models;
+    std::string _recon_models_for;
+    double _recon_models_at = -10.0;
     void draw_dense_row(bool busy);
     // Opens the geometry preview on the output folder when it already holds a
     // reconstruction -- the only case where the real cameras are known -- and

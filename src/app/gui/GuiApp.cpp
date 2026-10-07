@@ -2904,6 +2904,11 @@ std::string GuiApp::state_json() {
     out += ",\"model_download\":\"";
     out += kDownload[(int)_download.state()];
     out += "\",\"license_prompt\":" + quoted(_license_prompt);
+    out += ",\"recon_dir\":" + quoted(_cfg.colmap_recon_dir);
+    out += ",\"densify_ready\":";
+    out += densify_ready() ? "true" : "false";
+    out += ",\"dense_panel_running\":";
+    out += _dense_panel.running() ? "true" : "false";
     // Index order is the declaration order of mask::CanvasMode.
     static const char* kCanvasModes[] = {"shape", "eraser", "path", "pen", "sam"};
     static_assert(sizeof(kCanvasModes) / sizeof(kCanvasModes[0]) == (size_t)mask::CanvasMode::Sam + 1,
@@ -5708,7 +5713,12 @@ void GuiApp::draw_densify_options() {
 // The training screen's chooser of which of the dataset's models it trains on.
 void GuiApp::draw_recon_model_row(bool busy) {
     if (_cfg.data.empty()) return;
-    const std::vector<ReconModel> models = list_recon_models(_cfg.data);
+    if (_recon_models_for != _cfg.data || ImGui::GetTime() - _recon_models_at > 1.0) {
+        _recon_models = list_recon_models(_cfg.data);
+        _recon_models_for = _cfg.data;
+        _recon_models_at = ImGui::GetTime();
+    }
+    const std::vector<ReconModel>& models = _recon_models;
     if (models.empty()) return;
     ImGui::BeginDisabled(busy);
     ImGui::SetNextItemWidth(px(320.0f));

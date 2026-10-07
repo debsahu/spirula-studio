@@ -2,8 +2,9 @@
 """Cut a few images out of the staircase `spirula densify --check --check-dir` writes.
 
 The GUI gate (tools/roma/densify_gui.txt) wants a dataset small enough to
-densify in a minute: the first N pinhole images, their masks, and a sparse
-model reduced to them. Points left with fewer than two observations are
+densify in a minute: the first N pinhole images and a sparse
+model reduced to them. No masks: the staircase's pinhole masks keep every pixel, which
+densify's polarity guard refuses. Points left with fewer than two observations are
 dropped from the tracks; every 2-D row keeps its index, so a track still
 points at the right keypoint.
 
@@ -84,10 +85,9 @@ def main():
             f.write(struct.pack("<Q3d3BdQ", pid, *xyz, *rgb, err, len(track)))
             for t in track:
                 f.write(struct.pack("<ii", *t))
-    for sub in ("images", "masks"):
-        (a.dst / sub).mkdir(exist_ok=True)
-        for _, _, _, name, _ in images:
-            shutil.copy(a.src / sub / name, a.dst / sub / name)
+    (a.dst / "images").mkdir(exist_ok=True)
+    for _, _, _, name, _ in images:
+        shutil.copy(a.src / "images" / name, a.dst / "images" / name)
     print(f"{len(images)} images, {len(points)} points -> {a.dst}")
 
 
