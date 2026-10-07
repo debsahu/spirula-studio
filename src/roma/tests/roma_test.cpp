@@ -7,6 +7,7 @@
 // file still runs the rest.
 
 #include "roma/Roma.h"
+#include "roma/model/Fetch.h"
 #include "roma/model/Model.h"
 #include "roma/model/Rope.h"
 #include "roma/model/Weights.h"
@@ -182,19 +183,19 @@ void test_rope_bf16(vk::Arena& arena) {
     nn::tensor_from_host(tt, table.data(), (int64_t)table.size());
     rope_half_bf16(tx, tt, heads, hd, n, batch, stride);
     const std::vector<float> got = download(tx);
-    size_t bad = 0, differs = 0, rotated = 0;
+    size_t bad = 0, differs = 0, outside = 0;
     for (size_t i = 0; i < got.size(); ++i) {
         bad += got[i] != want[i];
         differs += want[i] != plain[i];
-        rotated += want[i] != x[i];
+        if ((int64_t)(i % (size_t)stride) >= heads * hd) outside += got[i] != x[i];
     }
     check(bad == 0, "rope_bf16", "%zu of %zu elements differ from the emulation", bad,
           got.size());
     check(differs > got.size() / 4, "rope_bf16_discriminates",
           "%zu elements separate bf16 from fp32 rotation (must exceed a quarter)", differs);
-    // v (the last third of each row) must be untouched; q and k rotated.
-    check(rotated > got.size() / 2 && rotated <= got.size() * 2 / 3 + 1, "rope_bf16_extent",
-          "%zu of %zu elements changed, expected q and k only", rotated, got.size());
+    // Only the first heads*head_dim columns of each row are this call's.
+    check(outside == 0, "rope_bf16_extent", "%zu elements past the rotated columns changed",
+          outside);
 }
 
 // ---- The bf16 table rounds every eager op; the fp32 one does not.
@@ -340,8 +341,9 @@ int main(int argc, char** argv) {
         test_rope_tables();
         test_resize();
         std::error_code ec;
-        if (ckpt.empty() || !std::filesystem::exists(ckpt, ec))
-            std::printf("\nSKIP model: no checkpoint (--checkpoint romav2.0.1.pt)\n");
+        if (ckpt.empty()) ckpt = nn::cached_path(checkpoint_file());
+        if (!std::filesystem::exists(ckpt, ec))
+            std::printf("\nSKIP model: %s is not cached (--checkpoint PATH)\n", ckpt.c_str());
         else
             test_model(ckpt, a, b, size, repeat);
     } catch (const std::exception& e) {
