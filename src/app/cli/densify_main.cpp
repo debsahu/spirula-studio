@@ -117,12 +117,6 @@ std::string jsonEscape(const std::string& s) {
 
 int spirula_densify_main(int argc, char** argv) {
     app::set_program_name(argc > 0 ? argv[0] : nullptr, "spirula densify");
-    try {
-        nn::consume_accept_license_args(argc, argv);
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "%s\n", format(D::error, {e.what()}).c_str());
-        return 2;
-    }
     roma::DensifyJob job;
     roma::DensifyOptions& o = job.opt;
     std::string dataset, model, image_dir = "images", mask_dir = "masks", matches, check_dir;
