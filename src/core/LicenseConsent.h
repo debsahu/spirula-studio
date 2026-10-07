@@ -12,19 +12,32 @@ namespace spirula::license {
 // A licence displayed in full before a download. `text` is the agreement as
 // published, byte for byte (LICENSES/), for offline display.
 struct Terms {
-    const char* family;   // "sam3", "sam2", "gdino", "birefnet", "dinov3", "romav2"
+    const char* family;   // "sam3", "sam2", "gdino", "birefnet", or a registered one
     const char* title;    // English, for the terminal; the GUI uses its Msg
     const char* url;      // the current text, which may be newer than `text`
     const char* text;
 };
 
-// Null for a family that is not one of ours. Every family we gate has its terms
+// Null for a family that is not known. Every family we gate has its terms
 // embedded, so every consent dialog and terminal prompt shows the whole text.
+// SAM 3, SAM 2.1, Grounding DINO and BiRefNet are built in.
 const Terms* terms_for(const std::string& family);
 
-// Every family terms_for() knows, in a stable order, comma separated: what an
-// "unknown licence" error names as the choices.
+// Adds a family to the table terms_for() reads. A feature calls this at startup,
+// before any thread asks; `t` and its strings must outlive the process. Idempotent
+// per family.
+void register_terms(const Terms* t);
+
+// Every family terms_for() knows, built in first and then in registration
+// order, comma separated: what an "unknown licence" error names as the choices.
 std::string known_families();
+
+// A comma list split and trimmed, empty items dropped: "sam3, gdino" is {sam3, gdino}.
+std::vector<std::string> split_families(const std::string& list);
+
+// A name for a file written beside `path` and renamed over it. Different for every
+// caller, so two writers (the GUI and a CLI) cannot trample each other's half-written copy.
+std::string scratch_path_for(const std::string& path);
 
 // <config>/gui.conf, where app::config_dir() puts it. Empty when neither
 // XDG_CONFIG_HOME nor HOME is set (APPDATA on Windows): app::config_dir() falls
@@ -33,7 +46,7 @@ std::string settings_path();
 
 bool accepted(const std::string& family);
 // Idempotent; every other line of the file is kept as it is. False when the
-// file could not be written, in which case the family is NOT accepted.
+// family is not known, or the file could not be written: it is NOT accepted then.
 bool record(const std::string& family);
 std::vector<std::string> accepted_all();
 // The families of a comma list that are not accepted, in order. Empty means go.

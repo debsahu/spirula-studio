@@ -323,6 +323,8 @@ private:
     void draw_model_fetch(FileDownload& dl, const spirula::i18n::Msg& missing,
                           const spirula::i18n::Msg& get, const std::function<void()>& request);
     bool license_accepted(const std::string& family) const;
+    mutable std::vector<std::string> _accepted_cache;   // gui.conf, as of _accepted_frame
+    mutable int _accepted_frame = -1;
     // Raises one modal per family not yet accepted, in order, then runs `then`.
     // Cancelling any of them drops the rest and `then` never runs.
     // `declined` runs when the user cancels one of them instead.
@@ -342,9 +344,22 @@ private:
         std::vector<std::string> families;                           // unaccepted, each once
         std::vector<std::pair<std::string, std::string>> masks;      // model id, detector id
         std::vector<std::string> geometries;
-        bool densify = false;
-        bool empty() const { return families.empty() && masks.empty() && geometries.empty() && !densify; }
+        std::vector<size_t> fetchers;                                // _batch_fetchers still to run
+        bool empty() const {
+            return families.empty() && masks.empty() && geometries.empty() && fetchers.empty();
+        }
     };
+    // A download a batch needs beyond the masking and geometry checkpoints. A
+    // feature registers one; the plan and the pump know no feature by name.
+    struct BatchFetcher {
+        // True when `needs` calls for a download that is not on disk yet; the
+        // licence families it would ask about are appended to `families`.
+        std::function<bool(const BatchModelNeeds& needs, std::vector<std::string>& families)> due;
+        std::function<FileDownload*()> active;   // its download while it runs, else null
+        std::function<void()> start;             // begins it (consent was given first)
+    };
+    void add_batch_fetcher(BatchFetcher f) { _batch_fetchers.push_back(std::move(f)); }
+    std::vector<BatchFetcher> _batch_fetchers;
     BatchFetchPlan batch_fetch_plan() const;
     void begin_batch(bool skip_invalid);
     void pump_batch_fetch();
@@ -410,6 +425,7 @@ private:
     // The checkpoint's state and its Get button or bar; true once a run can start.
     bool draw_densify_checkpoint(int source);
     void request_densify_download();
+    BatchFetcher densify_batch_fetcher();
     bool densify_ready(const DensifyJob& job) const;
     bool densify_model_missing() const;
     void draw_recon_model_row(bool busy);

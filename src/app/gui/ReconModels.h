@@ -23,10 +23,11 @@ int64_t recon_point_count(const std::string& dir);
 // either as its source.
 bool is_dense_model(const std::string& rel);
 
-// densify.json's recorded checksums of points3D.bin and points3D_tracks.bin
-// against the files beside it. None: no record. Read once per file size and time.
+// densify.json's recorded checksums of points3D.bin and points3D_tracks.bin against
+// the files beside it, hashed once per size and time. None: no record. With `wait`
+// false (a list on screen) an unhashed cloud answers None and is hashed on a worker.
 enum class CloudCheck { None, Ok, Mismatch };
-CloudCheck cloud_check(const std::string& dir);
+CloudCheck cloud_check(const std::string& dir, bool wait = true);
 
 // Most images first, then by path: the order the parser tries them in.
 std::vector<ReconModel> list_recon_models(const std::string& dataset);

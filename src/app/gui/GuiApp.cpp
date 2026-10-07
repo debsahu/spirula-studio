@@ -49,6 +49,7 @@
 
 #include "core/Env.h"
 #include "core/LicenseConsent.h"
+#include "core/LicenseFamilies.h"
 #if defined(SS_BUILD_SAM) || defined(SS_TOOL_SFM) || defined(SS_BACKEND_VULKAN)
 #include "core/VulkanDeviceSelection.h"
 #endif
@@ -216,6 +217,7 @@ static ModelContent classify_recent_model(const std::string& path);
 
 GuiApp::GuiApp() {
     load_settings();
+    add_batch_fetcher(densify_batch_fetcher());
     // Before the first frame, so an entry that is gone is never drawn.
     _recent.start_probe(classify_recent_model);
     _recent_probed_at = 0.0;
@@ -444,7 +446,7 @@ void GuiApp::save_settings() {
     const std::vector<std::string> accepted = spirula::license::accepted_all();
     // Written beside and renamed over: a crash or a full disk mid-write must not
     // leave a truncated gui.conf, which would also forget every accepted licence.
-    const std::string tmp = settings_path() + ".tmp";
+    const std::string tmp = spirula::license::scratch_path_for(settings_path());
     FILE* f = std::fopen(tmp.c_str(), "w");
     if (!f) return;
     _recent.write_settings(f);
@@ -1527,7 +1529,7 @@ GuiApp::BatchFetchPlan GuiApp::batch_fetch_plan() const {
                 plan.masks.push_back(pick);
                 const TextDetector* d = detector_for(*e, pick.second);
                 if (!model_is_cached(*e)) lists.push_back(e->family);
-                if (d && !detector_is_cached(*d)) lists.push_back("gdino");
+                if (d && !detector_is_cached(*d)) lists.push_back(spirula::license::family::kGdino);
             }
         }
         if (n.geometry && !geometry_model_cached(n.geometry_model) &&
@@ -1537,10 +1539,10 @@ GuiApp::BatchFetchPlan GuiApp::batch_fetch_plan() const {
             for (const PendingDownload& d : geometry_model_downloads(n.geometry_model))
                 lists.push_back(d.license_family);
         }
-        if (n.densify && !densify_ready(n.densify_job) && !plan.densify) {
-            plan.densify = true;
-            for (const std::string& f : densify_license_families()) lists.push_back(f);
-        }
+        for (size_t i = 0; i < _batch_fetchers.size(); ++i)
+            if (std::find(plan.fetchers.begin(), plan.fetchers.end(), i) == plan.fetchers.end() &&
+                _batch_fetchers[i].due(n, lists))
+                plan.fetchers.push_back(i);
     }
     for (const std::string& f : spirula::license::unique_families(lists))
         if (!license_accepted(f)) plan.families.push_back(f);
@@ -1579,8 +1581,8 @@ void GuiApp::pump_batch_fetch() {
         running = &_download;
     else if (_geom_download.running() || _geom_download.pending())
         running = &_geom_download.current();
-    else if (_dense_download.running() || _dense_download.pending())
-        running = &_dense_download.current();
+    for (const BatchFetcher& f : _batch_fetchers)
+        if (!running) running = f.active();
     if (running) {
         _batch_msg = running->status();
         _batch_msg_err = false;
@@ -1603,9 +1605,10 @@ void GuiApp::pump_batch_fetch() {
         _geom_download.start(geometry_model_downloads(id));
         return;
     }
-    if (p.densify) {
-        p.densify = false;
-        _dense_download.start(densify_model_downloads());
+    if (!p.fetchers.empty()) {
+        const size_t i = p.fetchers.front();
+        p.fetchers.erase(p.fetchers.begin());
+        _batch_fetchers[i].start();
         return;
     }
     _batch_fetching = false;
@@ -3918,8 +3921,14 @@ void GuiApp::cancel_dataset_job() {
     _colmap.cancel();
 }
 
+// gui.conf is read once per frame, not per question: densify_ready asks every frame.
 bool GuiApp::license_accepted(const std::string& family) const {
-    return spirula::license::accepted(family);
+    const int frame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : -1;
+    if (frame < 0 || frame != _accepted_frame) {
+        _accepted_cache = spirula::license::accepted_all();
+        _accepted_frame = frame;
+    }
+    return std::find(_accepted_cache.begin(), _accepted_cache.end(), family) != _accepted_cache.end();
 }
 
 void GuiApp::request_licenses(std::vector<std::string> families,
@@ -3978,7 +3987,7 @@ void GuiApp::request_model_download(const std::string& id, const std::string& de
     _license_notice.clear();
     const TextDetector* d = detector_for(*e, detector_id);
     const std::string families[] = {model_is_cached(*e) ? "" : e->family,
-                                    d && !detector_is_cached(*d) ? "gdino" : ""};
+                                    d && !detector_is_cached(*d) ? spirula::license::family::kGdino : ""};
     for (const std::string& family : families)
         if (!family.empty() && !license_accepted(family)) {
             _license_prompt = family;
@@ -5754,6 +5763,22 @@ bool GuiApp::densify_ready(const DensifyJob& job) const {
     return true;
 }
 
+// What a batch row that runs densify needs on disk first.
+GuiApp::BatchFetcher GuiApp::densify_batch_fetcher() {
+    BatchFetcher f;
+    f.due = [this](const BatchModelNeeds& n, std::vector<std::string>& families) {
+        if (!n.densify || densify_ready(n.densify_job)) return false;
+        for (const std::string& fam : densify_license_families()) families.push_back(fam);
+        return true;
+    };
+    f.active = [this]() -> FileDownload* {
+        return _dense_download.running() || _dense_download.pending() ? &_dense_download.current()
+                                                                      : nullptr;
+    };
+    f.start = [this] { _dense_download.start(densify_model_downloads()); };
+    return f;
+}
+
 bool GuiApp::densify_model_missing() const {
     return densify_availability().empty() &&
            densify_blocks_run(_densify, !_lidar.empty(), densify_ready(_densify));
@@ -5935,7 +5960,8 @@ void GuiApp::draw_recon_model_row(bool busy) {
         if (ui::Selectable(dgmsg::model_auto_entry, _cfg.colmap_recon_dir.empty())) pick("");
         for (const ReconModel& m : models) {
             const CloudCheck check =
-                is_dense_model(m.rel) ? cloud_check((fs::path(_cfg.data) / m.rel).string()) : CloudCheck::None;
+                is_dense_model(m.rel) ? cloud_check((fs::path(_cfg.data) / m.rel).string(), false)
+                                      : CloudCheck::None;
             const Msg& entry = check == CloudCheck::Mismatch ? dgmsg::model_entry_bad
                                : check == CloudCheck::Ok     ? dgmsg::model_entry_ok
                                                              : dgmsg::model_entry;
@@ -8032,15 +8058,20 @@ void GuiApp::draw_new_dataset() {
 // ---------------------------------------------------------------------------
 // Licence consent
 //
-// Shown once per model family, before the first download. Deliberately short:
-// what it is, whose it is, whether anything unusual is being agreed to, and a
-// link. A wall of text here would be read by nobody, which is the outcome the
-// requirement exists to avoid.
+// Shown once per model family, before the first download: a plain-language
+// summary, then the licence in full, which the tick below is acceptance of.
 // ---------------------------------------------------------------------------
 
 void GuiApp::draw_license_modal() {
     if (_license_prompt.empty()) return;
-    const LicenseInfo& li = license_for(_license_prompt);
+    const LicenseInfo* family = license_for(_license_prompt);
+    if (!family) {
+        // A family nothing gave wording to cannot be accepted here; ask no more.
+        _license_prompt.clear();
+        _license_queue.clear();
+        return;
+    }
+    const LicenseInfo& li = *family;
 
     ui::OpenPopup(dmsg::license_modal_title);
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -8100,6 +8131,7 @@ void GuiApp::draw_license_modal() {
                    ImVec2(150, 0))) {
         if (!accept_license(_license_prompt))
             log(i18n::format(dmsg::license_not_saved, {spirula::license::settings_path()}));
+        _accepted_frame = -1;
         _license_prompt.clear();
         ImGui::CloseCurrentPopup();
         if (downloads)

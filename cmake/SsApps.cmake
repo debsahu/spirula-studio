@@ -133,6 +133,7 @@ if(SS_BUILD_SAM)
          ${SS_SRC}/app/FfmpegVideo.cpp
          ${SS_SRC}/app/gui/Subprocess.cpp)
     list(APPEND SS_TOOL_DEFS SS_TOOL_SAM=1)
+    list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/LicenseCli.cpp)
     list(APPEND SS_TOOL_LIBS ss_sam)
     if(SS_ENABLE_PATENTED)
         list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/FrameDecodeVulkan.cpp)
@@ -275,6 +276,7 @@ endif()
 # spirula -- the executable
 # ---------------------------------------------------------------------------
 # Optional modules add their tools here (SsRoma.cmake: `spirula densify`).
+list(APPEND SS_TOOL_LIBS ss_license)
 list(APPEND SS_TOOL_SOURCES ${SS_EXT_TOOL_SOURCES})
 list(APPEND SS_TOOL_DEFS ${SS_EXT_TOOL_DEFS})
 list(APPEND SS_TOOL_LIBS ${SS_EXT_TOOL_LIBS})
@@ -344,8 +346,8 @@ if(SS_SEPARATE_TOOLS)
                      ${SS_SRC}/app/FrameSharpness.cpp ${SS_SRC}/app/Pano360.cpp
                      ${SS_SRC}/app/cli/sam_extract.cpp ${SS_SRC}/app/FrameExtract.cpp
                      ${SS_SRC}/app/FrameDecodeFfmpeg.cpp ${SS_SRC}/app/FfmpegVideo.cpp
-                     ${SS_SRC}/app/gui/Subprocess.cpp)
-        set(_sam_lib ss_sam)
+                     ${SS_SRC}/app/gui/Subprocess.cpp ${SS_SRC}/app/cli/LicenseCli.cpp)
+        set(_sam_lib ss_sam ss_license)
         if(SS_ENABLE_PATENTED)
             list(APPEND _sam_src ${SS_SRC}/app/FrameDecodeVulkan.cpp)
             list(APPEND _sam_lib ss_video)

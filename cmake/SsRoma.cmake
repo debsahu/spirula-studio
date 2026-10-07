@@ -14,7 +14,7 @@ if(SS_BUILD_SAM)
     file(GLOB SS_ROMA_SOURCES CONFIGURE_DEPENDS ${SS_SRC}/roma/model/*.cpp)
 
     add_library(ss_roma STATIC ${SS_ROMA_SOURCES} ${SS_ROMA_EMBED})
-    target_link_libraries(ss_roma PUBLIC ss_nn)
+    target_link_libraries(ss_roma PUBLIC ss_nn ss_license)
     target_compile_options(ss_roma PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
     set_property(TARGET ss_roma PROPERTY CXX_STANDARD 17)
@@ -29,6 +29,10 @@ if(SS_BUILD_SAM)
         target_compile_options(${test_name} PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
     endforeach()
+
+    # The licence test drives the terminal prompt and reads the translated wording.
+    target_sources(roma_license_test PRIVATE ${SS_SRC}/app/cli/LicenseCli.cpp)
+    target_link_libraries(roma_license_test PRIVATE ss_license ss_i18n)
 endif()
 
 if(NOT SS_BUILD_SFM)

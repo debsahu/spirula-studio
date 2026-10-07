@@ -87,7 +87,12 @@ struct LicenseInfo {
     // The terms in full, shown in the dialog and ticked for: every family has them.
     const char* full_text;
 };
-const LicenseInfo& license_for(const std::string& family);
+// Null for a family with no registered wording.
+const LicenseInfo* license_for(const std::string& family);
+// Gives a family registered with license::register_terms() its dialog wording.
+// The built-in four need no call.
+void register_license_info(const char* family, const ::spirula::i18n::Msg* title,
+                           const ::spirula::i18n::Msg* summary);
 
 // The one place the GUI records an acceptance: the accepted_license= key of
 // gui.conf, which the CLI reads too (core/LicenseConsent.h). False when it

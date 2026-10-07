@@ -707,32 +707,35 @@ SS_MSG(chk_unavailable,
     TR("Bu derleme yoğun nokta ekleyemez."));
 
 SS_MSG(chk_not_ready,
-    EN("The RoMa v2 checkpoint is not downloaded, or its licences have not been accepted. A batch cannot "
-       "ask: do it once on the New Dataset screen."),
-    JA("RoMa v2 のチェックポイントが未ダウンロードか、ライセンスに同意していません。バッチでは確認できません。"
-       "先に「新規データセット」画面で一度行ってください。"),
-    ZH_HANS("RoMa v2 检查点尚未下载，或尚未接受其许可协议。批处理无法询问：请先在“新建数据集”界面完成一次。"),
-    ZH_HANT("RoMa v2 檢查點尚未下載，或尚未接受其授權條款。批次無法詢問：請先在「新增資料集」畫面完成一次。"),
-    KO("RoMa v2 체크포인트를 내려받지 않았거나 라이선스에 동의하지 않았습니다. 배치는 물어볼 수 없으니 "
-       "먼저 '새 데이터셋' 화면에서 한 번 하세요."),
-    DE("Der RoMa-v2-Checkpoint ist nicht heruntergeladen oder seine Lizenzen wurden nicht akzeptiert. Ein "
-       "Stapel kann nicht nachfragen: einmal im Bildschirm „Neuer Datensatz“ erledigen."),
-    FR("Le point de contrôle RoMa v2 n'est pas téléchargé, ou ses licences n'ont pas été acceptées. Un lot ne "
-       "peut pas demander : faites-le une fois dans l'écran Nouveau jeu de données."),
-    ES("El punto de control de RoMa v2 no está descargado o sus licencias no se han aceptado. Un lote no puede "
-       "preguntar: hazlo una vez en la pantalla Nuevo conjunto."),
-    PT("O ponto de controlo do RoMa v2 não foi descarregado ou as suas licenças não foram aceites. Um lote não "
-       "pode perguntar: faça-o uma vez no ecrã Novo conjunto."),
-    IT("Il checkpoint di RoMa v2 non è scaricato, o le sue licenze non sono state accettate. Un batch non può "
-       "chiedere: fallo una volta nella schermata Nuovo insieme."),
-    NL("Het RoMa v2-checkpoint is niet gedownload, of de licenties zijn niet geaccepteerd. Een batch kan niet "
-       "vragen: doe het eenmaal in het scherm Nieuwe dataset."),
-    RU("Чекпойнт RoMa v2 не скачан, или его лицензии не приняты. Пакет не может спросить: сделайте это один раз "
-       "на экране «Новый набор»."),
-    TR("RoMa v2 kontrol noktası indirilmedi veya lisansları kabul edilmedi. Toplu iş soramaz: bunu bir kez Yeni "
-       "Veri Kümesi ekranında yapın."));
-
-// ---- the training screen's row ----
+    EN("The RoMa v2 checkpoint is still missing, or its licences are not accepted: the download failed or "
+       "was declined. Fetch it on the New Dataset screen, then start the batch again."),
+    JA("RoMa v2 のチェックポイントがまだ無いか、ライセンスに同意していません。ダウンロードが"
+       "失敗したか、拒否されました。「新規データセット」画面で取得してから、バッチをもう一度開始して"
+       "ください。"),
+    ZH_HANS("RoMa v2 检查点仍然缺失，或尚未接受其许可协议：下载失败或被拒绝。请先在“新建数据集”"
+            "界面获取，然后重新开始批处理。"),
+    ZH_HANT("RoMa v2 檢查點仍然缺失，或尚未接受其授權條款：下載失敗或被拒絕。請先在「新增資料集」"
+            "畫面取得，然後重新開始批次。"),
+    KO("RoMa v2 체크포인트가 아직 없거나 라이선스에 동의하지 않았습니다. 내려받기가 "
+       "실패했거나 거부되었습니다. '새 데이터셋' 화면에서 받은 다음 배치를 다시 시작하세요."),
+    DE("Der RoMa-v2-Checkpoint fehlt noch, oder seine Lizenzen wurden nicht akzeptiert: Der Download ist "
+       "fehlgeschlagen oder wurde abgelehnt. Im Bildschirm „Neuer Datensatz“ holen und den Stapel dann "
+       "erneut starten."),
+    FR("Le point de contrôle RoMa v2 manque encore, ou ses licences n'ont pas été acceptées : le "
+       "téléchargement a échoué ou a été refusé. Récupérez-le dans l'écran Nouveau jeu de données, puis "
+       "relancez le lot."),
+    ES("El punto de control de RoMa v2 sigue sin estar, o sus licencias no se han aceptado: la descarga "
+       "falló o se rechazó. Descárgalo en la pantalla Nuevo conjunto y vuelve a iniciar el lote."),
+    PT("O ponto de controlo do RoMa v2 continua em falta, ou as suas licenças não foram aceites: a "
+       "transferência falhou ou foi recusada. Obtenha-o no ecrã Novo conjunto e volte a iniciar o lote."),
+    IT("Il checkpoint di RoMa v2 manca ancora, oppure le sue licenze non sono state accettate: il download è "
+       "fallito o è stato rifiutato. Scaricalo nella schermata Nuovo dataset e riavvia il batch."),
+    NL("Het RoMa v2-checkpoint ontbreekt nog, of de licenties zijn niet geaccepteerd: de download is mislukt "
+       "of geweigerd. Haal het op in het scherm Nieuwe dataset en start de batch opnieuw."),
+    RU("Контрольная точка RoMa v2 по-прежнему отсутствует, или её лицензии не приняты: загрузка не удалась "
+       "или была отклонена. Загрузите её на экране «Новый набор данных» и запустите пакет снова."),
+    TR("RoMa v2 kontrol noktası hâlâ yok ya da lisansları kabul edilmedi: indirme başarısız oldu veya "
+       "reddedildi. Onu Yeni Veri Kümesi ekranından alın, sonra toplu işi yeniden başlatın.");
 
 SS_MSG(panel_button,
     EN("Add Dense Points"),
@@ -1025,6 +1028,146 @@ SS_MSG(model_auto_entry,
     NL("Automatisch (meeste beelden)"),
     RU("Авто (больше всего снимков)"),
     TR("Otomatik (en çok görüntü)"));
+
+// LEGAL -- human review in every language. The DINOv3 summary states only what
+// the Agreement says; it adds no term and drops none.
+SS_MSG(license_dinov3_title,
+    EN("DINOv3 License Agreement (Meta)"),
+    JA("DINOv3 ライセンス契約（Meta）"),
+    ZH_HANS("DINOv3 许可协议（Meta）"),
+    ZH_HANT("DINOv3 授權協議（Meta）"),
+    KO("DINOv3 라이선스 계약(Meta)"),
+    DE("DINOv3-Lizenzvereinbarung (Meta)"),
+    FR("Contrat de licence DINOv3 (Meta)"),
+    ES("Acuerdo de licencia de DINOv3 (Meta)"),
+    PT("Contrato de licença do DINOv3 (Meta)"),
+    IT("Accordo di licenza DINOv3 (Meta)"),
+    NL("DINOv3-licentieovereenkomst (Meta)"),
+    RU("Лицензионное соглашение DINOv3 (Meta)"),
+    TR("DINOv3 Lisans Sözleşmesi (Meta)"));
+
+SS_MSG(license_dinov3_summary,
+    EN("The RoMa v2 file contains Meta's DINOv3 model weights. They are Meta's, "
+       "not part of Spirula Studio, and come with Meta's DINOv3 License "
+       "Agreement, shown in full below. Please read it: accepting it here means "
+       "you agree to be bound by it. The file is downloaded from the RoMa v2 "
+       "authors' release; it is never bundled with the app."),
+    JA("RoMa v2 のファイルには、Meta の DINOv3 モデルの重みが含まれています。"
+       "これは Meta のものであり Spirula Studio の一部ではなく、Meta の DINOv3 "
+       "ライセンス契約が適用されます。契約の全文を下に表示しますので、お読みください。"
+       "ここで同意すると、この契約に拘束されることに同意したことになります。"
+       "ファイルは RoMa v2 の作者のリリースからダウンロードされ、アプリに同梱される"
+       "ことはありません。"),
+    ZH_HANS("RoMa v2 的文件包含 Meta 的 DINOv3 模型权重。它们属于 Meta，不属于 "
+            "Spirula Studio，并适用 Meta 的 DINOv3 许可协议，协议全文显示在下方。"
+            "请阅读：在此接受即表示你同意受其约束。该文件从 RoMa v2 作者的发布页下载，"
+            "不会随应用一起打包。"),
+    ZH_HANT("RoMa v2 的檔案包含 Meta 的 DINOv3 模型權重。它們屬於 Meta，不屬於 "
+            "Spirula Studio，並適用 Meta 的 DINOv3 授權協議，協議全文顯示在下方。"
+            "請閱讀：在此接受即表示你同意受其約束。該檔案從 RoMa v2 作者的發布頁下載，"
+            "不會隨應用程式一起打包。"),
+    KO("RoMa v2 파일에는 Meta의 DINOv3 모델 가중치가 들어 있습니다. 이는 Meta의 "
+       "것이며 Spirula Studio의 일부가 아니고, 아래에 전문을 표시한 Meta의 DINOv3 "
+       "라이선스 계약이 적용됩니다. 읽어 보세요. 여기서 동의하면 이 계약에 구속되는 "
+       "데 동의하는 것입니다. 파일은 RoMa v2 저자의 릴리스에서 내려받으며 앱에 "
+       "포함되지 않습니다."),
+    DE("Die RoMa-v2-Datei enthält die DINOv3-Modellgewichte von Meta. Sie gehören "
+       "Meta, sind nicht Teil von Spirula Studio und unterliegen Metas DINOv3 "
+       "License Agreement, das unten vollständig angezeigt wird. Bitte lesen Sie "
+       "es: Mit der Annahme hier erklären Sie sich daran gebunden. Die Datei wird "
+       "aus dem Release der RoMa-v2-Autoren heruntergeladen und nie mit der "
+       "Anwendung mitgeliefert."),
+    FR("Le fichier RoMa v2 contient les poids du modèle DINOv3 de Meta. Ils "
+       "appartiennent à Meta, ne font pas partie de Spirula Studio et sont soumis "
+       "au DINOv3 License Agreement de Meta, affiché en entier ci-dessous. Lisez-le "
+       ": l'accepter ici signifie que vous acceptez d'être lié par ses termes. Le "
+       "fichier est téléchargé depuis la publication des auteurs de RoMa v2 ; il "
+       "n'est jamais fourni avec l'application."),
+    ES("El archivo de RoMa v2 contiene los pesos del modelo DINOv3 de Meta. Son de "
+       "Meta, no forman parte de Spirula Studio y se rigen por el DINOv3 License "
+       "Agreement de Meta, que se muestra completo abajo. Léelo: al aceptarlo aquí "
+       "aceptas quedar obligado por él. El archivo se descarga de la publicación de "
+       "los autores de RoMa v2; nunca se incluye con la aplicación."),
+    PT("O arquivo do RoMa v2 contém os pesos do modelo DINOv3 da Meta. Eles "
+       "pertencem à Meta, não fazem parte do Spirula Studio e estão sujeitos ao "
+       "DINOv3 License Agreement da Meta, exibido por inteiro abaixo. Leia-o: ao "
+       "aceitá-lo aqui, você concorda em ficar vinculado a ele. O arquivo é baixado "
+       "da release dos autores do RoMa v2 e nunca é incluído no aplicativo."),
+    IT("Il file di RoMa v2 contiene i pesi del modello DINOv3 di Meta. Sono di "
+       "Meta, non fanno parte di Spirula Studio e sono soggetti al DINOv3 License "
+       "Agreement di Meta, mostrato per intero qui sotto. Leggilo: accettandolo qui "
+       "accetti di esserne vincolato. Il file viene scaricato dalla release degli "
+       "autori di RoMa v2 e non viene mai incluso nell'app."),
+    NL("Het RoMa v2-bestand bevat de DINOv3-modelgewichten van Meta. Die zijn van "
+       "Meta, maken geen deel uit van Spirula Studio en vallen onder Meta's DINOv3 "
+       "License Agreement, hieronder volledig weergegeven. Lees het: door het hier "
+       "te aanvaarden stem je ermee in eraan gebonden te zijn. Het bestand wordt "
+       "gedownload van de release van de auteurs van RoMa v2 en wordt nooit met de "
+       "app meegeleverd."),
+    RU("Файл RoMa v2 содержит веса модели DINOv3 от Meta. Они принадлежат Meta, не "
+       "входят в Spirula Studio и распространяются на условиях Meta DINOv3 License "
+       "Agreement, полный текст которого показан ниже. Прочитайте его: приняв его "
+       "здесь, вы соглашаетесь быть связанным его условиями. Файл загружается из "
+       "релиза авторов RoMa v2 и никогда не поставляется вместе с приложением."),
+    TR("RoMa v2 dosyası, Meta'nın DINOv3 model ağırlıklarını içerir. Bunlar Meta'ya "
+       "aittir, Spirula Studio'nun parçası değildir ve tam metni aşağıda gösterilen "
+       "Meta'nın DINOv3 License Agreement'ına tabidir. Lütfen okuyun: burada kabul "
+       "etmeniz, onunla bağlı olmayı kabul ettiğiniz anlamına gelir. Dosya, RoMa v2 "
+       "yazarlarının sürümünden indirilir; uygulamayla birlikte asla verilmez."));
+
+SS_MSG(license_romav2_title,
+    EN("RoMa v2 licence (MIT)"),
+    JA("RoMa v2 のライセンス（MIT）"),
+    ZH_HANS("RoMa v2 许可协议（MIT）"),
+    ZH_HANT("RoMa v2 授權條款（MIT）"),
+    KO("RoMa v2 라이선스(MIT)"),
+    DE("Lizenz von RoMa v2 (MIT)"),
+    FR("Licence de RoMa v2 (MIT)"),
+    ES("Licencia de RoMa v2 (MIT)"),
+    PT("Licença do RoMa v2 (MIT)"),
+    IT("Licenza di RoMa v2 (MIT)"),
+    NL("Licentie van RoMa v2 (MIT)"),
+    RU("Лицензия RoMa v2 (MIT)"),
+    TR("RoMa v2 lisansı (MIT)"));
+
+SS_MSG(license_romav2_summary,
+    EN("RoMa v2 (Johan Edstedt) is released under the MIT licence, shown in full "
+       "below. The model file is downloaded from its authors' release rather than "
+       "bundled with the app."),
+    JA("RoMa v2（Johan Edstedt）は MIT ライセンスで公開されています。全文を下に"
+       "表示します。モデルのファイルは、アプリに同梱せず、作者のリリースから"
+       "ダウンロードします。"),
+    ZH_HANS("RoMa v2（Johan Edstedt）以 MIT 许可协议发布，全文显示在下方。"
+            "模型文件从作者的发布页下载，而不是随应用打包。"),
+    ZH_HANT("RoMa v2（Johan Edstedt）以 MIT 授權條款發布，全文顯示在下方。"
+            "模型檔案從作者的發布頁下載，而不是隨應用程式打包。"),
+    KO("RoMa v2(Johan Edstedt)는 MIT 라이선스로 공개되어 있으며 전문은 아래에 "
+       "표시됩니다. 모델 파일은 앱에 포함하지 않고 저자의 릴리스에서 내려받습니다."),
+    DE("RoMa v2 (Johan Edstedt) steht unter der MIT-Lizenz, unten vollständig "
+       "angezeigt. Die Modelldatei wird aus dem Release der Autoren heruntergeladen "
+       "und nicht mit der Anwendung mitgeliefert."),
+    FR("RoMa v2 (Johan Edstedt) est publié sous licence MIT, affichée en entier "
+       "ci-dessous. Le fichier du modèle est téléchargé depuis la publication de ses "
+       "auteurs et n'est pas fourni avec l'application."),
+    ES("RoMa v2 (Johan Edstedt) se publica bajo la licencia MIT, que se muestra "
+       "completa abajo. El archivo del modelo se descarga de la publicación de sus "
+       "autores y no se incluye con la aplicación."),
+    PT("O RoMa v2 (Johan Edstedt) é publicado sob a licença MIT, exibida por inteiro "
+       "abaixo. O arquivo do modelo é baixado da release dos autores e não é "
+       "incluído no aplicativo."),
+    IT("RoMa v2 (Johan Edstedt) è pubblicato con licenza MIT, mostrata per intero "
+       "qui sotto. Il file del modello viene scaricato dalla release dei suoi autori "
+       "e non è incluso nell'app."),
+    NL("RoMa v2 (Johan Edstedt) is uitgebracht onder de MIT-licentie, hieronder "
+       "volledig weergegeven. Het modelbestand wordt gedownload van de release van "
+       "de auteurs en niet met de app meegeleverd."),
+    RU("RoMa v2 (Johan Edstedt) выпущен под лицензией MIT, полный текст которой "
+       "показан ниже. Файл модели загружается из релиза его авторов и не "
+       "поставляется вместе с приложением."),
+    TR("RoMa v2 (Johan Edstedt) MIT lisansıyla yayımlanmıştır; tam metni aşağıda "
+       "gösterilir. Model dosyası, uygulamayla birlikte verilmek yerine yazarlarının "
+       "sürümünden indirilir."));
+
 
 }}}}
 #include "i18n/EndCatalog.h"

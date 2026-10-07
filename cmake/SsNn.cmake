@@ -106,8 +106,6 @@ add_library(ss_nn STATIC
     ${SS_SRC}/core/ExrImage.cpp
     ${SS_SRC}/core/IccProfile.cpp
     ${SS_SRC}/core/ImageFile.cpp
-    ${SS_SRC}/core/LicenseConsent.cpp
-    ${SS_SRC}/core/LicenseTexts.cpp
     ${SS_SRC}/core/MappedFile.cpp
     ${SS_SRC}/core/TiffImage.cpp
     ${SS_SRC}/external/miniz.c
@@ -120,8 +118,7 @@ target_include_directories(ss_nn PUBLIC ${SS_SRC})
 if(SS_ENABLE_PATENTED)
     target_compile_definitions(ss_nn PUBLIC SS_HAVE_VIDEO=1)
 endif()
-# ss_i18n: the consent prompt a terminal shows is translated (nn/io/Fetch.cpp).
-target_link_libraries(ss_nn PUBLIC ss_vulkan ss_i18n Threads::Threads)
+target_link_libraries(ss_nn PUBLIC ss_vulkan Threads::Threads)
 target_compile_options(ss_nn PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>
     $<$<COMPILE_LANGUAGE:C>:${SPLAT_C_FLAGS}>)
@@ -287,11 +284,16 @@ foreach(test_src ${SS_NN_TESTS})
         $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
 endforeach()
 
-# The two tests below reach outside the inference layer: the app's path logic,
-# and the translation catalogs.
+# The licence tests reach outside the inference layer: the app's path logic and
+# terminal prompt, the licence table, and the translation catalogs.
+foreach(t license_paths_test license_text_test fetch_consent_test)
+    if(TARGET ${t})
+        target_link_libraries(${t} PRIVATE ss_license ss_i18n)
+    endif()
+endforeach()
 if(TARGET license_paths_test)
     target_sources(license_paths_test PRIVATE ${SS_SRC}/app/AppPaths.cpp)
 endif()
-if(TARGET license_text_test)
-    target_link_libraries(license_text_test PRIVATE ss_i18n)
+if(TARGET fetch_consent_test)
+    target_sources(fetch_consent_test PRIVATE ${SS_SRC}/app/cli/LicenseCli.cpp)
 endif()

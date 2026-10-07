@@ -2,6 +2,8 @@
 
 #include "app/gui/DensifyRunner.h"
 
+#include "roma/SourceRule.h"
+
 #include <algorithm>
 #include <filesystem>
 
@@ -68,7 +70,9 @@ DensifyJob densify_after_settings(const DensifyJob& current, const DensifyJob& i
 
 int densify_resolved_source(int source) {
     source = std::clamp(source, 0, kNumDensifySources - 1);
-    return source == kSourceAuto ? kSourceRoma : source;
+    if (source != kSourceAuto) return source;
+    // A run fetches the matcher first, so auto is what the tool picks when one exists.
+    return roma::autoSource(true, false) == roma::AutoSource::Depth ? kSourceMoge : kSourceRoma;
 }
 
 bool densify_has_depth_maps(const std::string& dataset) {

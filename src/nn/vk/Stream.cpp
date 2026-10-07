@@ -1,9 +1,11 @@
 #include "nn/vk/Stream.h"
+#include "nn/vk/StreamTesting.h"
 
 #include "nn/core/Error.h"
 #include "nn/core/Log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -22,6 +24,10 @@ bool debug_sync_enabled() {
 }
 
 namespace {
+
+// Set only by testing::override_work_cap; negative means the measured budget.
+std::atomic<double> g_cap_override{-1};
+
 constexpr VkDeviceSize kStagingBytes = 32ull << 20;   // upload/download chunk
 constexpr VkDeviceSize kParamsRingBytes = 1ull << 20;  // oversized param structs
 constexpr uint32_t     kMaxQueries = 8192;
@@ -45,7 +51,6 @@ struct Stream::Impl {
     // submits of a process are safe everywhere and a fast GPU outgrows it at once.
     static constexpr double kPriorFlops = 50e9;
     spirula::SubmitBudget budget{kPriorFlops};
-    double cap_override = -1;
 
     VkSemaphore timeline = VK_NULL_HANDLE;
     uint64_t    submitted = 0;
@@ -268,11 +273,13 @@ void Stream::Impl::harvest(int slot) {
 }
 
 double Stream::workCap() {
-    const Impl& s = impl();
-    return s.cap_override >= 0 ? s.cap_override : s.budget.limit();
+    const double pinned = g_cap_override.load();
+    return pinned >= 0 ? pinned : impl().budget.limit();
 }
 
-void Stream::overrideWorkCap(double cap) { impl().cap_override = cap; }
+namespace testing {
+void override_work_cap(double cap) { g_cap_override.store(cap); }
+}  // namespace testing
 
 void Stream::sync() {
     Impl& s = impl();

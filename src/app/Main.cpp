@@ -13,7 +13,10 @@
 #include "i18n/Locale.h"
 #include "i18n/catalog/Cli.h"
 #ifdef SS_TOOL_SAM
-#include "nn/io/Fetch.h"   // --accept-license: the inference layer is in this build
+#include "app/cli/LicenseCli.h"   // --accept-license: the inference layer is in this build
+#endif
+#ifdef SS_TOOL_DENSIFY
+#include "roma/model/Fetch.h"
 #endif
 
 #include <cctype>
@@ -182,10 +185,14 @@ int main(int argc, char** argv) {
 
 #ifdef SS_TOOL_SAM
     // --accept-license, anywhere in argv and for every command: how a terminal
-    // accepts a model licence (nn::ensure_file refuses without it). Removed from
-    // argv, so no tool's parser sees it.
+    // accepts a model licence. Removed from argv, so no tool's parser sees it;
+    // the gate installed here answers every command that fetches a licensed model.
     try {
-        nn::consume_accept_license_args(argc, argv);
+        app::install_license_gate();
+#ifdef SS_TOOL_DENSIFY
+        roma::register_licenses();
+#endif
+        app::consume_accept_license_args(argc, argv);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
         return 2;

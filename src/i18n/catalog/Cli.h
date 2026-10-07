@@ -1211,19 +1211,19 @@ SS_MSG(sam_subject_no_prompt,
 
 // {0} is the licence's name.
 SS_MSG(license_ask_header,
-    EN("[license] {0} must be accepted before this model is fetched."),
-    JA("[license] このモデルを取得する前に、{0} に同意する必要があります。"),
-    ZH_HANS("[license] 获取此模型之前，必须先接受 {0}。"),
-    ZH_HANT("[license] 取得此模型之前，必須先接受 {0}。"),
-    KO("[license] 이 모델을 내려받기 전에 {0}에 동의해야 합니다."),
-    DE("[license] {0} muss angenommen werden, bevor dieses Modell geladen wird."),
-    FR("[license] {0} doit être acceptée avant de récupérer ce modèle."),
-    ES("[license] Hay que aceptar {0} antes de descargar este modelo."),
-    PT("[license] {0} precisa ser aceita antes de baixar este modelo."),
-    IT("[license] {0} deve essere accettata prima di scaricare questo modello."),
-    NL("[license] {0} moet worden aanvaard voordat dit model wordt opgehaald."),
-    RU("[license] Перед загрузкой этой модели нужно принять {0}."),
-    TR("[license] Bu model alınmadan önce {0} kabul edilmelidir."));
+    EN("[license] {0} must be accepted before this model is used."),
+    JA("[license] このモデルを使う前に、{0} に同意する必要があります。"),
+    ZH_HANS("[license] 使用此模型之前，必须先接受 {0}。"),
+    ZH_HANT("[license] 使用此模型之前，必須先接受 {0}。"),
+    KO("[license] 이 모델을 사용하기 전에 {0}에 동의해야 합니다."),
+    DE("[license] {0} muss angenommen werden, bevor dieses Modell verwendet wird."),
+    FR("[license] {0} doit être acceptée avant d'utiliser ce modèle."),
+    ES("[license] Hay que aceptar {0} antes de usar este modelo."),
+    PT("[license] {0} precisa ser aceita antes de usar este modelo."),
+    IT("[license] {0} deve essere accettata prima di usare questo modello."),
+    NL("[license] {0} moet worden aanvaard voordat dit model wordt gebruikt."),
+    RU("[license] Перед использованием этой модели нужно принять {0}."),
+    TR("[license] Bu model kullanılmadan önce {0} kabul edilmelidir."));
 
 // {0} is the licence's name. Ends in a space: the answer is typed after it.
 SS_MSG(license_ask_confirm,
@@ -1243,19 +1243,19 @@ SS_MSG(license_ask_confirm,
 
 // {0} is the licence's name, {1} what was typed.
 SS_MSG(license_ask_declined,
-    EN("The {0} was not accepted (answered '{1}'), so nothing was fetched."),
-    JA("{0} には同意されませんでした（入力: '{1}'）。何も取得していません。"),
-    ZH_HANS("未接受 {0}（输入: '{1}'），因此没有获取任何内容。"),
-    ZH_HANT("未接受 {0}（輸入: '{1}'），因此沒有取得任何內容。"),
-    KO("{0}에 동의하지 않았으므로(입력: '{1}') 아무것도 가져오지 않았습니다."),
-    DE("{0} wurde nicht angenommen (Antwort: '{1}'), deshalb wurde nichts geladen."),
-    FR("{0} n'a pas été acceptée (réponse : '{1}') ; rien n'a donc été récupéré."),
-    ES("No se aceptó {0} (respuesta: '{1}'), así que no se descargó nada."),
-    PT("{0} não foi aceita (resposta: '{1}'), então nada foi baixado."),
-    IT("{0} non è stata accettata (risposta: '{1}'), quindi non è stato scaricato nulla."),
-    NL("{0} is niet aanvaard (antwoord: '{1}'), dus er is niets opgehaald."),
-    RU("{0} не принята (ответ: '{1}'), поэтому ничего не было загружено."),
-    TR("{0} kabul edilmedi (yanıt: '{1}'), bu yüzden hiçbir şey alınmadı."));
+    EN("{0} was not accepted (answered '{1}'), so the model was not used."),
+    JA("{0} には同意されませんでした（入力: '{1}'）。モデルは使用していません。"),
+    ZH_HANS("未接受 {0}（输入: '{1}'），因此没有使用该模型。"),
+    ZH_HANT("未接受 {0}（輸入: '{1}'），因此沒有使用該模型。"),
+    KO("{0}에 동의하지 않았으므로(입력: '{1}') 모델을 사용하지 않았습니다."),
+    DE("{0} wurde nicht angenommen (Antwort: '{1}'), deshalb wurde das Modell nicht verwendet."),
+    FR("{0} n'a pas été acceptée (réponse : '{1}') ; le modèle n'a donc pas été utilisé."),
+    ES("No se aceptó {0} (respuesta: '{1}'), así que no se usó el modelo."),
+    PT("{0} não foi aceita (resposta: '{1}'), então o modelo não foi usado."),
+    IT("{0} non è stata accettata (risposta: '{1}'), quindi il modello non è stato usato."),
+    NL("{0} is niet aanvaard (antwoord: '{1}'), dus het model is niet gebruikt."),
+    RU("{0} не принята (ответ: '{1}'), поэтому модель не использовалась."),
+    TR("{0} kabul edilmedi (yanıt: '{1}'), bu yüzden model kullanılmadı."));
 
 // {0} is the licence's name, {1} its URL, {2} the family to pass to --accept-license.
 // The flag and `=yes` are identifiers and stay as typed.

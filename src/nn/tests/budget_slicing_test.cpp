@@ -10,6 +10,7 @@
 #include "nn/vk/Memory.h"
 #include "nn/vk/Pipelines.h"
 #include "nn/vk/Stream.h"
+#include "nn/vk/StreamTesting.h"
 
 #include <cstdio>
 #include <cstring>
@@ -37,12 +38,11 @@ std::vector<float> host(const nn::Tensor& t) {
 // `run` launches the op into `out`; `work` is its FLOP count as the op counts it.
 template <class F>
 void check_slicing(const char* name, double work, const nn::Tensor& out, F run) {
-    nn::vk::Stream& st = nn::vk::Stream::get();
-    st.overrideWorkCap(1e30);
+    nn::vk::testing::override_work_cap(1e30);
     run();
     const std::vector<float> ref = host(out);
     for (double div : {2.0, 7.0, 40.0}) {
-        st.overrideWorkCap(work / div);
+        nn::vk::testing::override_work_cap(work / div);
         nn::fill(out, 0.0f);
         run();
         const std::vector<float> got = host(out);
@@ -53,7 +53,7 @@ void check_slicing(const char* name, double work, const nn::Tensor& out, F run) 
                     same ? "ok  " : "FAIL", name, div, diff, ref.size());
         g_failures += !same;
     }
-    st.overrideWorkCap(-1);
+    nn::vk::testing::override_work_cap(-1);
 }
 
 }  // namespace

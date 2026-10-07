@@ -13,6 +13,7 @@ project(spirula_studio LANGUAGES C CXX)  # CUDA enabled by the cuda backend modu
 #   SsNn.cmake             inference layer + SAM + video (optional; Vulkan-only)
 #   SsRoma.cmake           RoMa v2: the network (with SAM), the densify host stage (with SfM)
 #   SsI18n.cmake           ss_i18n, the translation library (a leaf)
+#   SsLicense.cmake        ss_license, accepted model licences and their texts (a leaf)
 #   SsApps.cmake           the `spirula` executable (every tool in one)
 #   SsRomaApp.cmake        the RoMa tests that need SsApps' settings
 #   SsPackage.cmake        the redistributable form of it (macOS .app / .dmg)
@@ -29,6 +30,7 @@ include(SsSources)
 # A leaf everything else may link: the backends print device names, and their
 # test binaries link a backend without the engine.
 include(SsI18n)
+include(SsLicense)
 
 # The web viewer's browser client is compiled into the engine library
 # (app/webviewer/Viewer.cpp), so it must be embedded before either backend

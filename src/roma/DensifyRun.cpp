@@ -24,6 +24,7 @@
 #include "roma/DepthSource.h"
 #include "roma/Publish.h"
 #include "roma/Sample.h"
+#include "roma/SourceRule.h"
 #include "sfm/core/FixedPoses.h"
 #include "sfm/core/Model.h"
 
@@ -283,7 +284,7 @@ DensifyPlan planDensify(const DensifyJob& job) {
         const bool m = job.matcher != nullptr || !job.export_dir.empty(), d = job.depth != nullptr;
         // Auto is the matches; the depth maps stand in only when no matcher can run.
         if (o.source == DensifySource::Auto)
-            pl.source = m ? DensifySource::Roma : d ? DensifySource::Depth : DensifySource::Roma;
+            pl.source = autoSource(m, d) == AutoSource::Depth ? DensifySource::Depth : DensifySource::Roma;
         else
             pl.source = o.source;
         if (o.source != DensifySource::Auto &&

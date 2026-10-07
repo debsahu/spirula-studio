@@ -4,12 +4,12 @@
 //
 // Runs against a scratch config and cache directory, never the user's.
 
+#include "app/cli/LicenseCli.h"
 #include "app/gui/FetchSource.h"
 #include "core/LicenseConsent.h"
 #include "core/ModelMirror.h"
 #include "nn/core/Error.h"
 #include "nn/io/Fetch.h"
-#include "roma/model/Fetch.h"
 
 #include <algorithm>
 #include <cctype>
@@ -120,9 +120,9 @@ nn::FetchFile never_file(const char* family) {
 
 void test_refusal() {
     reset_dirs();
-    const nn::FetchFile f = never_file("dinov3,romav2");
+    const nn::FetchFile f = never_file("sam3,gdino");
     const std::string m = message_of([&] { nn::ensure_file(f, "test"); });
-    check(has(m, "has not been accepted") && has(m, "--accept-license dinov3"),
+    check(has(m, "has not been accepted") && has(m, "--accept-license sam3"),
           "unaccepted family: ensure_file REFUSES, naming the family and the flag");
     check(!fs::exists(g_root / "cache" / "spirula-studio" / "models" / "consent-test.bin.part") &&
               !fs::exists(g_root / "cache" / "spirula-studio" / "models" / "consent-test.bin"),
@@ -135,22 +135,22 @@ void test_refusal() {
     const fs::path dst = nn::cached_path(f);
     { std::ofstream o(dst, std::ios::binary); o << "abc"; }
     nn::FetchFile cached = f;
-    cached.license_gates_load = true;   // the RoMa v2 file's setting
+    cached.license_gates_load = true;   // a file whose loading the licence governs
     cached.sha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     const std::string m2 = message_of([&] { nn::ensure_file(cached, "test"); });
     check(has(m2, "has not been accepted"), "a cached, hash-correct file is refused until accepted");
 
     // Positive control: with consent, the same call returns the path. Without
     // it the refusals above could be any failure at all.
-    nn::ConsentIO io;
+    app::ConsentIO io;
     Capture cap;
     io.out = cap.f;
-    nn::accept_licenses("dinov3=yes", io);
+    app::accept_licenses("sam3=yes", io);
     const std::string m3 = message_of([&] { nn::ensure_file(cached, "test"); });
-    check(has(m3, "has not been accepted") && has(m3, "--accept-license romav2") &&
-              !has(m3, "--accept-license dinov3"),
-          "accepting dinov3 alone still refuses a file that also needs romav2, naming romav2");
-    nn::accept_licenses("romav2=yes", io);
+    check(has(m3, "has not been accepted") && has(m3, "--accept-license gdino") &&
+              !has(m3, "--accept-license sam3"),
+          "accepting sam3 alone still refuses a file that also needs gdino, naming gdino");
+    app::accept_licenses("gdino=yes", io);
     check(nn::ensure_file(cached, "test") == dst.string(),
           "both families accepted: the cached file is returned");
     const std::string m4 = message_of([&] { nn::ensure_file(f, "test"); });
@@ -164,7 +164,7 @@ void test_refusal() {
     { std::ofstream o(nn::cached_path(cached), std::ios::binary); o << "abc"; }
     nn::FetchFile dl_only = cached;
     dl_only.license_gates_load = false;
-    check(nn::ensure_file(dl_only, "test") == nn::cached_path(cached) && !lic::accepted("dinov3"),
+    check(nn::ensure_file(dl_only, "test") == nn::cached_path(cached) && !lic::accepted("sam3"),
           "download-only gate: a cached, hash-correct copy loads with no consent recorded");
     fs::remove(nn::cached_path(cached));
     const std::string m5 = message_of([&] { nn::ensure_file(dl_only, "test"); });
@@ -173,13 +173,13 @@ void test_refusal() {
 
 // What the dialogs and a batch lean on, in core: the tick policy and the family list.
 void test_dialog_policy() {
-    for (const char* fam : {"sam3", "sam2", "gdino", "birefnet", "dinov3", "romav2"}) {
+    for (const char* fam : {"sam3", "sam2", "gdino", "birefnet"}) {
         check(!lic::accept_enabled(fam, false), std::string(fam) + ": Accept is OFF until ticked");
         check(lic::accept_enabled(fam, true), std::string(fam) + ": Accept is ON once ticked");
     }
     check(!lic::accept_enabled("nonsense", true), "a family with no terms can never be accepted");
-    const std::vector<std::string> want = {"sam3", "gdino", "dinov3", "romav2"};
-    check(lic::unique_families({"sam3", "", "gdino, sam3", "dinov3,romav2", "romav2"}) == want,
+    const std::vector<std::string> want = {"sam3", "gdino", "sam2", "birefnet"};
+    check(lic::unique_families({"sam3", "", "gdino, sam3", "sam2,birefnet", "birefnet"}) == want,
           "unique_families: comma lists flattened, each family once, first-seen order");
     check(lic::unique_families({}).empty() && lic::unique_families({"", " , "}).empty(),
           "unique_families: nothing named, nothing asked");
@@ -190,12 +190,12 @@ void test_dialog_policy() {
 void test_require_prompt() {
     reset_dirs();
     Capture cap;
-    nn::ConsentIO io;
+    app::ConsentIO io;
     io.out = cap.f;
     io.tty = true;
     int asked = 0;
     io.read_line = [&] { ++asked; return std::string("no"); };
-    std::string m = message_of([&] { nn::require_license("sam3", io); });
+    std::string m = message_of([&] { app::require_license("sam3", io); });
     const std::string shown = cap.text();
     check(has(m, "was not accepted") && !lic::accepted("sam3") && asked == 1,
           "TTY, 'no': refused after one question, nothing recorded");
@@ -204,38 +204,38 @@ void test_require_prompt() {
     check(has(shown, "read and accept the terms of SAM License (Meta)"),
           "TTY: the question says the user has read and accepts, naming the licence");
     io.read_line = [&] { ++asked; return std::string("y"); };
-    m = message_of([&] { nn::require_license("sam3", io); });
+    m = message_of([&] { app::require_license("sam3", io); });
     check(has(m, "was not accepted") && !lic::accepted("sam3"), "TTY, 'y': only 'yes' accepts");
     io.read_line = [&] { ++asked; return std::string("yes"); };
-    check(message_of([&] { nn::require_license("sam3", io); }) == "<did not throw>" &&
+    check(message_of([&] { app::require_license("sam3", io); }) == "<did not throw>" &&
               lic::accepted("sam3"),
           "TTY, 'yes': proceeds, and the acceptance is recorded");
     const int before = asked;
-    nn::require_license("sam3", io);
+    app::require_license("sam3", io);
     check(asked == before, "an accepted family is not asked again");
 
     // Two families: asked once each, in order, and a refusal of the second keeps the first.
     reset_dirs();
     std::vector<std::string> answers = {"yes", "no"};
     io.read_line = [&] { const std::string a = answers.front(); answers.erase(answers.begin()); return a; };
-    m = message_of([&] { nn::require_license("dinov3,romav2", io); });
-    check(has(m, "MIT") && lic::accepted("dinov3") && !lic::accepted("romav2"),
+    m = message_of([&] { app::require_license("sam3,birefnet", io); });
+    check(has(m, "MIT") && lic::accepted("sam3") && !lic::accepted("birefnet"),
           "two families: the first accepted and kept, the second refused by name");
 
     // No terminal.
     reset_dirs();
-    nn::ConsentIO script;
+    app::ConsentIO script;
     Capture cap2;
     script.out = cap2.f;
     script.read_line = [] { return std::string("yes"); };   // present, but tty is false
-    m = message_of([&] { nn::require_license("gdino", script); });
+    m = message_of([&] { app::require_license("gdino", script); });
     check(has(m, "--accept-license gdino=yes") && has(m, "no terminal") && !lic::accepted("gdino"),
           "no terminal: refused, naming --accept-license gdino=yes, even with an input present");
     check(cap2.text().empty(), "no terminal: nothing is printed to a script's stdout");
-    check(message_of([&] { nn::require_license(nullptr, script); }) == "<did not throw>" &&
-              message_of([&] { nn::require_license("", script); }) == "<did not throw>",
+    check(message_of([&] { app::require_license(nullptr, script); }) == "<did not throw>" &&
+              message_of([&] { app::require_license("", script); }) == "<did not throw>",
           "a null or empty family needs nothing");
-    check(has(message_of([&] { nn::require_license("nonsense", script); }), "unknown licence"),
+    check(has(message_of([&] { app::require_license("nonsense", script); }), "unknown licence"),
           "an unknown family is refused, not waved through");
 }
 
@@ -261,69 +261,71 @@ void test_record_and_gui_key() {
         std::ofstream o(gui_conf(), std::ios::binary);
         o << "colmap_exe=/opt/colmap\nlang=de\naccepted_license=sam3\nui_scale=1.250\n";
     }
-    check(lic::accepted("sam3") && !lic::accepted("dinov3"),
+    check(lic::accepted("sam3") && !lic::accepted("sam2"),
           "reads the GUI's accepted_license= lines");
-    check(lic::record("dinov3") && lic::accepted("dinov3"), "record() accepts a family");
+    check(lic::record("sam2") && lic::accepted("sam2"), "record() accepts a family");
     const std::string conf = slurp(gui_conf());
-    check(has(conf, "accepted_license=dinov3\n"), "the key the GUI writes: accepted_license=dinov3");
+    check(has(conf, "accepted_license=sam2\n"), "the key the GUI writes: accepted_license=sam2");
     check(has(conf, "colmap_exe=/opt/colmap\nlang=de\naccepted_license=sam3\nui_scale=1.250\n"),
           "every other line survives, in order");
-    lic::record("dinov3");
+    lic::record("sam2");
     size_t n = 0, at = 0;
-    while ((at = conf.find("accepted_license=dinov3", at)) != std::string::npos) { ++n; ++at; }
+    while ((at = conf.find("accepted_license=sam2", at)) != std::string::npos) { ++n; ++at; }
     check(n == 1 && slurp(gui_conf()) == conf, "record() is idempotent");
     check(!lic::record(""), "an empty family is not recorded");
-    check(lic::accepted_all() == std::vector<std::string>{"sam3", "dinov3"},
+    check(!lic::record("nonsense") && !lic::accepted("nonsense"),
+          "a family with no terms is not recorded, so a typo cannot pose as consent");
+    check(lic::accepted_all() == std::vector<std::string>{"sam3", "sam2"},
           "accepted_all() lists them in file order");
     // A prefix of an accepted family is not that family.
-    check(!lic::accepted("dino") && !lic::accepted("dinov3x"),
+    check(!lic::accepted("sam") && !lic::accepted("sam2x"),
           "a family is matched whole, not as a prefix");
 }
 
 void test_prompts() {
     reset_dirs();
     Capture cap;
-    nn::ConsentIO io;
+    app::ConsentIO io;
     io.out = cap.f;
     io.tty = true;
     io.read_line = [] { return std::string("no"); };
-    std::string m = message_of([&] { nn::accept_licenses("romav2", io); });
-    check(has(m, "was not accepted") && !lic::accepted("romav2"),
+    std::string m = message_of([&] { app::accept_licenses("birefnet", io); });
+    check(has(m, "was not accepted") && !lic::accepted("birefnet"),
           "TTY, answer 'no': refused and nothing recorded");
     io.read_line = [] { return std::string("YES"); };
-    m = message_of([&] { nn::accept_licenses("romav2", io); });
-    check(has(m, "was not accepted") && !lic::accepted("romav2"),
+    m = message_of([&] { app::accept_licenses("birefnet", io); });
+    check(has(m, "was not accepted") && !lic::accepted("birefnet"),
           "TTY, answer 'YES': only the exact word 'yes' accepts");
     io.read_line = [] { return std::string("yes"); };
-    nn::accept_licenses("romav2", io);
-    check(lic::accepted("romav2"), "TTY, answer 'yes': accepted and recorded");
+    app::accept_licenses("birefnet", io);
+    check(lic::accepted("birefnet"), "TTY, answer 'yes': accepted and recorded");
 
-    nn::ConsentIO script;
+    app::ConsentIO script;
     Capture cap2;
     script.out = cap2.f;
-    m = message_of([&] { nn::accept_licenses("dinov3", script); });
-    check(has(m, "dinov3=yes") && !lic::accepted("dinov3"),
+    m = message_of([&] { app::accept_licenses("gdino", script); });
+    check(has(m, "gdino=yes") && !lic::accepted("gdino"),
           "no terminal and no '=yes': refused, and the message names the =yes form");
-    m = message_of([&] { nn::accept_licenses("nonsense=yes", script); });
+    m = message_of([&] { app::accept_licenses("nonsense=yes", script); });
     check(has(m, "unknown licence") && !lic::accepted("nonsense"), "an unknown family is refused");
-    m = message_of([&] { nn::accept_licenses("dinov3=maybe", script); });
-    check(has(m, "=yes") && !lic::accepted("dinov3"), "only '=yes' follows a family");
-    nn::accept_licenses("dinov3=yes", script);
-    check(lic::accepted("dinov3"), "no terminal, '=yes': accepted");
+    m = message_of([&] { app::accept_licenses("gdino=maybe", script); });
+    check(has(m, "=yes") && !lic::accepted("gdino"), "only '=yes' follows a family");
+    app::accept_licenses("gdino=yes", script);
+    check(lic::accepted("gdino"), "no terminal, '=yes': accepted");
 }
 
 void test_terms_shown() {
     reset_dirs();
     Capture cap;
-    nn::ConsentIO io;
+    app::ConsentIO io;
     io.out = cap.f;
-    nn::accept_licenses("dinov3=yes,romav2=yes", io);
+    app::accept_licenses("sam3=yes,birefnet=yes", io);
     const std::string shown = cap.text();
-    const lic::Terms* d = lic::terms_for("dinov3");
-    const lic::Terms* r = lic::terms_for("romav2");
+    const lic::Terms* d = lic::terms_for("sam3");
+    const lic::Terms* r = lic::terms_for("birefnet");
     check(d && r, "both families have terms");
-    check(has(shown, d->text), "the DINOv3 Agreement is printed in full, verbatim");
-    check(has(shown, r->text), "the RoMa v2 MIT text is printed in full, verbatim");
+    check(has(shown, d->text), "the SAM License is printed in full, verbatim");
+    check(has(shown, r->text), "the BiRefNet MIT text is printed in full, verbatim");
     // Everything printed besides the two texts is ours; it must add no term.
     std::string ours = shown;
     for (const std::string& t : {std::string(d->text), std::string(r->text)})
@@ -333,19 +335,14 @@ void test_terms_shown() {
 
     // The embedded text is the file under LICENSES/, not a stale copy.
     const fs::path lic_dir = fs::path(SS_REPO_ROOT) / "LICENSES";
-    if (fs::exists(lic_dir / "DINOv3-License-Agreement.md")) {
-        check(slurp(lic_dir / "DINOv3-License-Agreement.md") == d->text,
-              "embedded DINOv3 text == LICENSES/DINOv3-License-Agreement.md");
-        check(slurp(lic_dir / "MIT-RoMaV2.txt") == r->text,
-              "embedded MIT text == LICENSES/MIT-RoMaV2.txt");
-    } else {
+    if (!fs::exists(lic_dir / "SAM3-License.txt")) {
         check(false, "LICENSES/ not found next to the sources");
+        return;
     }
-    // Every gated family has its terms, and they are the files under LICENSES/.
+    // Every built-in family has its terms, and they are the files under LICENSES/.
     const struct { const char* fam; const char* file; } kAll[] = {
         {"sam3", "SAM3-License.txt"}, {"sam2", "Apache-2.0-SAM2.txt"},
-        {"gdino", "Apache-2.0-GroundingDINO.txt"}, {"birefnet", "MIT-BiRefNet.txt"},
-        {"dinov3", "DINOv3-License-Agreement.md"}, {"romav2", "MIT-RoMaV2.txt"}};
+        {"gdino", "Apache-2.0-GroundingDINO.txt"}, {"birefnet", "MIT-BiRefNet.txt"}};
     for (const auto& e : kAll) {
         const lic::Terms* t = lic::terms_for(e.fam);
         check(t && std::string(t->text).size() > 500 && slurp(lic_dir / e.file) == t->text,
@@ -356,68 +353,35 @@ void test_terms_shown() {
 
 void test_argv() {
     reset_dirs();
-    std::vector<std::string> store = {"spirula", "densify", "--accept-license", "dinov3=yes",
-                                      "ds", "--accept-license=romav2=yes", "--preset", "base"};
+    std::vector<std::string> store = {"spirula", "densify", "--accept-license", "sam3=yes",
+                                      "ds", "--accept-license=birefnet=yes", "--preset", "base"};
     std::vector<char*> argv;
     for (auto& s : store) argv.push_back(s.data());
     argv.push_back(nullptr);
     int argc = (int)store.size();
-    const int n = nn::consume_accept_license_args(argc, argv.data());
+    const int n = app::consume_accept_license_args(argc, argv.data());
     check(n == 2 && argc == 5, "both spellings are found and removed from argv");
     check(std::string(argv[1]) == "densify" && std::string(argv[2]) == "ds" &&
               std::string(argv[3]) == "--preset" && std::string(argv[4]) == "base",
           "every other argument keeps its order");
-    check(lic::accepted("dinov3") && lic::accepted("romav2"), "and both were recorded");
+    check(lic::accepted("sam3") && lic::accepted("birefnet"), "and both were recorded");
     int c2 = 2;
     char a0[] = "x", a1[] = "--accept-license";
     char* v2[] = {a0, a1, nullptr};
-    check(message_of([&] { nn::consume_accept_license_args(c2, v2); }).find("needs a value") !=
+    check(message_of([&] { app::consume_accept_license_args(c2, v2); }).find("needs a value") !=
               std::string::npos,
           "--accept-license with no value is an error");
 }
 
-void test_roma_checkpoint() {
-    reset_dirs();
-    const nn::FetchFile& f = roma::checkpoint_file();
-    check(std::string(f.url) ==
-              "https://github.com/Parskatt/RoMaV2/releases/download/v2.0.1/romav2.0.1.pt",
-          "roma: fetched from the authors' own release URL");
-    check(f.no_mirror && nn::mirror_url(f).empty(), "roma: never from the project mirror");
-    check(std::string(f.license_family) == "dinov3,romav2" && f.bytes == 1095883548ull,
-          "roma: needs both licences; 1,095,883,548 bytes");
-    const std::string m = message_of([] { roma::ensure_checkpoint(); });
-    check(has(m, "has not been accepted") && has(m, "--accept-license dinov3") &&
-              !fs::exists(nn::cached_path(f) + ".part"),
-          "roma: ensure_checkpoint refuses until accepted, with nothing fetched");
-
-    const char* real = std::getenv("SS_TEST_ROMAV2_PT");
-    if (!real || !*real) {
-        std::printf("SKIP roma: real-file hash (set SS_TEST_ROMAV2_PT)\n");
-        return;
-    }
-    check(nn::sha256_file(real) == f.sha256, "roma: the pinned SHA-256 is the real file's");
-    fs::create_directories(fs::path(nn::cached_path(f)).parent_path());
-    std::error_code ec;
-    fs::create_symlink(real, nn::cached_path(f), ec);
-    check(!ec, "roma: cache seeded with the real file");
-    check(has(message_of([] { roma::ensure_checkpoint(); }), "has not been accepted"),
-          "roma: a cached, hash-correct checkpoint is still refused until accepted");
-    nn::ConsentIO io;
-    Capture cap;
-    io.out = cap.f;
-    nn::accept_licenses("dinov3=yes,romav2=yes", io);
-    check(roma::ensure_checkpoint() == nn::cached_path(f), "roma: accepted, it loads from the cache");
-}
-
 // Every route a download takes resolves its fallback through spirula::mirror_for.
 void test_mirror_paths() {
-    const nn::FetchFile& roma_file = roma::checkpoint_file();
-    check(spirula::mirror_for(roma_file.file, roma_file.mirror, roma_file.no_mirror).empty(),
-          "mirror_for: empty for the RoMa file");
-    check(nn::mirror_url(roma_file).empty(), "nn::mirror_url: empty for the RoMa file");
-    const gui::PendingDownload p = gui::pending_download(roma_file);
-    check(p.mirror.empty() && p.url == roma_file.url && p.license_family == "dinov3,romav2" &&
-              p.dest == nn::cached_path(roma_file),
+    const nn::FetchFile pinned = never_file("sam3,gdino");   // no_mirror, two licences
+    check(spirula::mirror_for(pinned.file, pinned.mirror, pinned.no_mirror).empty(),
+          "mirror_for: empty for a no_mirror file");
+    check(nn::mirror_url(pinned).empty(), "nn::mirror_url: empty for a no_mirror file");
+    const gui::PendingDownload p = gui::pending_download(pinned);
+    check(p.mirror.empty() && p.url == pinned.url && p.license_family == "sam3,gdino" &&
+              p.dest == nn::cached_path(pinned),
           "GUI download queue entry: no mirror, both licences carried, the cache path");
     // An own mirror still wins for an ordinary file, and the project's is the default.
     nn::FetchFile own;
@@ -434,10 +398,72 @@ void test_mirror_paths() {
     check(gui::pending_download(own).mirror.empty(), "no_mirror alone empties the entry");
 }
 
+// ensure_file asks the application's gate; with none installed a gated file is refused.
+void test_gate_installation() {
+    reset_dirs();
+    const nn::FetchFile f = never_file("gdino,sam2");
+    nn::set_license_gate(nullptr);
+    std::string m = message_of([&] { nn::ensure_file(f, "test"); });
+    check(has(m, "has not installed a licence gate") && !fs::exists(nn::cached_path(f)),
+          "no gate installed: a gated file is refused, not waved through");
+    check(message_of([&] { nn::ensure_file(never_file(nullptr), "test"); }) != "<did not throw>",
+          "control: an ungated file reaches the download, which fails on its own terms");
+
+    std::vector<std::string> asked;
+    nn::set_license_gate([&](const char* families) { asked.push_back(families); });
+    m = message_of([&] { nn::ensure_file(f, "test"); });
+    check(asked == std::vector<std::string>{"gdino,sam2"} && !has(m, "has not been accepted"),
+          "the gate is handed the family list as written, and its silence lets the file through");
+    nn::set_license_gate([](const char*) { nn::fail("declined by the test gate"); });
+    m = message_of([&] { nn::ensure_file(f, "test"); });
+    check(has(m, "declined by the test gate"), "a gate that throws refuses the file");
+    app::install_license_gate();
+}
+
+// A family a feature registers is a family everywhere: terms, record, the list in errors.
+void test_registered_family() {
+    reset_dirs();
+    static const lic::Terms kExtra{"testfam", "Test Licence", "https://example.invalid/l", "TERMS TEXT"};
+    check(lic::terms_for("testfam") == nullptr && !lic::record("testfam"),
+          "before registering, the family is unknown and cannot be recorded");
+    lic::register_terms(&kExtra);
+    lic::register_terms(&kExtra);   // idempotent
+    check(lic::terms_for("testfam") == &kExtra, "registered: terms_for finds it");
+    const std::string known = lic::known_families();
+    check(known == "sam3, sam2, gdino, birefnet, testfam",
+          "known_families lists the built-ins, then registrations: " + known);
+    const lic::Terms clash{"sam3", "Impostor", "x", "x"};
+    lic::register_terms(&clash);
+    check(std::string(lic::terms_for("sam3")->title) == "SAM License (Meta)",
+          "a registration cannot replace a built-in family");
+    Capture cap;
+    app::ConsentIO io;
+    io.out = cap.f;
+    app::accept_licenses("testfam=yes", io);
+    check(lic::accepted("testfam") && has(cap.text(), "TERMS TEXT"),
+          "a registered family is accepted through the same path and its text printed");
+}
+
+void test_helpers() {
+    SS_UNSETENV("SS_NO_AUTO_FETCH");
+    check(app::terminal_allowed(true) && !app::terminal_allowed(false),
+          "a terminal may be asked; no terminal may not");
+    SS_SETENV("SS_NO_AUTO_FETCH", "1");
+    check(!app::terminal_allowed(true),
+          "SS_NO_AUTO_FETCH is 'no terminal': a GUI's child never waits on stdin");
+    SS_UNSETENV("SS_NO_AUTO_FETCH");
+    check(lic::split_families(" sam3 , ,gdino,") == std::vector<std::string>{"sam3", "gdino"},
+          "split_families trims and drops empty items");
+    const std::string a = lic::scratch_path_for("/x/gui.conf"), b = lic::scratch_path_for("/x/gui.conf");
+    check(a != b && a.rfind("/x/gui.conf", 0) == 0,
+          "scratch_path_for: two writers never share a temporary name");
+}
+
 }  // namespace
 
 int main() {
     g_root = fs::temp_directory_path() / "spirula_fetch_consent_test";
+    app::install_license_gate();
     try {
         test_refusal();
         test_no_family_unaffected();
@@ -447,7 +473,9 @@ int main() {
         test_require_prompt();
         test_dialog_policy();
         test_argv();
-        test_roma_checkpoint();
+        test_gate_installation();
+        test_registered_family();
+        test_helpers();
         test_mirror_paths();
     } catch (const std::exception& e) {
         std::printf("FAIL exception: %s\n", e.what());

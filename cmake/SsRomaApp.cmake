@@ -15,4 +15,9 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/DensifyArgs.cpp
         ${SS_SRC}/app/gui/ReconModels.cpp)
     ss_configure_app(densify_gui_test)
+    if(TARGET ss_roma)
+        # The GUI's preset names and help are held to the matcher's own.
+        target_link_libraries(densify_gui_test PRIVATE ss_roma)
+        target_compile_definitions(densify_gui_test PRIVATE SS_ROMA_LINKED=1)
+    endif()
 endif()

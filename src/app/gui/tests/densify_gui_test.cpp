@@ -6,17 +6,25 @@
 #include "app/gui/ReconModels.h"
 
 #include "core/Sha256.h"
+#include "i18n/catalog/DenseGui.h"
+#include "roma/SourceRule.h"
+#ifdef SS_ROMA_LINKED
+#include "roma/model/RomaMatcher.h"
+#endif
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
 using namespace gui;
+namespace dgmsg = spirula::i18n::msg::densegui;
 
 namespace {
 
@@ -109,6 +117,34 @@ int main() {
                "an index out of range is clamped, not read past the table");
         expect(std::string(kDensifyPresets[0]) == "auto" && kNumDensifyPresets == 6,
                "the preset table is the one the combo and the record both read");
+#ifdef SS_ROMA_LINKED
+        // The combo offers exactly the names the tool parses, and says what they cost.
+        for (int i = 1; i < kNumDensifyPresets; i++) {
+            roma::Preset p;
+            expect(roma::parse_preset(kDensifyPresets[i], p),
+                   std::string("the tool parses the GUI's preset '") + kDensifyPresets[i] + "'");
+        }
+        for (roma::Preset p : {roma::Preset::Turbo, roma::Preset::Fast, roma::Preset::Base,
+                               roma::Preset::High, roma::Preset::Precise}) {
+            const roma::PresetSpec& sp = roma::preset_spec(p);
+            const bool offered = std::find_if(std::begin(kDensifyPresets), std::end(kDensifyPresets),
+                                              [&](const char* n) { return std::string(n) == sp.name; }) !=
+                                 std::end(kDensifyPresets);
+            expect(offered, std::string("the GUI offers the tool's preset '") + sp.name + "'");
+            bool help_ok = true;
+            for (unsigned l = 0; l < spirula::i18n::kLangCount; l++) {
+                const std::string help = dgmsg::preset_help.in((spirula::i18n::Lang)l);
+                help_ok = help_ok && help.find(std::to_string(sp.lr)) != std::string::npos &&
+                          (!sp.hr || help.find(std::to_string(sp.hr)) != std::string::npos);
+            }
+            expect(help_ok, std::string("preset_help states ") + sp.name + "'s resolutions in every language");
+        }
+        for (unsigned l = 0; l < spirula::i18n::kLangCount; l++) {
+            const std::string help = dgmsg::preset_help.in((spirula::i18n::Lang)l);
+            expect(help.find("auto") != std::string::npos && help.find("base") != std::string::npos,
+                   "preset_help says what auto resolves to [" + std::to_string(l) + "]");
+        }
+#endif
     }
 
     // ---- the point source -----------------------------------------------------------
@@ -148,6 +184,14 @@ int main() {
                    densify_resolved_source(kSourceHybrid) == kSourceHybrid &&
                    densify_resolved_source(kSourceRoma) == kSourceRoma,
                "auto is roma, with or without depth maps; hybrid is never auto; a chosen source stays");
+        // The rule the tool itself applies (roma/SourceRule.h), spelled out: a matcher
+        // makes it the matches whatever depth maps exist; depth only stands in without one.
+        using roma::AutoSource;
+        expect(roma::autoSource(true, false) == AutoSource::Roma &&
+                   roma::autoSource(true, true) == AutoSource::Roma &&
+                   roma::autoSource(false, true) == AutoSource::Depth &&
+                   roma::autoSource(false, false) == AutoSource::Roma,
+               "the tool's auto rule: matches with a matcher, depth maps only without one");
         const fs::path ds = fs::temp_directory_path() / "spirula_densify_gui_source";
         fs::remove_all(ds);
         fs::create_directories(ds / "depths");
@@ -239,6 +283,14 @@ int main() {
         const std::string pa = spirula::sha256_file((dense / "points3D.bin").string());
         const std::string tb = spirula::sha256_file((dense / "points3D_tracks.bin").string());
         record(pa, tb);
+        expect(cloud_check(dense.string(), false) == CloudCheck::None,
+               "a list that must not wait is told None at once for a cloud it has not hashed");
+        CloudCheck later = CloudCheck::None;
+        for (int i = 0; i < 400 && later == CloudCheck::None; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            later = cloud_check(dense.string(), false);
+        }
+        expect(later == CloudCheck::Ok, "... and the answer arrives once the worker has hashed it");
         expect(cloud_check(dense.string()) == CloudCheck::Ok, "checksums that match the files: Ok");
         record(std::string(64, '0'), tb);
         expect(cloud_check(dense.string()) == CloudCheck::Mismatch,

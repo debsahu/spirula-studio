@@ -76,13 +76,13 @@ int main() {
     fs::create_directories(root / "cwd");
     fs::current_path(root / "cwd");
     check(lic::settings_path().empty(), "no config home and no HOME: no settings path");
-    check(!lic::accepted("dinov3") && lic::accepted_all().empty(), "...so nothing is accepted");
-    check(!lic::record("dinov3"), "...and record() refuses");
+    check(!lic::accepted("sam3") && lic::accepted_all().empty(), "...so nothing is accepted");
+    check(!lic::record("sam3"), "...and record() refuses");
     check(fs::is_empty(root / "cwd"), "...and nothing was written to the working directory");
     // A gui.conf lying in the working directory is not consent either.
     fs::create_directories(root / "cwd" / "spirula-studio");
-    { FILE* f = std::fopen("spirula-studio/gui.conf", "w"); std::fputs("accepted_license=dinov3\n", f); std::fclose(f); }
-    check(!lic::accepted("dinov3"), "a gui.conf in the working directory is not read");
+    { FILE* f = std::fopen("spirula-studio/gui.conf", "w"); std::fputs("accepted_license=sam3\n", f); std::fclose(f); }
+    check(!lic::accepted("sam3"), "a gui.conf in the working directory is not read");
     fs::current_path("/");
 #endif
     fs::remove_all(root, ec);

@@ -337,7 +337,7 @@ void RecomputePanel::draw_dense(const Source& src, bool busy,
         for (std::string& a : densify_args(j, src.dataset,
                                            in_dataset(src.dataset, src.image_dir).string(),
                                            have_masks ? masks.string() : std::string(),
-                                           src.mask_flipped, densify_has_flag("--preset")))
+                                           src.mask_flipped, densify_has_flag("--preset", true)))
             argv.push_back(std::move(a));
         if (_worker.joinable()) _worker.join();
         _dense_done = _dense_total = 0;

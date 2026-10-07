@@ -69,10 +69,14 @@ bool densify_blocks_run(const DensifyJob& job, bool lidar_run, bool ready);
 
 // "" when this build has the step, otherwise why not.
 std::string densify_availability();
-// Whether `spirula densify --help` lists `flag`; asked once per process.
-bool densify_has_flag(const std::string& flag);
+// Whether `spirula densify --help` lists `flag`. The help is read once, on a worker
+// the first call starts; until then this answers false at once, so a screen never
+// waits on a child process. With `wait` (building a run's arguments) it blocks.
+bool densify_has_flag(const std::string& flag, bool wait = false);
 
-// Both licence families the checkpoint's one file carries, in the order shown.
+// The licence families the checkpoint's one file carries, in the order the file
+// names them (roma::checkpoint_file). The first call registers their terms and
+// dialog wording; empty in a build without the densify tool.
 const std::vector<std::string>& densify_license_families();
 bool densify_model_cached();
 std::vector<PendingDownload> densify_model_downloads();

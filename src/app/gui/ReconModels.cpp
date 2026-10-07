@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <set>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -40,7 +42,7 @@ bool is_dense_model(const std::string& rel) {
     return ends_with(rel, "-roma") || ends_with(rel, "-roma-edit");
 }
 
-CloudCheck cloud_check(const std::string& dir) {
+CloudCheck cloud_check(const std::string& dir, bool wait) {
     struct Seen {
         uintmax_t size = 0;
         fs::file_time_type time;
@@ -48,6 +50,7 @@ CloudCheck cloud_check(const std::string& dir) {
     };
     static std::mutex mu;
     static std::map<std::string, Seen> seen;
+    static std::set<std::string> pending;
     std::error_code ec;
     const fs::path points = fs::path(dir) / "points3D.bin", tracks = fs::path(dir) / "points3D_tracks.bin",
                    record = fs::path(dir) / "densify.json";
@@ -58,6 +61,15 @@ CloudCheck cloud_check(const std::string& dir) {
         std::lock_guard<std::mutex> lk(mu);
         auto it = seen.find(dir);
         if (it != seen.end() && it->second.size == size && it->second.time == time) return it->second.result;
+        if (!wait) {
+            if (pending.insert(dir).second)
+                std::thread([dir] {
+                    cloud_check(dir, true);
+                    std::lock_guard<std::mutex> lk2(mu);
+                    pending.erase(dir);
+                }).detach();
+            return CloudCheck::None;
+        }
     }
     CloudCheck result = CloudCheck::None;
     try {

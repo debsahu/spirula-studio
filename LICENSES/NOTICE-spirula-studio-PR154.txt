@@ -41,5 +41,4 @@ What was taken, and from where. "Design" means the idea only; no line was copied
       only.
 
 Items of the pull request that were not taken: its RoMa model and pipeline, its
-dense output tree and CLI, its training changes. See
-docs/superpowers/plans/2026-10-07-integrate-pr154.md for what was decided and why.
+dense output tree and CLI, its training changes.

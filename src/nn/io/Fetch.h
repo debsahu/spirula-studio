@@ -12,7 +12,6 @@
 // (core/ModelMirror.h) holds identical files, and the SHA-256 holds it to that.
 
 #include <cstdint>
-#include <cstdio>
 #include <functional>
 #include <string>
 
@@ -52,37 +51,14 @@ std::string cached_path(const FetchFile& f);
 
 // A verified local copy, fetched with the system `curl` from `url`, then the
 // mirror, if missing; `tag` prefixes its progress lines. Throws nn::Error naming
-// both URLs -- and, with SS_NO_AUTO_FETCH set, instead of downloading at all.
+// both URLs (or, with SS_NO_AUTO_FETCH set, refusing to download) or on a refusal.
 std::string ensure_file(const FetchFile& f, const char* tag);
 
-// ---- Licence consent (the CLI half of the GUI's accept dialog) ----
-// A terminal prints the terms and wants `yes`; without one it throws, naming
-// `--accept-license <family>=yes`.
-
-struct ConsentIO {
-    std::FILE*                       out = stdout;  // the terms are printed here
-    bool                             tty = false;   // may ask on stdin
-    std::function<std::string()>     read_line;     // one answer; used when `tty`
-};
-
-// stdin/stdout, asking only when both are a terminal.
-ConsentIO stdio_consent();
-
-// A `--accept-license` value: a comma list of `family` (asks "yes" on a TTY,
-// refuses otherwise) or `family=yes` (no question; for scripts). Prints each
-// family's full terms first, then records the acceptance in gui.conf. Throws
-// nn::Error on an unknown family, a declined or unanswerable question.
-void accept_licenses(const std::string& spec, const ConsentIO& io);
-
-// Removes every `--accept-license <spec>` / `--accept-license=<spec>` from
-// argv, accepts what they name on stdin/stdout, and returns how many it found.
-int consume_accept_license_args(int& argc, char** argv);
-
-// Asks for each unaccepted family of a comma list (null or empty: none) and
-// records a "yes". Throws nn::Error without a terminal, on any other answer, or
-// for an unknown family. The one-argument form uses stdio_consent().
-void require_license(const char* family, const ConsentIO& io);
-void require_license(const char* family);
+// The licence gate: the application installs it (terms, prompt and record are
+// its business) and it throws to refuse a family list. With none installed a file
+// that names a family is refused, so forgetting one cannot let it through.
+using LicenseGate = std::function<void(const char* families)>;
+void set_license_gate(LicenseGate gate);
 
 std::string sha256_file(const std::string& path);
 

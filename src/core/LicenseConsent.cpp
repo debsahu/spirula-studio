@@ -1,12 +1,16 @@
 #include "core/LicenseConsent.h"
 
+#include "core/LicenseFamilies.h"
 #include "core/LicenseTexts.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <random>
 #include <sstream>
 
 namespace fs = std::filesystem;
@@ -32,37 +36,76 @@ std::string env_or_empty(const char* name) {
     return v && *v ? v : "";
 }
 
+const Terms* const* builtin_terms(size_t& n) {
+    static const Terms kSam3{
+        family::kSam3, "SAM License (Meta)",
+        "https://github.com/facebookresearch/sam3/blob/main/LICENSE", kSam3License};
+    static const Terms kSam2{
+        family::kSam2, "Apache License 2.0 (SAM 2.1, Meta)",
+        "https://github.com/facebookresearch/sam2/blob/main/LICENSE", kSam2Apache};
+    static const Terms kGdino{
+        family::kGdino, "Apache License 2.0 (Grounding DINO, IDEA Research)",
+        "https://github.com/IDEA-Research/GroundingDINO/blob/main/LICENSE", kGdinoApache};
+    static const Terms kBirefnet{
+        family::kBirefnet, "MIT License (BiRefNet)",
+        "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE", kBirefnetMit};
+    static const Terms* const kAll[] = {&kSam3, &kSam2, &kGdino, &kBirefnet};
+    n = sizeof kAll / sizeof kAll[0];
+    return kAll;
+}
+
+std::mutex g_registry_mu;
+std::vector<const Terms*>& registered() {
+    static std::vector<const Terms*> v;
+    return v;
+}
+
 }  // namespace
 
 const Terms* terms_for(const std::string& family) {
-    static const Terms kDinov3{
-        "dinov3", "DINOv3 License Agreement (Meta)",
-        "https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md", kDinov3Agreement};
-    static const Terms kRoma{
-        "romav2", "RoMa v2 License (MIT)",
-        "https://github.com/Parskatt/RoMaV2/blob/main/LICENSE", kRomaV2Mit};
-    static const Terms kSam3{
-        "sam3", "SAM License (Meta)",
-        "https://github.com/facebookresearch/sam3/blob/main/LICENSE", kSam3License};
-    static const Terms kSam2{
-        "sam2", "Apache License 2.0 (SAM 2.1, Meta)",
-        "https://github.com/facebookresearch/sam2/blob/main/LICENSE", kSam2Apache};
-    static const Terms kGdino{
-        "gdino", "Apache License 2.0 (Grounding DINO, IDEA Research)",
-        "https://github.com/IDEA-Research/GroundingDINO/blob/main/LICENSE", kGdinoApache};
-    static const Terms kBirefnet{
-        "birefnet", "MIT License (BiRefNet)",
-        "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE", kBirefnetMit};
-    if (family == "sam3") return &kSam3;
-    if (family == "sam2") return &kSam2;
-    if (family == "gdino") return &kGdino;
-    if (family == "birefnet") return &kBirefnet;
-    if (family == "dinov3") return &kDinov3;
-    if (family == "romav2") return &kRoma;
+    size_t n = 0;
+    const Terms* const* all = builtin_terms(n);
+    for (size_t i = 0; i < n; ++i)
+        if (family == all[i]->family) return all[i];
+    std::lock_guard<std::mutex> lock(g_registry_mu);
+    for (const Terms* t : registered())
+        if (family == t->family) return t;
     return nullptr;
 }
 
-std::string known_families() { return "sam3, sam2, gdino, birefnet, dinov3, romav2"; }
+void register_terms(const Terms* t) {
+    if (!t || !t->family || terms_for(t->family)) return;
+    std::lock_guard<std::mutex> lock(g_registry_mu);
+    registered().push_back(t);
+}
+
+std::string known_families() {
+    size_t n = 0;
+    const Terms* const* all = builtin_terms(n);
+    std::string out;
+    for (size_t i = 0; i < n; ++i) out += (i ? ", " : "") + std::string(all[i]->family);
+    std::lock_guard<std::mutex> lock(g_registry_mu);
+    for (const Terms* t : registered()) out += ", " + std::string(t->family);
+    return out;
+}
+
+std::vector<std::string> split_families(const std::string& list) {
+    std::vector<std::string> out;
+    std::stringstream ss(list);
+    for (std::string t; std::getline(ss, t, ',');) {
+        const size_t a = t.find_first_not_of(" \t"), b = t.find_last_not_of(" \t");
+        if (a != std::string::npos) out.push_back(t.substr(a, b - a + 1));
+    }
+    return out;
+}
+
+std::string scratch_path_for(const std::string& path) {
+    static std::atomic<unsigned> counter{0};
+    std::random_device rd;
+    char tag[40];
+    std::snprintf(tag, sizeof tag, ".%08x%08x.%u.tmp", rd(), rd(), counter.fetch_add(1));
+    return path + tag;
+}
 
 std::string settings_path() {
 #ifdef _WIN32
@@ -102,27 +145,16 @@ bool accepted(const std::string& family) {
 
 std::vector<std::string> missing(const std::string& families) {
     std::vector<std::string> out;
-    std::stringstream ss(families);
-    for (std::string t; std::getline(ss, t, ',');) {
-        const size_t a = t.find_first_not_of(" \t"), b = t.find_last_not_of(" \t");
-        if (a == std::string::npos) continue;
-        t = t.substr(a, b - a + 1);
+    for (const std::string& t : split_families(families))
         if (!accepted(t)) out.push_back(t);
-    }
     return out;
 }
 
 std::vector<std::string> unique_families(const std::vector<std::string>& lists) {
     std::vector<std::string> out;
-    for (const std::string& list : lists) {
-        std::stringstream ss(list);
-        for (std::string t; std::getline(ss, t, ',');) {
-            const size_t a = t.find_first_not_of(" \t"), b = t.find_last_not_of(" \t");
-            if (a == std::string::npos) continue;
-            t = t.substr(a, b - a + 1);
+    for (const std::string& list : lists)
+        for (const std::string& t : split_families(list))
             if (std::find(out.begin(), out.end(), t) == out.end()) out.push_back(t);
-        }
-    }
     return out;
 }
 
@@ -131,7 +163,7 @@ bool accept_enabled(const std::string& family, bool ticked) {
 }
 
 bool record(const std::string& family) {
-    if (family.empty() || settings_path().empty()) return false;
+    if (!terms_for(family) || settings_path().empty()) return false;
     if (accepted(family)) return true;
     const fs::path path = settings_path();
     std::error_code ec;
@@ -139,8 +171,7 @@ bool record(const std::string& family) {
     std::vector<std::string> lines = read_lines(path.string());
     lines.push_back(kKey + family);
     // Written beside and renamed over, so a crash cannot leave half a settings file.
-    fs::path tmp = path;
-    tmp += ".tmp";
+    const fs::path tmp = scratch_path_for(path.string());
     bool written = false;
     {
         std::ofstream o(tmp, std::ios::binary | std::ios::trunc);

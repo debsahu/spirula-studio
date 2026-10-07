@@ -10,11 +10,12 @@
 // no SAM family and is left alone, so BiRefNet and Grounding DINO checkpoints
 // are gated where they are fetched instead (nn::ensure_file).
 
-#include "nn/core/Error.h"
-#include "nn/io/Fetch.h"
+#include "app/cli/LicenseCli.h"
+#include "core/LicenseFamilies.h"
 
 #include <cctype>
 #include <cstdio>
+#include <exception>
 #include <string>
 
 namespace app {
@@ -24,19 +25,19 @@ inline const char* sam_license_family(const std::string& model) {
     const size_t cut = model.find_last_of("/\\");
     std::string base = cut == std::string::npos ? model : model.substr(cut + 1);
     for (char& c : base) c = (char)std::tolower((unsigned char)c);
-    if (base.rfind("sam3", 0) == 0) return "sam3";
-    if (base.rfind("sam2", 0) == 0) return "sam2";
+    if (base.rfind("sam3", 0) == 0) return spirula::license::family::kSam3;
+    if (base.rfind("sam2", 0) == 0) return spirula::license::family::kSam2;
     return nullptr;
 }
 
 // True when the checkpoint may be loaded. Otherwise the reason is on stderr and
 // the caller exits non-zero before it opens the file.
 inline bool require_model_license(const std::string& model,
-                                  const nn::ConsentIO& io = nn::stdio_consent()) {
+                                  const ConsentIO& io = stdio_consent()) {
     const char* family = sam_license_family(model);
     if (!family) return true;
     try {
-        nn::require_license(family, io);
+        require_license(family, io);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
         return false;

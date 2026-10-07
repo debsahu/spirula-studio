@@ -20,7 +20,7 @@ none() {  # file text
 G=src/app/gui/GuiApp.cpp
 has 1 $G 'if (!accept_license(_license_prompt))'
 has 1 src/app/gui/ModelCache.cpp 'return spirula::license::record(family);'
-has 1 $G 'return spirula::license::accepted(family);'
+has 1 $G '_accepted_cache = spirula::license::accepted_all();'
 none $G '_accepted_licenses'
 none src/app/gui/GuiApp.h '_accepted_licenses'
 has 1 $G 'const std::vector<std::string> accepted = spirula::license::accepted_all();'
@@ -29,7 +29,7 @@ has 1 $G 'for (const auto& l : accepted)'
 has 1 $G 'std::function<void()> then = std::move(_license_then);'
 none $G 'if (auto then = std::move(_license_then)) then();'
 # save_settings writes beside and renames over.
-has 1 $G 'const std::string tmp = settings_path() + ".tmp";'
+has 1 $G 'const std::string tmp = spirula::license::scratch_path_for(settings_path());'
 has 1 $G 'if (ok && closed) fs::rename(tmp, settings_path(), ec);'
 none $G 'std::fopen(settings_path().c_str(), "w")'
 # The download queue refuses a licence-gated file that is not accepted.
@@ -39,7 +39,7 @@ none src/app/gui/ModelCache.cpp 'model_mirror_url'
 none src/app/gui/SfmRunner.cpp 'model_mirror_url'
 none src/app/gui/GeometryRunner.cpp 'model_mirror_url'
 # Main consumes --accept-license for every command.
-has 1 src/app/Main.cpp 'nn::consume_accept_license_args(argc, argv);'
+has 1 src/app/Main.cpp 'app::consume_accept_license_args(argc, argv);'
 # accepted_all() is read BEFORE the "w" open truncates gui.conf.
 read_at=$(command grep -nF 'spirula::license::accepted_all();' $G | head -1 | cut -d: -f1)
 open_at=$(command grep -nF 'std::fopen(tmp.c_str(), "w")' $G | head -1 | cut -d: -f1)
@@ -50,7 +50,7 @@ else
 fi
 has 1 $G 'ImGui::BeginChild("##license_text"'
 has 1 $G 'ui::TextWrappedRaw(std::string(li.full_text));'
-has 1 src/app/gui/ModelCache.cpp 'return LicenseInfo{fam, title, summary, t->url, t->text};'
+has 1 src/app/gui/ModelCache.cpp 'out.push_back({e.fam, e.title, e.summary, t->url, t->text});'
 # Accept is gated on the tick for every family, through the one policy function.
 has 1 $G 'ImGui::BeginDisabled(!spirula::license::accept_enabled(_license_prompt, _license_tick));'
 none $G 'needs_tick'

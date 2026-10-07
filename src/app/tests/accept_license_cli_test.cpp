@@ -89,28 +89,28 @@ int main() {
     const std::string version = r.out;
 
     fresh();
-    r = run("--accept-license dinov3=yes,romav2=yes --version");
+    r = run("--accept-license sam3=yes,birefnet=yes --version");
     const std::string conf = slurp(gui_conf());
     check(r.code == 0 && has(r.out, version), "leading flag: the command still runs (--version)");
-    check(has(conf, "accepted_license=dinov3\n") && has(conf, "accepted_license=romav2\n"),
+    check(has(conf, "accepted_license=sam3\n") && has(conf, "accepted_license=birefnet\n"),
           "leading flag: both families recorded in gui.conf");
-    check(has(r.out, "# DINOv3 License") && has(r.out, "MIT License"),
+    check(has(r.out, "SAM License") && has(r.out, "MIT License"),
           "leading flag: the full terms were printed first");
 
     fresh();
-    r = run("--version --accept-license=romav2=yes");
-    check(r.code == 0 && has(slurp(gui_conf()), "accepted_license=romav2\n"),
+    r = run("--version --accept-license=birefnet=yes");
+    check(r.code == 0 && has(slurp(gui_conf()), "accepted_license=birefnet\n"),
           "trailing --accept-license=family=yes spelling is consumed too");
 
     fresh();
-    r = run("sam --accept-license dinov3=yes --help");
-    check(r.code == 0 && has(slurp(gui_conf()), "accepted_license=dinov3\n") &&
+    r = run("sam --accept-license sam3=yes --help");
+    check(r.code == 0 && has(slurp(gui_conf()), "accepted_license=sam3\n") &&
               !has(r.out, "accept-license"),
           "after a subcommand: consumed, and the subcommand never sees it");
 
     fresh();
-    r = run("--accept-license dinov3 --version");
-    check(r.code == 2 && has(r.out, "dinov3=yes") && !has(r.out, version) &&
+    r = run("--accept-license sam3 --version");
+    check(r.code == 2 && has(r.out, "sam3=yes") && !has(r.out, version) &&
               !fs::exists(gui_conf()),
           "no terminal and no =yes: exit 2, names the =yes form, runs nothing, records nothing");
 
@@ -120,7 +120,7 @@ int main() {
           "an unknown family: exit 2");
 
     fresh();
-    r = run("--accept-license dinov3=yes --version",
+    r = run("--accept-license sam3=yes --version",
             "env -u XDG_CONFIG_HOME -u HOME XDG_CACHE_HOME='" + (g_root / "cache").string() + "'");
     check(r.code == 2 && has(r.out, "XDG_CONFIG_HOME") && fs::is_empty(g_root / "cwd"),
           "no XDG_CONFIG_HOME and no HOME: refused, nothing written to the working directory");

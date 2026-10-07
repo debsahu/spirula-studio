@@ -661,22 +661,27 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   (Apache-2.0) and BiRefNet (MIT) are fetched the same way for consistency. They are fetched
   at run time after the user has seen the terms -- `src/app/gui/ModelCache.cpp`
   is where that policy lives, and it is the only place that should grow one.
-- **A gated download PROMPTS; it never just fails.** Every family (SAM 3, SAM 2.1,
-  Grounding DINO, BiRefNet, DINOv3, RoMa v2) has its verbatim text in `LICENSES/`,
+- **A gated download is ASKED about, in the GUI and on a terminal.** Every family
+  (SAM 3, SAM 2.1, Grounding DINO, BiRefNet) has its verbatim text in `LICENSES/`,
   embedded by `tools/gen_license_texts.py`, and is accepted in one place:
-  `core/LicenseConsent.h`'s `accepted_license=` lines of gui.conf. The GUI shows
-  the whole text with a required "I have read and accept the terms of <name>" tick
-  for EVERY family (`accept_enabled`), and a download continues by itself once it
-  is accepted; a batch asks for every family up front (`GuiApp::begin_batch`), never
-  mid-run. Anything that starts a download with a `license_family` goes through
+  `core/LicenseConsent.h`'s `accepted_license=` lines of gui.conf. A model with
+  licences of its own adds them with `license::register_terms()` at startup and
+  gives the GUI its wording with `register_license_info()`. A family whose
+  weights we must not redistribute sets `no_mirror` on its `FetchFile`. The GUI
+  shows the whole text with a required "I have read and accept the terms of
+  <name>" tick for EVERY family (`accept_enabled`), and a download continues by
+  itself once it is accepted; a batch asks for every family up front
+  (`GuiApp::begin_batch`), never mid-run.
+  Anything that starts a download with a `license_family` goes through
   `GuiApp::request_licenses` / `start_downloads_with_consent`;
-  `FileDownload::start`'s refusal is only a backstop. The CLI (`nn::require_license`)
-  prints the terms and asks for `yes` on a terminal, and refuses without one,
-  naming `--accept-license <family>=yes`. A SAM checkpoint named with `--model`
-  is gated by its file name (`app/cli/ModelLicense.h`). `FetchFile::license_gates_load`
-  says whether a cached copy is refused too (RoMa v2) or only the download is
-  (the rest). A family whose weights we must not redistribute sets `no_mirror`;
-  `src/roma/model/Fetch.h` is the worked example. End to end:
+  `FileDownload::start`'s refusal is only a backstop. On a terminal,
+  `app::require_license` (`app/cli/LicenseCli.h`) prints the terms and asks for
+  `yes`; without one (a script, or SS_NO_AUTO_FETCH set) the CLI refuses, naming
+  `--accept-license <family>=yes`. `nn::ensure_file` only calls the gate the
+  application installs (`app::install_license_gate()`), so the inference layer
+  knows no terms. A SAM checkpoint named with `--model` is gated by its file name
+  (`app/cli/ModelLicense.h`). `FetchFile::license_gates_load` says whether a cached
+  copy is refused too or only the download is. End to end:
   `tools/license_checks/cli_prompt_gate.py` (a pty) and `license_prompt_gate.py` (guictl).
 - **The inference layer's VRAM pool is process-wide and grow-only**, so
   destroying a `sam::Session` frees nothing by itself and a 2 GB checkpoint

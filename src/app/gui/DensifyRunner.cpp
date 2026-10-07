@@ -14,13 +14,18 @@
 #include "app/gui/FetchSource.h"
 #include "data/DatasetParser.h"
 #include "nn/Device.h"
+#include "core/LicenseConsent.h"
 #include "nn/io/Fetch.h"
 #include "roma/model/Fetch.h"
 #endif
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <mutex>
+#include <thread>
 
 namespace fs = std::filesystem;
 namespace dg = spirula::i18n::msg::densegui;
@@ -39,25 +44,50 @@ std::string densify_availability() {
 #endif
 }
 
-bool densify_has_flag(const std::string& flag) {
-    static std::mutex mu;
-    static std::vector<std::pair<std::string, bool>> known;
-    std::lock_guard<std::mutex> lk(mu);
-    for (const auto& [f, has] : known)
-        if (f == flag) return has;
-    bool has = false;
-    if (densify_availability().empty()) {
-        const std::atomic<bool> never{false};
-        run_process({app::exe_path(), "densify", "--help"}, "",
-                    [&](const std::string& l) { has = has || l.find(flag) != std::string::npos; },
-                    never);
-    }
-    known.emplace_back(flag, has);
-    return has;
+bool densify_has_flag(const std::string& flag, bool wait) {
+    struct Help {
+        std::mutex mu;
+        std::condition_variable cv;
+        bool done = false;
+        std::string text;
+    };
+    // Shared with the worker, which may outlive a process that quits mid-probe.
+    static const std::shared_ptr<Help> help = [] {
+        auto h = std::make_shared<Help>();
+        if (densify_availability().empty())
+            std::thread([h] {
+                std::string text;
+                const std::atomic<bool> never{false};
+                run_process({app::exe_path(), "densify", "--help"}, "",
+                            [&](const std::string& l) { text += l + "\n"; }, never);
+                std::lock_guard<std::mutex> lk(h->mu);
+                h->text = std::move(text);
+                h->done = true;
+                h->cv.notify_all();
+            }).detach();
+        else
+            h->done = true;
+        return h;
+    }();
+    std::unique_lock<std::mutex> lk(help->mu);
+    if (wait) help->cv.wait(lk, [] { return help->done; });
+    return help->done && help->text.find(flag) != std::string::npos;
 }
 
 const std::vector<std::string>& densify_license_families() {
-    static const std::vector<std::string> kFamilies = {"romav2", "dinov3"};
+    static const std::vector<std::string> kFamilies = [] {
+        std::vector<std::string> out;
+#ifdef SS_TOOL_DENSIFY
+        roma::register_licenses();
+        const std::string list = roma::checkpoint_file().license_family;
+        out = spirula::license::split_families(list);
+        for (const std::string& f : out) {
+            if (f == "dinov3") register_license_info(f.c_str(), &dg::license_dinov3_title, &dg::license_dinov3_summary);
+            if (f == "romav2") register_license_info(f.c_str(), &dg::license_romav2_title, &dg::license_romav2_summary);
+        }
+#endif
+        return out;
+    }();
     return kFamilies;
 }
 
@@ -111,7 +141,7 @@ bool run_densify_step(const DensifyJob& job, const std::string& dataset,
     std::vector<std::string> argv = {app::exe_path(), "--lang",
                                      spirula::i18n::code(spirula::i18n::current())};
     for (std::string& a : densify_args(j, dataset, images, masks, masks_flipped,
-                                       densify_has_flag("--preset"), progress_dir))
+                                       densify_has_flag("--preset", true), progress_dir))
         argv.push_back(std::move(a));
     std::string cmd;
     for (const std::string& a : argv) cmd += (cmd.empty() ? "$ " : " ") + a;
