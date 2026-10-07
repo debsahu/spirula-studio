@@ -17,6 +17,27 @@ struct CoarseMatch {
     std::vector<float> data;
 };
 
+// A refined warp at the last refiner's resolution, [h, w] pixels of the image
+// it was matched from: warp (x, y) as in CoarseMatch, and confidence [h, w, 4]
+// = (overlap logit, precision p00, p10, p11). overlap() is sigmoid(logit).
+struct DenseMatch {
+    int h = 0, w = 0;
+    std::vector<float> warp, confidence;
+    float overlap(size_t i) const;
+};
+
+// RoMaV2.forward's two scales: the coarse match and three refiners at lr, then
+// the same refiners again at hr when hr_h > 0. `bidirectional` also returns B
+// into A; A into B does not depend on it.
+struct MatchSpec {
+    int lr_h = 0, lr_w = 0, hr_h = 0, hr_w = 0;
+    bool bidirectional = false;
+};
+
+struct MatchResult {
+    DenseMatch ab, ba;   // ba is empty unless MatchSpec::bidirectional
+};
+
 class Model {
 public:
     Model();
@@ -30,6 +51,14 @@ public:
     // `a`, `b`: [H, W, 3] RGB in [0, 1], H and W multiples of 16 -- the
     // tensors RoMaV2.forward() takes, after match()'s resize.
     CoarseMatch coarse(const float* a, const float* b, int H, int W);
+
+    // [lr_h, lr_w, 3] and [hr_h, hr_w, 3] RGB in [0, 1]; the hr pair is ignored
+    // without an hr scale. A non-empty `key_a` keeps A's backbone taps and VGG
+    // maps on the device, reused by the next call with the same key and sizes.
+    MatchResult match(const float* a_lr, const float* b_lr, const float* a_hr,
+                      const float* b_hr, const MatchSpec& spec, const std::string& key_a = {});
+    // The reference cache's arena, separate from plannedBytes()/peakBytes().
+    uint64_t cacheBytes() const;
 
     uint64_t plannedBytes() const;   // the largest arena plan so far
     uint64_t peakBytes() const;      // the arena's high water
