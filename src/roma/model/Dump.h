@@ -11,6 +11,8 @@
 
 namespace roma {
 
+// The first call (of any of these) empties a stale dump directory and writes
+// an unfinished manifest; call it at startup so a run that dies early leaves one.
 bool dump_enabled();
 void dump_tensor(const char* name, const nn::Tensor& t, const std::vector<int64_t>& shape);
 void dump_host(const char* name, const float* data, const std::vector<int64_t>& shape);

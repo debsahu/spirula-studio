@@ -390,7 +390,7 @@ void test_refine_kernels(vk::Arena& arena) {
 }
 
 // ---- torch's antialiased bicubic preserves a constant and averages on a
-// downscale. Its exact match to torch is reported by compare_torch.py.
+// downscale. Its match to torch is roma_unit_test's resize_down / resize_up.
 void test_resize() {
     std::printf("\nresize\n");
     std::vector<uint8_t> flat(64 * 48 * 3, 200), checker(64 * 48 * 3);
@@ -454,7 +454,8 @@ void test_model(const std::string& ckpt, const std::string& a, const std::string
         if (f16_weights()) {
             // bf16 -> f16 is exact inside f16's normal range; 4.6e-4 of the
             // backbone's values are below it (measured on romav2.0.1.pt).
-            const double frac = (double)w.inexactF16() / 303.2e6;
+            const double frac =
+                (double)w.inexactF16() / (double)std::max<uint64_t>(w.totalF16(), 1);
             check(frac < 1e-3, "f16_inexact_bounded", "%llu backbone weights not exact in "
                   "f16 (%.2e of them)", (unsigned long long)w.inexactF16(), frac);
         }
@@ -656,10 +657,33 @@ void bench(const std::string& ckpt, const std::string& a, const std::string& b,
 }
 }  // namespace
 
+// One coarse() on a W x H pair, for the non-square parity fixture: RoPE's two
+// axes and the DPT's resize targets only separate when H != W.
+void test_coarse_rect(const std::string& ckpt, const std::string& a, const std::string& b,
+                      int W, int H) {
+    std::printf("\ncoarse %dx%d\n", W, H);
+    NN_CHECK(!a.empty() && !b.empty(), "--rect needs --pair A B");
+    const nn::Image ia = nn::load_image(a), ib = nn::load_image(b);
+    const std::vector<float> A = resize_rgb(ia.data.data(), ia.width, ia.height, W, H);
+    const std::vector<float> B = resize_rgb(ib.data.data(), ib.width, ib.height, W, H);
+    Model m;
+    m.load(ckpt);
+    const CoarseMatch cm = m.coarse(A.data(), B.data(), H, W);
+    size_t finite = 0;
+    for (float v : cm.data) finite += std::isfinite(v);
+    check(cm.w == W / 4 && cm.h == H / 4, "rect_shape", "%dx%d", cm.w, cm.h);
+    check(finite == cm.data.size(), "rect_finite", "%zu of %zu", finite, cm.data.size());
+    for (const Model::Stage& st : m.stages())
+        check(st.peak <= st.plan, "stage_within_plan", "%s: %.1f of %.1f MB", st.name,
+              st.peak / 1e6, st.plan / 1e6);
+}
+
 int main(int argc, char** argv) {
     if (!spirula::env("NN_LOG")) nn::set_log_level(2);
+    dump_enabled();
     std::string ckpt, a, b, bench_list;
-    int size = 640, repeat = 1;
+    int size = 640, repeat = 1, rect_w = 0, rect_h = 0;
+    bool require_model = false;
     for (int i = 1; i < argc; ++i) {
         const std::string s = argv[i];
         auto next = [&] { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
@@ -668,6 +692,8 @@ int main(int argc, char** argv) {
         else if (s == "--size") size = std::atoi(next().c_str());
         else if (s == "--repeat") repeat = std::atoi(next().c_str());
         else if (s == "--bench") bench_list = next();
+        else if (s == "--require-model") require_model = true;
+        else if (s == "--rect") { rect_w = std::atoi(next().c_str()); rect_h = std::atoi(next().c_str()); }
         else { std::printf("unknown argument '%s'\n", s.c_str()); return 2; }
     }
     try {
@@ -685,18 +711,23 @@ int main(int argc, char** argv) {
         test_resize();
         std::error_code ec;
         if (ckpt.empty()) ckpt = nn::cached_path(checkpoint_file());
-        if (!std::filesystem::exists(ckpt, ec))
+        if (!std::filesystem::exists(ckpt, ec)) {
             std::printf("\nSKIP model: %s is not cached (--checkpoint PATH)\n", ckpt.c_str());
+            check(!require_model, "model_present", "--require-model and no checkpoint");
+        } else if (rect_w > 0)
+            test_coarse_rect(ckpt, a, b, rect_w, rect_h);
         else if (!bench_list.empty())
             bench(ckpt, a, b, bench_list, repeat);
         else
             test_model(ckpt, a, b, size, repeat);
     } catch (const std::exception& e) {
         std::printf("EXCEPTION: %s\n", e.what());
+        dump_finish(1);
         return 1;
     }
     std::printf("\n%d checks, %d failures\n%s\n", g_checks, g_failures,
                 g_failures ? "FAIL" : "PASS");
+    dump_finish(g_failures ? 1 : 0);
     vk::Stream::shutdown();
     vk::Pipelines::get().shutdown();
     vk::VramPool::get().releaseAll();

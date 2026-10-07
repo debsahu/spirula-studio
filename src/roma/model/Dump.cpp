@@ -58,6 +58,7 @@ void init(DumpState& d) {
     std::snprintf(buf, sizeof buf, "%08x%08x-%lld", rd(), rd(),
                   (long long)std::chrono::system_clock::now().time_since_epoch().count());
     d.nonce = buf;
+    write_manifest(d, -1, false);
 }
 
 DumpState& state() {
