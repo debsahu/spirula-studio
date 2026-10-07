@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <numeric>
 #include <random>
 #include <stdexcept>
@@ -15,13 +16,35 @@ using sfm::Vec3;
 
 DepthFiles::DepthFiles(std::function<std::string(const std::string&)> path,
                        std::function<bool(const SourceImage&)> ray, std::string dir,
-                       std::function<std::string(const std::string&)> normal_path)
-    : path_(std::move(path)), normal_path_(std::move(normal_path)), ray_(std::move(ray)),
-      dir_(std::move(dir)) {}
+                       std::function<std::string(const std::string&)> normal_path,
+                       std::function<std::string(const std::string&)> image_path)
+    : path_(std::move(path)), normal_path_(std::move(normal_path)), image_path_(std::move(image_path)),
+      ray_(std::move(ray)), dir_(std::move(dir)), records_(app::read_depth_manifest(dir_)) {}
 
 bool DepthFiles::load(const SourceImage& img, RawDepth& out) {
     const std::string p = path_(img.name);
     if (p.empty()) return false;
+    out = RawDepth{};
+    out.ray = ray_(img);
+    std::error_code ec;
+    const std::string rel = std::filesystem::relative(p, dir_, ec).generic_string();
+    auto rec = records_.find(rel);
+    if (rec != records_.end()) {
+        // A map shifted, renamed or left from an older extraction is plausible
+        // depth for the wrong picture, and some pass every fit gate.
+        out.recorded = true;
+        const std::string want = std::filesystem::path(img.name).generic_string();
+        if (rec->second.image != want) out.refused = "made for " + rec->second.image;
+        else if (app::file_print(p) != rec->second.map_print) out.refused = "changed since geometry wrote it";
+        else if (image_path_ && app::file_print(image_path_(img.name)) != rec->second.image_print)
+            out.refused = "the image changed since its map was made";
+        if (!out.refused.empty()) return true;
+        out.ray = rec->second.ray;
+    }
+    if (!stbi_is_16_bit(p.c_str())) {
+        out.refused = "not a 16-bit map";
+        return true;
+    }
     int w = 0, h = 0, c = 0;
     uint16_t* d = stbi_load_16(p.c_str(), &w, &h, &c, 1);
     if (!d) throw std::runtime_error("cannot read depth " + p);
@@ -29,7 +52,12 @@ bool DepthFiles::load(const SourceImage& img, RawDepth& out) {
     out.height = h;
     out.value.assign(d, d + (size_t)w * h);
     stbi_image_free(d);
-    out.ray = ray_(img);
+    const double aspect = (double)w / h, cam = (double)img.cam.width / img.cam.height;
+    if (std::fabs(aspect / cam - 1.0) > 0.01) {
+        out.refused = std::to_string(w) + "x" + std::to_string(h) + " is not the camera's shape (" +
+                      std::to_string(img.cam.width) + "x" + std::to_string(img.cam.height) + ")";
+        return true;
+    }
     out.normal.clear();
     const std::string np = normal_path_ ? normal_path_(img.name) : std::string();
     if (!np.empty()) {
@@ -208,6 +236,7 @@ DepthField fitDepth(const SourceImage& img, const sfm::Reconstruction& rec, cons
     // the map has data.
     std::vector<double> xs, ys;   // disparities: raw, true
     for (uint64_t pid : img.points) {
+        if (o.holdout_mod > 0 && pid % (uint64_t)o.holdout_mod == 0) continue;
         auto it = rec.points3D.find(pid);
         if (it == rec.points3D.end()) continue;
         const Vec3 Xc = sfm::mul(img.pose.R, it->second.xyz) + img.pose.t;
@@ -403,6 +432,8 @@ std::vector<DensePoint> depthPointsForView(
         uint64_t h = (uint64_t)s * 0x9E3779B97F4A7C15ull + (uint64_t)ref;
         for (int v : others) {
             if (v == A.image) continue;
+            const Vec3 ra = (imA.centre - X).normalized(), rb = (images[(size_t)v].centre - X).normalized();
+            if (normalAngleDeg(ra, rb) < o.min_parallax_deg) { st.depth_vote_close++; continue; }
             double field, own;
             if (!fields[(size_t)v].at(images[(size_t)v], X, &field, &own)) continue;
             const double rel = (own - field) / field;

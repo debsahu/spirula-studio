@@ -6,6 +6,7 @@
 #include <numeric>
 #include <random>
 #include <set>
+#include <stdexcept>
 
 namespace roma {
 
@@ -46,6 +47,8 @@ std::vector<int64_t> sampleWithCoverage(const std::vector<float>& certainty, int
             const double u = std::max(uni(rng), 1e-300);
             keys.push_back({std::log(u) / weight[(size_t)i], i});
         }
+    // nth_element past the end is undefined behaviour, not an error: say so.
+    if (m_main > (int64_t)keys.size()) throw std::logic_error("more weighted draws than non-zero pixels");
     std::nth_element(keys.begin(), keys.begin() + m_main, keys.end(),
                      [](const auto& a, const auto& b) { return a.first > b.first; });
     std::set<int64_t> chosen;

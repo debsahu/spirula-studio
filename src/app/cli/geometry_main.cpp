@@ -8,6 +8,7 @@
 
 #include "app/Tools.h"
 
+#include "app/DepthManifest.h"
 #include "app/DepthPng.h"
 #include "app/FrameLook.h"
 #include "app/GeometryModel.h"
@@ -729,6 +730,9 @@ int spirula_geometry_main(int argc, char** argv) {
         };
 
         app::WriterPool writers;
+        // Rows for app/DepthManifest.h, filled in once the writers are done.
+        struct Written { int64_t i; fs::path dp; bool ray; };
+        std::vector<Written> wrote_depth;
         const double t_start = nn::now_ms();
         int64_t written = 0, skipped = 0, unreadable = 0;
         double model_ms = 0;
@@ -880,6 +884,7 @@ int spirula_geometry_main(int argc, char** argv) {
                         std::fmin(65535.0f, std::fmax(1.0f, v)));
                 }
                 writers.submit(std::move(job));
+                wrote_depth.push_back({i, dp, ray});
             }
 
             // Every image, not every tenth: the GUI drives its bar and its
@@ -898,6 +903,18 @@ int spirula_geometry_main(int argc, char** argv) {
             }
         }
         writers.finish();
+        if (o.want_depth && !wrote_depth.empty()) {
+            auto m = app::read_depth_manifest(depth_dir.string());
+            for (const Written& w : wrote_depth) {
+                const fs::path img(ds.image_filenames[(size_t)w.i]);
+                fs::path rel = fs::relative(img, image_root, ec);
+                if (ec || rel.empty() || rel.native()[0] == '.') rel = img.filename();
+                m[fs::relative(w.dp, depth_dir, ec).generic_string()] = {
+                    rel.generic_string(), app::file_print(img.string()), app::file_print(w.dp.string()), w.ray};
+            }
+            if (!app::write_depth_manifest(depth_dir.string(), m))
+                std::fprintf(stderr, "warning: cannot write %s\n", (depth_dir / app::kDepthManifest).string().c_str());
+        }
         std::printf("\r%s\n",
                     format(G::log_done,
                            {(long long)written, (long long)skipped,

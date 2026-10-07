@@ -6,9 +6,11 @@
 
 #include <array>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
+#include "app/DepthManifest.h"
 #include "roma/Densify.h"
 #include "roma/Select.h"
 #include "sfm/core/Model.h"
@@ -24,6 +26,8 @@ struct RawDepth {
     bool ray = true;
     int normal_width = 0, normal_height = 0;
     std::vector<float> normal;        // [nh*nw*3], empty = no normal map
+    std::string refused;              // a map that is there but must not be used, and why
+    bool recorded = false;            // checked against geometry's record of it
 };
 
 class DepthSource {
@@ -34,21 +38,25 @@ public:
     virtual std::string describe() const = 0;
 };
 
-// Spirula `geometry` output: 16-bit PNGs, relative or millimetres (both are
-// linear in depth, so the fit absorbs which), ray depth where `ray(img)` says;
-// normals/ 8-bit, byte / 127.5 - 1, black = none, when `normal_path` finds one.
+// Spirula `geometry` output: 16-bit depth, relative or mm (the fit absorbs which);
+// normals/ byte / 127.5 - 1, black = none. A map geometry recorded
+// (app/DepthManifest.h) must match its record, which also says ray or z depth.
 class DepthFiles : public DepthSource {
 public:
     DepthFiles(std::function<std::string(const std::string& name)> path,
                std::function<bool(const SourceImage&)> ray, std::string dir,
-               std::function<std::string(const std::string& name)> normal_path = {});
+               std::function<std::string(const std::string& name)> normal_path = {},
+               std::function<std::string(const std::string& name)> image_path = {});
     bool load(const SourceImage& img, RawDepth& out) override;
     std::string describe() const override { return "depth maps in " + dir_; }
+    int recorded() const { return (int)records_.size(); }
+    void rereadRecord() { records_ = app::read_depth_manifest(dir_); }   // after geometry added maps
 
 private:
-    std::function<std::string(const std::string&)> path_, normal_path_;
+    std::function<std::string(const std::string&)> path_, normal_path_, image_path_;
     std::function<bool(const SourceImage&)> ray_;
     std::string dir_;
+    std::map<std::string, app::DepthMapRecord> records_;
 };
 
 // The view ray of map pixel (x, y) of a w x h map of `img`: unit for ray
@@ -101,6 +109,7 @@ struct DepthFitOptions {
     // A normal map below this median cosine against the depth's own normals
     // is in another convention and is not used (docs/notes/densify.md).
     double normal_min_cos = 0.9;
+    int holdout_mod = 0;              // > 0: sparse points with id % mod == 0 are not anchors (an evaluation)
 };
 
 DepthField fitDepth(const SourceImage& img, const sfm::Reconstruction& rec, const RawDepth& raw,
@@ -115,6 +124,9 @@ struct DepthAgreeOptions {
     bool vote = true;
     bool normal_check = true;         // drop past `normal_deg` from the agreeing images' median
     double normal_deg = 55;
+    // A voter this close in angle at the point shares the reference's monocular
+    // error instead of checking it (adjacent frames): it does not vote.
+    double min_parallax_deg = 1.5;
 };
 std::vector<DensePoint> depthPointsForView(
     const std::vector<View>& views, const std::vector<SourceImage>& images,

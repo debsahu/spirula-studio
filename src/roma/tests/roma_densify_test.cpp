@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 
+#include "app/DepthManifest.h"
+#include "app/DepthPng.h"
 #include "data/CameraMath.h"
 #include "external/stb_image_write.h"
 #include "roma/Densify.h"
@@ -687,6 +689,11 @@ void depth_fit_recovers_affine() {
         for (int x = 10; x < 400; x += 41)
             worst = std::max(worst, std::fabs(f.dist[(size_t)y * 400 + x] / truth(x, y) - 1));
     check(worst < 1e-3, "fitted depth off by " + std::to_string(worst) + " (relative)");
+    // Mutant: the evaluation hold-out ignored (its anchors would score their own fit).
+    DepthFitOptions ho = fo;
+    ho.holdout_mod = 3;
+    const DepthField fh = fitDepth(img, rec, raw, ho);
+    check(fh.ok && fh.anchors == 200, "anchors with every third held out: " + std::to_string(fh.anchors));
     // An unrelated map: no monotone relation to the anchors.
     RawDepth noise = raw;
     for (float& v : noise.value) v = (float)(1.0 + 10.0 * std::fabs(u(rng)));
@@ -820,10 +827,10 @@ std::unique_ptr<DepthFiles> stairDepthsWithNormals(const fs::path& d) {
         });
 }
 
-// Mutant: normals/ ignored when present (always from depth). Also: a map in
-// another convention (turned 120 degrees) must not be used.
+// Mutants: normals/ ignored when present (always from depth); the convention
+// checked after facing (a map pointing away, 180 degrees, is then "repaired").
 void file_normals_used_when_present() {
-    for (double tilt : {15.0, 120.0}) {
+    for (double tilt : {15.0, 120.0, 180.0}) {
         const fs::path d = tempDir("filenormals");
         writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
         SyntheticDepth sd;
@@ -896,13 +903,27 @@ void depth_reuse_computes_only_missing() {
     const DepthInventory all = ensureDepths(names, find, [&] { calls++; });
     check(calls == 1 && all.reused == 5 && all.computed == 0, "compute ran with nothing missing");
     fs::remove(d / "e.png");
+    // In place: the present maps are read-only while it runs, so nothing changes.
     bool threw = false;
     try {
         ensureDepths(names, find, [&] { for (const std::string& n : names) put(n, "rewritten"); });
     } catch (const std::exception&) {
         threw = true;
     }
-    check(threw, "a compute that rewrote present maps was accepted");
+    check(!threw && slurp(d / "a.png") == "kept", "a present map was overwritten in place: " + slurp(d / "a.png"));
+    // Replaced (removed, written anew), which a permission does not stop: refused.
+    fs::remove(d / "e.png");
+    threw = false;
+    try {
+        ensureDepths(names, find, [&] {
+            fs::remove(d / "a.png");
+            put("a.jpg", "replaced");
+            put("e.jpg", "new");
+        });
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    check(threw, "a compute that replaced a present map was accepted");
     fs::remove_all(d);
 }
 
@@ -989,7 +1010,8 @@ void hybrid_fill_normal_matches_neighbours() {
     const auto on = run(true), off = run(false);
     const int64_t bad_on = fromFirstImages(on.first, on.second, 4), bad_off = fromFirstImages(off.first, off.second, 4);
     check(on.first.stats.depth_local_normal > 0, "no fill was tested against its neighbours' plane");
-    check(bad_off > 100, "the fixture's wrong-normal images give too few fills: " + std::to_string(bad_off));
+    // 96 since fill next to another reference's matches is dropped (8 with the test).
+    check(bad_off > 50, "the fixture's wrong-normal images give too few fills: " + std::to_string(bad_off));
     check(bad_on * 4 < bad_off, "fills from wrong-normal images: " + std::to_string(bad_on) + " with the test, " +
                                     std::to_string(bad_off) + " without");
     fs::remove_all(d);
@@ -1024,7 +1046,7 @@ void hybrid_fills_only_uncovered() {
     };
     const DensifyResult h = run(DensifySource::Hybrid), m = run(DensifySource::Depth);
     check(m.stats.depth_kept > 2000, "depth-only points: " + std::to_string(m.stats.depth_kept));
-    check(h.stats.depth_covered > 0, "hybrid saw no matched pixels to leave alone");
+    check(h.stats.depth_left_to_matches > 0, "hybrid saw no matched pixels to leave alone");
     check(h.stats.depth_kept * 4 < m.stats.depth_kept,
           "hybrid kept " + std::to_string(h.stats.depth_kept) + " depth points against " +
               std::to_string(m.stats.depth_kept) + " depth-only: it is not filling only the gaps");
@@ -1053,6 +1075,345 @@ void hybrid_fill_has_its_own_budget() {
     const std::vector<DensePoint> shared = finalizePoints(pts, 3, 0, 5, opt, s2);
     check(shared.size() == 5 && std::none_of(shared.begin(), shared.end(), [](const DensePoint& p) { return p.from_depth; }),
           "the shared cap did not keep matches first");
+}
+
+// The vote on its own: pinhole images of the plane x = 3, each with a map that
+// is the true distance times `scale` (no fit), and one sample grid of the first.
+struct VoteRig {
+    std::vector<View> views;
+    std::vector<SourceImage> images;
+    std::vector<DepthField> fields;
+    std::vector<int> others;
+};
+VoteRig voteRig(const std::vector<Vec3>& eyes, const std::vector<double>& scale) {
+    VoteRig r;
+    const Scene sc = planeScene();
+    for (size_t i = 0; i < eyes.size(); i++) {
+        View v = pinView("v" + std::to_string(i), (int)i, eyes[i], {3, 0, 0}, 64, 64, 48);
+        SourceImage im;
+        im.id = (uint32_t)i + 1;
+        im.name = v.name;
+        im.cam = v.cam;
+        im.pose = {v.R, v.t};
+        im.centre = v.centre;
+        DepthField f;
+        f.width = f.height = 64;
+        f.ray = true;
+        f.ok = true;
+        f.dist.assign(64 * 64, 0.0f);
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++) {
+                const Vec3 d = sfm::mul(sfm::transpose(v.R), v.cam.bearing({x + 0.5, y + 0.5})).normalized();
+                const double tt = sc.hit(v.centre, d);
+                if (std::isfinite(tt)) f.dist[(size_t)y * 64 + x] = (float)(tt * scale[i]);
+            }
+        r.views.push_back(v);
+        r.images.push_back(im);
+        r.fields.push_back(f);
+        r.others.push_back((int)i);
+    }
+    return r;
+}
+std::vector<DensePoint> runVote(const VoteRig& r, const DepthAgreeOptions& o, DensifyStats& st) {
+    std::vector<int64_t> samples;
+    for (int y = 16; y < 48; y += 4)
+        for (int x = 16; x < 48; x += 4) samples.push_back((int64_t)y * 64 + x);
+    return depthPointsForView(r.views, r.images, r.fields, r.others, 0, 64, 64, samples, o, {}, {}, st);
+}
+
+// Mutant: the "seen through" vote off (two agree, three see past the point).
+void depth_vote_seen_through_wins() {
+    const std::vector<Vec3> eyes = {{0, 0, 0}, {0, 0.6, 0}, {0, -0.6, 0}, {0, 0, 0.6}, {0, 0, -0.6}, {0, 0.4, 0.4}};
+    DepthAgreeOptions o;
+    DensifyStats s1, s2;
+    const VoteRig fair = voteRig(eyes, {1, 1, 1, 1, 1, 1});
+    check(runVote(fair, o, s1).size() == 64, "the fixture's points are not kept when every map is right");
+    const VoteRig deep = voteRig(eyes, {1, 1, 1, 1.3, 1.3, 1.3});
+    const std::vector<DensePoint> out = runVote(deep, o, s2);
+    check(out.empty() && s2.depth_through == 64, "kept " + std::to_string(out.size()) +
+                                                   " points three images see through (two agree)");
+}
+
+// Mutant: voters no parallax apart counted (adjacent frames share the error).
+void depth_vote_needs_parallax() {
+    // A wrong map (10 % deep) and two images a centimetre from it with the same error.
+    const std::vector<Vec3> eyes = {{0, 0, 0}, {0, 0.01, 0}, {0, -0.01, 0}};
+    DepthAgreeOptions o;
+    DensifyStats st, s0;
+    const VoteRig r = voteRig(eyes, {1.1, 1.1, 1.1});
+    const std::vector<DensePoint> out = runVote(r, o, st);
+    check(out.empty() && st.depth_vote_close > 0, "kept " + std::to_string(out.size()) + " points that only "
+                                                  "images 0.2 degrees away agree with");
+    DepthAgreeOptions none = o;
+    none.min_parallax_deg = 0;
+    check(runVote(r, none, s0).size() == 64, "the fixture's close images do not agree, so it tests nothing");
+}
+
+// Mutant: the rank-correlation gate off. Most anchors fit the map in a narrow
+// depth band; the rest, spread wide, run the other way.
+void depth_fit_refuses_rank_disorder() {
+    sfm::Reconstruction rec;
+    SourceImage img;
+    img.cam = sfm::Camera::defaultFor(1, 400, 300, 300, sfm::CamModel::Pinhole);
+    img.pose = {sfm::mat3Identity(), {0, 0, 0}};
+    RawDepth raw;
+    raw.width = 400;
+    raw.height = 300;
+    raw.ray = false;
+    raw.value.assign(400 * 300, 0.0f);
+    for (int y = 0; y < 300; y++)
+        for (int x = 0; x < 400; x++) raw.value[(size_t)y * 400 + x] = (float)(2.0 + 4.0 * x / 400.0);
+    std::mt19937 rng(4);
+    std::uniform_real_distribution<double> u(0, 1);
+    for (uint64_t i = 1; i <= 100; i++) {
+        const double px = 10 + 380 * u(rng), py = 10 + 280 * u(rng);
+        const double raw_d = 2.0 + 4.0 * std::floor(px) / 400.0;
+        // 55 inliers at x in [190, 210) (depth ~4), 45 outliers anti-correlated across the frame.
+        const double ax = i <= 55 ? 190 + 20 * u(rng) : px;
+        const double d = i <= 55 ? 2.0 + 4.0 * std::floor(ax) / 400.0 : 8.0 - raw_d;
+        const Vec3 b = img.cam.bearing({ax, py});
+        sfm::Point3D p;
+        p.xyz = b * (d / b.z);
+        rec.points3D[i] = p;
+        img.points.push_back(i);
+    }
+    const DepthField f = fitDepth(img, rec, raw, DepthFitOptions{});
+    check(!f.ok && f.refused.rfind("rank", 0) == 0, "refused: '" + f.refused + "', rank " + std::to_string(f.spearman) +
+                                                       ", inliers " + std::to_string(f.inliers));
+}
+
+// Mutant: the inlier-share gate off. 40 of 100 anchors on the map; the rest
+// 25 % off either way, still in rank order.
+void depth_fit_refuses_few_inliers() {
+    sfm::Reconstruction rec;
+    SourceImage img;
+    img.cam = sfm::Camera::defaultFor(1, 400, 300, 300, sfm::CamModel::Pinhole);
+    img.pose = {sfm::mat3Identity(), {0, 0, 0}};
+    RawDepth raw;
+    raw.width = 400;
+    raw.height = 300;
+    raw.ray = false;
+    raw.value.assign(400 * 300, 0.0f);
+    for (int y = 0; y < 300; y++)
+        for (int x = 0; x < 400; x++) raw.value[(size_t)y * 400 + x] = (float)(2.0 + 4.0 * x / 400.0);
+    std::mt19937 rng(6);
+    std::uniform_real_distribution<double> u(0, 1);
+    for (uint64_t i = 1; i <= 100; i++) {
+        const double px = 10 + 380 * u(rng), py = 10 + 280 * u(rng);
+        // A scale alone is an affine disparity: two groups, 25 % either way, are not one.
+        const double d = (2.0 + 4.0 * std::floor(px) / 400.0) * (i <= 40 ? 1.0 : i % 2 ? 1.25 : 0.8);
+        const Vec3 b = img.cam.bearing({px, py});
+        sfm::Point3D p;
+        p.xyz = b * (d / b.z);
+        rec.points3D[i] = p;
+        img.points.push_back(i);
+    }
+    const DepthField f = fitDepth(img, rec, raw, DepthFitOptions{});
+    check(!f.ok && f.refused.rfind("inlier share", 0) == 0, "refused: '" + f.refused + "', inliers " +
+                                                                std::to_string(f.inliers) + ", rank " + std::to_string(f.spearman));
+}
+
+// Mutant: the flatness test off (a plane fitted through a corner or a line).
+void plane_normal_needs_a_plane() {
+    std::vector<Vec3> flat, corner, line;
+    for (int i = 0; i < 10; i++)
+        for (int j = 0; j < 10; j++) {
+            flat.push_back({0.01 * i, 0.01 * j, 0.0001 * ((i + j) % 2)});
+            corner.push_back(i < 5 ? Vec3{0.01 * i, 0.01 * j, 0} : Vec3{0.05, 0.01 * j, 0.01 * (i - 5)});
+        }
+    for (int i = 0; i < 20; i++) line.push_back({0.01 * i, 0.0001 * (i % 2), 0});
+    Vec3 n;
+    check(planeNormal(flat, &n) && std::fabs(std::fabs(n.z) - 1) < 1e-3, "no normal for a flat patch");
+    check(!planeNormal(corner, &n), "a normal for two planes at right angles");
+    check(!planeNormal(line, &n), "a normal for points on a line");
+}
+
+// Mutant: hybrid's residual test off (a fill whose map disagrees with the
+// matched points around it by more than the tolerance).
+void hybrid_local_residual_check() {
+    const int G = 32;
+    std::vector<float> local((size_t)G * G, NAN);
+    for (int k = 0; k < 6; k++) local[(size_t)(10 + k) * G + 12] = 0.04f;
+    check(!localResidualOk(local, G, 12 * G + 12, 0.02), "a fill 4 % off its matched neighbours passed at 2 %");
+    check(localResidualOk(local, G, 12 * G + 12, 0.05), "a fill within tolerance refused");
+    check(localResidualOk(local, G, 30 * G + 30, 0.02), "a fill with no neighbours refused");
+}
+
+// Mutant: the hybrid's fill budget changed (a quarter of the automatic cap).
+void hybrid_fill_budget_is_a_quarter() {
+    const fs::path d = tempDir("fillbudget");
+    writeStairDataset(stairScene(), d.string(), 96, 192, 300);
+    writeStairDepths(stairScene(), d.string(), SyntheticDepth{});
+    auto files = stairDepths(d);
+    struct Size : Matcher {
+        int inputSize() const override { return 64; }
+        Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+        std::string describe() const override { return ""; }
+    } sizer;
+    DensifyJob job;
+    job.model_dir = (d / "sparse" / "0").string();
+    job.depth = files.get();
+    job.matcher = &sizer;
+    const DensifyPlan a = planDensify(job);
+    check(a.source == DensifySource::Hybrid && a.max_fill == a.max_points / 4,
+          "auto cap " + std::to_string(a.max_points) + ", fill " + std::to_string(a.max_fill));
+    job.opt.max_points = 5000;
+    const DensifyPlan e = planDensify(job);
+    check(e.max_fill == -1, "an explicit cap must be one budget, fill " + std::to_string(e.max_fill));
+    fs::remove_all(d);
+}
+
+// Mutant: hybrid fill kept where another reference's matches already measured
+// the surface (a fill 1 cm off it is a second layer).
+void fill_near_matches_dropped() {
+    std::vector<DensePoint> pts;
+    for (int i = 0; i < 10; i++) {
+        DensePoint m;
+        m.xyz = {0.02 * i, 0, 0};
+        pts.push_back(m);
+        DensePoint f = m;
+        f.from_depth = true;
+        f.xyz.z = 0.01;
+        pts.push_back(f);
+        DensePoint far = f;
+        far.xyz.z = 0.5;
+        pts.push_back(far);
+    }
+    const int64_t n = dropFillNearMatches(pts, 0.02);
+    int fill = 0;
+    for (const DensePoint& p : pts) fill += p.from_depth;
+    check(n == 10 && fill == 10 && pts.size() == 20, "dropped " + std::to_string(n) + ", fill left " + std::to_string(fill));
+}
+
+// The synthetic depths given geometry's record (app/DepthManifest.h).
+void recordStairDepths(const fs::path& d) {
+    std::map<std::string, app::DepthMapRecord> m;
+    for (const auto& e : fs::directory_iterator(d / "depths")) {
+        if (e.path().extension() != ".png") continue;
+        const std::string name = e.path().filename().string();
+        m[name] = {name, app::file_print((d / "images" / name).string()), app::file_print(e.path().string()), false};
+    }
+    check(app::write_depth_manifest((d / "depths").string(), m), "cannot write the record");
+}
+std::unique_ptr<DepthFiles> recordedStairDepths(const fs::path& d) {
+    return std::make_unique<DepthFiles>(
+        [d](const std::string& n) { return (d / "depths" / n).string(); },
+        [](const SourceImage& im) { return im.cam.isSpherical(); }, (d / "depths").string(),
+        std::function<std::string(const std::string&)>{},
+        [d](const std::string& n) { return (d / "images" / n).string(); });
+}
+
+// Mutants: the share gate off; a record's image name, the map's own print, or
+// the image's print not checked; an 8-bit map or one of another shape read.
+void stale_depth_maps_refused() {
+    const fs::path d = tempDir("staledepth");
+    writeStairDataset(stairScene(), d.string(), 192, 384, 3000);
+    writeStairDepths(stairScene(), d.string(), SyntheticDepth{});
+    std::vector<std::string> names;
+    for (const auto& e : fs::directory_iterator(d / "depths")) names.push_back(e.path().filename().string());
+    std::sort(names.begin(), names.end());
+    const Scene scene = stairScene();
+    auto run = [&](DepthSource* src, DensifySource s, bool matcher, std::string* error) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+        job.depth = src;
+        job.opt.refs = 1.0;
+        job.opt.matches_per_ref = 2000;
+        job.opt.source = s;
+        struct Size : Matcher {
+            int inputSize() const override { return 96; }
+            Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+            std::string describe() const override { return ""; }
+        } sizer;
+        if (matcher) job.matcher = &sizer;
+        const DensifyPlan pl = planDensify(job);
+        OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 96, 0.0, 0.0, 1);
+        if (matcher) job.matcher = &om;
+        try {
+            return runDensify(job, pl, nullptr);
+        } catch (const std::exception& e) {
+            *error = e.what();
+            return DensifyResult{};
+        }
+    };
+    std::string err;
+    // The fixture's power: right maps are used.
+    auto good = stairDepths(d);
+    const DensifyResult ok = run(good.get(), DensifySource::Depth, false, &err);
+    check(err.empty() && ok.depth_share > 0.9, "right maps: share " + std::to_string(ok.depth_share) + " " + err);
+    // Shifted three frames, with no record: the share gate.
+    const fs::path shifted = d / "depths_shifted";
+    fs::create_directories(shifted);
+    for (size_t i = 0; i < names.size(); i++) fs::copy_file(d / "depths" / names[(i + 3) % names.size()], shifted / names[i]);
+    DepthFiles sh([&](const std::string& n) { return (shifted / n).string(); },
+                  [](const SourceImage& im) { return im.cam.isSpherical(); }, shifted.string());
+    err.clear();
+    run(&sh, DensifySource::Depth, false, &err);
+    check(err.find("usable depth map") != std::string::npos, "shifted maps used by --source moge: '" + err + "'");
+    err.clear();
+    const DensifyResult fb = run(&sh, DensifySource::Auto, true, &err);
+    check(err.empty() && !fb.depth_dropped.empty() && fb.stats.depth_kept == 0,
+          "auto with shifted maps: '" + err + "', depth points " + std::to_string(fb.stats.depth_kept));
+    // With geometry's record, every shifted map is named for another image.
+    recordStairDepths(d);
+    for (size_t i = 0; i < names.size(); i++) {
+        fs::copy_file(d / "depths" / names[(i + 3) % names.size()], shifted / names[i], fs::copy_options::overwrite_existing);
+    }
+    fs::copy_file(d / "depths" / app::kDepthManifest, shifted / app::kDepthManifest);
+    DepthFiles rec_sh([&](const std::string& n) { return (shifted / n).string(); },
+                      [](const SourceImage& im) { return im.cam.isSpherical(); }, shifted.string());
+    const DensifyPlan pl = [&] { DensifyJob j; j.model_dir = (d / "sparse" / "0").string(); return planDensify(j); }();
+    int refused = 0;
+    for (const SourceImage& im : pl.images) {
+        RawDepth r;
+        if (rec_sh.load(im, r) && r.recorded && !r.refused.empty()) refused++;
+    }
+    check(refused == (int)pl.images.size(), "maps under another image's name passed: " + std::to_string(refused) + " of " +
+                                               std::to_string(pl.images.size()) + " refused");
+    // A record that names another image for an unchanged map (a renamed image set).
+    {
+        auto m = app::read_depth_manifest((d / "depths").string());
+        const std::string key = pl.images[2].name;
+        m[key].image = pl.images[3].name;
+        app::write_depth_manifest((d / "depths").string(), m);
+        auto renamed = recordedStairDepths(d);
+        RawDepth rr;
+        renamed->load(pl.images[2], rr);
+        check(rr.refused.rfind("made for", 0) == 0, "a map recorded for another image used: '" + rr.refused + "'");
+        recordStairDepths(d);
+    }
+    // Right names, changed contents: a map rewritten, an image changed since.
+    auto rec = recordedStairDepths(d);
+    const SourceImage& a = pl.images[0];
+    const SourceImage& b = pl.images[1];
+    RawDepth r0;
+    check(rec->load(a, r0) && r0.recorded && r0.refused.empty(), "a recorded, unchanged map refused: " + r0.refused);
+    std::ofstream(d / "depths" / names[0], std::ios::app) << "x";
+    std::ofstream(d / "images" / b.name, std::ios::app) << "x";
+    RawDepth r1, r2;
+    rec->load(pl.images[0], r1);
+    rec->load(b, r2);
+    check(r1.refused.find("changed since geometry") != std::string::npos, "a rewritten map used: '" + r1.refused + "'");
+    check(r2.refused.find("image changed") != std::string::npos, "a map of an image that changed used: '" + r2.refused + "'");
+    // No record: an 8-bit map and a map of another shape.
+    const fs::path odd = d / "depths_odd";
+    fs::create_directories(odd);
+    const int w8 = a.cam.width / 4, h8 = a.cam.height / 4;   // the camera's shape: only the depth of bits differs
+    const std::vector<uint8_t> px8((size_t)w8 * h8, 100);
+    stbi_write_png((odd / a.name).replace_extension(".png").string().c_str(), w8, h8, 1, px8.data(), w8);
+    std::vector<uint16_t> sq(50 * 50, 1000);
+    app::save_depth_png16((odd / b.name).replace_extension(".png").string(), sq.data(), 50, 50);
+    DepthFiles of([&](const std::string& n) { return (odd / fs::path(n).replace_extension(".png")).string(); },
+                  [](const SourceImage& im) { return im.cam.isSpherical(); }, odd.string());
+    RawDepth r3, r4;
+    of.load(a, r3);
+    of.load(b, r4);
+    check(r3.refused.find("16-bit") != std::string::npos, "an 8-bit map read: '" + r3.refused + "'");
+    check(b.cam.width != b.cam.height && r4.refused.find("shape") != std::string::npos,
+          "a square map used for a " + std::to_string(b.cam.width) + "x" + std::to_string(b.cam.height) + " camera: '" +
+              r4.refused + "'");
+    fs::remove_all(d);
 }
 
 // Mutant: a depth point's long track winning a voxel from a matched point
@@ -1549,7 +1910,12 @@ void sparse_mask_draws_each_pixel_once() {
     for (int64_t i : on) c[(size_t)i] = 0.7f;
     SampleOptions o;
     o.count = 2000;
-    const std::vector<int64_t> s = sampleWithCoverage(c, w, h, o);
+    std::vector<int64_t> s;
+    try {
+        s = sampleWithCoverage(c, w, h, o);
+    } catch (const std::exception& e) {
+        check(false, std::string("threw: ") + e.what());
+    }
     check(s.size() == 5, "drew " + std::to_string(s.size()) + " samples from 5 non-zero pixels");
     for (int64_t i : on) check(std::count(s.begin(), s.end(), i) == 1, "pixel " + std::to_string(i) + " not drawn once");
 }
@@ -1682,6 +2048,15 @@ static int body(int argc, char** argv) {
         {"sibling_is_consistent_and_readable", sibling_is_consistent_and_readable},
         {"warp_files_round_trip", warp_files_round_trip},
         {"voxel_prefers_matched_points", voxel_prefers_matched_points},
+        {"depth_vote_seen_through_wins", depth_vote_seen_through_wins},
+        {"depth_vote_needs_parallax", depth_vote_needs_parallax},
+        {"depth_fit_refuses_rank_disorder", depth_fit_refuses_rank_disorder},
+        {"depth_fit_refuses_few_inliers", depth_fit_refuses_few_inliers},
+        {"plane_normal_needs_a_plane", plane_normal_needs_a_plane},
+        {"hybrid_local_residual_check", hybrid_local_residual_check},
+        {"hybrid_fill_budget_is_a_quarter", hybrid_fill_budget_is_a_quarter},
+        {"fill_near_matches_dropped", fill_near_matches_dropped},
+        {"stale_depth_maps_refused", stale_depth_maps_refused},
         {"hybrid_fill_has_its_own_budget", hybrid_fill_has_its_own_budget},
         {"empty_cloud_writes_nothing", empty_cloud_writes_nothing},
         {"written_points_reproject", written_points_reproject},

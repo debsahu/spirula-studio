@@ -70,6 +70,11 @@ void usage() {
     help_row("--depth-dir <dir>", D::opt_depth_dir);
     help_row("--normal-dir <dir>", D::opt_normal_dir);
     help_row("--normal-check <deg>|off", D::opt_normal_check);
+    help_row("--depth-tol auto|<f>", D::opt_depth_tol);
+    help_row("--depth-min-agree <n>", D::opt_depth_min_agree);
+    help_row("--no-depth-vote", D::opt_no_depth_vote);
+    help_row("--min-depth-share <f>", D::opt_min_depth_share);
+    help_row("--depth-fit-holdout <n>", D::opt_depth_fit_holdout);
     help_row("--preset turbo|fast|base|high|precise", D::opt_preset);
     help_row("--matches <dir>", D::opt_matches);
     help_row("--export-pairs <dir>", D::opt_export_pairs);
@@ -193,6 +198,15 @@ int spirula_densify_main(int argc, char** argv) {
         }
         else if (a == "--depth-dir") depth_dir = next();
         else if (a == "--normal-dir") normal_dir = next();
+        else if (a == "--depth-tol") {
+            const double v = autoOff();
+            if (v < 0) bad("off");
+            o.depth_tol = v;
+        }
+        else if (a == "--depth-min-agree") o.depth_min_agree = (int)real(1);
+        else if (a == "--no-depth-vote") o.depth_agreement = false;
+        else if (a == "--min-depth-share") o.min_depth_share = real(0);
+        else if (a == "--depth-fit-holdout") o.depth_fit_holdout = (int)real(2);
         else if (a == "--normal-check") {
             const double v = autoOff();
             if (v == 0) bad("auto");
@@ -328,7 +342,8 @@ int spirula_densify_main(int argc, char** argv) {
                     const int model = c.isSpherical() ? 3 : c.isFisheye() ? 1 : 0;
                     return camhost::splits_to_pinhole_faces(model, c.width, c.height, c.fx, c.fy);
                 },
-                root, [nroot](const std::string& n) { return dsparse::find_aux_file(nroot, n, "normal"); });
+                root, [nroot](const std::string& n) { return dsparse::find_aux_file(nroot, n, "normal"); },
+                job.image_path);
             job.depth = depth.get();
         }
 
@@ -400,10 +415,12 @@ int spirula_densify_main(int argc, char** argv) {
             std::vector<std::string> names;
             for (const roma::SourceImage& im : pl.images) names.push_back(im.name);
             const std::string root = depth_root.string();
-            // Only into geometry's own folder: a sky-blanked copy cannot be extended.
+            // Only into geometry's own folder (a sky-blanked copy cannot be
+            // extended), and only when a depth source was asked for by name.
             const bool own = fs::path(depth_dir).lexically_normal() == fs::path("depths");
+            const bool asked = o.source != roma::DensifySource::Auto;
             std::function<void()> compute;
-            if (own)
+            if (own && asked)
                 compute = [&] {
                     std::printf("%s\n", format(D::computing_depths, {root}).c_str());
                     std::fflush(stdout);
@@ -416,6 +433,11 @@ int spirula_densify_main(int argc, char** argv) {
                 names, [root](const std::string& n) { return dsparse::find_aux_file(root, n, "depth"); }, compute);
             std::printf("%s\n", format(D::depth_inventory, {root, (long long)inv.reused, (long long)inv.computed,
                                                             (long long)inv.missing}).c_str());
+            if (inv.computed > 0) depth->rereadRecord();
+            if (inv.missing > 0 && !asked)
+                std::printf("%s\n", format(D::depth_not_computed, {(long long)inv.missing}).c_str());
+            if (depth->recorded() > 0)
+                std::printf("%s\n", format(D::depth_records, {(long long)depth->recorded()}).c_str());
             job.on_depth_fit = [&normals](const roma::SourceImage& im, const roma::DepthField& f) {
                 if (!f.ok) {
                     std::printf("%s\n", format(D::depth_refused, {im.name, f.refused}).c_str());
@@ -450,6 +472,8 @@ int spirula_densify_main(int argc, char** argv) {
             return 0;
         }
         const roma::DensifyStats& st = res.stats;
+        if (!res.depth_dropped.empty())
+            std::fprintf(stderr, "%s\n", format(D::depth_dropped, {res.depth_dropped}).c_str());
         if (pl.source != roma::DensifySource::Roma)
             std::printf("%s\n", format(D::depth_stats, {(long long)st.depth_samples, (long long)st.depth_nodata,
                                                          (long long)st.depth_disagree, (long long)st.depth_through,
@@ -509,9 +533,11 @@ int spirula_densify_main(int argc, char** argv) {
            << ", \"short_track\": " << st.short_track << ", \"inconsistent\": " << st.inconsistent << ", \"uncertain\": " << st.uncertain
            << ", \"depth_samples\": " << st.depth_samples << ", \"depth_nodata\": " << st.depth_nodata
            << ", \"depth_disagree\": " << st.depth_disagree << ", \"depth_through\": " << st.depth_through
-           << ", \"depth_local\": " << st.depth_local << ", \"depth_covered\": " << st.depth_covered
+           << ", \"depth_local\": " << st.depth_local << ", \"depth_left_to_matches\": " << st.depth_left_to_matches
            << ", \"depth_kept\": " << st.depth_kept << ", \"depth_edge\": " << st.depth_edge << ", \"depth_tol\": " << jnum(res.depth_tol)
            << ", \"depth_normal\": " << st.depth_normal << ", \"depth_local_normal\": " << st.depth_local_normal
+           << ", \"depth_vote_close\": " << st.depth_vote_close << ", \"fill_near_matches\": " << st.fill_near_matches
+           << ", \"depth_share\": " << jnum(res.depth_share) << ", \"depth_fit_holdout\": " << o.depth_fit_holdout << ", \"depth_dropped\": \"" << jsonEscape(res.depth_dropped) << "\""
            << ", \"two_image_kept\": " << st.two_image_kept << ", \"seen_through\": " << st.seen_through << ", \"two_image_bar\": " << jnum(st.two_image_bar)
            << ", \"voxel_merged\": " << st.voxel_merged << ", \"capped\": " << st.capped << "},\n"
            << "  \"track_hist\": {";
@@ -535,6 +561,12 @@ int spirula_densify_main(int argc, char** argv) {
 
         if (res.cloud.empty()) {
             std::fprintf(stderr, "%s\n", format(D::empty_result, {job.out_dir}).c_str());
+            // An older sibling under the same name would be trained from as if it were this run's.
+            std::error_code ec;
+            if (job.overwrite && fs::exists(job.out_dir, ec)) {
+                fs::remove_all(job.out_dir, ec);
+                std::fprintf(stderr, "%s\n", format(D::stale_removed, {job.out_dir}).c_str());
+            }
             return 1;
         }
         const roma::ReprojStats rp = roma::writeSibling(job.model_dir, job.out_dir, pl, res.cloud, js.str());

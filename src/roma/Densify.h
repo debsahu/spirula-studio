@@ -34,6 +34,8 @@ struct DensifyOptions {
     bool depth_align = true;
     bool hybrid_local_check = true;
     bool depth_normal_files = true;     // false: normals always from the fitted depth
+    double min_depth_share = 0.5;
+    int depth_fit_holdout = 0;          // sparse points id % n == 0 kept out of the fits, to score against       // usable maps among the matched images, or no depth source
     double depth_normal_min_cos = 0.9;  // a normal map's median cosine against its own depth
     double depth_normal_deg = 55;       // normal agreement, degrees: measured (docs/notes/densify.md)
     bool depth_normal_check = true;     // against the images that agree on the depth
@@ -108,8 +110,8 @@ struct DensifyStats {
             reproj = 0, cheirality = 0, parallax = 0, candidates = 0, ref_reproj = 0, inconsistent = 0, uncertain = 0,
             fused = 0, short_track = 0, two_image_kept = 0, seen_through = 0, voxel_merged = 0,
             capped = 0, depth_samples = 0, depth_nodata = 0, depth_disagree = 0,
-            depth_through = 0, depth_local = 0, depth_covered = 0, depth_kept = 0, depth_edge = 0,
-            depth_normal = 0, depth_local_normal = 0;
+            depth_through = 0, depth_local = 0, depth_left_to_matches = 0, depth_kept = 0, depth_edge = 0,
+            depth_normal = 0, depth_local_normal = 0, depth_vote_close = 0, fill_near_matches = 0;
     // 5-degree bins: candidate normal against the agreeing images' (agree), against
     // a random pixel of the same image (null), and a hybrid fill against its neighbourhood.
     std::array<int64_t, 36> normal_agree_hist{}, normal_null_hist{}, local_normal_hist{};
@@ -161,6 +163,10 @@ std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_trac
                                        const DensifyOptions& opt, DensifyStats& stats,
                                        const std::function<bool(const DensePoint&)>& veto = {},
                                        int64_t max_fill = -1);   // >= 0: depth points capped apart
+
+// Depth points within `radius` of a matched point (any reference's) removed:
+// there the surface is measured, and a fill off it is a second layer. The count.
+int64_t dropFillNearMatches(std::vector<DensePoint>& pts, double radius);
 
 // The plugin's per-voxel choice: longest track, then lower error; surviving
 // points keep their input order. Track length counts views (plugin) or

@@ -543,25 +543,31 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
     std::vector<int> others;
     DepthAgreeOptions dao;
     const bool use_matches = job.matcher && pl.source != DensifySource::Depth;
-    const bool use_depth = job.depth && pl.source != DensifySource::Roma;
+    bool use_depth = job.depth && pl.source != DensifySource::Roma;
     sfm::Reconstruction rec;
+    DensifyResult& res_out = res;
     if (use_depth) {
         rec = sfm::Reconstruction::readBinary(job.model_dir);
         fields.resize(pl.images.size());
         std::vector<char> held(pl.images.size(), 0);
         for (int i : pl.held_out) held[(size_t)i] = 1;
         std::vector<double> res;
+        int considered = 0;
         for (size_t i = 0; i < pl.images.size(); i++) {
             if (held[i]) continue;
             RawDepth raw;
+            considered++;
             if (!job.depth->load(pl.images[i], raw)) {
                 fields[i].refused = "no depth map";
+            } else if (!raw.refused.empty()) {
+                fields[i].refused = raw.refused;
             } else {
                 DepthFitOptions fo;
                 fo.seed = o.seed + i;
                 fo.align = o.depth_align;
                 fo.normal_files = o.depth_normal_files;
                 fo.normal_min_cos = o.depth_normal_min_cos;
+                fo.holdout_mod = o.depth_fit_holdout;
                 fields[i] = fitDepth(pl.images[i], rec, raw, fo);
             }
             if (job.on_depth_fit) job.on_depth_fit(pl.images[i], fields[i]);
@@ -569,6 +575,20 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
                 others.push_back((int)i);
                 res.push_back(fields[i].rel_residual);
             }
+        }
+        // Few usable maps means they belong to other pictures (a re-extract, a
+        // shifted folder): 17 of 127 passed the fit on a 3-frame shift.
+        res_out.depth_share = considered ? (double)others.size() / considered : 0.0;
+        if (res_out.depth_share < o.min_depth_share) {
+            char why[256];
+            std::snprintf(why, sizeof why, "only %zu of %d images have a usable depth map (%.0f %%, below %.0f %%)",
+                          others.size(), considered, 100 * res_out.depth_share, 100 * o.min_depth_share);
+            if (o.source != DensifySource::Auto || !use_matches)
+                throw std::runtime_error(std::string(why) + "; stale or mismatched maps? --min-depth-share 0 uses them anyway");
+            res_out.depth_dropped = why;
+            use_depth = false;
+            fields.clear();
+            others.clear();
         }
         dao.min_agree = o.depth_min_agree;
         dao.vote = o.depth_agreement;
@@ -583,6 +603,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         dao.through = 2 * dao.tol;
         dao.normal_check = o.depth_normal_check;
         dao.normal_deg = o.depth_normal_deg;
+        dao.min_parallax_deg = o.min_parallax_deg;
         res_depth_tol = dao.tol;
     }
 
@@ -672,7 +693,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
                     // Hybrid: the depth source fills only where the matches are not certain.
                     if (hybrid && best[(size_t)(y * m.h / G) * m.w + (size_t)(x * m.w / G)] > 0) {
                         weight[i] = 0;
-                        res.stats.depth_covered++;
+                        res.stats.depth_left_to_matches++;
                     }
                 }
             // Hybrid: a fill point must also agree with the matched points and
@@ -709,22 +730,13 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
             if (hybrid && o.hybrid_local_check)
                 local_ok = [&, G, tol](int64_t s, const Vec3& X, const Vec3* n) {
                     const int cx = (int)(s % G), cy = (int)(s / G);
-                    std::vector<float> v;
+                    if (!localResidualOk(local, G, s, tol)) return false;
                     std::vector<Vec3> P;
-                    for (int y = std::max(0, cy - 8); y <= std::min(G - 1, cy + 8); y++)
-                        for (int x = std::max(0, cx - 8); x <= std::min(G - 1, cx + 8); x++) {
-                            const float r = local[(size_t)y * G + x];
-                            if (std::isfinite(r)) v.push_back(std::fabs(r));
-                        }
                     const double radius = 0.06 * (X - A.centre).norm();
                     for (int y = std::max(0, cy / 8 - 3); y <= std::min(GC - 1, cy / 8 + 3); y++)
                         for (int x = std::max(0, cx / 8 - 3); x <= std::min(GC - 1, cx / 8 + 3); x++)
                             for (int k = head[(size_t)y * GC + x]; k >= 0; k = next[(size_t)k])
                                 if ((near_pts[(size_t)k] - X).norm() <= radius) P.push_back(near_pts[(size_t)k]);
-                    if (v.size() >= 3) {
-                        std::nth_element(v.begin(), v.begin() + (long)(v.size() / 2), v.end());
-                        if (v[v.size() / 2] > tol) return false;
-                    }
                     Vec3 pn;
                     if (!n || !o.hybrid_normal_check || !planeNormal(P, &pn)) return true;
                     const double ang = std::min(normalAngleDeg(*n, pn), 180.0 - normalAngleDeg(*n, pn));
@@ -745,6 +757,8 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
         for (DensePoint& p : pts) all.push_back(std::move(p));
         if (progress) progress(++done, (int)pl.ref_views.size(), (int64_t)all.size());
     }
+    // Radius: 4 voxels, twice the sparse spacing (a choice, docs/notes/densify.md).
+    if (use_matches && use_depth && pl.voxel > 0) res.stats.fill_near_matches = dropFillNearMatches(all, 4 * pl.voxel);
     std::function<bool(const DensePoint&)> veto;
     std::unique_ptr<FreeSpace> free_space;
     if (pl.min_track == 0 && !o.plugin_exact && o.visibility_check) {
@@ -937,7 +951,28 @@ DepthInventory ensureDepths(const std::vector<std::string>& names,
     }
     inv.reused = (int)before.size();
     if (inv.missing == 0 || !compute) return inv;
-    compute();
+    // Read-only while it runs, so a writer that would overwrite fails instead;
+    // then checked anyway (a rename would get past the permission).
+    std::vector<fs::perms> was;
+    for (const Seen& s : before) {
+        std::error_code ec;
+        was.push_back(fs::status(s.path, ec).permissions());
+        fs::permissions(s.path, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write,
+                        fs::perm_options::remove, ec);
+    }
+    auto restore = [&] {
+        for (size_t k = 0; k < before.size(); k++) {
+            std::error_code ec;
+            fs::permissions(before[k].path, was[k], fs::perm_options::replace, ec);
+        }
+    };
+    try {
+        compute();
+    } catch (...) {
+        restore();
+        throw;
+    }
+    restore();
     for (const Seen& s : before) {
         std::error_code ec;
         if (fs::file_size(s.path, ec) != s.size || fs::last_write_time(s.path, ec) != s.time)
@@ -947,6 +982,19 @@ DepthInventory ensureDepths(const std::vector<std::string>& names,
     for (const std::string& n : names) inv.missing += find(n).empty();
     inv.computed = (int)names.size() - inv.missing - inv.reused;
     return inv;
+}
+
+bool localResidualOk(const std::vector<float>& local, int G, int64_t s, double tol) {
+    const int cx = (int)(s % G), cy = (int)(s / G);
+    std::vector<float> v;
+    for (int y = std::max(0, cy - 8); y <= std::min(G - 1, cy + 8); y++)
+        for (int x = std::max(0, cx - 8); x <= std::min(G - 1, cx + 8); x++) {
+            const float r = local[(size_t)y * G + x];
+            if (std::isfinite(r)) v.push_back(std::fabs(r));
+        }
+    if (v.size() < 3) return true;   // nothing nearby to disagree with
+    std::nth_element(v.begin(), v.begin() + (long)(v.size() / 2), v.end());
+    return v[v.size() / 2] <= tol;
 }
 
 ReprojStats reprojectWritten(const std::string& model_dir) {
