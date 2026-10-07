@@ -245,6 +245,23 @@ target_compile_options(ss_moge PRIVATE
 set_property(TARGET ss_moge PROPERTY CXX_STANDARD 17)
 
 # ---------------------------------------------------------------------------
+# ss_roma -- RoMa v2 dense matching (DINOv3 ViT-L/16 + the multi-view matcher)
+#
+# The general ops it needed went into nn/. Its one shader is the multi-view
+# transformer's RoPE, which the reference runs in bf16 by construction.
+# ---------------------------------------------------------------------------
+ss_nn_shaders(roma ${SS_SRC}/roma/shaders SS_ROMA_EMBED)
+
+# Only model/: src/roma/*.cpp is the densify host stage, built by SsRoma.cmake.
+file(GLOB SS_ROMA_SOURCES CONFIGURE_DEPENDS ${SS_SRC}/roma/model/*.cpp)
+
+add_library(ss_roma STATIC ${SS_ROMA_SOURCES} ${SS_ROMA_EMBED})
+target_link_libraries(ss_roma PUBLIC ss_nn)
+target_compile_options(ss_roma PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
+set_property(TARGET ss_roma PROPERTY CXX_STANDARD 17)
+
+# ---------------------------------------------------------------------------
 # ss_video -- container demux + VK_KHR_video_decode_*
 #
 # Gated on SS_ENABLE_PATENTED: H.264 / H.265 / AV1 bitstream parsing is the
@@ -283,6 +300,7 @@ file(GLOB SS_NN_TESTS CONFIGURE_DEPENDS
      ${SS_SRC}/aliked/tests/*.cpp ${SS_SRC}/loma/tests/*.cpp
      ${SS_SRC}/metric3d/tests/*.cpp
      ${SS_SRC}/moge/tests/*.cpp ${SS_SRC}/birefnet/tests/*.cpp
+     ${SS_SRC}/roma/model/tests/*.cpp
      ${SS_SRC}/gdino/tests/*.cpp)
 foreach(test_src ${SS_NN_TESTS})
     get_filename_component(test_name ${test_src} NAME_WE)
@@ -290,7 +308,7 @@ foreach(test_src ${SS_NN_TESTS})
     # Every test links every library above it: the four are small, and one
     # rule here beats a per-directory list that drifts.
     target_link_libraries(${test_name} PRIVATE ss_sam ss_aliked ss_loma ss_metric3d
-                                                ss_moge)
+                                                ss_moge ss_roma)
     set_property(TARGET ${test_name} PROPERTY CXX_STANDARD 17)
     target_compile_definitions(${test_name} PRIVATE SS_REPO_ROOT="${SS_ROOT}")
     target_compile_options(${test_name} PRIVATE

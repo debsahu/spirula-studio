@@ -225,6 +225,9 @@ public:
 
     VkDeviceSize capacity()  const { return cap_; }
     VkDeviceSize highWater() const { return high_water_; }
+    // Restarts the high water at the current head, so one stage of a pass can
+    // be held to its own plan.
+    void resetHighWater() { high_water_ = head_; }
 
 private:
     void grow(VkDeviceSize need);
