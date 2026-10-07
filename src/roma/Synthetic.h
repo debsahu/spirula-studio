@@ -38,6 +38,16 @@ Scene stairScene();
 void writeStairDataset(const Scene& scene, const std::string& dir, int pinhole_w,
                        int equirect_w, int sparse_points);
 
+// Its depth maps (depths/, 16-bit, linear in depth), each with its own
+// disparity-affine error and `noise`; `copies` images see the risers
+// `copy_scale` too deep, which no per-image fit undoes: the doubled stairs.
+struct SyntheticDepth {
+    double noise = 0.002, copy_scale = 1.05;
+    int copies = 3;
+    uint64_t seed = 5;
+};
+void writeStairDepths(const Scene& scene, const std::string& dir, const SyntheticDepth& sd);
+
 // Matches from the geometry: certainty 1 where B sees the point A's pixel
 // ray hits, else 0. `noise_px` (match pixels) jitters each warp; a share
 // `outliers` of them is sent somewhere random with certainty 1.

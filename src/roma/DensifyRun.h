@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "roma/Densify.h"
+#include "roma/DepthSource.h"
 #include "roma/Matcher.h"
 #include "roma/Select.h"
 
@@ -26,7 +27,10 @@ struct DensifyJob {
     bool overwrite = false;
     std::string export_dir;             // write the views and pairs.txt, match nothing
     Matcher* matcher = nullptr;
+    DepthSource* depth = nullptr;
     DensifyOptions opt;
+    // Each image's depth fit as it is made, refused or not.
+    std::function<void(const SourceImage&, const DepthField&)> on_depth_fit;
     // Called once if the warps come back coarser than the matcher's input.
     std::function<void(int warp_size, int input_size)> on_warp_scale;
 };
@@ -51,6 +55,7 @@ struct DensifyPlan {
     int min_track = 0;
     double voxel = 0;
     int64_t max_points = 0;
+    DensifySource source = DensifySource::Roma;
     double median_pair_angle_deg = 0;            // ref-neighbour, at their shared points
     double match_focal = 0;                      // median view focal, match pixels
     double mask_keep = -1;                       // mean keep fraction of sampled masks, -1 none
@@ -64,6 +69,7 @@ struct DensifyResult {
     DensifyStats stats;
     int64_t points = 0;
     double seconds_match = 0, seconds_total = 0;
+    double depth_tol = 0;                        // the depth agreement tolerance used
     std::string out_dir;
     std::vector<DensePoint> cloud;               // what points3D.bin holds
 };

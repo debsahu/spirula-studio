@@ -10,6 +10,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <set>
@@ -20,6 +21,7 @@
 #include "external/stb_image_write.h"
 #include "roma/Densify.h"
 #include "roma/DensifyRun.h"
+#include "roma/DepthSource.h"
 #include "roma/DumpMatcher.h"
 #include "roma/Sample.h"
 #include "roma/Select.h"
@@ -628,6 +630,145 @@ void visibility_drops_seen_through_pairs() {
     fs::remove_all(d);
 }
 
+// Mutants: the alignment off (raw values taken as distances), the rank gate
+// off (an unrelated map fitted anyway).
+void depth_fit_recovers_affine() {
+    sfm::Reconstruction rec;
+    SourceImage img;
+    img.name = "a.png";
+    img.cam = sfm::Camera::defaultFor(1, 400, 300, 300, sfm::CamModel::Pinhole);
+    img.pose = {sfm::mat3Identity(), {0, 0, 0}};
+    img.centre = {0, 0, 0};
+    std::mt19937 rng(2);
+    std::uniform_real_distribution<double> u(-1, 1), z(2, 6);
+    for (uint64_t i = 1; i <= 300; i++) {
+        sfm::Point3D p;
+        const double d = z(rng);
+        p.xyz = {u(rng) * d * 0.6, u(rng) * d * 0.45, d};
+        rec.points3D[i] = p;
+        img.points.push_back(i);
+    }
+    // A slanted plane z = 3 + 0.4 x; raw = 1 / ((1/z - b) / a), a = 0.7, b = 0.05.
+    RawDepth raw;
+    raw.width = 400;
+    raw.height = 300;
+    raw.ray = false;
+    raw.value.assign(400 * 300, 0.0f);
+    auto truth = [&](int x, int y) {
+        const Vec3 b = img.cam.bearing({x + 0.5, y + 0.5});
+        const double t = 3.0 / (b.z - 0.4 * b.x);   // ray b*t on z = 3 + 0.4 x
+        return b.z * t;
+    };
+    for (int y = 0; y < 300; y++)
+        for (int x = 0; x < 400; x++) raw.value[(size_t)y * 400 + x] = (float)(1.0 / ((1.0 / truth(x, y) - 0.05) / 0.7));
+    // The anchors on that plane, so the fit has the true depths to agree with.
+    for (auto& kv : rec.points3D) {
+        const Vec3 b = img.cam.bearing(img.cam.project(kv.second.xyz));
+        kv.second.xyz = b * (3.0 / (b.z - 0.4 * b.x));
+    }
+    DepthFitOptions fo;
+    const DepthField f = fitDepth(img, rec, raw, fo);
+    check(f.ok, "fit refused: " + f.refused);
+    double worst = 0;
+    for (int y = 10; y < 300; y += 37)
+        for (int x = 10; x < 400; x += 41)
+            worst = std::max(worst, std::fabs(f.dist[(size_t)y * 400 + x] / truth(x, y) - 1));
+    check(worst < 1e-3, "fitted depth off by " + std::to_string(worst) + " (relative)");
+    // An unrelated map: no monotone relation to the anchors.
+    RawDepth noise = raw;
+    for (float& v : noise.value) v = (float)(1.0 + 10.0 * std::fabs(u(rng)));
+    check(!fitDepth(img, rec, noise, fo).ok, "an unrelated map was fitted");
+}
+
+std::unique_ptr<DepthFiles> stairDepths(const fs::path& d) {
+    return std::make_unique<DepthFiles>([d](const std::string& n) { return (d / "depths" / n).string(); },
+                                        [](const SourceImage& im) { return im.cam.isSpherical(); },
+                                        (d / "depths").string());
+}
+
+// Mutants: the cross-view agreement off (the doubled stairs survive), the
+// no-data sentinel taken as a depth (points at the camera centres).
+void depth_agreement_drops_copies() {
+    const fs::path d = tempDir("depthcopy");
+    writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
+    SyntheticDepth sd;
+    sd.copies = 3;
+    writeStairDepths(stairScene(), d.string(), sd);
+    auto files = stairDepths(d);
+    const Scene scene = stairScene();
+    auto run = [&](bool agreement) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+        job.depth = files.get();
+        job.opt.refs = 1.0;
+        job.opt.matches_per_ref = 3000;
+        job.opt.depth_agreement = agreement;
+        if (!agreement) job.opt.min_track = 1;   // the union of per-image clouds, as the DA360 seed is
+        const DensifyPlan pl = planDensify(job);
+        return runDensify(job, pl, nullptr);
+    };
+    const DensifyResult r = run(true);
+    const CloudScore s = scoreCloud(scene, r.cloud, 0.01, 0.05, 0.02, 0.02);
+    check(s.points > 2000, "depth points: " + std::to_string(s.points));
+    check(s.beyond * 1000 <= s.points, "points beyond 5 cm with the agreement check: " + std::to_string(s.beyond));
+    double nearest_centre = INFINITY;
+    DensifyJob pj;
+    pj.model_dir = (d / "sparse" / "0").string();
+    const DensifyPlan pl = planDensify(pj);
+    for (const DensePoint& p : r.cloud)
+        for (const SourceImage& im : pl.images) nearest_centre = std::min(nearest_centre, (p.xyz - im.centre).norm());
+    check(nearest_centre > 0.2, "a point at a camera centre: the no-data sentinel became a depth");
+    // The fixture's power: without the agreement check the copies are there.
+    const DensifyResult lr = run(false);
+    // With no vote to catch it, only the sentinel keeps no-data pixels out.
+    double loose_centre = INFINITY;
+    for (const DensePoint& p : lr.cloud)
+        for (const SourceImage& im : pl.images) loose_centre = std::min(loose_centre, (p.xyz - im.centre).norm());
+    check(loose_centre > 0.2, "a point at a camera centre with no vote: the sentinel became a depth");
+    const CloudScore loose = scoreCloud(scene, lr.cloud, 0.01, 0.05, 0.02, 0.02);
+    check(loose.beyond > 20 * std::max<int64_t>(1, s.beyond) && loose.beyond * 50 > loose.points,
+          "the fixture has no doubled copy to remove: " + std::to_string(loose.beyond) + " of " +
+              std::to_string(loose.points));
+    fs::remove_all(d);
+}
+
+// Mutant: hybrid's fill-only rule off (depth points everywhere, not only
+// where the matches have nothing).
+void hybrid_fills_only_uncovered() {
+    const fs::path d = tempDir("hybrid");
+    writeStairDataset(stairScene(), d.string(), 384, 768, 3000);
+    writeStairDepths(stairScene(), d.string(), SyntheticDepth{});
+    auto files = stairDepths(d);
+    const Scene scene = stairScene();
+    struct Size : Matcher {
+        int inputSize() const override { return 128; }
+        Warp match(const MatchImage&, const MatchImage&) override { return {}; }
+        std::string describe() const override { return ""; }
+    } sizer;
+    auto run = [&](DensifySource src) {
+        DensifyJob job;
+        job.model_dir = (d / "sparse" / "0").string();
+        job.image_path = [&](const std::string& n) { return (d / "images" / n).string(); };
+        job.depth = files.get();
+        job.matcher = &sizer;
+        job.opt.refs = 4;
+        job.opt.matches_per_ref = 3000;
+        job.opt.source = src;
+        const DensifyPlan pl = planDensify(job);
+        OracleMatcher om(&scene, OracleMatcher::independentViews(pl.images), 128, 0.0, 0.0, 1);
+        job.matcher = &om;
+        return runDensify(job, pl, nullptr);
+    };
+    const DensifyResult h = run(DensifySource::Hybrid), m = run(DensifySource::Depth);
+    check(m.stats.depth_kept > 2000, "depth-only points: " + std::to_string(m.stats.depth_kept));
+    check(h.stats.depth_covered > 0, "hybrid saw no matched pixels to leave alone");
+    check(h.stats.depth_kept * 4 < m.stats.depth_kept,
+          "hybrid kept " + std::to_string(h.stats.depth_kept) + " depth points against " +
+              std::to_string(m.stats.depth_kept) + " depth-only: it is not filling only the gaps");
+    fs::remove_all(d);
+}
+
 // Mutant: shortest track kept, or the error tie-break reversed.
 void voxel_select_keeps_longest_then_best() {
     auto pt = [](double x, int images, double err) {
@@ -1064,6 +1205,9 @@ static int body(int argc, char** argv) {
         {"consistency_counts_images_not_faces", consistency_counts_images_not_faces},
         {"coarse_warp_thresholds_scale", coarse_warp_thresholds_scale},
         {"visibility_drops_seen_through_pairs", visibility_drops_seen_through_pairs},
+        {"depth_fit_recovers_affine", depth_fit_recovers_affine},
+        {"depth_agreement_drops_copies", depth_agreement_drops_copies},
+        {"hybrid_fills_only_uncovered", hybrid_fills_only_uncovered},
         {"holdout_is_every_nth_and_never_matched", holdout_is_every_nth_and_never_matched},
         {"cut_view_is_pixel_exact", cut_view_is_pixel_exact},
         {"flip_mask_inverts_keep", flip_mask_inverts_keep},

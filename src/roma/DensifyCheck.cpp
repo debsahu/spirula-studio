@@ -35,9 +35,23 @@ int densifyCheck(const CheckOptions& co) {
         };
     job.opt.refs = 1.0;
     job.opt.seed = 7;
+    std::unique_ptr<DepthFiles> depth;
+    if (co.source != "roma") {
+        if (!fs::exists(dir / "depths")) writeStairDepths(scene, dir.string(), SyntheticDepth{});
+        depth = std::make_unique<DepthFiles>(
+            [&](const std::string& n) { return (dir / "depths" / n).string(); },
+            [](const SourceImage& im) { return im.cam.isSpherical(); }, (dir / "depths").string());
+        job.depth = depth.get();
+        job.on_depth_fit = [](const SourceImage& im, const DepthField& f) {
+            std::printf("check: depth %s: %s, a %.3f b %.4f, residual %.4f, anchors %d\n", im.name.c_str(),
+                        f.ok ? "fitted" : f.refused.c_str(), f.a, f.b, f.rel_residual, f.anchors);
+        };
+    }
     std::unique_ptr<Matcher> matcher;
     DensifyPlan plan;
-    if (co.matches.empty()) {
+    if (co.source == "moge") {
+        plan = planDensify(job);
+    } else if (co.matches.empty()) {
         struct Size : Matcher {
             int s;
             explicit Size(int s_) : s(s_) {}
@@ -55,9 +69,9 @@ int densifyCheck(const CheckOptions& co) {
         plan = planDensify(job);
     }
     job.matcher = matcher.get();
-    std::printf("check: %s; %zu images, %zu views, %zu reference views, %lld pairs, voxel %.4f m, "
+    std::printf("check: %s, source %s; %zu images, %zu views, %zu reference views, %lld pairs, voxel %.4f m, "
                 "min track %d\n",
-                matcher->describe().c_str(), plan.images.size(), plan.views.size(),
+                matcher ? matcher->describe().c_str() : "no matcher", co.source.c_str(), plan.images.size(), plan.views.size(),
                 plan.ref_views.size(), (long long)plan.pairs, plan.voxel, plan.min_track);
     const DensifyResult r = runDensify(job, plan, nullptr);
     writeSibling(job.model_dir, job.out_dir, plan, r.cloud, "{\"check\": true}\n");

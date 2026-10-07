@@ -160,6 +160,34 @@ SS_DENSIFY_OPT(opt_flip_mask,
     "Maskers die juist het te verwijderen gebied tekenen",
     "Маски, которые закрашивают удаляемую область",
     "Bunun yerine kaldırılacak bölgeyi boyayan maskeler")
+SS_DENSIFY_OPT(opt_source,
+    "Where points come from: roma (dense matches), moge (fitted monocular depth), hybrid (matches, depth filling the rest). Default: auto, hybrid when depth maps exist",
+    "点の出所: roma（密なマッチ）、moge（合わせ込んだ単眼深度）、hybrid（マッチ、残りを深度で補う）。既定: auto（深度マップがあれば hybrid）",
+    "点的来源：roma（稠密匹配），moge（拟合后的单目深度），hybrid（匹配，其余由深度补充）。默认：auto，有深度图时为 hybrid",
+    "點的來源：roma（稠密匹配），moge（擬合後的單目深度），hybrid（匹配，其餘由深度補充）。預設：auto，有深度圖時為 hybrid",
+    "점의 출처: roma (조밀 매칭), moge (맞춘 단안 깊이), hybrid (매칭, 나머지는 깊이로 채움). 기본값: auto, 깊이 맵이 있으면 hybrid",
+    "Woher die Punkte kommen: roma (dichte Zuordnungen), moge (angepasste monokulare Tiefe), hybrid (Zuordnungen, Tiefe füllt den Rest). Standard: auto, hybrid mit Tiefenkarten",
+    "D'où viennent les points : roma (appariements denses), moge (profondeur monoculaire ajustée), hybrid (appariements, la profondeur complète le reste). Défaut : auto, hybrid s'il y a des cartes de profondeur",
+    "De dónde salen los puntos: roma (correspondencias densas), moge (profundidad monocular ajustada), hybrid (correspondencias, la profundidad completa el resto). Por defecto: auto, hybrid si hay mapas de profundidad",
+    "De onde vêm os pontos: roma (correspondências densas), moge (profundidade monocular ajustada), hybrid (correspondências, a profundidade preenche o resto). Por omissão: auto, hybrid se houver mapas de profundidade",
+    "Da dove vengono i punti: roma (corrispondenze dense), moge (profondità monoculare adattata), hybrid (corrispondenze, la profondità riempie il resto). Predefinito: auto, hybrid con mappe di profondità",
+    "Waar de punten vandaan komen: roma (dichte overeenkomsten), moge (aangepaste monoculaire diepte), hybrid (overeenkomsten, diepte vult de rest). Standaard: auto, hybrid als er dieptekaarten zijn",
+    "Откуда берутся точки: roma (плотные соответствия), moge (подогнанная монокулярная глубина), hybrid (соответствия, остальное дополняет глубина). По умолчанию: auto, hybrid при наличии карт глубины",
+    "Noktaların kaynağı: roma (yoğun eşleşmeler), moge (uydurulmuş tek gözlü derinlik), hybrid (eşleşmeler, kalanı derinlik doldurur). Varsayılan: auto, derinlik haritaları varsa hybrid")
+SS_DENSIFY_OPT(opt_depth_dir,
+    "The depth maps spirula geometry wrote, relative to the dataset or absolute. Default: depths",
+    "spirula geometry が書いた深度マップ（相対または絶対パス）。既定: depths",
+    "spirula geometry 写出的深度图，相对或绝对路径。默认：depths",
+    "spirula geometry 寫出的深度圖，相對或絕對路徑。預設：depths",
+    "spirula geometry 가 쓴 깊이 맵, 상대 또는 절대 경로. 기본값: depths",
+    "Die Tiefenkarten von spirula geometry, relativ zum Datensatz oder absolut. Standard: depths",
+    "Les cartes de profondeur de spirula geometry, relatives au jeu de données ou absolues. Défaut : depths",
+    "Los mapas de profundidad de spirula geometry, relativos al conjunto o absolutos. Por defecto: depths",
+    "Os mapas de profundidade do spirula geometry, relativos ao conjunto ou absolutos. Por omissão: depths",
+    "Le mappe di profondità di spirula geometry, relative all'insieme o assolute. Predefinito: depths",
+    "De dieptekaarten van spirula geometry, relatief aan de dataset of absoluut. Standaard: depths",
+    "Карты глубины от spirula geometry, относительно набора или абсолютный путь. По умолчанию: depths",
+    "spirula geometry'nin yazdığı derinlik haritaları, veri kümesine göre ya da mutlak. Varsayılan: depths")
 SS_DENSIFY_OPT(opt_preset,
     "RoMa v2's match resolution: turbo 320, fast 512, base 640, high 640 then 960, precise 800 then 1280. Default: base",
     "RoMa v2 のマッチ解像度: turbo 320、fast 512、base 640、high 640 から 960、precise 800 から 1280。既定: base",
@@ -709,6 +737,74 @@ SS_MSG(warp_scale,
        "применяются в пикселях поля, пересчитанные из значений для {1} px"),
     TR("Eşleyici {1} px girdiler için {0} px alanlar döndürüyor: pikselleri daha kaba, bu yüzden piksel "
        "eşikleri {1} px değerlerinden çevrilerek alan piksellerinde uygulanır"));
+
+SS_MSG(source,
+    EN("Source: {0}"), JA("出所: {0}"), ZH_HANS("来源：{0}"), ZH_HANT("來源：{0}"), KO("출처: {0}"),
+    DE("Quelle: {0}"), FR("Source : {0}"), ES("Fuente: {0}"), PT("Fonte: {0}"), IT("Fonte: {0}"),
+    NL("Bron: {0}"), RU("Источник: {0}"), TR("Kaynak: {0}"));
+
+SS_MSG(depth_maps,
+    EN("Depth: {0}"), JA("深度: {0}"), ZH_HANS("深度：{0}"), ZH_HANT("深度：{0}"), KO("깊이: {0}"),
+    DE("Tiefe: {0}"), FR("Profondeur : {0}"), ES("Profundidad: {0}"), PT("Profundidade: {0}"),
+    IT("Profondità: {0}"), NL("Diepte: {0}"), RU("Глубина: {0}"), TR("Derinlik: {0}"));
+
+SS_MSG(running_geometry,
+    EN("No depth maps in {0}: running spirula geometry --depth to make them"),
+    JA("{0} に深度マップがありません。spirula geometry --depth で作ります"),
+    ZH_HANS("{0} 中没有深度图：运行 spirula geometry --depth 生成"),
+    ZH_HANT("{0} 中沒有深度圖：執行 spirula geometry --depth 產生"),
+    KO("{0} 에 깊이 맵이 없습니다: spirula geometry --depth 로 만듭니다"),
+    DE("Keine Tiefenkarten in {0}: spirula geometry --depth erzeugt sie"),
+    FR("Aucune carte de profondeur dans {0} : spirula geometry --depth les produit"),
+    ES("No hay mapas de profundidad en {0}: se crean con spirula geometry --depth"),
+    PT("Não há mapas de profundidade em {0}: são criados com spirula geometry --depth"),
+    IT("Nessuna mappa di profondità in {0}: le crea spirula geometry --depth"),
+    NL("Geen dieptekaarten in {0}: spirula geometry --depth maakt ze"),
+    RU("В {0} нет карт глубины: их создаёт spirula geometry --depth"),
+    TR("{0} içinde derinlik haritası yok: spirula geometry --depth ile oluşturuluyor"));
+
+SS_MSG(depth_refused,
+    EN("Depth map of {0} not used: {1}"),
+    JA("{0} の深度マップは使いません: {1}"),
+    ZH_HANS("未使用 {0} 的深度图：{1}"),
+    ZH_HANT("未使用 {0} 的深度圖：{1}"),
+    KO("{0} 의 깊이 맵을 쓰지 않음: {1}"),
+    DE("Tiefenkarte von {0} nicht verwendet: {1}"),
+    FR("Carte de profondeur de {0} non utilisée : {1}"),
+    ES("Mapa de profundidad de {0} sin usar: {1}"),
+    PT("Mapa de profundidade de {0} não usado: {1}"),
+    IT("Mappa di profondità di {0} non usata: {1}"),
+    NL("Dieptekaart van {0} niet gebruikt: {1}"),
+    RU("Карта глубины {0} не используется: {1}"),
+    TR("{0} derinlik haritası kullanılmadı: {1}"));
+
+SS_MSG(depth_stats,
+    EN("Depth samples {0}. Rejected: no data {1}, other images disagree {2}, seen through {3}, "
+       "against nearby matches {4}; kept {5}, agreement within {6}"),
+    JA("深度サンプル {0}。除外: データなし {1}、他画像と不一致 {2}、透けて見える {3}、近くのマッチと不一致 {4}。"
+       "採用 {5}、一致の許容 {6}"),
+    ZH_HANS("深度样本 {0}。剔除：无数据 {1}，与其他图像不一致 {2}，被看穿 {3}，与附近匹配不符 {4}；"
+            "保留 {5}，一致容差 {6}"),
+    ZH_HANT("深度樣本 {0}。剔除：無資料 {1}，與其他影像不一致 {2}，被看穿 {3}，與附近匹配不符 {4}；"
+            "保留 {5}，一致容差 {6}"),
+    KO("깊이 표본 {0}. 제외: 데이터 없음 {1}, 다른 이미지와 불일치 {2}, 관통되어 보임 {3}, 근처 매칭과 불일치 {4}; "
+       "유지 {5}, 일치 허용 {6}"),
+    DE("Tiefenstichproben {0}. Verworfen: keine Daten {1}, andere Bilder widersprechen {2}, durchschaut {3}, "
+       "gegen nahe Zuordnungen {4}; behalten {5}, Übereinstimmung innerhalb {6}"),
+    FR("Échantillons de profondeur {0}. Rejetés : sans données {1}, autres images en désaccord {2}, vus à travers {3}, "
+       "contre les appariements voisins {4} ; gardés {5}, accord à {6} près"),
+    ES("Muestras de profundidad {0}. Rechazadas: sin datos {1}, otras imágenes en desacuerdo {2}, vistas a través {3}, "
+       "contra correspondencias cercanas {4}; conservadas {5}, acuerdo dentro de {6}"),
+    PT("Amostras de profundidade {0}. Rejeitadas: sem dados {1}, outras imagens em desacordo {2}, vistas através {3}, "
+       "contra correspondências próximas {4}; mantidas {5}, acordo dentro de {6}"),
+    IT("Campioni di profondità {0}. Scartati: senza dati {1}, altre immagini in disaccordo {2}, visti attraverso {3}, "
+       "contro corrispondenze vicine {4}; tenuti {5}, accordo entro {6}"),
+    NL("Dieptesteekproeven {0}. Afgewezen: geen gegevens {1}, andere beelden oneens {2}, doorzien {3}, "
+       "tegen nabije overeenkomsten {4}; behouden {5}, overeenstemming binnen {6}"),
+    RU("Выборок глубины {0}. Отброшено: нет данных {1}, другие снимки не согласны {2}, видны насквозь {3}, "
+       "против соседних соответствий {4}; сохранено {5}, согласие в пределах {6}"),
+    TR("Derinlik örneği {0}. Elenen: veri yok {1}, diğer görüntüler uyuşmuyor {2}, içinden görülüyor {3}, "
+       "yakın eşleşmelere aykırı {4}; tutulan {5}, uyum payı {6}"));
 
 SS_MSG(matcher,
     EN("Matcher: {0}"), JA("マッチャ: {0}"), ZH_HANS("匹配器：{0}"), ZH_HANT("匹配器：{0}"),

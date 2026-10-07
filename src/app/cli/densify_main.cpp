@@ -5,6 +5,9 @@
 
 #include "app/Tools.h"
 
+#include "app/AppPaths.h"
+#include "data/CameraMath.h"
+
 #include "core/VulkanDeviceSelection.h"
 #include "data/DatasetParser.h"
 #include "i18n/Locale.h"
@@ -14,6 +17,7 @@
 #include "nn/io/Fetch.h"
 #include "roma/DensifyCheck.h"
 #include "roma/DensifyRun.h"
+#include "roma/DepthSource.h"
 #include "roma/DumpMatcher.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/RomaMatcher.h"
@@ -62,6 +66,8 @@ void usage() {
     help_row("--image-dir <dir>", D::opt_image_dir);
     help_row("--mask-dir <dir> | --no-masks", D::opt_mask_dir);
     help_row("--flip-mask", D::opt_flip_mask);
+    help_row("--source auto|roma|moge|hybrid", D::opt_source);
+    help_row("--depth-dir <dir>", D::opt_depth_dir);
     help_row("--preset turbo|fast|base|high|precise", D::opt_preset);
     help_row("--matches <dir>", D::opt_matches);
     help_row("--export-pairs <dir>", D::opt_export_pairs);
@@ -90,6 +96,7 @@ void usage() {
     // English, like every --check: a table of errors for whoever changed the stage.
     std::fprintf(stderr, "    --check [--check-dir <dir>] [--matches <dir>] [--check-noise <px>]\n"
                          "            [--check-outliers <share>] [--check-size <px>] [--check-no-masks]\n"
+                         "            [--check-source roma|moge|hybrid]\n"
                          "                                  run the synthetic staircase S-1 and exit\n");
     std::fprintf(stderr, "\n%s --device <index|name|uuid>  --lang <code>\n", D::label_common.get());
 }
@@ -132,6 +139,7 @@ int spirula_densify_main(int argc, char** argv) {
     bool rule_set = false;
     std::string device;
     roma::Preset preset = roma::Preset::Base;
+    std::string depth_dir = "depths";
     bool device_set = false;   // an explicit `--device ""` is Auto and beats SS_VK_DEVICE
 
     for (int i = 1; i < argc; ++i) {
@@ -171,7 +179,17 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--check-outliers") check_outliers = real(0);
         else if (a == "--check-size") check_size = (int)real(16);
         else if (a == "--check-no-masks") check_opt.masks = false;
+        else if (a == "--check-source") check_opt.source = next();
         else if (a == "--device") { device = next(); device_set = true; }
+        else if (a == "--source") {
+            const std::string v = next();
+            if (v == "auto") o.source = roma::DensifySource::Auto;
+            else if (v == "roma") o.source = roma::DensifySource::Roma;
+            else if (v == "moge") o.source = roma::DensifySource::Depth;
+            else if (v == "hybrid") o.source = roma::DensifySource::Hybrid;
+            else bad(v);
+        }
+        else if (a == "--depth-dir") depth_dir = next();
         else if (a == "--preset") {
             const std::string v = next();
             if (!roma::parse_preset(v, preset)) bad(v);
@@ -278,10 +296,43 @@ int spirula_densify_main(int argc, char** argv) {
 
         if (job.export_dir.empty() && matches.empty())
             nn::configure_device(spirula::vkselect::requestFrom(device, device_set).text);
+        // The depth source: the dataset's `spirula geometry` maps, made here
+        // when a depth source is asked for and there are none.
+        const fs::path depth_root = fs::path(depth_dir).is_absolute() ? fs::path(depth_dir)
+                                                                      : fs::path(dataset) / depth_dir;
+        auto have_depth = [&] {
+            std::error_code ec;
+            return fs::is_directory(depth_root, ec) && !fs::is_empty(depth_root, ec);
+        };
+        const bool want_depth = o.source == roma::DensifySource::Depth || o.source == roma::DensifySource::Hybrid;
+        if (want_depth && !have_depth() && job.export_dir.empty()) {
+            std::printf("%s\n", format(D::running_geometry, {depth_root.string()}).c_str());
+            std::fflush(stdout);
+            std::string cmd = "\"" + app::exe_path() + "\" geometry \"" + dataset + "\" --depth --no-normal";
+            if (image_dir != "images") cmd += " --image-dir \"" + image_dir + "\"";
+            if (device_set) cmd += " --device \"" + device + "\"";
+            if (std::system(cmd.c_str()) != 0) throw std::runtime_error("spirula geometry failed");
+        }
+        std::unique_ptr<roma::DepthFiles> depth;
+        if (have_depth() && o.source != roma::DensifySource::Roma && job.export_dir.empty()) {
+            const std::string root = depth_root.string();
+            depth = std::make_unique<roma::DepthFiles>(
+                [root](const std::string& n) { return dsparse::find_aux_file(root, n, "depth"); },
+                // `spirula geometry` writes ray depth exactly where it splits the
+                // lens into faces; the trainer asks the same function.
+                [](const roma::SourceImage& im) {
+                    const sfm::Camera& c = im.cam;
+                    const int model = c.isSpherical() ? 3 : c.isFisheye() ? 1 : 0;
+                    return camhost::splits_to_pinhole_faces(model, c.width, c.height, c.fx, c.fy);
+                },
+                root);
+            job.depth = depth.get();
+        }
+
         std::unique_ptr<roma::Matcher> matcher;
         const roma::PresetSpec& spec = roma::preset_spec(preset);
         if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, spec.hr ? spec.hr : spec.lr);
-        else if (job.export_dir.empty())
+        else if (job.export_dir.empty() && o.source != roma::DensifySource::Depth)
             matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), preset);
         job.matcher = matcher.get();
         if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
@@ -329,7 +380,17 @@ int spirula_densify_main(int argc, char** argv) {
                 return 2;
             }
         }
-        if (job.matcher) std::printf("%s\n", format(D::matcher, {job.matcher->describe()}).c_str());
+        const char* src_name = pl.source == roma::DensifySource::Roma ? "roma"
+                             : pl.source == roma::DensifySource::Depth ? "moge" : "hybrid";
+        std::printf("%s\n", format(D::source, {src_name}).c_str());
+        if (job.matcher && pl.source != roma::DensifySource::Depth)
+            std::printf("%s\n", format(D::matcher, {job.matcher->describe()}).c_str());
+        if (job.depth && pl.source != roma::DensifySource::Roma) {
+            std::printf("%s\n", format(D::depth_maps, {job.depth->describe()}).c_str());
+            job.on_depth_fit = [](const roma::SourceImage& im, const roma::DepthField& f) {
+                if (!f.ok) std::printf("%s\n", format(D::depth_refused, {im.name, f.refused}).c_str());
+            };
+        }
         job.on_warp_scale = [](int warp, int input) {
             std::printf("%s\n", format(D::warp_scale, {(long long)warp, (long long)input}).c_str());
             std::fflush(stdout);
@@ -350,6 +411,11 @@ int spirula_densify_main(int argc, char** argv) {
             return 0;
         }
         const roma::DensifyStats& st = res.stats;
+        if (pl.source != roma::DensifySource::Roma)
+            std::printf("%s\n", format(D::depth_stats, {(long long)st.depth_samples, (long long)st.depth_nodata,
+                                                         (long long)st.depth_disagree, (long long)st.depth_through,
+                                                         (long long)st.depth_local, (long long)st.depth_kept,
+                                                         num(res.depth_tol)}).c_str());
         std::printf("%s\n", format(D::rejected, {(long long)st.samples, (long long)st.below_certainty,
                                                  (long long)st.outside, (long long)st.sampson,
                                                  (long long)st.reproj, (long long)st.cheirality,
@@ -362,7 +428,8 @@ int spirula_densify_main(int argc, char** argv) {
            << "  \"source_model\": \"" << jsonEscape(job.model_dir) << "\",\n"
            << "  \"source_images_bin_sha256\": \"" << nn::sha256_file(job.model_dir + "/images.bin") << "\",\n"
            << "  \"source_cameras_bin_sha256\": \"" << nn::sha256_file(job.model_dir + "/cameras.bin") << "\",\n"
-           << "  \"matcher\": \"" << jsonEscape(job.matcher->describe()) << "\",\n"
+           << "  \"matcher\": \"" << jsonEscape(job.matcher ? job.matcher->describe() : std::string()) << "\",\n"
+           << "  \"source\": \"" << src_name << "\", \"depth\": \"" << jsonEscape(job.depth ? job.depth->describe() : std::string()) << "\",\n"
            << "  \"plugin_exact\": " << (r.plugin_exact ? "true" : "false") << ",\n"
            << "  \"images\": " << pl.images.size() << ", \"sparse_points\": " << pl.sparse_points
            << ", \"sparse_spacing\": " << jnum(pl.sparse_spacing) << ",\n"
@@ -393,6 +460,10 @@ int spirula_densify_main(int argc, char** argv) {
            << ", \"reproj\": " << st.reproj << ", \"cheirality\": " << st.cheirality << ", \"parallax\": " << st.parallax
            << ", \"candidates\": " << st.candidates << ", \"ref_reproj\": " << st.ref_reproj << ", \"fused\": " << st.fused
            << ", \"short_track\": " << st.short_track << ", \"inconsistent\": " << st.inconsistent << ", \"uncertain\": " << st.uncertain
+           << ", \"depth_samples\": " << st.depth_samples << ", \"depth_nodata\": " << st.depth_nodata
+           << ", \"depth_disagree\": " << st.depth_disagree << ", \"depth_through\": " << st.depth_through
+           << ", \"depth_local\": " << st.depth_local << ", \"depth_covered\": " << st.depth_covered
+           << ", \"depth_kept\": " << st.depth_kept << ", \"depth_edge\": " << st.depth_edge << ", \"depth_tol\": " << jnum(res.depth_tol)
            << ", \"two_image_kept\": " << st.two_image_kept << ", \"seen_through\": " << st.seen_through << ", \"two_image_bar\": " << jnum(st.two_image_bar)
            << ", \"voxel_merged\": " << st.voxel_merged << ", \"capped\": " << st.capped << "},\n"
            << "  \"track_hist\": {";

@@ -24,6 +24,10 @@ void DensifyStats::add(const DensifyStats& o) {
     ref_reproj += o.ref_reproj; inconsistent += o.inconsistent; uncertain += o.uncertain; fused += o.fused; short_track += o.short_track;
     two_image_kept += o.two_image_kept;
     seen_through += o.seen_through;
+    depth_samples += o.depth_samples; depth_nodata += o.depth_nodata;
+    depth_disagree += o.depth_disagree; depth_through += o.depth_through;
+    depth_local += o.depth_local; depth_covered += o.depth_covered; depth_kept += o.depth_kept;
+    depth_edge += o.depth_edge;
     if (o.two_image_bar >= 0) two_image_bar = o.two_image_bar; voxel_merged += o.voxel_merged; capped += o.capped;
     for (const auto& kv : o.track_hist) track_hist[kv.first] += kv.second;
 }
@@ -458,7 +462,7 @@ std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_trac
         // as the median of the run's own longer tracks.
         std::vector<double> e3;
         for (const DensePoint& p : pts)
-            if (trackLen(p, by_images) >= 3) e3.push_back(p.error);
+            if (trackLen(p, by_images) >= 3 && !p.from_depth) e3.push_back(p.error);
         double bar = -1;
         if (!e3.empty()) {
             std::nth_element(e3.begin(), e3.begin() + (long)(e3.size() / 2), e3.end());
@@ -487,6 +491,9 @@ std::vector<DensePoint> finalizePoints(std::vector<DensePoint> pts, int min_trac
         std::iota(idx.begin(), idx.end(), 0);
         std::mt19937_64 rng(opt.seed);
         std::shuffle(idx.begin(), idx.end(), rng);
+        // Matched points before depth points: in a hybrid run the cap spends
+        // itself on the fill last.
+        std::stable_partition(idx.begin(), idx.end(), [&](size_t i) { return !v[i].from_depth; });
         idx.resize((size_t)max_points);
         std::vector<DensePoint> c;
         c.reserve(idx.size());
