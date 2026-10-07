@@ -58,6 +58,8 @@ const Case kCases[] = {
     {"memo_keys.pt", "memoizes more than 250000", "6M MEMOIZE opcodes become 6M std::map nodes"},
     {"binget_stack.pt", "stack grows past 250000", "15M BINGET opcodes become 15M stack slots"},
     {"long_binget_stack.pt", "stack grows past 250000", "6M LONG_BINGET opcodes become 6M stack slots"},
+    {"container_items.pt", "containers hold more than 250000 items",
+     "16M items in 80 tuples of 200k, each under every per-object cap, are 128 MB of vectors"},
 };
 
 std::string refusal(const std::string& path) {
