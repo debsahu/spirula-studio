@@ -1275,9 +1275,9 @@ void fill_near_matches_dropped() {
         f.from_depth = true;
         f.xyz.z = 0.01;
         pts.push_back(f);
-        DensePoint far = f;
-        far.xyz.z = 0.5;
-        pts.push_back(far);
+        DensePoint distant = f;
+        distant.xyz.z = 0.5;
+        pts.push_back(distant);
     }
     const int64_t n = dropFillNearMatches(pts, 0.02);
     int fill = 0;
