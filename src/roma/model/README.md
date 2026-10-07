@@ -175,22 +175,24 @@ uv run tools/roma/compare_torch.py --dump /tmp/d --weights f32 --full
 
 ## Memory and speed of the full match
 
-M5 Pro (24 GB, no cooperative matrix), basement cube faces, f16 backbone. A
+Basement cube faces, f16 backbone, neither Mac has cooperative matrices. A
 pair is "cold" when A is new, "warm" when A's features are cached (densify's
 case after a reference's first neighbour). The arena is the plan, which the
-peak stays inside at every stage; A's cache is its own arena.
+peak stays inside at every stage; A's cache is its own arena. Both Macs plan
+the same bytes.
 
-| preset | arena | A cache | cold s/pair | warm s/pair |
+| preset | arena | A cache | M5 Pro cold / warm s/pair | M4 Max cold / warm s/pair |
 |---|---|---|---|---|
-| turbo | 142 MB | 50 MB | 0.39 | 0.27 |
-| fast | 310 MB | 129 MB | 0.97 | 0.68 |
-| base | 466 MB | 202 MB | 1.63 | 1.16 |
-| high | 993 MB | 625 MB | 2.52 | 1.81 |
-| high, both directions | 1037 MB | 625 MB | 3.07 | 2.40 |
-| precise | 1734 MB | 1069 MB | 4.78 | 3.43 |
-| precise, both directions | 1813 MB | 1069 MB | 5.26 | 4.10 |
+| turbo | 142 MB | 50 MB | 0.39 / 0.27 | 0.28 / 0.19 |
+| fast | 310 MB | 129 MB | 0.97 / 0.68 | 0.71 / 0.49 |
+| base | 466 MB | 202 MB | 1.63 / 1.16 | 1.15 / 0.80 |
+| high | 993 MB | 625 MB | 2.52 / 1.81 | 1.71 / 1.19 |
+| high, both directions | 1037 MB | 625 MB | 3.07 / 2.40 | 2.19 / 1.67 |
+| precise | 1734 MB | 1069 MB | 4.78 / 3.43 | 2.95 / 2.06 |
+| precise, both directions | 1813 MB | 1069 MB | 5.26 / 4.10 | 3.66 / 2.77 |
 
 `precise` in both directions holds 2.88 GB of arena and cache beside 0.95 GB of
 weights (1.40 GB with `SS_ROMA_F32_WEIGHTS=1`), against the plan's 4 GB gate.
-The process peak footprint `/usr/bin/time -l` measured is 4.64 GB, which agrees.
+The process peak footprint `/usr/bin/time -l` measured is 4.64 GB on the M5 Pro
+and 4.72 GB on the M4 Max, which agrees.
 PyTorch on MPS needs 17.1 GB for the same preset.
