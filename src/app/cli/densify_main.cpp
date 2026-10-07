@@ -5,10 +5,12 @@
 
 #include "app/Tools.h"
 
+#include "core/VulkanDeviceSelection.h"
 #include "data/DatasetParser.h"
 #include "i18n/Locale.h"
 #include "i18n/TimeFormat.h"
 #include "i18n/catalog/Densify.h"
+#include "nn/Device.h"
 #include "nn/io/Fetch.h"
 #include "roma/DensifyCheck.h"
 #include "roma/DensifyRun.h"
@@ -74,7 +76,9 @@ void usage() {
     help_row("--reproj <px>", D::opt_reproj);
     help_row("--sampson <px2>", D::opt_sampson);
     help_row("--parallax <deg>", D::opt_parallax);
-    help_row("--min-track <n>", D::opt_min_track);
+    help_row("--min-track auto|<n>", D::opt_min_track);
+    help_row("--covis-min-angle <deg>", D::opt_covis_min_angle);
+    help_row("--max-depth-error auto|<f>|off", D::opt_max_depth_error);
     help_row("--voxel auto|<size>|off", D::opt_voxel);
     help_row("--max-points auto|<n>|off", D::opt_max_points);
     help_row("--max-baseline auto|<d>|off", D::opt_max_baseline);
@@ -86,7 +90,7 @@ void usage() {
     std::fprintf(stderr, "    --check [--check-dir <dir>] [--matches <dir>] [--check-noise <px>]\n"
                          "            [--check-outliers <share>] [--check-size <px>] [--check-no-masks]\n"
                          "                                  run the synthetic staircase S-1 and exit\n");
-    std::fprintf(stderr, "\n%s --lang <code>\n", D::label_common.get());
+    std::fprintf(stderr, "\n%s --device <index|name|uuid>  --lang <code>\n", D::label_common.get());
 }
 
 std::string num(double v, int prec = 3) {
@@ -125,6 +129,8 @@ int spirula_densify_main(int argc, char** argv) {
     double check_noise = check_opt.noise_px, check_outliers = check_opt.outliers;
     int check_size = check_opt.match_size;
     bool rule_set = false;
+    std::string device;
+    bool device_set = false;   // an explicit `--device ""` is Auto and beats SS_VK_DEVICE
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -163,6 +169,7 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--check-outliers") check_outliers = real(0);
         else if (a == "--check-size") check_size = (int)real(16);
         else if (a == "--check-no-masks") check_opt.masks = false;
+        else if (a == "--device") { device = next(); device_set = true; }
         else if (a == "--model") model = next();
         else if (a == "--out") job.out_dir = next();
         else if (a == "--image-dir") image_dir = next();
@@ -196,7 +203,18 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--reproj") o.reproj_px = real(1e-9);
         else if (a == "--sampson") o.sampson_px2 = real(0);
         else if (a == "--parallax") o.min_parallax_deg = real(0);
-        else if (a == "--min-track") o.min_track = (int)real(1);
+        else if (a == "--min-track") {
+            const std::string v = next();
+            if (v == "auto") o.min_track = 0;
+            else {
+                char* end = nullptr;
+                const long n = std::strtol(v.c_str(), &end, 10);
+                if (v.empty() || *end || n < 1) bad(v);
+                o.min_track = (int)n;
+            }
+        }
+        else if (a == "--covis-min-angle") o.covis_min_angle_deg = real(0);
+        else if (a == "--max-depth-error") o.max_depth_error = autoOff();
         else if (a == "--voxel") o.voxel = autoOff();
         else if (a == "--max-points") o.max_points = (int64_t)autoOff();
         else if (a == "--max-baseline") o.max_baseline = autoOff();
@@ -252,11 +270,15 @@ int spirula_densify_main(int argc, char** argv) {
                 return dsparse::find_aux_file(mask_root.string(), n, "mask");
             };
 
+        if (job.export_dir.empty() && matches.empty())
+            nn::configure_device(spirula::vkselect::requestFrom(device, device_set).text);
         std::unique_ptr<roma::Matcher> matcher;
         if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, 640);
         else if (job.export_dir.empty())
             matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), roma::Preset::Base);
         job.matcher = matcher.get();
+        if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
+            throw std::runtime_error(job.out_dir + ": " + why);
         if (job.export_dir.empty() && fs::exists(job.out_dir) && !job.overwrite) {
             std::fprintf(stderr, "%s\n", format(D::out_exists, {job.out_dir}).c_str());
             return 2;
@@ -285,7 +307,7 @@ int spirula_densify_main(int argc, char** argv) {
         std::printf("%s\n", format(D::filters, {(long long)pl.match_size, num(r.reproj_px),
                                                 num(r.sampson_px2), num(r.min_parallax_deg),
                                                 num(r.plugin_exact ? r.certainty_floor : r.min_certainty),
-                                                (long long)pl.min_track})
+                                                pl.min_track > 0 ? std::to_string(pl.min_track) : std::string("auto")})
                                 .c_str());
         std::printf("%s\n", format(D::budget, {(long long)r.matches_per_ref,
                                                pl.voxel > 0 ? num(pl.voxel) : std::string("off"),
@@ -301,6 +323,10 @@ int spirula_densify_main(int argc, char** argv) {
             }
         }
         if (job.matcher) std::printf("%s\n", format(D::matcher, {job.matcher->describe()}).c_str());
+        job.on_warp_scale = [](int warp, int input) {
+            std::printf("%s\n", format(D::warp_scale, {(long long)warp, (long long)input}).c_str());
+            std::fflush(stdout);
+        };
         std::fflush(stdout);
 
         int last_pct = -1;
@@ -348,16 +374,19 @@ int spirula_densify_main(int argc, char** argv) {
         js << "],\n  \"matches_per_ref\": " << r.matches_per_ref << ", \"min_certainty\": " << jnum(r.min_certainty)
            << ", \"certainty_floor\": " << jnum(r.certainty_floor) << ", \"sample_cap\": " << jnum(r.sample_cap) << ",\n"
            << "  \"reproj_px\": " << jnum(r.reproj_px) << ", \"sampson_px2\": " << r.sampson_px2
-           << ", \"min_parallax_deg\": " << jnum(r.min_parallax_deg) << ", \"min_track\": " << pl.min_track
-           << ", \"lone_parallax_deg\": " << jnum(r.lone_parallax_deg)
-           << ", \"max_depth_error\": " << jnum(r.max_depth_error) << ",\n"
+           << ", \"min_parallax_deg\": " << jnum(r.min_parallax_deg) << ", \"min_track\": " << (pl.min_track > 0 ? std::to_string(pl.min_track) : std::string("\"auto\""))
+           << ", \"covis_min_angle_deg\": " << jnum(r.covis_min_angle_deg)
+           << ", \"max_depth_error\": " << jnum(r.max_depth_error)
+           << ", \"median_pair_angle_deg\": " << jnum(pl.median_pair_angle_deg)
+           << ", \"match_focal\": " << jnum(pl.match_focal) << ",\n"
            << "  \"voxel\": " << jnum(pl.voxel) << ", \"max_points\": " << pl.max_points << ", \"seed\": " << r.seed << ",\n"
            << "  \"mask_keep\": " << jnum(pl.mask_keep) << ", \"flip_mask\": " << (job.flip_mask ? "true" : "false") << ",\n"
            << "  \"stats\": {\"samples\": " << st.samples << ", \"below_certainty\": " << st.below_certainty
            << ", \"outside\": " << st.outside << ", \"sampson\": " << st.sampson << ", \"nonfinite\": " << st.nonfinite
            << ", \"reproj\": " << st.reproj << ", \"cheirality\": " << st.cheirality << ", \"parallax\": " << st.parallax
            << ", \"candidates\": " << st.candidates << ", \"ref_reproj\": " << st.ref_reproj << ", \"fused\": " << st.fused
-           << ", \"short_track\": " << st.short_track << ", \"lone_kept\": " << st.lone_kept
+           << ", \"short_track\": " << st.short_track << ", \"inconsistent\": " << st.inconsistent << ", \"uncertain\": " << st.uncertain
+           << ", \"two_image_kept\": " << st.two_image_kept << ", \"two_image_bar\": " << jnum(st.two_image_bar)
            << ", \"voxel_merged\": " << st.voxel_merged << ", \"capped\": " << st.capped << "},\n"
            << "  \"track_hist\": {";
         bool first = true;

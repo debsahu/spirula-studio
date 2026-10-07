@@ -49,7 +49,9 @@ def write_text(out: Path) -> None:
     meta = json.loads((out / "meta.json").read_text())
     with open(out / "views.txt", "w") as f:
         for n, v in meta["views"].items():
-            vals = [v["w"], v["h"], *v["K"], *np.asarray(v["R"]).reshape(-1), *v["t"]]
+            # The plugin holds R, t and K as float32 (CameraRecord): so does the C++ side.
+            f32 = lambda a: [float(x) for x in np.asarray(a, np.float32).reshape(-1)]
+            vals = [v["w"], v["h"], *f32(v["K"]), *f32(v["R"]), *f32(v["t"])]
             f.write(n + " " + " ".join(repr(float(x)) if not isinstance(x, int) else str(x) for x in vals) + "\n")
     cfg = dict(meta["config"], w_match=meta["w_match"], h_match=meta["h_match"])
     (out / "config.txt").write_text("".join(f"{k} {float(v)}\n" for k, v in cfg.items() if not isinstance(v, str)))

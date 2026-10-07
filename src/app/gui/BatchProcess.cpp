@@ -11,6 +11,7 @@
 #include "checkpoint/SplatPly.h"
 #include "data/Json.h"
 #include "data/JsonWrite.h"
+#include "i18n/catalog/DenseGui.h"
 #include "i18n/catalog/Gui.h"
 #include "i18n/catalog/Log.h"
 
@@ -423,6 +424,13 @@ void check_dataset_stage(const BatchRow& row, const BatchCapabilities& caps,
                  !caps.geometry_model_ready(s.sfm.geometry.model))
             out.push_back(issue_of(msg::chk_geometry_model_missing, kSt, true,
                                    s.sfm.geometry.model));
+    }
+
+    if (s.sfm.densify.enable) {
+        if (!caps.densify)
+            out.push_back(issue_of(spirula::i18n::msg::densegui::chk_unavailable, kSt, true));
+        else if (caps.densify_ready && !caps.densify_ready())
+            out.push_back(issue_of(spirula::i18n::msg::densegui::chk_not_ready, kSt, true));
     }
 
     // A preset made for photographs, pointed at a video (or the other way

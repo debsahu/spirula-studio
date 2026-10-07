@@ -261,6 +261,11 @@ void SfmRunner::take_geometry(SfmJob& job) {
     job.geometry = _live.geometry;
 }
 
+void SfmRunner::take_densify(SfmJob& job) {
+    std::lock_guard<std::mutex> lk(_mu);
+    job.densify = _live.densify;
+}
+
 void SfmRunner::take_masking(PrepJob& prep) {
     std::lock_guard<std::mutex> lk(_mu);
     prep.mask_enable = _live.prep.mask_enable;
@@ -1030,7 +1035,21 @@ void SfmRunner::run(SfmJob job) {
                 return fail(err);
         }
 
-        // ---- 4. depth and normals -------------------------------------------
+        // ---- 4. dense points ------------------------------------------------
+        take_densify(job);
+        plan = plan_dataset(plan_job(job), prior, rec, req, &plan, Step::Densify);
+        say(Step::Densify);
+        if (makes(plan[Step::Densify].act)) {
+            const DensifyJob d = densify_for_plan(job.densify, plan[Step::Densify]);
+            record.begin(Step::Densify, densify_fields(job.densify));
+            std::string err;
+            if (!run_densify_step(d, ws.string(), prep.image_dir, prep.mask_dir,
+                                  prep.mask_dir_flipped, _prog, _cancel, err))
+                return fail(err);
+            record.finish(Step::Densify);
+        }
+
+        // ---- 5. depth and normals -------------------------------------------
         take_geometry(job);
         // The scans gave the run its depth and normals.
         if (job.lidar.enabled()) job.geometry.enable = false;
@@ -1047,7 +1066,7 @@ void SfmRunner::run(SfmJob job) {
             record.finish(Step::Geometry);
         }
 
-        // ---- 5. tidy up ----------------------------------------------------
+        // ---- 6. tidy up ----------------------------------------------------
         // Swept by sweep_intermediates(), not here: the screen reads them
         // after the run ends. Only ones this run produced.
         {

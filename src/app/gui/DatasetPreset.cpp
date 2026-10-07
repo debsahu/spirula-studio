@@ -74,6 +74,16 @@ namespace {
     X("geometry_split",             sfm.geometry.split)                       \
     X("geometry_face_res",          sfm.geometry.face_res)                    \
     X("geometry_overwrite",         sfm.geometry.overwrite)                   \
+    /* ---- dense points; the source model is the capture's, not the preset's */ \
+    X("densify_enable",             sfm.densify.enable)                       \
+    X("densify_preset",             sfm.densify.preset)                       \
+    X("densify_refs",               sfm.densify.refs)                         \
+    X("densify_neighbours",         sfm.densify.neighbours)                   \
+    X("densify_rule",               sfm.densify.rule)                         \
+    X("densify_matches_per_ref",    sfm.densify.matches_per_ref)              \
+    X("densify_max_points",         sfm.densify.max_points)                   \
+    X("densify_min_track",          sfm.densify.min_track)                    \
+    X("densify_use_masks",          sfm.densify.use_masks)                    \
     /* ---- the built-in reconstruction ---- */                               \
     X("sfm_quality",                sfm.quality)                              \
     X("sfm_data_type",              sfm.data_type)                            \
@@ -236,6 +246,15 @@ void sanitize_dataset_settings(DatasetSettings& s) {
     clamp_to(g.ray_depth, 0, 2);
     clamp_to(g.split, 0, 2);
     clamp_to(g.face_res, 0, 1);
+
+    DensifyJob& d = s.sfm.densify;
+    clamp_to(d.preset, 0, kNumDensifyPresets - 1);
+    clamp_to(d.refs, 0, 100000);
+    clamp_to(d.neighbours, 0, 64);
+    clamp_to(d.rule, 0, 2);
+    clamp_to(d.matches_per_ref, 0, 1000000);
+    clamp_to(d.max_points, 0, 200000000);
+    clamp_to(d.min_track, 0, 64);
 
     SfmJob& j = s.sfm;
     clamp_index(j.quality, kSfmQuality);

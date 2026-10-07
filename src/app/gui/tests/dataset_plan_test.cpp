@@ -73,7 +73,7 @@ void build(const fs::path& ws, const SfmJob& job) {
     rec.finish(Step::Masks);
     rec.begin(Step::Model, model_fields(job));
     rec.finish(Step::Model);
-    const bool all[kNumSteps] = {true, true, true, true};
+    const bool all[kNumSteps] = {true, true, true, true, true};
     write_record_settings(ws.string(), "{}",
                           encode_record_inputs({job.prep.inputs, job.prep.mask_clicks}), all);
 }
@@ -279,7 +279,7 @@ int main() {
     // ---- what the record restores ------------------------------------------
     {
         const bool all[kNumSteps] = {true, true, true, true};
-        const bool geometry_only[kNumSteps] = {false, false, false, true};
+        const bool geometry_only[kNumSteps] = {false, false, false, false, true};
         const std::string rows = encode_record_inputs({made.prep.inputs, {}});
         write_record_settings(ws.string(), R"({"sfm_quality": 2, "geometry_max_size": 1064})",
                               rows, all);
@@ -510,6 +510,73 @@ int main() {
         const DatasetPlan p = plan(j, redo);
         expect(p[Step::Geometry].act == Act::Redo && p[Step::Geometry].why == Why::Model,
                "a rebuilt reconstruction redoes them");
+    }
+
+    // ---- dense points ----------------------------------------------------------
+    build(ws, made);
+    {
+        SfmJob j = made;
+        expect(plan(j)[Step::Densify].act == Act::None, "dense points off is not a step");
+        j.densify.enable = true;
+        DatasetPlan p = plan(j);
+        expect(p[Step::Densify].act == Act::Run && p[Step::Model].act == Act::Reuse,
+               "dense points are added without touching the model");
+        expect(p[Step::Densify].why == Why::None && !p.ask(),
+               "... and nothing about adding them needs asking");
+
+        touch(ws / "sparse" / "0-roma" / "points3D.bin");
+        StepRecorder rec(ws.string(), read_dataset_record(ws.string()));
+        rec.begin(Step::Densify, densify_fields(j.densify));
+        rec.finish(Step::Densify);
+        expect(plan(j)[Step::Densify].act == Act::Reuse,
+               "a dense model made with these settings is reused");
+
+        SfmJob k = j;
+        k.densify.preset = 4;
+        const DatasetPlan changed = plan(k);
+        expect(changed[Step::Densify].act == Act::Redo &&
+                   changed[Step::Densify].why == Why::Settings,
+               "another preset redoes it");
+        expect(changed[Step::Model].act == Act::Reuse, "... and only it");
+        k = j;
+        k.densify.max_points = 500000;
+        expect(plan(k)[Step::Densify].act == Act::Redo, "a points cap is part of the settings");
+        k = j;
+        k.densify.device_uuid = "other";
+        expect(plan(k)[Step::Densify].act == Act::Reuse, "the device is not");
+
+        PlanRequest again;
+        again.redo_densify = true;
+        const DatasetPlan asked = plan(j, again);
+        expect(asked[Step::Densify].act == Act::Redo && asked[Step::Densify].why == Why::Requested &&
+                   asked[Step::Model].act == Act::Reuse,
+               "the redo button redoes dense points alone");
+        expect(densify_for_plan(j.densify, asked[Step::Densify]).overwrite &&
+                   !densify_for_plan(j.densify, plan(j)[Step::Densify]).overwrite,
+               "only a redo tells the tool to overwrite");
+
+        PlanRequest model;
+        model.redo_model = true;
+        const DatasetPlan rebuilt = plan(j, model);
+        expect(rebuilt[Step::Densify].act == Act::Redo && rebuilt[Step::Densify].why == Why::Model,
+               "a rebuilt reconstruction redoes the dense model built on it");
+
+        StepRecorder rec2(ws.string(), read_dataset_record(ws.string()));
+        rec2.begin(Step::Model, model_fields(j));
+        rec2.finish(Step::Model);
+        const DatasetPlan stale = plan(j);
+        expect(stale[Step::Densify].act == Act::Redo && stale[Step::Densify].why == Why::Stale,
+               "a dense model made from an earlier reconstruction is stale");
+
+        SfmJob scans = j;
+        scans.lidar.clouds = {"/scan.e57"};
+        scans.lidar.scanner_only = true;
+        expect(plan(scans)[Step::Densify].act == Act::None,
+               "a scan's poses run no dense points step");
+
+        expect(read_dataset_record(ws.string()).step(Step::Densify).present &&
+                   read_dataset_record(ws.string()).step(Step::Geometry).present == false,
+               "the record names the step apart from geometry");
     }
 
     // ---- no record, and the stamp a workspace from before the record left -----

@@ -147,8 +147,15 @@ std::vector<int> neighboursByCovis(const std::vector<SourceImage>& imgs,
                               q.points.end(), std::back_inserter(both));
         if (both.empty()) continue;
         Vec3 g{0, 0, 0};
-        for (uint64_t p : both) g = g + rec.points3D.at(p).xyz;
-        g = g * (1.0 / (double)both.size());
+        int64_t found = 0;
+        for (uint64_t p : both) {
+            auto it = rec.points3D.find(p);
+            if (it == rec.points3D.end()) continue;
+            g = g + it->second.xyz;
+            found++;
+        }
+        if (!found) continue;
+        g = g * (1.0 / (double)found);
         const double ang = sfm::triangulationAngle(g, r.centre, q.centre) * 57.29577951308232;
         if (ang < min_angle_deg) continue;
         c.push_back({(int64_t)both.size(), i});
