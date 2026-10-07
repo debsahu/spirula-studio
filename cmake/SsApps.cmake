@@ -152,6 +152,13 @@ if(SS_BUILD_SAM)
          ${SS_SRC}/app/DepthPng.cpp)
     list(APPEND SS_TOOL_DEFS SS_TOOL_GEOMETRY=1)
     list(APPEND SS_TOOL_LIBS ss_metric3d ss_moge)
+
+    # ---- dense points for a solved model (src/roma/, docs/notes/densify.md) ----
+    if(SS_BUILD_SFM)
+        list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/densify_main.cpp)
+        list(APPEND SS_TOOL_DEFS SS_TOOL_DENSIFY=1)
+        list(APPEND SS_TOOL_LIBS ss_roma_host ss_roma)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -397,6 +404,13 @@ add_executable(lidar_align_test
     ${SS_SRC}/app/DepthPng.cpp)
 ss_configure_app(lidar_align_test)
 
+# Gate H-3: a densified sibling model never wins the parser's automatic pick.
+if(SS_BUILD_SFM AND SS_BUILD_SAM)
+    add_executable(densify_autopick_test ${SS_SRC}/app/tests/densify_autopick_test.cpp)
+    ss_configure_app(densify_autopick_test)
+    target_link_libraries(densify_autopick_test PRIVATE ss_roma_host)
+endif()
+
 # The stencil shapes, spelling and fill, with no GUI: FrameMask.cpp is compiled
 # into the CLI too, so this must link without imgui.
 add_executable(frame_mask_test
@@ -534,4 +548,15 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/tests/recompute_files_test.cpp
         ${SS_SRC}/app/gui/RecomputeFiles.cpp)
     ss_configure_app(recompute_files_test)
+endif()
+
+# `--accept-license` through the real binary (Main.cpp), not a stand-in for it.
+if(SS_BUILD_SAM)
+    add_executable(accept_license_cli_test ${SS_SRC}/app/tests/accept_license_cli_test.cpp)
+    add_dependencies(accept_license_cli_test spirula)
+    target_compile_definitions(accept_license_cli_test PRIVATE
+        SS_SPIRULA_EXE="$<TARGET_FILE:spirula>")
+    set_property(TARGET accept_license_cli_test PROPERTY CXX_STANDARD 17)
+    target_compile_options(accept_license_cli_test PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
 endif()

@@ -14737,7 +14737,7 @@ SS_MSG(license_dinov3_summary,
        "것이며 Spirula Studio의 일부가 아니고, 아래에 전문을 표시한 Meta의 DINOv3 "
        "라이선스 계약이 적용됩니다. 읽어 보세요. 여기서 동의하면 이 계약에 구속되는 "
        "데 동의하는 것입니다. 파일은 RoMa v2 저자의 릴리스에서 내려받으며 앱에 "
-       "포함되어 배포되지 않습니다."),
+       "포함되지 않습니다."),
     DE("Die RoMa-v2-Datei enthält die DINOv3-Modellgewichte von Meta. Sie gehören "
        "Meta, sind nicht Teil von Spirula Studio und unterliegen Metas DINOv3 "
        "License Agreement, das unten vollständig angezeigt wird. Bitte lesen Sie "
@@ -14780,7 +14780,7 @@ SS_MSG(license_dinov3_summary,
        "aittir, Spirula Studio'nun parçası değildir ve tam metni aşağıda gösterilen "
        "Meta'nın DINOv3 License Agreement'ına tabidir. Lütfen okuyun: burada kabul "
        "etmeniz, onunla bağlı olmayı kabul ettiğiniz anlamına gelir. Dosya, RoMa v2 "
-       "yazarlarının sürümünden indirilir; uygulamayla birlikte asla dağıtılmaz."));
+       "yazarlarının sürümünden indirilir; uygulamayla birlikte asla verilmez."));
 
 SS_MSG(license_romav2_title,
     EN("RoMa v2 licence (MIT)"),
@@ -14863,6 +14863,22 @@ SS_MSG(license_not_saved,
        "принятой."),
     TR("Kabulünüz {0} dosyasına kaydedilemedi, bu yüzden lisans kabul edilmiş "
        "sayılmaz."));
+
+// {0} is the licence family, e.g. "dinov3".
+SS_MSG(license_not_accepted_download,
+    EN("The {0} licence has not been accepted, so nothing was downloaded."),
+    JA("{0} のライセンスに同意していないため、何もダウンロードしていません。"),
+    ZH_HANS("尚未接受 {0} 许可协议，因此没有下载任何内容。"),
+    ZH_HANT("尚未接受 {0} 授權條款，因此沒有下載任何內容。"),
+    KO("{0} 라이선스에 동의하지 않았으므로 아무것도 내려받지 않았습니다."),
+    DE("Die Lizenz {0} wurde nicht angenommen, deshalb wurde nichts heruntergeladen."),
+    FR("La licence {0} n'a pas été acceptée ; rien n'a donc été téléchargé."),
+    ES("No se ha aceptado la licencia {0}, así que no se descargó nada."),
+    PT("A licença {0} não foi aceita, então nada foi baixado."),
+    IT("La licenza {0} non è stata accettata, quindi non è stato scaricato nulla."),
+    NL("De licentie {0} is niet aanvaard, dus er is niets gedownload."),
+    RU("Лицензия {0} не принята, поэтому ничего не было загружено."),
+    TR("{0} lisansı kabul edilmedi, bu yüzden hiçbir şey indirilmedi."));
 
 SS_MSG(license_accept,
     EN("Accept"), JA("同意する"), ZH_HANS("接受"), ZH_HANT("接受"), KO("동의"),

@@ -214,9 +214,18 @@ FileDownload::~FileDownload() {
 }
 
 void FileDownload::start(const std::string& url, const std::string& dest,
-                         uint64_t expected_bytes, const std::string& mirror) {
+                         uint64_t expected_bytes, const std::string& mirror,
+                         const std::string& license_family) {
     if (_state.load() == State::Running) return;
     if (_worker.joinable()) _worker.join();
+    if (const auto missing = spirula::license::missing(license_family); !missing.empty()) {
+        std::lock_guard<std::mutex> lk(_mu);
+        _status = spirula::i18n::format(spirula::i18n::msg::dataset::license_not_accepted_download,
+                                        {missing.front()});
+        _path.clear();
+        _state = State::Failed;
+        return;
+    }
     _cancel = false;
     _progress = -1.0f;
     {
@@ -235,13 +244,14 @@ void FileDownload::start(const std::string& url, const std::string& dest,
 bool FileDownload::start(const ModelEntry& e, const TextDetector* d) {
     if (!model_is_cached(e)) {
         start(e.url ? std::string(e.url) : std::string(kBaseUrl) + e.file, model_path(e),
-              e.bytes, e.mirror ? std::string(e.mirror) : spirula::model_mirror_url(e.file));
+              e.bytes, spirula::mirror_for(e.file, e.mirror, false), e.family);
         return true;
     }
     if (d)
         for (const ExtraFile* x : {d->weights, d->vocab})
             if (!file_is_cached(cache_file(x->file), x->bytes)) {
-                start(x->url, cache_file(x->file), x->bytes, x->mirror);
+                start(x->url, cache_file(x->file), x->bytes,
+                      spirula::mirror_for(x->file, x->mirror, false), "gdino");
                 return true;
             }
     return false;
@@ -378,7 +388,7 @@ void DownloadQueue::pump() {
     if (_rest.empty()) return;
     const PendingDownload d = _rest.front();
     _rest.erase(_rest.begin());
-    _dl.start(d.url, d.dest, d.bytes, d.mirror);
+    _dl.start(d.url, d.dest, d.bytes, d.mirror, d.license_family);
 }
 
 void DownloadQueue::cancel() {

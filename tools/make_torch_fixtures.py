@@ -50,6 +50,98 @@ class Evil:
 torch.save(collections.OrderedDict(t=torch.zeros(2), e=Evil()), out / "evil_reduce.pt")
 
 
+# ---- hostile files: written by hand, no torch, one defect each ------------
+# nn/tests/torch_pickle_hostile_test.cpp refuses every one of these by name.
+import struct
+import zipfile
+
+hostile = out / "hostile"
+hostile.mkdir(exist_ok=True)
+
+
+def _s(x):
+    b = x.encode()
+    return b"\x8c" + bytes([len(b)]) + b
+
+
+def _glob(m, n):
+    return b"c" + m.encode() + b"\n" + n.encode() + b"\n"
+
+
+def _i(n):
+    return b"J" + struct.pack("<i", n) if -(2**31) <= n < 2**31 else b"\x8a\x08" + struct.pack("<q", n)
+
+
+def _tup(*xs):
+    return b"(" + b"".join(xs) + b"t"
+
+
+def _tensor(key, numel, off, shape, stride, cls="torch.FloatStorage"):
+    pid = b"(" + _s("storage") + _glob(*cls.rsplit(".", 1)) + _s(key) + _s("cpu") + _i(numel) + b"t"
+    return (_glob("torch._utils", "_rebuild_tensor_v2") + b"(" + pid + b"Q" + _i(off)
+            + _tup(*[_i(x) for x in shape]) + _tup(*[_i(x) for x in stride]) + b"\x89"
+            + _glob("collections", "OrderedDict") + b")R" + b"tR")
+
+
+def _pkl(items, tail=b""):
+    p = b"\x80\x02" + _glob("collections", "OrderedDict") + b")R("
+    for k, v in items:
+        p += _s(k) + v
+    return p + b"u" + tail + b"."
+
+
+def _zip(name, pk, storages, pkl_method=zipfile.ZIP_STORED, storage_method=zipfile.ZIP_STORED):
+    with zipfile.ZipFile(hostile / name, "w") as z:
+        z.writestr("a/data.pkl", pk, compress_type=pkl_method)
+        for k, b in storages.items():
+            z.writestr("a/data/" + k, b, compress_type=storage_method)
+
+
+F4 = struct.pack("<4f", 1, 2, 3, 4)
+_zip("stride_short.pt", _pkl([("w", _tensor("0", 4, 0, [4], []))]), {"0": F4})
+_zip("off_overflow.pt", _pkl([("w", _tensor("0", 4, 2**63 - 1, [1], [1]))]), {"0": F4})
+_zip("numel_wrap.pt", _pkl([("w", _tensor("0", 4, 0, [2**32, 2**32], [2**32, 1]))]), {"0": F4})
+_zip("off_wrap_read.pt", _pkl([("w", _tensor("0", 4, 2**62 - 1, [4], [1]))]), {"0": F4})
+_zip("wrap_unsigned.pt",
+     _pkl([("w", _tensor("0", 2**62, 2**62 - 1, [1], [1], "torch.DoubleStorage"))]),
+     {"0": struct.pack("<2d", 1.0, 2.0)})
+_zip("storage_lies.pt", _pkl([("w", _tensor("0", 1000, 0, [1000], [1]))]), {"0": F4})
+# Honest storage claim, tensor reaches one element past it.
+_zip("storage_bounds.pt", _pkl([("w", _tensor("0", 4, 1, [4], [1]))]), {"0": F4})
+_zip("dup_name.pt", _pkl([("w", _tensor("0", 4, 0, [4], [1])), ("w", _tensor("0", 4, 0, [4], [1]))]),
+     {"0": F4})
+# BUILD on a dict with a state that is not a dict.
+_zip("build_kind.pt", _pkl([("w", _tensor("0", 4, 0, [4], [1]))], tail=b"N" + b"b"), {"0": F4})
+_zip("unknown_opcode.pt", b"\x80\x02\xff.", {})
+_zip("deflated_storage.pt", _pkl([("w", _tensor("0", 4, 0, [4], [1]))]), {"0": F4},
+     storage_method=zipfile.ZIP_DEFLATED)
+# two_tensors.pt with every storage cut to one byte: what a file swapped in after
+# open() looks like to read_raw, whose bounds check the constructor cannot cover.
+with zipfile.ZipFile(out / "two_tensors.pt") as src, zipfile.ZipFile(hostile / "shrunk_storage.pt", "w") as dst:
+    for info in src.infolist():
+        data = src.read(info.filename)
+        dst.writestr(info.filename, data[:1] if "/data/" in info.filename else data)
+
+
+# 2M nested TUPLE1: freed recursively it overflows the stack. Deflated: 2 KB.
+_zip("deep.pt", b"\x80\x02N" + b"\x85" * 2_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
+# 50M `N`: 48 KB on disk, 5.6 GB of objects without a bound. Over the pickle cap.
+_zip("amp.pt", b"\x80\x02" + b"N" * 50_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
+# 3M `N`: under the pickle cap, over the object cap.
+_zip("many_objects.pt", b"\x80\x02" + b"N" * 3_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
+
+# Memo / stack amplification, none of it counted by the mk() object cap. Each is
+# ~30 MB of pickle (under the 32 MiB cap), a few KB deflated.
+# 6M MEMOIZE: each one a new distinct memo key, one std::map node apiece, 1 byte each
+# (LONG_BINPUT with distinct keys is the same defect at 5 bytes, but does not deflate).
+_zip("memo_keys.pt", b"\x80\x02N" + b"\x94" * 6_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
+# 15M BINGET of one memo entry: a stack slot each, no new object.
+_zip("binget_stack.pt", b"\x80\x02Nq\x00" + b"h\x00" * 15_000_000 + b".", {}, zipfile.ZIP_DEFLATED)
+# 6M LONG_BINGET of one memo entry.
+_zip("long_binget_stack.pt", b"\x80\x02Nq\x00" + b"j\x00\x00\x00\x00" * 6_000_000 + b".",
+     {}, zipfile.ZIP_DEFLATED)
+
+
 # --table <romav2.0.1.pt>: one line per tensor, in file order, "name dtype shape
 # sum abs_sum" (shape x-joined, "-" for 0-d; sums in float64).
 import sys

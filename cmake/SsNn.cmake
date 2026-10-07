@@ -314,3 +314,12 @@ foreach(test_src ${SS_NN_TESTS})
     target_compile_options(${test_name} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
 endforeach()
+
+# The two tests below reach outside the inference layer: the app's path logic,
+# and the translation catalogs.
+if(TARGET license_paths_test)
+    target_sources(license_paths_test PRIVATE ${SS_SRC}/app/AppPaths.cpp)
+endif()
+if(TARGET license_text_test)
+    target_link_libraries(license_text_test PRIVATE ss_i18n)
+endif()

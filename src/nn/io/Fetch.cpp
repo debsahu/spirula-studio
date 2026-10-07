@@ -76,8 +76,7 @@ std::string cached_path(const FetchFile& f) {
 }
 
 std::string mirror_url(const FetchFile& f) {
-    if (f.no_mirror) return std::string();
-    return f.mirror ? std::string(f.mirror) : spirula::model_mirror_url(f.file);
+    return spirula::mirror_for(f.file, f.mirror, f.no_mirror);
 }
 
 std::string sha256_file(const std::string& path) {
@@ -100,18 +99,24 @@ std::vector<std::string> split_commas(const std::string& s) {
 
 void require_license(const char* family) {
     if (!family || !*family) return;
-    for (const std::string& fam : split_commas(family)) {
-        if (spirula::license::accepted(fam)) continue;
-        const spirula::license::Terms* t = spirula::license::terms_for(fam);
-        nn::fail("the licence '%s' has not been accepted, so this model cannot be "
-                 "downloaded or loaded.\n  Read it and accept it with\n    "
-                 "--accept-license %s\n  (add =yes to accept without a prompt, in a "
-                 "script), or accept it in the application's download dialog.\n  Terms: %s",
-                 t ? t->title : fam.c_str(), fam.c_str(), t ? t->url : "(unknown family)");
-    }
+    const std::vector<std::string> missing = spirula::license::missing(family);
+    if (missing.empty()) return;
+    const std::string& fam = missing.front();
+    const spirula::license::Terms* t = spirula::license::terms_for(fam);
+    const bool no_home = spirula::license::settings_path().empty();
+    nn::fail("the licence '%s' has not been accepted, so this model cannot be "
+             "downloaded or loaded.\n  Read it and accept it with\n    "
+             "--accept-license %s\n  (add =yes to accept without a prompt, in a "
+             "script), or accept it in the application's download dialog.\n  Terms: %s%s",
+             t ? t->title : fam.c_str(), fam.c_str(), t ? t->url : "(unknown family)",
+             no_home ? "\n  (Neither XDG_CONFIG_HOME nor HOME is set, so no acceptance can "
+                       "be read or recorded.)" : "");
 }
 
 void accept_licenses(const std::string& spec, const ConsentIO& io) {
+    NN_CHECK(!spirula::license::settings_path().empty(),
+             "--accept-license: neither XDG_CONFIG_HOME nor HOME is set, so there is nowhere "
+             "to record an acceptance.");
     for (const std::string& token : split_commas(spec)) {
         const size_t eq = token.find('=');
         const std::string fam = token.substr(0, eq);

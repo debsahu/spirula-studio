@@ -1372,6 +1372,31 @@ void test_geometry(vk::Arena& arena) {
             want[i] = x[i] > 20.0f ? x[i] : (float)std::log1p(std::exp((double)x[i]));
         check("softplus", readback(to), want, 1e-5f);
 
+        // Per element, not against the tensor's RMS: log(1+t) alone returns 0 for every
+        // x below -16.6 and that is invisible to a tolerance scaled by the rest.
+        {
+            const std::vector<float> xs = {-60, -40, -30, -25, -20.5f, -18, -16.7f, -16, -12, -8,
+                                           -4, -2.2f, -2.0f, -1.9f, -1, -0.5f, 0, 0.5f, 1, 4, 10, 15, 19.9f};
+            Tensor ty = arena_tensor(arena, DType::F32, (int64_t)xs.size());
+            unary(ty, upload_f32(arena, xs, (int64_t)xs.size()), Act::Softplus);
+            const std::vector<float> got = readback(ty);
+            double worst = 0;
+            size_t at = 0;
+            for (size_t i = 0; i < xs.size(); ++i) {
+                const double w = std::log1p(std::exp((double)xs[i]));
+                const double e = std::fabs(got[i] - w) / w;
+                if (e > worst) { worst = e; at = i; }
+            }
+            ++g_checks;
+            if (worst > 1e-5) {
+                ++g_failures;
+                std::printf("  FAIL softplus tail               rel err %.3g at x=%g (got %.6g)\n",
+                            worst, xs[at], got[at]);
+            } else {
+                std::printf("  ok   softplus tail               rel err %.3g\n", worst);
+            }
+        }
+
         // The same activation as a GEMM epilogue, which is where RoMa's Cholesky head
         // applies it.
         const int M = 33, N = 17, K = 24;

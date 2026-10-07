@@ -133,10 +133,12 @@ public:
 
     ~FileDownload();
 
-    // `expected_bytes` is only used for the progress readout; curl reports the
-    // real length. 0 means unknown. `mirror`, if set, is tried when `url` fails.
+    // `expected_bytes` only feeds the progress readout; 0 is unknown. An empty
+    // `mirror` means none. A `license_family` (comma list) not yet accepted
+    // fails the download at once, before any network.
     void start(const std::string& url, const std::string& dest,
-               uint64_t expected_bytes, const std::string& mirror = "");
+               uint64_t expected_bytes, const std::string& mirror = "",
+               const std::string& license_family = "");
     // The first file of the pair that is not on disk yet, false if none is;
     // the caller starts the next one when this is Done.
     bool start(const ModelEntry& e, const TextDetector* d = nullptr);
@@ -171,7 +173,8 @@ using ModelDownload = FileDownload;
 struct PendingDownload {
     std::string url, dest;
     uint64_t bytes = 0;
-    std::string mirror;
+    std::string mirror;          // empty: none
+    std::string license_family;  // empty: none needed
 };
 
 // Several of them, fetched one at a time: a checkpoint that comes in two
