@@ -6,6 +6,7 @@
 #include "app/Tools.h"
 
 #include "app/AppPaths.h"
+#include "app/gui/Subprocess.h"
 #include "data/CameraMath.h"
 
 #include "core/VulkanDeviceSelection.h"
@@ -21,12 +22,14 @@
 #include "roma/DepthSource.h"
 #include "roma/Publish.h"
 #include "roma/DumpMatcher.h"
+#include "roma/FlagParse.h"
 #include "roma/RomaIdentity.h"
 #include "roma/WarpCache.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/RomaMatcher.h"
 #include "sfm/core/Progress.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -109,12 +112,12 @@ void usage() {
     help_row("--cache auto|off|<dir>", D::opt_cache);
     help_row("--cache-budget auto|<size>", D::opt_cache_budget);
     help_row("--clear-cache", D::opt_clear_cache);
-    help_row("--accept-license dinov3,romav2", D::opt_accept_license);
+    help_row("--accept-license dinov3=yes,romav2=yes", D::opt_accept_license);
     // English, like every --check: a table of errors for whoever changed the stage.
     std::fprintf(stderr, "    --check [--check-dir <dir>] [--matches <dir>] [--check-noise <px>]\n"
                          "            [--check-outliers <share>] [--check-size <px>] [--check-no-masks]\n"
                          "            [--check-source roma|moge|hybrid]\n"
-                         "                                  run the synthetic staircase S-1 and exit\n");
+                         "                                  run the synthetic staircase and exit\n");
     std::fprintf(stderr, "\n%s --device <index|name|uuid>  --lang <code>\n", D::label_common.get());
 }
 
@@ -186,6 +189,12 @@ int spirula_densify_main(int argc, char** argv) {
             if (v.empty() || *end || !(d >= lo) || !std::isfinite(d)) bad(v);
             return d;
         };
+        auto whole = [&](long long lo, long long hi = 2147483647LL) {
+            const std::string v = next();
+            long long n = 0;
+            if (!roma::parseWhole(v, lo, hi, &n)) bad(v);
+            return n;
+        };
         // auto -> 0, off -> -1, else a positive number.
         auto autoOff = [&]() {
             const std::string v = next();
@@ -201,7 +210,7 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--check-dir") check_dir = next();
         else if (a == "--check-noise") check_noise = real(0);
         else if (a == "--check-outliers") check_outliers = real(0);
-        else if (a == "--check-size") check_size = (int)real(16);
+        else if (a == "--check-size") check_size = (int)whole(16);
         else if (a == "--check-no-masks") check_opt.masks = false;
         else if (a == "--check-source") check_opt.source = next();
         else if (a == "--device") { device = next(); device_set = true; }
@@ -220,10 +229,10 @@ int spirula_densify_main(int argc, char** argv) {
             if (v < 0) bad("off");
             o.depth_tol = v;
         }
-        else if (a == "--depth-min-agree") o.depth_min_agree = (int)real(1);
+        else if (a == "--depth-min-agree") o.depth_min_agree = (int)whole(1);
         else if (a == "--no-depth-vote") o.depth_agreement = false;
         else if (a == "--min-depth-share") o.min_depth_share = real(0);
-        else if (a == "--depth-fit-holdout") o.depth_fit_holdout = (int)real(2);
+        else if (a == "--depth-fit-holdout") o.depth_fit_holdout = (int)whole(2);
         else if (a == "--normal-check") {
             const double v = autoOff();
             if (v == 0) bad("auto");
@@ -244,7 +253,7 @@ int spirula_densify_main(int argc, char** argv) {
         else if (a == "--export-pairs") job.export_dir = next();
         else if (a == "--plugin-exact") o.plugin_exact = true;
         else if (a == "--refs") { o.refs = real(1e-9); }
-        else if (a == "--neighbours") o.neighbours = (int)real(1);
+        else if (a == "--neighbours") o.neighbours = (int)whole(1);
         else if (a == "--neighbour-rule") {
             const std::string v = next();
             if (v == "covis") o.neighbour_rule = roma::NeighbourRule::Covis;
@@ -252,7 +261,7 @@ int spirula_densify_main(int argc, char** argv) {
             else bad(v);
             rule_set = true;
         }
-        else if (a == "--holdout-every") o.holdout_every = (int)real(2);
+        else if (a == "--holdout-every") o.holdout_every = (int)whole(2);
         else if (a == "--split") {
             const std::string v = next();
             o.split = v == "auto" ? -1 : v == "yes" ? 1 : v == "no" ? 0 : (bad(v), 0);
@@ -262,7 +271,7 @@ int spirula_densify_main(int argc, char** argv) {
             if (v == "all") o.all_face_pairs = true;
             else if (v != "auto") bad(v);
         }
-        else if (a == "--matches-per-ref") o.matches_per_ref = (int)real(1);
+        else if (a == "--matches-per-ref") o.matches_per_ref = (int)whole(1);
         else if (a == "--min-certainty") o.min_certainty = (float)real(0);
         else if (a == "--reproj") o.reproj_px = real(1e-9);
         else if (a == "--sampson") o.sampson_px2 = real(0);
@@ -287,7 +296,7 @@ int spirula_densify_main(int argc, char** argv) {
             if (v != "auto" && v != "off") bad(v);
             o.far_isolated = v == "auto";
         }
-        else if (a == "--seed") o.seed = (uint64_t)real(0);
+        else if (a == "--seed") o.seed = (uint64_t)whole(0, 1LL << 62);
         else if (a == "--cache") cache_arg = next();
         else if (a == "--cache-budget") cache_budget_arg = next();
         else if (a == "--clear-cache") clear_cache = true;
@@ -300,6 +309,10 @@ int spirula_densify_main(int argc, char** argv) {
         } else if (dataset.empty()) dataset = a;
         else { usage(); return 2; }
     }
+
+    uint64_t cache_budget = roma::kDefaultCacheBudget;
+    if (cache_budget_arg != "auto" && !roma::parseByteSize(cache_budget_arg, &cache_budget))
+        bad_flag("--cache-budget", cache_budget_arg);
 
     try {
         if (check) {
@@ -392,20 +405,21 @@ int spirula_densify_main(int argc, char** argv) {
         }
 
         job.matcher = matcher.get();
-        uint64_t cache_budget = roma::kDefaultCacheBudget;
-        if (cache_budget_arg != "auto" && !roma::parseByteSize(cache_budget_arg, &cache_budget)) bad_flag("--cache-budget", cache_budget_arg);
         if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
             throw std::runtime_error(job.out_dir + ": " + why);
-        if (job.export_dir.empty() && fs::exists(job.out_dir) && !job.overwrite) {
-            std::fprintf(stderr, "%s\n", format(D::out_exists, {job.out_dir}).c_str());
-            return 2;
-        }
-
         // Held from here to the end: two runs would match for half an hour and then fight over the folder.
+        // Claimed after recovering a crashed publish, so --overwrite is judged against what is really there.
         std::unique_ptr<roma::WriterLock> out_lock;
         if (job.export_dir.empty()) {
-            out_lock = std::make_unique<roma::WriterLock>(job.out_dir);
-            roma::recoverPublish(job.out_dir);
+            const roma::Claim claim = roma::claimOut(job.out_dir, job.overwrite, out_lock);
+            if (claim == roma::Claim::Exists) {
+                std::fprintf(stderr, "%s\n", format(D::out_exists, {job.out_dir}).c_str());
+                return 2;
+            }
+            if (claim == roma::Claim::NotDensify) {
+                std::fprintf(stderr, "%s\n", format(D::out_not_densify, {job.out_dir}).c_str());
+                return 2;
+            }
         }
 
         const roma::DensifyPlan pl = roma::planDensify(job);
@@ -441,6 +455,10 @@ int spirula_densify_main(int argc, char** argv) {
                                                 num(r.plugin_exact ? r.certainty_floor : r.min_certainty),
                                                 pl.min_track > 0 ? std::to_string(pl.min_track) : std::string("auto")})
                                 .c_str());
+        std::printf("%s\n", format(D::depth_bar, {r.max_depth_error > 0 ? num(100 * r.max_depth_error) + " %" : std::string("off"),
+                                                job.opt.max_depth_error == 0 ? "auto" : "--max-depth-error"}).c_str());
+        if (job.opt.min_track <= 0 && pl.min_track == 0 && !r.plugin_exact)
+            std::printf("%s\n", D::min_track_auto.get());
         std::printf("%s\n", format(D::budget, {(long long)r.matches_per_ref,
                                                pl.voxel > 0 ? num(pl.voxel) : std::string("off"),
                                                pl.max_points > 0 ? std::to_string(pl.max_points)
@@ -480,10 +498,14 @@ int spirula_densify_main(int argc, char** argv) {
                 compute = [&] {
                     std::printf("%s\n", format(D::computing_depths, {root}).c_str());
                     std::fflush(stdout);
-                    std::string cmd = "\"" + app::exe_path() + "\" geometry \"" + dataset + "\" --depth --no-normal";
-                    if (image_dir != "images") cmd += " --image-dir \"" + image_dir + "\"";
-                    if (device_set) cmd += " --device \"" + device + "\"";
-                    if (std::system(cmd.c_str()) != 0) throw std::runtime_error("spirula geometry failed");
+                    std::vector<std::string> argv = {app::exe_path(), "geometry", dataset, "--depth", "--no-normal"};
+                    if (image_dir != "images") argv.insert(argv.end(), {"--image-dir", image_dir});
+                    if (device_set) argv.insert(argv.end(), {"--device", device});
+                    const std::atomic<bool> never{false};
+                    const int rc = gui::run_process(argv, "", [](const std::string& line) {
+                        std::printf("%s\n", line.c_str());
+                    }, never);
+                    if (rc != 0) throw std::runtime_error(format(D::geometry_failed, {(long long)rc}));
                 };
             const roma::DepthInventory inv = inventory = roma::ensureDepths(
                 names, [root](const std::string& n) { return dsparse::find_aux_file(root, n, "depth"); }, compute);
@@ -688,11 +710,8 @@ int spirula_densify_main(int argc, char** argv) {
         if (res.cloud.empty()) {
             std::fprintf(stderr, "%s\n", format(D::empty_result, {job.out_dir}).c_str());
             // An older sibling under the same name would be trained from as if it were this run's.
-            std::error_code ec;
-            if (job.overwrite && fs::exists(job.out_dir, ec)) {
-                fs::remove_all(job.out_dir, ec);
+            if (job.overwrite && roma::removeStaleOutput(job.out_dir))
                 std::fprintf(stderr, "%s\n", format(D::stale_removed, {job.out_dir}).c_str());
-            }
             return 1;
         }
         const roma::ReprojStats rp = roma::writeSibling(job.model_dir, job.out_dir, pl, res.cloud, js.str());

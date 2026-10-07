@@ -1,7 +1,6 @@
 #include "roma/DensifyCheck.h"
 
 #include <cstdio>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 
@@ -105,17 +104,6 @@ int densifyCheck(const CheckOptions& co) {
             std::printf("check: parallax %4.0f-%-4.0f deg: points %7lld, within 1 cm %.3f, past 5 cm %lld, "
                         "track>=3 %.3f\n", edges[b], std::min(edges[b + 1], 999.0), (long long)n,
                         n ? (double)in / n : 0.0, (long long)beyond, n ? (double)tl3 / n : 0.0);
-        }
-    }
-    if (std::getenv("SS_DENSIFY_CHECK_DEBUG")) {
-        int shown = 0;
-        for (const DensePoint& p : r.cloud) {
-            if (scene.distance(p.xyz) <= 0.05 || shown++ >= 8) continue;
-            std::printf("far %.3f m: images %d parallax %.1f err %.3f track", scene.distance(p.xyz),
-                        p.distinct_images, p.parallax_deg, p.error);
-            for (const Observation& o : p.track)
-                std::printf(" %s(%.1f,%.1f)", plan.views[(size_t)o.view].name.c_str(), o.x, o.y);
-            std::printf("\n");
         }
     }
     int fails = 0;

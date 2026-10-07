@@ -1,7 +1,7 @@
 """WS-4 basement evaluation (plan §9.4 subset, geometry only), every metric beside its null.
 usage: ws4_eval_basement.py <sibling model dir> <source model dir> <out.json> [--m3 points3D.txt | --no-m3] [--anchor-mod N]
 Units: sparse_final/0 gauge; mm via 0.9521 m/unit (SHOWS, basement_brush/scale_config.json)."""
-import json, struct, pickle, hashlib, os
+import json, struct, pickle, hashlib, os, sys
 import numpy as np
 from scipy.spatial import cKDTree
 import evalcfg
@@ -46,7 +46,7 @@ I = out['integrity']
 I['cameras_bin_identical'] = sha(sib + '/cameras.bin') == sha(src + '/cameras.bin')
 import integrity as _ig
 _ia, _ra = _ig.parse(open(sib + '/images.bin', 'rb').read()); _ib, _rb = _ig.parse(open(src + '/images.bin', 'rb').read())
-I['images_bin_identical'] = _ra == _rb and all(i == 2**64 - 1 for i in _ia)
+I['images_bin_identical'] = _ra == _rb and len(_ia) > 0 and all(i == 2**64 - 1 for i in _ia)
 Rx, Rc = rd_points(sib + '/points3D.bin'); T = rd_tracks(sib + '/points3D_tracks.bin')
 ids, P, PC, Tr, imgs = pickle.load(open(SP / 'model.pkl', 'rb'))
 name2id = {v['name']: k for k, v in imgs.items()}
@@ -55,10 +55,11 @@ I['held_out_in_tracks'] = int(sum(bool(set(t['id'].tolist()) & held) for t in T)
 I['mask_keep'] = dj['mask_keep']; I['mask_keep_in_range'] = 0.05 <= dj['mask_keep'] <= 0.995
 I['nonfinite'] = int((~np.isfinite(Rx)).any(1).sum())
 M = np.load(SP / 'da360_seed_only.npy')[:, :3].astype(np.float64)
-I['M_min_dist_to_anchor'] = float(cKDTree(M).query(P[:5000])[0].min())
-I['M_contains_anchors'] = I['M_min_dist_to_anchor'] == 0.0
+I['M_min_dist_to_anchor'] = float(cKDTree(M).query(P)[0].min()) if len(M) and len(P) else float('nan')
+I['M_contains_anchors'] = _ig.contains_anchors(M, P)
 I['void'] = not (I['cameras_bin_identical'] and I['images_bin_identical'] and I['held_out_in_tracks'] == 0
-                 and I['mask_keep_in_range'] and I['nonfinite'] == 0 and not I['M_contains_anchors'])
+                 and I['mask_keep_in_range'] and I['nonfinite'] == 0 and not I['M_contains_anchors']
+                 and len(Rx) > 0 and len(T) > 0 and len(M) > 0 and len(P) > 0)
 refs = sorted({int(t['id'][0]) for t in T})
 out['refs_from_tracks'] = len(refs)
 clouds = {'R': Rx, 'M': M}
@@ -160,3 +161,4 @@ for k, c in clouds.items():
     G3e[k + '_outside_box'] = float(((c < box_lo) | (c > box_hi)).any(1).mean())
 json.dump(out, open(outp, 'w'), indent=1, default=float)
 print(json.dumps({k: v for k, v in out.items() if k != 'densify_json'}, indent=1, default=float))
+sys.exit(1 if I['void'] else 0)

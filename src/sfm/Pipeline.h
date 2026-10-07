@@ -228,6 +228,8 @@ struct ModelGauge {
     double scale_sigma = 0;  // relative; 0 when nothing estimated one
 };
 
+void writeGauge(const std::filesystem::path& dir, const ModelGauge& g);
+
 // Levelling, centring and the metric gauge. False when no metric frame fitted.
 bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
               const std::string& imagedir, bool verbose,

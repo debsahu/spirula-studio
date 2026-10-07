@@ -1,4 +1,4 @@
-// `spirula densify --check`: the synthetic staircase S-1 end to end, through
+// `spirula densify --check`: the synthetic staircase end to end, through
 // the same plan, run and writer a dataset gets. English, like every --check.
 #pragma once
 
