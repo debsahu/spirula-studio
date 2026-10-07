@@ -296,8 +296,10 @@ def compare_full(a, dump, ref, bars, floor_of, row, missing):
         # rounding; not gated, for reading a gated miss.
         sure = (cr > 0.5).ravel()
         if sure.any():
-            row(st, "EPE p50 px, ref cert>0.5", float(np.percentile(e[sure], 50)), None)
-            row(st, "EPE p99 px, ref cert>0.5", float(np.percentile(e[sure], 99)), None)
+            row(st, "EPE p50 px, ref cert>0.5", float(np.percentile(e[sure], 50)),
+                bar(st, "EPE p50 px, ref cert>0.5", "p3_p50"))
+            row(st, "EPE p99 px, ref cert>0.5", float(np.percentile(e[sure], 99)),
+                bar(st, "EPE p99 px, ref cert>0.5", "p3_p99"))
         row(st, "certainty max abs", float(np.abs(co - cr).max()),
             bar(st, "certainty max abs", "p3_cert"))
         cross = np.zeros(co.shape, bool)
@@ -305,16 +307,17 @@ def compare_full(a, dump, ref, bars, floor_of, row, missing):
             cross |= (co > t) != (cr > t)
         row(st, "cert crosses 0.2/0.9", float(cross.mean()),
             bar(st, "cert crosses 0.2/0.9", "p3_cross"))
-        # Precision (p00, p10, p11) is in match px^-2, relative to max(|ref|, 1).
-        # Gated where the reference is certain: elsewhere it is arbitrary and
-        # torch misses the bar against itself (MPS vs CPU, rounding off: 0.25).
+        # Precision (p00, p10, p11) is in match px^-2, relative to max(|ref|, 1),
+        # gated at p99 where the reference is certain: elsewhere it is arbitrary,
+        # and a max is one pixel on an occlusion edge (README, P-3).
         dp = np.abs(oc_[..., 1:] - rc[..., 1:]).astype(np.float64)
-        rel = (dp / np.maximum(np.abs(rc[..., 1:]), 1.0)).reshape(-1, 3)
+        rel = (dp / np.maximum(np.abs(rc[..., 1:]), 1.0)).reshape(-1, 3).max(-1)
         row(st, "precision max abs", float(dp.max()), None)
         row(st, "precision max rel", float(rel.max()), None)
         if sure.any():
-            row(st, "prec max rel, cert>0.5", float(rel[sure].max()),
-                bar(st, "prec max rel, cert>0.5", "p3_prec"))
+            row(st, "prec max rel, cert>0.5", float(rel[sure].max()), None)
+            row(st, "prec p99 rel, cert>0.5", float(np.percentile(rel[sure], 99)),
+                bar(st, "prec p99 rel, cert>0.5", "p3_prec"))
         else:
             missing(st + " has no certain pixel")
         row(st, "reference certain > 0.5", float((cr > 0.5).mean()), None)
@@ -337,6 +340,12 @@ def main():
     ap.add_argument("--floor-device", default="auto",
                     help="second torch device whose reference, scored as ours, is the floor "
                          "(auto: MPS, else CUDA; none: the plan's bars unwidened)")
+    ap.add_argument("--floor-from", help="reuse the floor a previous --json of the same inputs, "
+                    "--ref and mode recorded, instead of measuring it again")
+    ap.add_argument("--floor-perturb-draws", type=int, default=3,
+                    help="also reference draws on inputs + N(0, --floor-perturb), one seed "
+                         "each, on --device; the floor is the max over every draw")
+    ap.add_argument("--floor-perturb", type=float, default=1e-6)
     ap.add_argument("--perturb", type=float, default=0.0,
                     help="add N(0, s) to the inputs: the reference's own noise floor")
     ap.add_argument("--perturb-seed", type=int, default=0)
@@ -389,22 +398,61 @@ def main():
 
     # The floor: the same reference on a second torch device, scored as if it
     # were ours. Every P-2/P-3 bar is then max(plan bar, FLOOR_FACTOR x floor).
-    floor_dev = resolve_floor_device(a.floor_device, a.device)
+    floor_dev = None if a.floor_from else resolve_floor_device(a.floor_device, a.device)
     floor_of, floor_info = {}, None
+    if a.floor_from:
+        with open(a.floor_from) as f:
+            prev = json.load(f)
+        if (prev.get("input_sha"), prev.get("ref"), prev.get("full")) != (input_sha, a.ref, a.full):
+            sys.exit(f"{a.floor_from}: floor of inputs {prev.get('input_sha')} ref "
+                     f"{prev.get('ref')} full {prev.get('full')}, not this run's")
+        floor_info = prev["floor"]
+        floor_of = {(r_["stage"], r_["metric"]): r_["value"] for r_ in floor_info["rows"]}
+    draws = []   # (label, reference): each scored against `ref` as if it were ours
     if floor_dev:
-        fref = reference(floor_dev)
-        with tempfile.TemporaryDirectory() as tmp:
-            save_reference(tmp, fref, a.dump, "torch-" + floor_dev)
-            require_manifest(tmp)
-            frows = []
-            compare(a, tmp, ref, bars, {}, collect(frows), lambda name: None)
-        floor_of = {(r_["stage"], r_["metric"]): r_["value"] for r_ in frows}
-        floor_info = dict(device=floor_dev, against=a.device, torch=torch.__version__,
-                          factor=FLOOR_FACTOR, rows=frows)
+        draws.append(("torch-" + floor_dev, reference(floor_dev)))
+    if floor_dev:
+        for seed in range(a.floor_perturb_draws):
+            draws.append((f"torch-{a.device}+N(0,{a.floor_perturb:g}) seed {seed}",
+                          perturbed_reference(a, img_A, img_B, a.floor_perturb, 1000 + seed)))
+    if draws:
+        per_draw = []
+        for label, fref in draws:
+            with tempfile.TemporaryDirectory() as tmp:
+                save_reference(tmp, fref, a.dump, label)
+                require_manifest(tmp)
+                frows = []
+                compare(a, tmp, ref, bars, {}, collect(frows), lambda name: None)
+            per_draw.append(dict(draw=label, rows=frows))
+        # The floor of a row is the worst draw: n >= 3 (plan section 9).
+        for d in per_draw:
+            for r_ in d["rows"]:
+                k = (r_["stage"], r_["metric"])
+                floor_of[k] = max(floor_of.get(k, 0.0), r_["value"])
+        frows = [dict(stage=k[0], metric=k[1], value=v) for k, v in floor_of.items()]
+        floor_info = dict(device=floor_dev or "none", against=a.device, torch=torch.__version__,
+                          factor=FLOOR_FACTOR, n_draws=len(per_draw), draws=per_draw,
+                          rows=frows)
 
     rows = []
     compare(a, a.dump, ref, bars, floor_of, collect(rows), missing_into(rows))
     return report(a, rows, input_sha, manifest, floor_info)
+
+
+def perturbed_reference(a, img_A, img_B, sigma, seed):
+    """The reference on inputs + N(0, sigma) (hr too): one draw of its own noise floor."""
+    import torch
+    g = torch.Generator().manual_seed(seed)
+    pa = img_A + sigma * torch.randn(img_A.shape, generator=g)
+    pb = img_B + sigma * torch.randn(img_B.shape, generator=g)
+    if not a.full:
+        return run_reference(build_model(a.ref, a.device), pa.to(a.device), pb.to(a.device), None)
+    saved = (a.perturb, a.perturb_seed)
+    a.perturb, a.perturb_seed = sigma, seed   # reference_full perturbs the hr pair from these
+    try:
+        return reference_full(a, a.dump, (pa, pb), a.device)
+    finally:
+        a.perturb, a.perturb_seed = saved
 
 
 def collect(rows):
@@ -525,7 +573,8 @@ def report(a, rows, input_sha, manifest, floor_info):
     print(f"ref={a.ref} weights={a.weights} dump={a.dump} inputs={input_sha}"
           + (" (matcher fed our taps)" if a.our_taps else "")
           + (" (full match, P-3)" if a.full else "")
-          + (f" floor: torch {floor_info['device']} vs {floor_info['against']}, bars >= "
+          + (f" floor: worst of {floor_info['n_draws']} draws (device {floor_info['device']}, "
+             f"perturbed {a.floor_perturb:g}) vs {floor_info['against']}, bars >= "
              f"{FLOOR_FACTOR:g}x" if floor_info else " floor: none, plan bars"))
     floor_of = {(r_["stage"], r_["metric"]): r_["value"]
                 for r_ in (floor_info["rows"] if floor_info else [])}

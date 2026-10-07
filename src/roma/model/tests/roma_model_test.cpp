@@ -754,16 +754,18 @@ int main(int argc, char** argv) {
     try {
         vk::Context::get();
         NN_ENSURE_EMBEDDED_MODULES(roma);
-        {
+        // --bench measures and dumps; the kernel tests are the plain run's, so a
+        // mutant they catch still reaches P-3 in a bench dump.
+        if (bench_list.empty()) {
             vk::Arena arena("roma-test");
             arena.reserve(64ull << 20);
             test_rope_permutation(arena);
             test_rope_bf16(arena);
             test_local_corr(arena);
             test_refine_kernels(arena);
+            test_rope_tables();
+            test_resize();
         }
-        test_rope_tables();
-        test_resize();
         std::error_code ec;
         if (ckpt.empty()) ckpt = nn::cached_path(checkpoint_file());
         if (!std::filesystem::exists(ckpt, ec)) {
