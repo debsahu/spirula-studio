@@ -142,7 +142,7 @@ surface, against 0 without it) and removed.
 
 ## Depth source: MoGe-2 maps, and the hybrid (WS-4d, 2026-10-07)
 
-`--source auto|roma|moge|hybrid`. Auto is `hybrid` when the dataset has depth maps and a
+`--source auto|roma|moge|hybrid`. Auto (provisional, see the measurement below) is `hybrid` when the dataset has depth maps and a
 matcher is available, `moge` with depth maps only, else `roma`; the choice is printed. The
 licence gate applies to RoMa only. The GUI has a "Points from" combo (dataset step and the
 training screen's Add Dense Points row) that sends `--source`; Auto sends nothing and says which it will
@@ -239,25 +239,43 @@ a second layer the voxel select cannot merge. So after all references a depth po
 
 ### Measured: basement steps ROI (vitl maps, 2048 x 1024, 146 panoramas, holdout every 8)
 
-| arm | stair points | anchor p50 / p90 mm | anchors within 5 cm | free-space violations | thickness p50 mm |
-|---|---|---|---|---|---|
-| moge | 30,700 | 51.8 / 429.7 | 0.487 | 1.13 % | 9.17 |
-| moge, normal check off | 35,049 | 47.3 / 431.7 | 0.513 | 1.16 % | 9.68 |
-| **hybrid** | **49,777** | **19.9 / 53.5** | **0.885** | 0.38 % | 9.24 |
-| hybrid, normal check off | 50,776 | 20.2 / 52.8 | 0.885 | 0.44 % | 8.99 |
-| roma | 40,744 | 20.9 / 55.8 | 0.879 | 0.31 % | 8.90 |
-| DA360 seed (M) | 355,760 | 15.9 / 28.7 | 0.991 | 1.82 % | |
-| DA360 3-view (M3) | 168,771 | 20.3 / | | 2.50 % | |
-| sparse | 2,174 | (the anchors) | | | |
+**Retracted (review B2, 2026-10-07)**: the first version of this table said the hybrid beat roma
+with 22 % more stair points. That was the cap: the hybrid wrote 1.25 M points (1 M matches and its
+250 k fill budget) while roma and moge were capped at random to 1 M. It is not evidence for the
+hybrid, and neither was its anchor score, half of whose anchors the depth fits had been fitted to.
 
-The vitb maps (1064 x 532) were worse for moge (p50 81.7 mm, within 5 cm 0.377). Side profile
-(`render_profile`): DA360 shows the doubled stair line; hybrid and roma show one; **moge shows
-none, because it has almost no stairs**: the MoGe stairs do not survive the vote at this
-tolerance. So moge alone is not usable on this scene and the doubled-line gate is passed by
-absence there, not by quality. The hybrid is the arm to use: 22 % more stair points than roma
-and anchors as good or better, at 0.07 pp more violations. The normal check is within noise on
-anchors in both arms; it lowers hybrid violations (0.44 -> 0.38 %) and raises plane thickness
-(8.99 -> 9.24 mm): mixed, kept on as specified, open.
+Re-measured with no cap on any arm (`--max-points off`, the same 10,212 samples per view), so the
+fraction of each cloud inside the ROI is comparable, and scored against **independent anchors**:
+the 425 ROI sparse points with `id % 5 == 0`, which `--depth-fit-holdout 5` kept out of every depth
+fit (roma never uses sparse points). The ROI holds a wall and a column besides the steps, so its
+point count is not a stair count.
+
+| arm | points | in ROI | ROI share | indep. anchor p50 / p90 mm | within 2 / 5 cm | free-space violations |
+|---|---|---|---|---|---|---|
+| roma | 1,875,846 | 76,414 | 4.07 % | 17.8 / 54.7 | 0.565 / 0.885 | 0.37 % |
+| moge | 2,335,938 | 70,223 | 3.01 % | 48.6 / 441.1 | 0.268 / 0.508 | 1.23 % |
+| hybrid | 2,350,933 | 102,743 | 4.37 % | 17.2 / 54.7 | 0.579 / 0.887 | 0.59 % |
+| DA360 seed | 3,804,518 | 355,760 | 9.35 % | 15.7 / | / 0.993 | 1.85 % |
+| DA360 3-view | 2,681,011 | 168,771 | 6.30 % | 20.1 / | / 0.944 | 2.53 % |
+
+(anchor p50 is the distance from an anchor to the nearest point of the cloud: coverage of the
+measured surface, not the accuracy of the points.) Against roma the hybrid adds 0.3 pp of ROI
+share and 0.002 of anchors within 5 cm, inside what one arm moves between runs, and costs 0.22 pp
+of free-space violations. The S4 guard dropped 1,138,170 of its 1,697,082 fill points as lying
+within 4 voxels of a matched point. **No hybrid gain is shown on this scene.** moge alone is far
+behind: its stairs mostly do not survive the vote.
+
+**Whether `hybrid` stays the automatic default is open, for the Fable consultant to decide on this
+evidence. Until then the default is provisional.** The equal-budget numbers for the final report
+are WS-6's.
+
+Side profile (`render_profile`): DA360 shows the doubled stair line; hybrid and roma one; moge
+almost no stairs, so its passing the doubled-line gate is absence, not quality. The normal check
+(capped runs): moge anchors 47.3 -> 51.8 mm, hybrid violations 0.44 -> 0.38 %; mixed, kept on.
+
+**Maps of other pictures, measured**: `depths/` shifted 3 frames on the basement (the reviewer's
+case, maps from before the record existed): `--source moge` now exits 1, "only 17 of 127 images
+have a usable depth map (13 %, below 50 %)"; `--source auto` warns and writes matches only.
 
 S-1 through each source (stand-in matches, synthetic maps with a per-image disparity-affine
 error, noise and three images with the risers 5 % too deep): roma 83,808 points / 0.996 within
@@ -293,6 +311,12 @@ error, noise and three images with the risers 5 % too deep): roma 83,808 points 
 - `roma_plugin_parity_test <fixture>`: gate P-4, against the plugin's own host stage on
   the same matches (`reference/python/roma_plugin_parity.py` writes the fixture).
 - `densify_autopick_test`: gate H-3.
+- WS-4d review mutation run, 2026-10-07 (each fails the test named): the convention checked after
+  facing, the seen-through vote off, the rank and inlier-share gates off, the flatness test off,
+  hybrid's residual test off, the fill budget changed, the share gate off, a record's image, map
+  print or image print unchecked, an 8-bit or wrongly shaped map read, maps writable while geometry
+  runs, voters without parallax, fill next to matches kept, the fit hold-out ignored; the
+  `nonzero` clamp dropped is a `logic_error` its test reports.
 - WS-4d mutation run (each fails the test named): normals faced by `n.z` (derived and
   `faceCamera`), normal maps ignored, depth computed with nothing missing, a present map
   rewritten, normal agreement off, hybrid plane test off, alignment off, vote off, sentinel

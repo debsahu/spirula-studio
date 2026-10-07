@@ -433,6 +433,7 @@ int spirula_densify_main(int argc, char** argv) {
                 names, [root](const std::string& n) { return dsparse::find_aux_file(root, n, "depth"); }, compute);
             std::printf("%s\n", format(D::depth_inventory, {root, (long long)inv.reused, (long long)inv.computed,
                                                             (long long)inv.missing}).c_str());
+            if (inv.computed > 0) depth->rereadRecord();
             if (inv.missing > 0 && !asked)
                 std::printf("%s\n", format(D::depth_not_computed, {(long long)inv.missing}).c_str());
             if (depth->recorded() > 0)

@@ -50,6 +50,7 @@ public:
     bool load(const SourceImage& img, RawDepth& out) override;
     std::string describe() const override { return "depth maps in " + dir_; }
     int recorded() const { return (int)records_.size(); }
+    void rereadRecord() { records_ = app::read_depth_manifest(dir_); }   // after geometry added maps
 
 private:
     std::function<std::string(const std::string&)> path_, normal_path_, image_path_;
