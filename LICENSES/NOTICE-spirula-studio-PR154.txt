@@ -30,6 +30,16 @@ What was taken, and from where. "Design" means the idea only; no line was copied
       are model.bin in the run's --progress-dir, read by the dataset screen's
       existing model view. Design only.
 
+  src/roma/WarpCache.{h,cpp}, src/roma/RomaIdentity.h, cmake/RomaModelDigest.cmake
+      The warp cache: a per-pair prediction cache so that changing a filter or
+      a threshold does not re-match every pair, with an identity that covers
+      the checkpoint and the precision mode (the pull request's verified pair
+      predictions, docs/dense.md, and src/dense/DenseProcessing.cpp). The key
+      here is a SHA-256 of the pixels both images carry, not the file size and
+      time stamp of its input_stamp (src/dense/Artifact.h), which a touched
+      file defeats. Storage, eviction and verification are our own. Design
+      only.
+
 Items of the pull request that were not taken: its RoMa model and pipeline, its
 dense output tree and CLI, its training changes. See
 docs/superpowers/plans/2026-10-07-integrate-pr154.md for what was decided and why.

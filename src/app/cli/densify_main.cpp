@@ -21,6 +21,8 @@
 #include "roma/DepthSource.h"
 #include "roma/Publish.h"
 #include "roma/DumpMatcher.h"
+#include "roma/RomaIdentity.h"
+#include "roma/WarpCache.h"
 #include "roma/model/Fetch.h"
 #include "roma/model/RomaMatcher.h"
 #include "sfm/core/Progress.h"
@@ -104,6 +106,9 @@ void usage() {
     help_row("--progress-dir <dir>", D::opt_progress_dir);
     help_row("--overwrite", D::opt_overwrite);
     help_row("--force", D::opt_force);
+    help_row("--cache auto|off|<dir>", D::opt_cache);
+    help_row("--cache-budget auto|<size>", D::opt_cache_budget);
+    help_row("--clear-cache", D::opt_clear_cache);
     help_row("--accept-license dinov3,romav2", D::opt_accept_license);
     // English, like every --check: a table of errors for whoever changed the stage.
     std::fprintf(stderr, "    --check [--check-dir <dir>] [--matches <dir>] [--check-noise <px>]\n"
@@ -137,6 +142,11 @@ std::string jsonEscape(const std::string& s) {
     return o;
 }
 
+[[noreturn]] void bad_flag(const char* flag, const std::string& v) {
+    std::fprintf(stderr, "%s\n", format(D::bad_value, {flag, v}).c_str());
+    std::exit(2);
+}
+
 }  // namespace
 
 int spirula_densify_main(int argc, char** argv) {
@@ -153,6 +163,8 @@ int spirula_densify_main(int argc, char** argv) {
     roma::Preset preset = roma::Preset::Base;
     std::string depth_dir = "depths", normal_dir = "normals";
     bool device_set = false;   // an explicit `--device ""` is Auto and beats SS_VK_DEVICE
+    std::string cache_arg = "auto", cache_budget_arg = "auto";
+    bool clear_cache = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -276,6 +288,9 @@ int spirula_densify_main(int argc, char** argv) {
             o.far_isolated = v == "auto";
         }
         else if (a == "--seed") o.seed = (uint64_t)real(0);
+        else if (a == "--cache") cache_arg = next();
+        else if (a == "--cache-budget") cache_budget_arg = next();
+        else if (a == "--clear-cache") clear_cache = true;
         else if (a == "--progress-dir") progress_dir = next();
         else if (a == "--overwrite") job.overwrite = true;
         else if (a == "--force") job.force = true;
@@ -353,6 +368,7 @@ int spirula_densify_main(int argc, char** argv) {
                 std::printf("%s\n", format(D::roma_unavailable, {why, depth_root.string()}).c_str());
             }
         }
+        const bool is_roma = matches.empty() && matcher;
         const bool want_depth = o.source == roma::DensifySource::Depth || o.source == roma::DensifySource::Hybrid;
         // Auto reads the maps only with no matcher; with one, it says they are left alone.
         const bool auto_no_matcher = o.source == roma::DensifySource::Auto && !matcher;
@@ -376,6 +392,8 @@ int spirula_densify_main(int argc, char** argv) {
         }
 
         job.matcher = matcher.get();
+        uint64_t cache_budget = roma::kDefaultCacheBudget;
+        if (cache_budget_arg != "auto" && !roma::parseByteSize(cache_budget_arg, &cache_budget)) bad_flag("--cache-budget", cache_budget_arg);
         if (const std::string why = roma::outDirProblem(dataset, job.model_dir, job.out_dir); !why.empty())
             throw std::runtime_error(job.out_dir + ": " + why);
         if (job.export_dir.empty() && fs::exists(job.out_dir) && !job.overwrite) {
@@ -496,6 +514,37 @@ int spirula_densify_main(int argc, char** argv) {
         };
         std::fflush(stdout);
 
+        std::unique_ptr<roma::WarpCache> warp_cache;
+        std::unique_ptr<roma::CachedMatcher> cached;
+        if (is_roma && cache_arg != "off") {
+            roma::WarpCacheOptions co;
+            co.dir = cache_arg == "auto" ? (fs::path(dataset) / "densify_cache").string()
+                     : fs::path(cache_arg).is_relative() ? (fs::path(dataset) / cache_arg).string() : cache_arg;
+            co.budget_bytes = cache_budget;
+            try {
+                warp_cache = std::make_unique<roma::WarpCache>(co);
+                // ensure_checkpoint has just hashed the file against this digest.
+                const roma::RomaSettings rs = roma::romaSettings(spec, roma::checkpoint_file().sha256);
+                cached = std::make_unique<roma::CachedMatcher>(*matcher, *warp_cache, roma::romaIdentity(rs));
+                job.matcher = cached.get();
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "%s\n", format(D::cache_unusable, {co.dir, e.what()}).c_str());
+                warp_cache.reset();
+            }
+        }
+        if (warp_cache) {
+            if (clear_cache) {
+                const roma::ClearResult cr = warp_cache->clear();
+                std::printf("%s\n", format(D::cache_cleared, {(long long)cr.entries, roma::formatByteSize(cr.bytes)}).c_str());
+            }
+            const roma::WarpCacheInfo ci = warp_cache->info();
+            std::printf("%s\n", format(D::cache_on, {warp_cache->dir(), roma::formatByteSize(warp_cache->budget()),
+                                                      roma::formatByteSize(ci.bytes), (long long)ci.entries}).c_str());
+        } else if (is_roma && cache_arg == "off") {
+            std::printf("%s\n", D::cache_off.get());
+        } else if (!is_roma) {
+            std::printf("%s\n", D::cache_unused.get());
+        }
         int last_pct = -1;
         const roma::DensifyResult res = roma::runDensify(job, pl, [&](int done, int total, int64_t pts) {
             const int pct = (int)(100.0 * done / std::max(1, total));
@@ -538,6 +587,30 @@ int spirula_densify_main(int argc, char** argv) {
             std::printf("%s\n", format(D::far_isolated_few, {(long long)pl.sparse_points}).c_str());
         else
             std::printf("%s\n", D::far_isolated_off.get());
+
+        std::string cache_json = "{\"enabled\": false}";
+        if (cached) {
+            const roma::CachedStats& cs = cached->stats();
+            const roma::WarpCacheInfo ci = warp_cache->info();
+            const int64_t lookups = cs.hits + cs.misses;
+            const double rate = lookups ? 100.0 * (double)cs.hits / (double)lookups : 0.0;
+            const double saved = std::max(0.0, cs.seconds_saved);
+            std::printf("%s\n", format(D::cache_summary, {(long long)cs.hits, (long long)cs.misses, num(rate, 3) + " %",
+                                                         spirula::i18n::format_duration(saved),
+                                                         roma::formatByteSize(ci.written_bytes),
+                                                         (long long)ci.evicted}).c_str());
+            if (cs.corrupt || cs.write_failed)
+                std::printf("%s\n", format(D::cache_trouble, {(long long)cs.corrupt, (long long)cs.write_failed}).c_str());
+            std::ostringstream cj;
+            cj << "{\"enabled\": true, \"dir\": \"" << jsonEscape(warp_cache->dir()) << "\", \"budget_bytes\": "
+               << warp_cache->budget() << ", \"hits\": " << cs.hits << ", \"misses\": " << cs.misses
+               << ", \"hit_rate\": " << jnum(rate / 100.0) << ", \"corrupt\": " << cs.corrupt
+               << ", \"uncacheable\": " << cs.uncacheable << ", \"write_failed\": " << cs.write_failed
+               << ", \"seconds_matched\": " << jnum(cs.seconds_matched) << ", \"seconds_saved\": " << jnum(saved)
+               << ", \"written_bytes\": " << ci.written_bytes << ", \"evicted\": " << ci.evicted
+               << ", \"entries\": " << ci.entries << ", \"bytes\": " << ci.bytes << "}";
+            cache_json = cj.str();
+        }
 
         std::ostringstream js;
         js << "{\n  \"tool\": \"spirula densify\",\n"
@@ -609,7 +682,7 @@ int spirula_densify_main(int argc, char** argv) {
             js << (i ? ", " : "") << '"' << jsonEscape(normals.checked[i].first) << "\": " << jnum(normals.checked[i].second);
         js << "}},\n  \"depth_maps\": {\"reused\": " << inventory.reused << ", \"computed\": " << inventory.computed
            << ", \"missing\": " << inventory.missing;
-        js << "},\n  \"points\": " << res.points << ", \"seconds_total\": " << jnum(res.seconds_total)
+        js << "},\n  \"warp_cache\": " << cache_json << ",\n  \"points\": " << res.points << ", \"seconds_total\": " << jnum(res.seconds_total)
            << ", \"seconds_match\": " << jnum(res.seconds_match) << "\n}\n";
 
         if (res.cloud.empty()) {
