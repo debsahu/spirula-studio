@@ -755,6 +755,12 @@ StepFields densify_fields(const DensifyJob& d) {
     return f;
 }
 
+std::string densify_model_of(const DatasetRecord& rec) {
+    for (const StepField& f : rec.step(Step::Densify).fields)
+        if (f.key == "densify_model") return f.value == "auto" ? std::string() : f.value;
+    return {};
+}
+
 StepFields geometry_fields(const GeometryJob& g) {
     StepFields f;
     add(f, "geometry_model", "", g.model);

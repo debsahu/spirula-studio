@@ -73,7 +73,8 @@ void build(const fs::path& ws, const SfmJob& job) {
     rec.finish(Step::Masks);
     rec.begin(Step::Model, model_fields(job));
     rec.finish(Step::Model);
-    const bool all[kNumSteps] = {true, true, true, true, true};
+    bool all[kNumSteps];
+    for (bool& b : all) b = true;
     write_record_settings(ws.string(), "{}",
                           encode_record_inputs({job.prep.inputs, job.prep.mask_clicks}), all);
 }
@@ -574,6 +575,23 @@ int main() {
         expect(plan(scans)[Step::Densify].act == Act::None,
                "a scan's poses run no dense points step");
 
+        {
+            DatasetRecord r;
+            r.steps[(int)Step::Densify].fields = densify_fields([&] {
+                DensifyJob d = j.densify;
+                d.model = "sparse/1";
+                return d;
+            }());
+            expect(densify_model_of(r) == "sparse/1",
+                   "a finished dense step names the model it was made from");
+            r.steps[(int)Step::Densify].fields = densify_fields(j.densify);
+            expect(densify_model_of(r).empty() && densify_model_of(DatasetRecord{}).empty(),
+                   "the tool's own pick, and no record, are both ''");
+            SfmJob picked = j;
+            picked.densify.model = "sparse/1";
+            expect(!(densify_fields(picked.densify) == densify_fields(j.densify)),
+                   "the picked model is part of what the record compares, so it must be restored");
+        }
         expect(read_dataset_record(ws.string()).step(Step::Densify).present &&
                    read_dataset_record(ws.string()).step(Step::Geometry).present == false,
                "the record names the step apart from geometry");

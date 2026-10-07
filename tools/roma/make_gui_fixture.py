@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cut a few images out of the staircase `spirula densify --check --check-dir` writes.
 
-The GUI gate (tools/roma/densify_gui.txt) wants a dataset small enough to
+The GUI gate (tools/roma/densify_gui_gate.py) wants a dataset small enough to
 densify in a minute: the first N pinhole images and a sparse
 model reduced to them. No masks: the staircase's pinhole masks keep every pixel, which
 densify's polarity guard refuses. Points left with fewer than two observations are

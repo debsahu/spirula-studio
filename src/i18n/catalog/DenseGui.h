@@ -96,7 +96,7 @@ SS_MSG(unavailable,
     RU("В этой сборке нет плотных точек."),
     TR("Yoğun noktalar bu derlemede yok."));
 
-SS_MSG(model,
+SS_MSG(source_model,
     EN("Source model"),
     JA("元のモデル"),
     ZH_HANS("源模型"),
@@ -230,27 +230,28 @@ SS_MSG(ckpt_first,
     TR("Önce RoMa v2 kontrol noktasını alın; düğme yoğun nokta seçeneklerinde."));
 
 SS_MSG(licence_declined,
-    EN("The RoMa v2 and DINOv3 licences were not accepted, so nothing was downloaded and no dense points "
-       "were made."),
-    JA("RoMa v2 と DINOv3 のライセンスに同意しなかったため、何もダウンロードせず、密な点も作成しませんでした。"),
-    ZH_HANS("未接受 RoMa v2 和 DINOv3 的许可协议，因此没有下载任何内容，也没有生成稠密点。"),
-    ZH_HANT("未接受 RoMa v2 和 DINOv3 的授權條款，因此沒有下載任何內容，也沒有產生稠密點。"),
-    KO("RoMa v2와 DINOv3 라이선스에 동의하지 않아 아무것도 내려받지 않았고 조밀한 점도 만들지 않았습니다."),
-    DE("Die Lizenzen von RoMa v2 und DINOv3 wurden nicht akzeptiert; es wurde nichts heruntergeladen und es "
+    EN("A licence the dense points step needs was not accepted, so nothing was downloaded and no dense "
+       "points were made."),
+    JA("密な点に必要なライセンスに同意しなかったため、何もダウンロードせず、密な点も作成しませんでした。"),
+    ZH_HANS("未接受稠密点所需的许可协议，因此没有下载任何内容，也没有生成稠密点。"),
+    ZH_HANT("未接受稠密點所需的授權條款，因此沒有下載任何內容，也沒有產生稠密點。"),
+    KO("조밀한 점에 필요한 라이선스에 동의하지 않아 아무것도 내려받지 않았고 조밀한 점도 만들지 않았습니다."),
+    DE("Eine für dichte Punkte nötige Lizenz wurde nicht akzeptiert; es wurde nichts heruntergeladen und es "
        "entstanden keine dichten Punkte."),
-    FR("Les licences de RoMa v2 et de DINOv3 n'ont pas été acceptées : rien n'a été téléchargé et aucun point "
-       "dense n'a été créé."),
-    ES("No se aceptaron las licencias de RoMa v2 y DINOv3, así que no se descargó nada ni se crearon puntos "
-       "densos."),
-    PT("As licenças do RoMa v2 e do DINOv3 não foram aceites, por isso nada foi descarregado e não foram "
-       "criados pontos densos."),
-    IT("Le licenze di RoMa v2 e DINOv3 non sono state accettate: non è stato scaricato nulla e non sono stati "
-       "creati punti densi."),
-    NL("De licenties van RoMa v2 en DINOv3 zijn niet geaccepteerd, dus er is niets gedownload en er zijn geen "
-       "dichte punten gemaakt."),
-    RU("Лицензии RoMa v2 и DINOv3 не приняты, поэтому ничего не скачано и плотные точки не созданы."),
-    TR("RoMa v2 ve DINOv3 lisansları kabul edilmedi; bu yüzden hiçbir şey indirilmedi ve yoğun nokta "
-       "oluşturulmadı."));
+    FR("Une licence nécessaire aux points denses n'a pas été acceptée : rien n'a été téléchargé et aucun "
+       "point dense n'a été créé."),
+    ES("No se aceptó una licencia que necesitan los puntos densos, así que no se descargó nada ni se "
+       "crearon puntos densos."),
+    PT("Não foi aceite uma licença de que os pontos densos precisam, por isso nada foi descarregado e não "
+       "foram criados pontos densos."),
+    IT("Una licenza necessaria ai punti densi non è stata accettata: non è stato scaricato nulla e non sono "
+       "stati creati punti densi."),
+    NL("Een voor dichte punten benodigde licentie is niet geaccepteerd, dus er is niets gedownload en er zijn "
+       "geen dichte punten gemaakt."),
+    RU("Лицензия, нужная для плотных точек, не принята, поэтому ничего не скачано и плотные точки не "
+       "созданы."),
+    TR("Yoğun noktalar için gereken bir lisans kabul edilmedi; bu yüzden hiçbir şey indirilmedi ve yoğun "
+       "nokta oluşturulmadı."));
 
 SS_MSG(advanced,
     EN("Dense points: overrides"),

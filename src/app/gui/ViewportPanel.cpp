@@ -371,6 +371,10 @@ void ViewportPanel::animate_view(double now) {
     if (t >= 1.0f) _anim = false;
 }
 
+int64_t ViewportPanel::preview_points() const {
+    return _mode == Mode::Preview && !_preview.has_mesh() ? _preview.num_points() : 0;
+}
+
 float ViewportPanel::nav_dist() const {
     float dx = _cam.pos[0] - _cam.target[0];
     float dy = _cam.pos[1] - _cam.target[1];
