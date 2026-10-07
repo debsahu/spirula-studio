@@ -228,6 +228,10 @@ struct SfmConfig {
     std::string reuse_features = "auto";
     std::string reuse_matches = "auto";
 
+    // `auto`: a COLMAP model whose cameras and poses come out byte for byte;
+    // the run only adds points (docs/notes/fixed-poses.md).
+    std::string poses;
+
     // Runtime.
     int threads = 0;           // host worker pools; 0 = hardware_concurrency
     int decode_threads = 0;    // image decode pool; 0 = hardware_concurrency
@@ -644,6 +648,7 @@ struct SfmConfig {
       reuse_features)                                                                              \
     F(reuse_matches, "reuse-matches", CMD_AUTO, Tier::Advanced, "input", 0, 0, "auto|keep|redo",   \
       reuse_matches)                                                                               \
+    F(poses, "poses", CMD_AUTO, Tier::Advanced, "input", 0, 0, "", poses)                          \
     F(check, "check", CMD_MAP, Tier::Advanced, "input", 0, 0, "", check)                           \
     /* ---- runtime ---- */                                                                        \
     F(threads, "threads", CMD_AUTO | CMD_MATCH | CMD_MAP, Tier::Advanced, "runtime", 0, 4096, "",  \
