@@ -237,8 +237,7 @@ void writeStairDataset(const Scene& sc, const std::string& dir, int pin_w, int e
 
     std::mt19937_64 rng(11);
     std::vector<double> area;
-    double total = 0;
-    for (const Quad& q : sc.quads) { area.push_back(q.u.cross(q.v).norm()); total += area.back(); }
+    for (const Quad& q : sc.quads) area.push_back(q.u.cross(q.v).norm());
     std::discrete_distribution<int> pick(area.begin(), area.end());
     std::uniform_real_distribution<double> uni(0, 1);
     int made = 0, tries = 0;
@@ -274,7 +273,6 @@ void writeStairDepths(const Scene& sc, const std::string& dir, const SyntheticDe
     std::mt19937_64 rng(sd.seed);
     std::normal_distribution<double> gauss(0.0, 1.0);
     std::uniform_real_distribution<double> uni(0.0, 1.0);
-    int copies = 0;
     for (const auto& kv : rec.images) {
         const sfm::Image& im = kv.second;
         const sfm::Camera& cam = rec.cameras.at(im.camera_id);
@@ -286,7 +284,6 @@ void writeStairDepths(const Scene& sc, const std::string& dir, const SyntheticDe
         const double a = 0.5 + uni(rng), b = (uni(rng) - 0.5) * 0.1;
         // The last pinholes look straight at the risers (the first see them edge on).
         const bool copy = !ray && (int)im.id > 8 - sd.copies && (int)im.id <= 8;
-        copies += copy;
         std::vector<double> raw((size_t)w * h, 0.0);
         std::vector<uint8_t> nrm((size_t)w * h * 3, 0);
         const bool tilt = (int)im.id <= sd.tilted;

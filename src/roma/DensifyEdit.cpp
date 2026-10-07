@@ -13,6 +13,7 @@
 #include "data/Json.h"
 #include "data/JsonWrite.h"
 #include "roma/DensifyRun.h"
+#include "roma/FileBytes.h"
 #include "roma/Publish.h"
 #include "sfm/core/FixedPoses.h"
 
@@ -27,17 +28,8 @@ bool endsWith(const std::string& s, const char* suffix) {
     return s.size() > n && s.compare(s.size() - n, n, suffix) == 0;
 }
 
-std::string slurp(const fs::path& p) {
-    std::ifstream f(p, std::ios::binary);
-    if (!f) throw std::runtime_error("cannot open " + p.string());
-    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-}
-
-void put(const fs::path& p, const std::string& bytes) {
-    std::ofstream f(p, std::ios::binary | std::ios::trunc);
-    f.write(bytes.data(), (std::streamsize)bytes.size());
-    if (!f) throw std::runtime_error("cannot write " + p.string());
-}
+using file::put;
+using file::slurp;
 
 template <class T>
 T take(const std::string& s, size_t& at, const char* what) {

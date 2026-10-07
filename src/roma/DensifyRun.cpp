@@ -13,6 +13,7 @@
 #include <memory>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -21,6 +22,7 @@
 #include "external/stb_image.h"
 #include "external/stb_image_write.h"
 #include "core/Sha256.h"
+#include "roma/FileBytes.h"
 #include "roma/DepthSource.h"
 #include "roma/Publish.h"
 #include "roma/Sample.h"
@@ -36,11 +38,7 @@ using sfm::Vec3;
 
 namespace {
 
-std::string slurp(const fs::path& p) {
-    std::ifstream f(p, std::ios::binary);
-    if (!f) throw std::runtime_error("cannot open " + p.string());
-    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-}
+using file::slurp;
 
 template <class F>
 void parallelFor(int n, F&& fn) {
@@ -103,12 +101,6 @@ double medianSpacing(const sfm::Reconstruction& rec) {
     return d[d.size() / 2];
 }
 
-std::string stemOf(const std::string& name) {
-    std::string s = fs::path(name).filename().string();
-    const size_t dot = s.rfind('.');
-    return dot == std::string::npos ? s : s.substr(0, dot);
-}
-
 }  // namespace
 
 // ===========================================================================
@@ -166,7 +158,7 @@ ImageData loadImage(const std::string& path, const std::string& mask_path, bool 
         stbi_image_free(m);
     } else if (!alpha.empty()) {
         out.keep.resize(n);
-        for (size_t i = 0; i < n; i++) out.keep[i] = (uint8_t)((alpha[i] > 0) != flip_mask);
+        for (size_t i = 0; i < n; i++) out.keep[i] = (uint8_t)(alpha[i] > 0);
     }
     return out;
 }
@@ -248,10 +240,14 @@ DensifyPlan planDensify(const DensifyJob& job) {
     pl.sparse_points = (int64_t)rec.points3D.size();
     pl.sparse_spacing = medianSpacing(rec);
     {
+        // Per line: the file opens with a comment of an odd word count, which shifts a token reader.
         std::ifstream g(fs::path(job.model_dir) / "gauge.txt");
-        std::string k, v;
-        while (g >> k >> v)
-            if (k == "metric") pl.metric = v == "1";
+        std::string line;
+        while (std::getline(g, line)) {
+            std::istringstream in(line);
+            std::string k, v;
+            if (in >> k >> v && k == "metric") pl.metric = v == "1";
+        }
     }
 
     if (!o.far_isolated) {
@@ -774,7 +770,7 @@ DensifyResult runDensify(const DensifyJob& job, const DensifyPlan& pl,
     std::unique_ptr<FreeSpace> free_space;
     if (pl.min_track == 0 && !o.plugin_exact && o.visibility_check) {
         // A two-image point has no third view to agree with it; it must at
-        // least not sit in space another image saw through (S-1: the floaters).
+        // least not sit in space another image saw through (the floaters on the synthetic staircase).
         free_space = std::make_unique<FreeSpace>(pl, all, 3, 0.05);
         veto = [&free_space](const DensePoint& p) { return free_space->seesThrough(p); };
     }
@@ -1074,11 +1070,7 @@ ReprojStats writeSibling(const std::string& model_dir, const std::string& out_di
     fs::remove_all(tmp, ec);
     fs::create_directories(tmp);
     try {
-        auto put = [&](const char* name, const std::string& bytes) {
-            std::ofstream f(tmp / name, std::ios::binary | std::ios::trunc);
-            f.write(bytes.data(), (std::streamsize)bytes.size());
-            if (!f) throw std::runtime_error(std::string("cannot write ") + name);
-        };
+        auto put = [&](const char* name, const std::string& bytes) { file::put(tmp / name, bytes); };
         put("cameras.bin", fp.cameras_bin);
         put("images.bin", images_bin);
         for (const char* extra : {"gauge.txt", "rigs.txt", "rigs.bin", "frames.bin"})

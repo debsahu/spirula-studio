@@ -34,8 +34,8 @@ struct DensifyOptions {
     bool depth_align = true;
     bool hybrid_local_check = true;
     bool depth_normal_files = true;     // false: normals always from the fitted depth
-    double min_depth_share = 0.5;
-    int depth_fit_holdout = 0;          // sparse points id % n == 0 kept out of the fits, to score against       // usable maps among the matched images, or no depth source
+    double min_depth_share = 0.5;       // least share of the matched images with a usable depth map; below it the run stops
+    int depth_fit_holdout = 0;          // sparse points id % n == 0 kept out of the fits, to score against
     double depth_normal_min_cos = 0.9;  // a normal map's median cosine against its own depth
     double depth_normal_deg = 55;       // normal agreement, degrees: measured (docs/notes/densify.md)
     bool depth_normal_check = true;     // against the images that agree on the depth

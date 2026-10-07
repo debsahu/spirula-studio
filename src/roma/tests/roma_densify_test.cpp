@@ -29,6 +29,7 @@
 #include "roma/Select.h"
 #include "roma/Synthetic.h"
 #include "sfm/core/FixedPoses.h"
+#include "sfm/Pipeline.h"
 #include "sfm/core/Model.h"
 #include "sfm/tests/TestMain.h"
 
@@ -1248,6 +1249,27 @@ void far_isolated_plan_states() {
     fs::remove_all(d);
 }
 
+// The gauge.txt spirula sfm writes, comment line and all, is what the plan must read.
+void plan_reads_the_gauge_sfm_writes() {
+    const fs::path d = tempDir("gaugeplan");
+    writeStairDataset(stairScene(), d.string(), 96, 192, 300);
+    const fs::path model = d / "sparse" / "0";
+    auto metricOf = [&](bool metric) {
+        sfm::ModelGauge g;
+        g.metric = metric;
+        g.oriented = true;
+        g.scale = "cameras";
+        g.scale_sigma = 0.01;
+        sfm::writeGauge(model, g);
+        DensifyJob job;
+        job.model_dir = model.string();
+        return planDensify(job).metric;
+    };
+    check(metricOf(true), "a metric gauge written by sfm::writeGauge was not read as metric");
+    check(!metricOf(false), "a non-metric gauge written by sfm::writeGauge was read as metric");
+    fs::remove_all(d);
+}
+
 // Mutant: a hybrid's fill sharing the cap (matches alone fill it, so no fill
 // survives), or the fill's own budget ignored.
 void hybrid_fill_has_its_own_budget() {
@@ -1775,7 +1797,8 @@ void cut_view_is_pixel_exact() {
     check(off == 0, "half-size mask read off-centre at " + std::to_string(off) + " pixels");
 }
 
-// Mutant: --flip-mask ignored, for a mask file or an image's alpha.
+// Mutant: --flip-mask ignored for a mask file, or applied to an image's alpha (which always
+// means transparent is not the subject).
 void flip_mask_inverts_keep() {
     const fs::path d = tempDir("flip");
     const uint8_t rgba[16] = {10, 20, 30, 255, 10, 20, 30, 0, 10, 20, 30, 255, 10, 20, 30, 255};
@@ -1789,7 +1812,7 @@ void flip_mask_inverts_keep() {
     const ImageData alpha = loadImage((d / "a.png").string(), "", false);
     const ImageData alpha_flip = loadImage((d / "a.png").string(), "", true);
     check(alpha.keep == std::vector<uint8_t>({1, 0, 1, 1}), "alpha read wrong");
-    check(alpha_flip.keep == std::vector<uint8_t>({0, 1, 0, 0}), "--flip-mask ignored for alpha");
+    check(alpha_flip.keep == std::vector<uint8_t>({1, 0, 1, 1}), "--flip-mask inverted an image's alpha");
     fs::remove_all(d);
 }
 
@@ -2238,6 +2261,7 @@ static int body(int argc, char** argv) {
         {"far_isolated_runs_before_the_cap", far_isolated_runs_before_the_cap},
         {"far_filter_is_scale_free", far_filter_is_scale_free},
         {"far_isolated_plan_states", far_isolated_plan_states},
+        {"plan_reads_the_gauge_sfm_writes", plan_reads_the_gauge_sfm_writes},
         {"normals_face_their_own_ray", normals_face_their_own_ray},
         {"file_normals_used_when_present", file_normals_used_when_present},
         {"depth_reuse_computes_only_missing", depth_reuse_computes_only_missing},

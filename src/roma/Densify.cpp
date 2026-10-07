@@ -36,7 +36,9 @@ void DensifyStats::add(const DensifyStats& o) {
         normal_null_hist[i] += o.normal_null_hist[i];
         local_normal_hist[i] += o.local_normal_hist[i];
     }
-    if (o.two_image_bar >= 0) two_image_bar = o.two_image_bar; voxel_merged += o.voxel_merged; capped += o.capped;
+    if (o.two_image_bar >= 0) two_image_bar = o.two_image_bar;
+    voxel_merged += o.voxel_merged;
+    capped += o.capped;
     for (const auto& kv : o.track_hist) track_hist[kv.first] += kv.second;
 }
 
@@ -148,7 +150,7 @@ Mat3 essential(const View& a, const View& b) {
 
 // The plugin's DLT, min |A X| over |X| = 1, by one-sided Jacobi SVD of A
 // itself: with pixel-scale rows, sfm::triangulateDLT's eigen-solve of A^T A
-// squares a condition number near 1e8 and lands millimetres off (gate P-4).
+// squares a condition number near 1e8 and lands millimetres off (plugin parity test).
 Vec3 dltSvd(const sfm::Mat34& P1, const sfm::Mat34& P2, const Vec3& b1, const Vec3& b2) {
     double A[4][4];
     sfm::dltRows(A[0], A[1], b1, P1);
@@ -354,7 +356,7 @@ std::vector<DensePoint> triangulateRef(const RefMatches& m, const std::vector<Vi
         double wsum = 0, par = 0, max_err = 0;
         for (const Candidate& c : cs) {
             // The plugin weighs by 1 / two-view residual, which a DLT drives to
-            // rounding noise (gate P-4); the default weighs by depth precision.
+            // rounding noise (plugin parity test); the default weighs by depth precision.
             const double w = exact ? 1.0 / std::max(c.err, 1e-4) : 1.0 / (c.depth_per_px * c.depth_per_px);
             sum = sum + c.X * w;
             wsum += w;

@@ -560,9 +560,9 @@ void lowered_budget_trims_on_open() {
         for (int i = 0; i < 5; i++) cm.match(imgs[(size_t)i].view(), imgs[(size_t)i + 1].view());
         check(cache.info().entries == 5, "five entries to start");
     }
-    WarpCache small(opts(d, 2 * one + one / 2));
-    check(small.info().entries == 2 && dirBytes(d) <= 2 * one + one / 2, "a smaller budget left " + std::to_string(small.info().entries) + " entries");
-    check(small.info().evicted == 3, "evicted " + std::to_string(small.info().evicted));
+    WarpCache trimmed(opts(d, 2 * one + one / 2));
+    check(trimmed.info().entries == 2 && dirBytes(d) <= 2 * one + one / 2, "a smaller budget left " + std::to_string(trimmed.info().entries) + " entries");
+    check(trimmed.info().evicted == 3, "evicted " + std::to_string(trimmed.info().evicted));
     fs::remove_all(d);
 }
 

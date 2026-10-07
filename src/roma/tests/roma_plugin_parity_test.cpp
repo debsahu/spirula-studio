@@ -1,4 +1,4 @@
-// Gate P-4: the host stage in plugin_exact mode against the Lichtfeld
+// The host stage in plugin_exact mode against the Lichtfeld
 // plugin's own, fed the same RoMa warps, masks and sample indices.
 //
 //   roma_plugin_parity_test <fixture>
