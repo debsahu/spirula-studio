@@ -1,0 +1,20 @@
+Lichtfeld Densification Plugin
+https://github.com/shadygm/Lichtfeld-Densification-Plugin
+Copyright (c) 2025 Shady Gmira and contributors
+SPDX-License-Identifier: GPL-3.0-or-later
+
+Spirula Studio's densify host stage is a port of this plugin's host logic,
+from commit ab0b04e35b12bff65ee87bdaacfa3177c21521d6. The ported files, and
+what they came from:
+
+  src/roma/Sample.{h,cpp}     core/sampling.py   (certainty sampling with coverage)
+  src/roma/Select.{h,cpp}     core/selection.py  (reference and neighbour selection)
+  src/roma/Densify.{h,cpp}    core/pipeline.py, core/geometry.py, densify.py
+                              (collect, triangulation, filters, fusion, support,
+                              track filter, voxel select, point cap)
+
+The plugin's vendored RoMaV2 tree, its GUI panels and its COLMAP writer were not
+ported. Spirula Studio is distributed under the GNU General Public License
+version 3 (LICENSE at the repository root), which the plugin's
+GPL-3.0-or-later permits. Where the port departs from the plugin, and the
+--plugin-exact mode that reproduces it, is docs/notes/densify.md.

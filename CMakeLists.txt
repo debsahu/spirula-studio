@@ -10,6 +10,7 @@ project(spirula_studio LANGUAGES C CXX)  # CUDA enabled by the cuda backend modu
 #   SsBackendCuda.cmake    CUDA kernels + the engine library         } one
 #   SsBackendVulkan.cmake  portable engine + Vulkan compute runtime } of
 #   SsSfm.cmake            the SfM module (optional; Vulkan-only)
+#   SsRoma.cmake           the densify host stage (with SfM)
 #   SsNn.cmake             inference layer + SAM + video (optional; Vulkan-only)
 #   SsI18n.cmake           ss_i18n, the translation library (a leaf)
 #   SsApps.cmake           the `spirula` executable (every tool in one)
@@ -46,6 +47,7 @@ endif()
 # Before SsApps: the app links the ss_sfm target.
 if(SS_BUILD_SFM)
     include(SsSfm)
+    include(SsRoma)
 endif()
 
 # Likewise for `spirula sam` and the GUI's built-in masking.
