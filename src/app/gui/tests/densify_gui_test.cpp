@@ -64,6 +64,8 @@ int main() {
                    !has(a, "--min-track") && !has(a, "--overwrite") && !has(a, "--device"),
                "a job of defaults sends nothing but the folders: every setting is the tool's");
         expect(value_of(a, "--image-dir") == "/ds/images", "the image folder is passed");
+        expect(!has(a, "--accept-license") && !has(a, "--out"),
+               "no default job accepts a licence for the user or names an output folder");
     }
     {
         DensifyJob j;
@@ -88,6 +90,8 @@ int main() {
         expect(value_of(a, "--mask-dir") == "/ds/masks" && has(a, "--flip-mask") &&
                    !has(a, "--no-masks"),
                "masks, and the flip that goes with them");
+        expect(!has(a, "--accept-license") && !has(a, "--out"),
+               "no override accepts a licence for the user or names an output folder");
         j.use_masks = false;
         const auto off = densify_args(j, "/ds", "/ds/images", "/ds/masks", true, true);
         expect(has(off, "--no-masks") && !has(off, "--mask-dir") && !has(off, "--flip-mask"),
@@ -103,6 +107,27 @@ int main() {
                "an index out of range is clamped, not read past the table");
         expect(std::string(kDensifyPresets[0]) == "auto" && kNumDensifyPresets == 6,
                "the preset table is the one the combo and the record both read");
+    }
+
+    // ---- state that must not leak between captures ---------------------------------
+    {
+        DensifyJob cur, incoming;
+        cur.model = "sparse/1";
+        cur.enable = true;
+        incoming.preset = 3;
+        const DensifyJob kept = densify_after_settings(cur, incoming, ModelCarry::Keep);
+        expect(kept.model == "sparse/1" && kept.preset == 3 && !kept.enable,
+               "a preset takes the settings but leaves the capture's model alone");
+        const DensifyJob row = densify_after_settings(cur, incoming, ModelCarry::Reset);
+        expect(row.model.empty() && row.preset == 3,
+               "a batch row never inherits the previous row's model");
+        DensifyJob on;
+        on.enable = true;
+        expect(densify_blocks_run(on, false, false), "an unready checkpoint blocks Run");
+        expect(!densify_blocks_run(on, false, true), "... a ready one does not");
+        expect(!densify_blocks_run(on, true, false),
+               "a laser scan's run never uses the step, so it never waits for the checkpoint");
+        expect(!densify_blocks_run(DensifyJob{}, false, false), "a step that is off blocks nothing");
     }
 
     // ---- the model chooser ---------------------------------------------------------
@@ -124,6 +149,9 @@ int main() {
         expect(m.size() == 4 && m[2].points == 2500000, "the dense model's own point count");
         expect(m.size() == 4 && m[3].rel == "colmap/sparse/0" && m[3].points == -1,
                "a model with no points3D.bin reports -1");
+        expect(is_dense_model("sparse/0-roma") && !is_dense_model("sparse/0") &&
+                   !is_dense_model("-roma") && !is_dense_model("sparse/roma"),
+               "only a name ending -roma is a dense model");
         expect(recon_point_count((ds / "sparse" / "0-roma").string()) == 2500000 &&
                    recon_point_count((ds / "nowhere").string()) == -1,
                "the count of a model, and of one that is not there");

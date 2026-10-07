@@ -37,6 +37,11 @@
 #include <string>
 #include <vector>
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
+void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const char* label,
+                                  int flags);
+#endif
+
 namespace ui {
 
 using ::spirula::i18n::Arg;
@@ -358,9 +363,25 @@ inline bool BeginPopupModalRaw(const char* title, bool* open = nullptr,
 // A combo's items are messages too -- pass them as a braced list of pointers:
 //   ui::Combo(msg::quality, &q, {&msg::q_fast, &msg::q_balanced});
 
+namespace detail {
+// ImGui names no combo to the automation surface; ours do, so a script can open one by id.
+struct ComboName {
+    const char* label;
+    ImGuiID id;
+    explicit ComboName(const char* l) : label(l), id(ImGui::GetID(l)) {}
+    ~ComboName() {
+#ifdef IMGUI_ENABLE_TEST_ENGINE
+        ::ImGuiTestEngineHook_ItemInfo(ImGui::GetCurrentContext(), id, label, 0);
+#endif
+    }
+};
+}  // namespace detail
+
 inline bool Combo(const Msg& m, int* cur, std::initializer_list<const Msg*> its) {
     const auto& v = detail::items(its);
-    return ImGui::Combo(detail::label(m), cur, v.data(), (int)v.size());
+    const char* l = detail::label(m);
+    detail::ComboName name(l);
+    return ImGui::Combo(l, cur, v.data(), (int)v.size());
 }
 inline bool ComboRaw(const char* id, int* cur, const char* const items[],
                      int count) {
@@ -380,7 +401,9 @@ inline bool ComboRaw(const char* id, int* cur, const std::vector<const Msg*>& it
     return ImGui::Combo(id, cur, v.data(), (int)v.size());
 }
 inline bool BeginCombo(const Msg& m, const char* preview, ImGuiComboFlags flags = 0) {
-    return ImGui::BeginCombo(detail::label(m), preview, flags);
+    const char* l = detail::label(m);
+    detail::ComboName name(l);
+    return ImGui::BeginCombo(l, preview, flags);
 }
 inline bool BeginComboRaw(const char* id, const char* preview) {
     return ImGui::BeginCombo(id, preview);

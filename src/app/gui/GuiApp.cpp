@@ -940,7 +940,7 @@ DatasetSettings GuiApp::capture_dataset_settings() const {
     return s;
 }
 
-void GuiApp::apply_dataset_settings(const DatasetSettings& in) {
+void GuiApp::apply_dataset_settings(const DatasetSettings& in, ModelCarry carry) {
     DatasetSettings s = in;
     sanitize_dataset_settings(s);
 
@@ -970,12 +970,7 @@ void GuiApp::apply_dataset_settings(const DatasetSettings& in) {
     _mask_memory_frames = s.sfm.prep.mask_memory_frames;
     _mask_features = s.sfm.mask_features;
     _geometry = s.sfm.geometry;
-    {
-        // The model is the capture's own, so a preset leaves it alone.
-        const std::string model = _densify.model;
-        _densify = s.sfm.densify;
-        _densify.model = model;
-    }
+    _densify = densify_after_settings(_densify, s.sfm.densify, carry);
     // A colour space the preset spelled out is a decision, so the EXR probe
     // must not overwrite it later.
     _color_space_touched =
@@ -1689,7 +1684,7 @@ bool GuiApp::launch_batch_dataset(BatchTask& task, const BatchRow& row) {
     clear_lidar_sources();
     _sources = sources;
     _workspace = _workspace_auto = workspace;
-    apply_dataset_settings(settings);
+    apply_dataset_settings(settings, ModelCarry::Reset);
     _sources = sources;          // rescan_found_masks() re-derived the list
     _source_path_edits.clear();  // re-seeded from _sources by the next draw
     forget_redo_requests();
@@ -2905,6 +2900,12 @@ std::string GuiApp::state_json() {
     out += kDownload[(int)_download.state()];
     out += "\",\"license_prompt\":" + quoted(_license_prompt);
     out += ",\"recon_dir\":" + quoted(_cfg.colmap_recon_dir);
+    out += ",\"preview_points\":" + std::to_string(_viewport.preview_points());
+    out += ",\"densify_missing\":";
+    out += densify_model_missing() ? "true" : "false";
+    out += ",\"densify_enable\":";
+    out += _densify.enable ? "true" : "false";
+    out += ",\"densify_model\":" + quoted(_densify.model);
     out += ",\"densify_ready\":";
     out += densify_ready() ? "true" : "false";
     out += ",\"dense_panel_running\":";
@@ -5605,7 +5606,8 @@ bool GuiApp::densify_ready() const {
 }
 
 bool GuiApp::densify_model_missing() const {
-    return _densify.enable && densify_availability().empty() && !densify_ready();
+    return densify_availability().empty() &&
+           densify_blocks_run(_densify, !_lidar.empty(), densify_ready());
 }
 
 // Consent first, the checkpoint's licences then the download, and a refusal
@@ -5659,10 +5661,11 @@ void GuiApp::draw_densify_options() {
     draw_densify_checkpoint();
 
     ImGui::SetNextItemWidth(px(320.0f));
-    if (ui::BeginCombo(dgmsg::model, _densify.model.empty() ? dgmsg::model_auto.get()
+    if (ui::BeginCombo(dgmsg::source_model, _densify.model.empty() ? dgmsg::model_auto.get()
                                                            : _densify.model.c_str())) {
         if (ui::Selectable(dgmsg::model_auto, _densify.model.empty())) _densify.model.clear();
         for (const ReconModel& m : list_recon_models(_workspace)) {
+            if (is_dense_model(m.rel)) continue;
             const std::string label =
                 m.images < 0 ? m.rel
                              : i18n::format(dgmsg::model_entry,
@@ -6352,36 +6355,41 @@ void GuiApp::draw_dataset_rerun(const WorkspaceState& prior) {
     // rerun of the masks.
     const bool need_mask_model = mask_model_missing();
     const bool need_feat_model = feature_model_missing();
+    // These rerun the reconstruction, and a run with dense points on ends with that step.
+    const bool need_dense_model = densify_model_missing();
 
     bool go = false;
     if (prior.frames) {
-        ImGui::BeginDisabled(need_mask_model || need_feat_model);
+        ImGui::BeginDisabled(need_mask_model || need_feat_model || need_dense_model);
         if (ui::Button(dmsg::rerun_frames)) {
             _redo_frames = _redo_masks = true;   // the masks describe the frames
             _redo_model = go = true;
         }
         ImGui::EndDisabled();
-        if (need_mask_model || need_feat_model)
-            ui::help_on_hover_disabled(need_mask_model ? dmsg::mask_model_first
-                                                       : dmsg::feat_model_first);
+        if (need_mask_model || need_feat_model || need_dense_model)
+            ui::help_on_hover_disabled(need_mask_model   ? dmsg::mask_model_first
+                                       : need_feat_model ? dmsg::feat_model_first
+                                                         : dgmsg::ckpt_first);
         ImGui::SameLine();
     }
     if (prior.masks) {
-        ImGui::BeginDisabled(need_mask_model);
+        ImGui::BeginDisabled(need_mask_model || need_dense_model);
         if (ui::Button(dmsg::rerun_masks)) {
             _redo_masks = true;
             _redo_model = go = true;
         }
         ImGui::EndDisabled();
-        if (need_mask_model) ui::help_on_hover_disabled(dmsg::mask_model_first);
+        if (need_mask_model || need_dense_model)
+            ui::help_on_hover_disabled(need_mask_model ? dmsg::mask_model_first : dgmsg::ckpt_first);
         ImGui::SameLine();
     }
-    ImGui::BeginDisabled(need_feat_model);
+    ImGui::BeginDisabled(need_feat_model || need_dense_model);
     if (ui::Button(dmsg::rerun_model)) {
         _redo_model = go = true;
     }
     ImGui::EndDisabled();
-    if (need_feat_model) ui::help_on_hover_disabled(dmsg::feat_model_first);
+    if (need_feat_model || need_dense_model)
+        ui::help_on_hover_disabled(need_feat_model ? dmsg::feat_model_first : dgmsg::ckpt_first);
     // Depth and normals are the one step that reruns on its own: they are read
     // off the finished dataset and nothing downstream of them exists.
     if (prior.geometry) {
@@ -6397,7 +6405,6 @@ void GuiApp::draw_dataset_rerun(const WorkspaceState& prior) {
     }
     if (prior.densify) {
         ImGui::SameLine();
-        const bool need_dense_model = densify_model_missing();
         ImGui::BeginDisabled(!_densify.enable || need_dense_model);
         if (ui::Button(dgmsg::rerun)) _redo_densify = go = true;
         ImGui::EndDisabled();
@@ -6875,7 +6882,7 @@ std::string plan_key_label(const std::string& key) {
         {"mask_negative_prompt", &dmsg::mask_but_keep},
         {"feature_prompt", &dmsg::mask_features_only},
         {"mask_threshold", &dmsg::mask_threshold}, {"geometry_model", &dmsg::geom_model},
-        {"densify_model", &dgmsg::model}, {"densify_preset", &dgmsg::preset},
+        {"densify_model", &dgmsg::source_model}, {"densify_preset", &dgmsg::preset},
         {"geometry_max_size", &dmsg::geom_max_size},
         {"geometry_tokens", &dmsg::geom_num_tokens},
         {"jpeg_quality", &dmsg::geom_jpeg_quality},
@@ -7060,6 +7067,7 @@ void GuiApp::restore_from_record(bool announce) {
         if (!rec.present) return;
     }
     apply_dataset_settings(s);
+    _densify.model = densify_model_of(rec);
     restore_record_rows(rec);
     // What the picker last applied no longer describes the panel, and a
     // built-in left armed would be put back over it by the next probe.

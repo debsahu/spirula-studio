@@ -49,4 +49,15 @@ std::vector<std::string> densify_args(const DensifyJob& job, const std::string& 
     return a;
 }
 
+DensifyJob densify_after_settings(const DensifyJob& current, const DensifyJob& incoming,
+                                  ModelCarry carry) {
+    DensifyJob out = incoming;
+    out.model = carry == ModelCarry::Keep ? current.model : std::string();
+    return out;
+}
+
+bool densify_blocks_run(const DensifyJob& job, bool lidar_run, bool ready) {
+    return job.enable && !lidar_run && !ready;
+}
+
 }  // namespace gui

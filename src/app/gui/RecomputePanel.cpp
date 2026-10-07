@@ -76,11 +76,7 @@ const spirula::i18n::Msg& stage_label(uint32_t stage) {
 // The model `spirula densify` reads: the one the trainer is set to unless that is
 // itself a dense model, else its own pick.
 std::string dense_source_model(const std::string& dataset, const std::string& recon_dir) {
-    auto dense = [](const std::string& d) {
-        const std::string name = fs::path(d).filename().string();
-        return name.size() > 5 && name.compare(name.size() - 5, 5, "-roma") == 0;
-    };
-    if (!recon_dir.empty() && !dense(recon_dir)) {
+    if (!recon_dir.empty() && !is_dense_model(fs::path(recon_dir).filename().string())) {
         const fs::path p = in_dataset(dataset, recon_dir);
         return p.string();
     }

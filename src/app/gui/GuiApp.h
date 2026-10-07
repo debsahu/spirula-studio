@@ -217,7 +217,8 @@ private:
     // The New Dataset screen's settings as a preset carries them, and back.
     // Applying one never touches the inputs or the output folder.
     DatasetSettings capture_dataset_settings() const;
-    void apply_dataset_settings(const DatasetSettings& s);
+    void apply_dataset_settings(const DatasetSettings& s,
+                                ModelCarry carry = ModelCarry::Keep);
     void apply_dataset_preset(const DatasetPreset& p);
     // A built-in, which is the capture's own answers with the preset's over
     // them -- and then the one question only the frames can settle.

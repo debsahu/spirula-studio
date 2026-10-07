@@ -42,6 +42,16 @@ std::vector<std::string> densify_args(const DensifyJob& job, const std::string& 
                                       const std::string& images, const std::string& masks,
                                       bool masks_flipped, bool preset_supported);
 
+// What a new settings block does to the model the screen is on. A preset leaves
+// it (it names one capture's folder); a batch row starts from the tool's own pick.
+enum class ModelCarry { Keep, Reset };
+DensifyJob densify_after_settings(const DensifyJob& current, const DensifyJob& incoming,
+                                  ModelCarry carry);
+
+// Does the checkpoint stand between the user and Run? Not when the step is off
+// or a laser scan's run, which plan_job never gives the step.
+bool densify_blocks_run(const DensifyJob& job, bool lidar_run, bool ready);
+
 // "" when this build has the step, otherwise why not.
 std::string densify_availability();
 // Whether `spirula densify --help` lists `flag`; asked once per process.

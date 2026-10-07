@@ -23,6 +23,10 @@ int64_t leading_count(const fs::path& file) {
 
 }  // namespace
 
+bool is_dense_model(const std::string& rel) {
+    return rel.size() > 5 && rel.compare(rel.size() - 5, 5, "-roma") == 0;
+}
+
 int64_t recon_point_count(const std::string& dir) {
     return leading_count(fs::path(dir) / "points3D.bin");
 }

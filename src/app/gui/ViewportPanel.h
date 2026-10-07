@@ -91,6 +91,9 @@ public:
         std::function<void()> on_primitive_changed);
     void detach();
     bool attached() const { return _mode == Mode::Engine; }
+    // Points the dataset preview built and draws; 0 when it shows something else.
+    int64_t preview_points() const;
+
 
     // Hide the controls the view link makes shared -- navigation, camera
     // model, field of view, reset -- so a row of linked panels shows them
