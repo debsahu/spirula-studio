@@ -171,7 +171,7 @@ SS_MSG(preset_help,
        "времени."),
     TR("auto varsayılan olan base'i kullanır. turbo (320), fast (512) ve base (640) tek bir çözünürlükte "
        "eşleştirir; high (önce 640, sonra 960) ve precise (önce 800, sonra 1280) daha çok bellek ve "
-       "zaman ister.");
+       "zaman ister."));
 
 SS_MSG(preset_missing,
     EN("This build's densify tool has no presets yet; it picks one itself."),
@@ -735,7 +735,7 @@ SS_MSG(chk_not_ready,
     RU("Контрольная точка RoMa v2 по-прежнему отсутствует, или её лицензии не приняты: загрузка не удалась "
        "или была отклонена. Загрузите её на экране «Новый набор данных» и запустите пакет снова."),
     TR("RoMa v2 kontrol noktası hâlâ yok ya da lisansları kabul edilmedi: indirme başarısız oldu veya "
-       "reddedildi. Onu Yeni Veri Kümesi ekranından alın, sonra toplu işi yeniden başlatın.");
+       "reddedildi. Onu Yeni Veri Kümesi ekranından alın, sonra toplu işi yeniden başlatın."));
 
 SS_MSG(panel_button,
     EN("Add Dense Points"),

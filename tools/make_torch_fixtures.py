@@ -143,23 +143,3 @@ _zip("long_binget_stack.pt", b"\x80\x02Nq\x00" + b"j\x00\x00\x00\x00" * 6_000_00
 # their caps, but the 16M items held are 128 MB of vector storage.
 _zip("container_items.pt", b"\x80\x02]\x94" + (b"(" + b"h\x00" * 200_000 + b"t") * 80 + b".",
      {}, zipfile.ZIP_DEFLATED)
-
-
-# --table <romav2.0.1.pt>: one line per tensor, in file order, "name dtype shape
-# sum abs_sum" (shape x-joined, "-" for 0-d; sums in float64).
-import sys
-
-if len(sys.argv) == 3 and sys.argv[1] == "--table":
-    names = {torch.float32: "F32", torch.bfloat16: "BF16", torch.float16: "F16",
-             torch.int64: "I64", torch.bool: "BOOL", torch.float64: "F64",
-             torch.int32: "I32", torch.uint8: "U8"}
-    sd = torch.load(sys.argv[2], map_location="cpu", weights_only=True)
-    if "state_dict" in sd and not torch.is_tensor(sd["state_dict"]):
-        sd = sd["state_dict"]
-    with open(out / "romav2_0_1_tensors.txt", "w") as f:
-        for k, t in sd.items():
-            d = names[t.dtype]
-            v = t.to(torch.float64) if t.dtype != torch.bool else t.to(torch.float64)
-            shape = "x".join(map(str, t.shape)) or "-"
-            f.write(f"{k} {d} {shape} {v.sum().item():.17g} {v.abs().sum().item():.17g}\n")
-    print(len(sd), "tensors")
