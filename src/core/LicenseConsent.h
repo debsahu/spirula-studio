@@ -25,8 +25,9 @@ const Terms* terms_for(const std::string& family);
 std::string settings_path();
 
 bool accepted(const std::string& family);
-// Idempotent; every other line of the file is kept as it is.
-void record(const std::string& family);
+// Idempotent; every other line of the file is kept as it is. False when the
+// file could not be written, in which case the family is NOT accepted.
+bool record(const std::string& family);
 std::vector<std::string> accepted_all();
 
 }  // namespace spirula::license

@@ -44,6 +44,7 @@
 #include "external/stb_image.h"
 
 #include "core/Env.h"
+#include "core/LicenseConsent.h"
 #if defined(SS_BUILD_SAM) || defined(SS_TOOL_SFM) || defined(SS_BACKEND_VULKAN)
 #include "core/VulkanDeviceSelection.h"
 #endif
@@ -394,8 +395,7 @@ void GuiApp::load_settings() {
         else if (k == "sfm_engine") _engine = v == "colmap" ? Engine::Colmap
                                                             : Engine::BuiltIn;
         else if (k == "batch_command") _batch_cmd = unescape_setting(v);
-        else if (k == "accepted_license" && !v.empty() && !license_accepted(v))
-            _accepted_licenses.push_back(v);
+        // accepted_license= is read from the file on demand (license_accepted).
         else if (k == "lang" && !v.empty()) saved_lang = v;
         else if (k == "ui_scale") _scale.set_user(std::clamp((float)atof(v.c_str()),
                                                              0.0f, 3.0f));
@@ -434,6 +434,8 @@ void GuiApp::load_settings() {
 }
 
 void GuiApp::save_settings() {
+    // Read before the file is truncated: the CLI may have added to it since load.
+    const std::vector<std::string> accepted = spirula::license::accepted_all();
     FILE* f = std::fopen(settings_path().c_str(), "w");
     if (!f) return;
     _recent.write_settings(f);
@@ -458,7 +460,7 @@ void GuiApp::save_settings() {
     std::fprintf(f, "save_full_checkpoint=%d\n", _keep_full_ckpt ? 1 : 0);
     for (const auto& [key, dir] : _dialog_dirs)
         std::fprintf(f, "%s%s=%s\n", kDirPrefix, key.c_str(), dir.c_str());
-    for (const auto& l : _accepted_licenses)
+    for (const auto& l : accepted)
         std::fprintf(f, "accepted_license=%s\n", l.c_str());
     std::fclose(f);
 }
@@ -3756,8 +3758,29 @@ void GuiApp::cancel_dataset_job() {
 }
 
 bool GuiApp::license_accepted(const std::string& family) const {
-    return std::find(_accepted_licenses.begin(), _accepted_licenses.end(),
-                     family) != _accepted_licenses.end();
+    return spirula::license::accepted(family);
+}
+
+void GuiApp::request_licenses(std::vector<std::string> families,
+                              std::function<void()> then) {
+    if (!_license_prompt.empty()) return;
+    _license_queue = std::move(families);
+    _license_then = std::move(then);
+    advance_license_queue();
+}
+
+void GuiApp::advance_license_queue() {
+    for (const std::string& f : _license_queue)
+        if (!license_accepted(f)) {
+            _license_prompt = f;
+            _license_model_id.clear();
+            _license_detector_id.clear();
+            _license_tick = false;
+            return;
+        }
+    _license_queue.clear();
+    if (auto then = std::move(_license_then)) then();
+    _license_then = nullptr;
 }
 
 MaskModelFiles GuiApp::selected_mask_model() const {
@@ -7571,7 +7594,7 @@ void GuiApp::draw_license_modal() {
     ui::OpenPopup(dmsg::license_modal_title);
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(540, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(li.full_text ? 720.0f : 540.0f, 0), ImGuiCond_Always);
     if (!ui::BeginPopupModal(dmsg::license_modal_title, nullptr,
                              ImGuiWindowFlags_AlwaysAutoResize))
         return;
@@ -7584,6 +7607,16 @@ void GuiApp::draw_license_modal() {
     ui::Text(*li.summary);
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
+
+    // The terms in full, not a summary of them: the tick below is acceptance of
+    // THIS text. Embedded, so it is on screen with no network.
+    if (li.full_text) {
+        ui::TextDisabled(dmsg::license_full_text);
+        ImGui::BeginChild("##license_text", ImVec2(0, 260), ImGuiChildFlags_Borders);
+        ui::TextWrappedRaw(std::string(li.full_text));
+        ImGui::EndChild();
+        ImGui::Spacing();
+    }
 
     // The link is a button, not decoration: the tick below says the user has
     // read the terms, so getting to them has to be one obvious click. Copying
@@ -7613,18 +7646,25 @@ void GuiApp::draw_license_modal() {
     ImGui::Spacing();
 
     ImGui::BeginDisabled(li.needs_tick && !_license_tick);
-    if (ui::Button(dmsg::license_download, ImVec2(150, 0))) {
-        _accepted_licenses.push_back(_license_prompt);
-        save_settings();
+    const bool downloads = find_model(_license_model_id) != nullptr;
+    if (ui::Button(downloads ? dmsg::license_download : dmsg::license_accept,
+                   ImVec2(150, 0))) {
+        if (!accept_license(_license_prompt))
+            log(i18n::format(dmsg::license_not_saved, {spirula::license::settings_path()}));
         _license_prompt.clear();
         ImGui::CloseCurrentPopup();
-        // Raises the detector's modal next if that one is still to agree to.
-        request_model_download(_license_model_id, _license_detector_id);
+        if (downloads)
+            // Raises the detector's modal next if that one is still to agree to.
+            request_model_download(_license_model_id, _license_detector_id);
+        else
+            advance_license_queue();
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ui::Button(dmsg::cancel, ImVec2(120, 0))) {
         _license_prompt.clear();
+        _license_queue.clear();
+        _license_then = nullptr;
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
