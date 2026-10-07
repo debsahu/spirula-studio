@@ -157,7 +157,7 @@ if(SS_BUILD_SAM)
     if(SS_BUILD_SFM)
         list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/densify_main.cpp)
         list(APPEND SS_TOOL_DEFS SS_TOOL_DENSIFY=1)
-        list(APPEND SS_TOOL_LIBS ss_roma_host)
+        list(APPEND SS_TOOL_LIBS ss_roma_host ss_roma)
     endif()
 endif()
 

@@ -13,6 +13,8 @@
 #include "roma/DensifyCheck.h"
 #include "roma/DensifyRun.h"
 #include "roma/DumpMatcher.h"
+#include "roma/model/Fetch.h"
+#include "roma/model/RomaMatcher.h"
 
 #include <cmath>
 #include <cstdio>
@@ -79,6 +81,7 @@ void usage() {
     help_row("--seed <n>", D::opt_seed);
     help_row("--overwrite", D::opt_overwrite);
     help_row("--force", D::opt_force);
+    help_row("--accept-license dinov3,romav2", D::opt_accept_license);
     // English, like every --check: a table of errors for whoever changed the stage.
     std::fprintf(stderr, "    --check [--check-dir <dir>] [--matches <dir>] [--check-noise <px>]\n"
                          "            [--check-outliers <share>] [--check-size <px>] [--check-no-masks]\n"
@@ -106,6 +109,12 @@ std::string jsonEscape(const std::string& s) {
 
 int spirula_densify_main(int argc, char** argv) {
     app::set_program_name(argc > 0 ? argv[0] : nullptr, "spirula densify");
+    try {
+        nn::consume_accept_license_args(argc, argv);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "%s\n", format(D::error, {e.what()}).c_str());
+        return 2;
+    }
     roma::DensifyJob job;
     roma::DensifyOptions& o = job.opt;
     std::string dataset, model, image_dir = "images", mask_dir = "masks", matches, check_dir;
@@ -243,11 +252,9 @@ int spirula_densify_main(int argc, char** argv) {
 
         std::unique_ptr<roma::Matcher> matcher;
         if (!matches.empty()) matcher = std::make_unique<roma::DumpMatcher>(matches, 640);
+        else if (job.export_dir.empty())
+            matcher = std::make_unique<roma::RomaMatcher>(roma::ensure_checkpoint(), 640);
         job.matcher = matcher.get();
-        if (!job.matcher && job.export_dir.empty()) {
-            std::fprintf(stderr, "%s\n", D::no_matcher.get());
-            return 2;
-        }
         if (job.export_dir.empty() && fs::exists(job.out_dir) && !job.overwrite) {
             std::fprintf(stderr, "%s\n", format(D::out_exists, {job.out_dir}).c_str());
             return 2;

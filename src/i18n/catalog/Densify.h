@@ -426,6 +426,20 @@ SS_DENSIFY_OPT(opt_seed,
     "Seed voor de steekproef en de puntgrens. Standaard: 0",
     "Зерно выборки и ограничения числа точек. По умолчанию: 0",
     "Örnekleme ve nokta sınırı için tohum. Varsayılan: 0")
+SS_DENSIFY_OPT(opt_accept_license,
+    "Accept Meta's DINOv3 License and RoMa v2's MIT terms after reading them; the checkpoint carries both",
+    "Meta の DINOv3 ライセンスと RoMa v2 の MIT 条項を読んだうえで受け入れる。チェックポイントは両方を含む",
+    "阅读后接受 Meta 的 DINOv3 许可与 RoMa v2 的 MIT 条款；检查点同时包含两者",
+    "閱讀後接受 Meta 的 DINOv3 授權與 RoMa v2 的 MIT 條款；檢查點同時包含兩者",
+    "Meta 의 DINOv3 라이선스와 RoMa v2 의 MIT 조항을 읽은 뒤 수락. 체크포인트에 둘 다 들어 있음",
+    "Metas DINOv3-Lizenz und die MIT-Bedingungen von RoMa v2 nach dem Lesen annehmen; der Checkpoint enthält beide",
+    "Accepter la licence DINOv3 de Meta et les termes MIT de RoMa v2 après lecture ; le point de contrôle contient les deux",
+    "Aceptar la licencia DINOv3 de Meta y los términos MIT de RoMa v2 tras leerlos; el punto de control contiene ambos",
+    "Aceitar a licença DINOv3 da Meta e os termos MIT do RoMa v2 depois de os ler; o ponto de controlo contém ambos",
+    "Accettare la licenza DINOv3 di Meta e i termini MIT di RoMa v2 dopo averli letti; il checkpoint li contiene entrambi",
+    "Meta's DINOv3-licentie en de MIT-voorwaarden van RoMa v2 aanvaarden na lezing; het checkpoint bevat beide",
+    "Принять лицензию DINOv3 от Meta и условия MIT RoMa v2 после прочтения; контрольная точка содержит обе",
+    "Okuduktan sonra Meta'nın DINOv3 Lisansını ve RoMa v2'nin MIT koşullarını kabul et; denetim noktası ikisini de içerir")
 SS_DENSIFY_OPT(opt_overwrite,
     "Replace an output model that already exists",
     "既にある出力モデルを置き換える",
@@ -633,34 +647,6 @@ SS_MSG(matcher,
     KO("매처: {0}"), DE("Zuordner: {0}"), FR("Apparieur : {0}"), ES("Emparejador: {0}"),
     PT("Emparelhador: {0}"), IT("Accoppiatore: {0}"), NL("Koppelaar: {0}"),
     RU("Сопоставитель: {0}"), TR("Eşleyici: {0}"));
-
-SS_MSG(no_matcher,
-    EN("This build has no dense matcher of its own yet. Pass --matches <dir> with matches "
-       "dumped by reference/python/roma_dump_matches.py, which --export-pairs <dir> prepares."),
-    JA("このビルドにはまだ密なマッチャがありません。reference/python/roma_dump_matches.py が書き出した"
-       "マッチを --matches <dir> で渡してください。その入力は --export-pairs <dir> で用意できます。"),
-    ZH_HANS("此构建尚无自带的稠密匹配器。请用 --matches <dir> 传入 reference/python/roma_dump_matches.py "
-            "导出的匹配，其输入可由 --export-pairs <dir> 生成。"),
-    ZH_HANT("此建置尚無自帶的稠密匹配器。請用 --matches <dir> 傳入 reference/python/roma_dump_matches.py "
-            "匯出的匹配，其輸入可由 --export-pairs <dir> 產生。"),
-    KO("이 빌드에는 아직 자체 조밀 매처가 없습니다. reference/python/roma_dump_matches.py 가 쓴 "
-       "매칭을 --matches <dir> 로 주세요. 그 입력은 --export-pairs <dir> 로 준비합니다."),
-    DE("Dieser Build hat noch keinen eigenen dichten Zuordner. --matches <dir> mit Zuordnungen "
-       "angeben, die reference/python/roma_dump_matches.py schreibt; --export-pairs <dir> bereitet sie vor."),
-    FR("Cette version n'a pas encore son propre apparieur dense. Passez --matches <dir> avec des "
-       "appariements écrits par reference/python/roma_dump_matches.py, que --export-pairs <dir> prépare."),
-    ES("Esta compilación aún no tiene emparejador denso propio. Pasa --matches <dir> con "
-       "correspondencias de reference/python/roma_dump_matches.py, que --export-pairs <dir> prepara."),
-    PT("Esta compilação ainda não tem emparelhador denso próprio. Passe --matches <dir> com "
-       "correspondências de reference/python/roma_dump_matches.py, que --export-pairs <dir> prepara."),
-    IT("Questa build non ha ancora un accoppiatore denso proprio. Passa --matches <dir> con "
-       "corrispondenze scritte da reference/python/roma_dump_matches.py, che --export-pairs <dir> prepara."),
-    NL("Deze build heeft nog geen eigen dichte koppelaar. Geef --matches <dir> met overeenkomsten "
-       "van reference/python/roma_dump_matches.py; --export-pairs <dir> bereidt ze voor."),
-    RU("В этой сборке пока нет своего плотного сопоставителя. Укажите --matches <dir> с "
-       "соответствиями из reference/python/roma_dump_matches.py; их вход готовит --export-pairs <dir>."),
-    TR("Bu derlemenin henüz kendi yoğun eşleyicisi yok. reference/python/roma_dump_matches.py'nin "
-       "yazdığı eşleşmeleri --matches <dir> ile verin; girdisini --export-pairs <dir> hazırlar."));
 
 SS_MSG(progress,
     EN("Reference view {0} of {1}: points so far {2}"),
