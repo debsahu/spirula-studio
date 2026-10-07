@@ -29,8 +29,9 @@ public:
         bool mask_flipped = false;
         // Dense: the model the trainer is set to, "" for its own pick.
         std::string recon_dir;
-        // Dense: draws the checkpoint's state and returns whether a run can start.
-        std::function<bool()> draw_checkpoint;
+        // Dense: draws the checkpoint's state for the chosen source (a kDensifySources
+        // index) and returns whether a run can start.
+        std::function<bool(int)> draw_checkpoint;
     };
     ~RecomputePanel();
 
@@ -62,7 +63,7 @@ private:
     bool _use_masks = true;
 
     // Dense: the preset, overrides and what the run last said.
-    int _preset = 0, _refs = 0, _neighbours = 0, _rule = 0, _matches = 0, _max_points = 0,
+    int _source = 0, _preset = 0, _refs = 0, _neighbours = 0, _rule = 0, _matches = 0, _max_points = 0,
         _min_track = 0;
     bool _replace = false;
     std::atomic<bool> _out_exists{false};

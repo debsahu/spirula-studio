@@ -188,8 +188,9 @@ struct BatchCapabilities {
     // Does it read the text prompt? BiRefNet needs none, and runs without one.
     std::function<bool(const std::string&)> mask_model_prompted;
     std::function<bool(const std::string&)> geometry_model_ready;
-    // Checkpoint on disk and both licences accepted.
-    std::function<bool()> densify_ready;
+    // The source this row picks decides what is needed: all but moge want the
+    // checkpoint on disk and both licences accepted.
+    std::function<bool(const DensifyJob&)> densify_ready;
 };
 
 // Check one row. `all`/`index` are for the checks that are about the list
@@ -207,7 +208,8 @@ struct BatchModelNeeds {
     std::string mask_model_id, mask_detector_id;
     bool geometry = false;
     std::string geometry_model;
-    bool densify = false;
+    bool densify = false;       // the row needs the RoMa checkpoint and licences
+    DensifyJob densify_job;
 };
 // False for a row that is off, has no Dataset stage, or whose preset cannot be read
 // (the pre-flight reports that one); `out` is then untouched.

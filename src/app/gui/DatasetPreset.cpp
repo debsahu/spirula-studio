@@ -77,6 +77,7 @@ namespace {
     /* ---- dense points; the source model is the capture's, not the preset's */ \
     X("densify_enable",             sfm.densify.enable)                       \
     X("densify_preset",             sfm.densify.preset)                       \
+    X("densify_source",             sfm.densify.source)                       \
     X("densify_refs",               sfm.densify.refs)                         \
     X("densify_neighbours",         sfm.densify.neighbours)                   \
     X("densify_rule",               sfm.densify.rule)                         \
@@ -249,6 +250,7 @@ void sanitize_dataset_settings(DatasetSettings& s) {
 
     DensifyJob& d = s.sfm.densify;
     clamp_to(d.preset, 0, kNumDensifyPresets - 1);
+    clamp_to(d.source, 0, kNumDensifySources - 1);
     clamp_to(d.refs, 0, 100000);
     clamp_to(d.neighbours, 0, 64);
     clamp_to(d.rule, 0, 2);

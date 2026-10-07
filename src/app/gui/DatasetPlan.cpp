@@ -745,6 +745,7 @@ StepFields densify_fields(const DensifyJob& d) {
     StepFields f;
     add(f, "densify_model", "", d.model.empty() ? "auto" : d.model);
     add(f, "densify_preset", "", kDensifyPresets[std::clamp(d.preset, 0, kNumDensifyPresets - 1)]);
+    add(f, "densify_source", "", kDensifySources[std::clamp(d.source, 0, kNumDensifySources - 1)]);
     add(f, "densify_refs", "", num(d.refs));
     add(f, "densify_neighbours", "", num(d.neighbours));
     add(f, "densify_rule", "", kDensifyRules[std::clamp(d.rule, 0, 2)]);
@@ -759,6 +760,14 @@ std::string densify_model_of(const DatasetRecord& rec) {
     for (const StepField& f : rec.step(Step::Densify).fields)
         if (f.key == "densify_model") return f.value == "auto" ? std::string() : f.value;
     return {};
+}
+
+int densify_source_of(const DatasetRecord& rec) {
+    for (const StepField& f : rec.step(Step::Densify).fields)
+        if (f.key == "densify_source")
+            for (int i = 0; i < kNumDensifySources; i++)
+                if (f.value == kDensifySources[i]) return i;
+    return kSourceAuto;
 }
 
 StepFields geometry_fields(const GeometryJob& g) {
@@ -950,7 +959,12 @@ DatasetPlan plan_dataset(const PlanJob& job, const WorkspaceState& ws,
     } else if (rd.frames_id != rf.id || rd.model_id != rr.id) {
         set(d, Act::Redo, Why::Stale);
     } else {
-        compare(d, rd, diff(rd.fields, densify_fields(job.densify)));
+        // A record from before the source option names none: that was auto.
+        StepFields was = rd.fields;
+        bool named = false;
+        for (const StepField& f : was) named = named || f.key == "densify_source";
+        if (!named) add(was, "densify_source", "", kDensifySources[kSourceAuto]);
+        compare(d, rd, diff(was, densify_fields(job.densify)));
     }
 
     StepPlan& g = p[Step::Geometry];

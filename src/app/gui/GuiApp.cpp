@@ -720,6 +720,7 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("enabled", cfg_str(_densify.enable));
     line("model", _densify.model.empty() ? "auto" : _densify.model);
     line("preset", kDensifyPresets[std::clamp(_densify.preset, 0, kNumDensifyPresets - 1)]);
+    line("source", kDensifySources[std::clamp(_densify.source, 0, kNumDensifySources - 1)]);
 
     // The training config, grouped the way the options editor groups it.
     for (int si = 0; si < kTrainNumSections; si++) {
@@ -1459,7 +1460,7 @@ BatchCapabilities GuiApp::batch_capabilities() const {
     caps.masking = backends().builtin_masking;
     caps.geometry = geometry_availability().empty();
     caps.densify = densify_availability().empty();
-    caps.densify_ready = [this] { return densify_ready(); };
+    caps.densify_ready = [this](const DensifyJob& j) { return densify_ready(j); };
     caps.mask_model_ready = [](const std::string& id, const std::string& detector_id) {
         return !cached_mask_model(id, detector_id).empty();
     };
@@ -1535,7 +1536,7 @@ GuiApp::BatchFetchPlan GuiApp::batch_fetch_plan() const {
             for (const PendingDownload& d : geometry_model_downloads(n.geometry_model))
                 lists.push_back(d.license_family);
         }
-        if (n.densify && !densify_ready() && !plan.densify) {
+        if (n.densify && !densify_ready(n.densify_job) && !plan.densify) {
             plan.densify = true;
             for (const std::string& f : densify_license_families()) lists.push_back(f);
         }
@@ -3012,8 +3013,12 @@ std::string GuiApp::state_json() {
     out += ",\"densify_enable\":";
     out += _densify.enable ? "true" : "false";
     out += ",\"densify_model\":" + quoted(_densify.model);
+    out += ",\"densify_source\":" + quoted(kDensifySources[std::clamp(_densify.source, 0, kNumDensifySources - 1)]);
+    out += ",\"densify_auto_picks\":" +
+           quoted(kDensifySources[densify_resolved_source(
+               kSourceAuto, densify_has_depth_maps(_workspace))]);
     out += ",\"densify_ready\":";
-    out += densify_ready() ? "true" : "false";
+    out += densify_ready(_densify) ? "true" : "false";
     out += ",\"dense_panel_running\":";
     out += _dense_panel.running() ? "true" : "false";
     // Index order is the declaration order of mask::CanvasMode.
@@ -5726,8 +5731,10 @@ void GuiApp::draw_masking_options(const MaskingPanel& p) {
 // Dense points
 // ---------------------------------------------------------------------------
 
-bool GuiApp::densify_ready() const {
-    if (!densify_availability().empty() || !densify_model_cached()) return false;
+bool GuiApp::densify_ready(const DensifyJob& job) const {
+    if (!densify_availability().empty()) return false;
+    if (!densify_needs_roma(job)) return true;
+    if (!densify_model_cached()) return false;
     for (const std::string& f : densify_license_families())
         if (!license_accepted(f)) return false;
     return true;
@@ -5735,7 +5742,7 @@ bool GuiApp::densify_ready() const {
 
 bool GuiApp::densify_model_missing() const {
     return densify_availability().empty() &&
-           densify_blocks_run(_densify, !_lidar.empty(), densify_ready());
+           densify_blocks_run(_densify, !_lidar.empty(), densify_ready(_densify));
 }
 
 // Consent first, the checkpoint's licences then the download, and a refusal
@@ -5751,7 +5758,7 @@ void GuiApp::request_densify_download() {
         });
 }
 
-bool GuiApp::draw_densify_checkpoint() {
+bool GuiApp::draw_densify_checkpoint(int source) {
     FileDownload& dl = _dense_download.current();
     if (_dense_download.running()) {
         ui::ProgressBarRaw(std::max(dl.progress(), 0.0f), ImVec2(px(260.0f), 0),
@@ -5762,7 +5769,13 @@ bool GuiApp::draw_densify_checkpoint() {
         ImGui::PopID();
         return false;
     }
-    if (densify_ready()) {
+    if (source == kSourceMoge) {
+        ui::TextDisabledWrapped(dgmsg::source_moge_needs_none);
+        return true;
+    }
+    DensifyJob probe;
+    probe.source = source;
+    if (densify_ready(probe)) {
         ui::TextColored(kOk, dgmsg::ckpt_ready);
         return true;
     }
@@ -5790,7 +5803,7 @@ void GuiApp::draw_densify_options() {
     if (!_densify.enable) return;
 
     ImGui::Indent();
-    draw_densify_checkpoint();
+    draw_densify_checkpoint(_densify.source);
 
     ImGui::SetNextItemWidth(px(320.0f));
     if (ui::BeginCombo(dgmsg::source_model, _densify.model.empty() ? dgmsg::model_auto.get()
@@ -5808,6 +5821,16 @@ void GuiApp::draw_densify_options() {
         ImGui::EndCombo();
     }
     ui::help_on_hover(spirula::i18n::msg::densify::opt_model);
+
+    ImGui::SetNextItemWidth(px(320.0f));
+    ui::Combo(dgmsg::source_from, &_densify.source,
+              {&dgmsg::source_auto, &dgmsg::source_roma, &dgmsg::source_moge,
+               &dgmsg::source_hybrid});
+    ui::help_on_hover(dgmsg::source_help);
+    if (_densify.source == kSourceAuto) {
+        const bool depth = densify_has_depth_maps(_workspace);
+        ui::TextDisabledWrapped(depth ? dgmsg::source_auto_hybrid : dgmsg::source_auto_roma);
+    }
 
     const bool presets = densify_has_flag("--preset");
     ImGui::BeginDisabled(!presets);
@@ -5885,7 +5908,7 @@ void GuiApp::draw_dense_row(bool busy) {
     if (_cfg.data.empty() || !densify_availability().empty()) return;
     RecomputePanel::Source src{_cfg.data, _cfg.image_dir, _cfg.mask_dir, _cfg.flip_mask};
     src.recon_dir = _cfg.colmap_recon_dir;
-    src.draw_checkpoint = [this] { return draw_densify_checkpoint(); };
+    src.draw_checkpoint = [this](int source) { return draw_densify_checkpoint(source); };
     _dense_panel.draw(src, busy, [this](std::string& device) {
         if (native_work_busy() || !freeze_native_device()) return false;
         device = _native_device_uuid;
@@ -7015,6 +7038,7 @@ std::string plan_key_label(const std::string& key) {
         {"feature_prompt", &dmsg::mask_features_only},
         {"mask_threshold", &dmsg::mask_threshold}, {"geometry_model", &dmsg::geom_model},
         {"densify_model", &dgmsg::source_model}, {"densify_preset", &dgmsg::preset},
+        {"densify_source", &dgmsg::source_from},
         {"geometry_max_size", &dmsg::geom_max_size},
         {"geometry_tokens", &dmsg::geom_num_tokens},
         {"jpeg_quality", &dmsg::geom_jpeg_quality},
@@ -7200,6 +7224,7 @@ void GuiApp::restore_from_record(bool announce) {
     }
     apply_dataset_settings(s);
     _densify.model = densify_model_of(rec);
+    _densify.source = densify_source_of(rec);
     restore_record_rows(rec);
     // What the picker last applied no longer describes the panel, and a
     // built-in left armed would be put back over it by the next probe.

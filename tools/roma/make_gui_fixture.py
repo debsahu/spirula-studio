@@ -55,6 +55,8 @@ def main():
     ap.add_argument("src", type=pathlib.Path)
     ap.add_argument("dst", type=pathlib.Path)
     ap.add_argument("--images", type=int, default=6)
+    ap.add_argument("--depths", action="store_true",
+                    help="also copy SRC/depths for the kept images (SRC from --check-source moge)")
     a = ap.parse_args()
 
     images = [i for i in read_images(a.src / "sparse/0/images.bin") if i[3].startswith("pin_")]
@@ -88,6 +90,12 @@ def main():
     (a.dst / "images").mkdir(exist_ok=True)
     for _, _, _, name, _ in images:
         shutil.copy(a.src / "images" / name, a.dst / "images" / name)
+    if a.depths:
+        (a.dst / "depths").mkdir(exist_ok=True)
+        for _, _, _, name, _ in images:
+            found = list((a.src / "depths").glob(pathlib.Path(name).stem + ".*"))
+            assert found, "no depth map for " + name
+            shutil.copy(found[0], a.dst / "depths" / found[0].name)
     print(f"{len(images)} images, {len(points)} points -> {a.dst}")
 
 

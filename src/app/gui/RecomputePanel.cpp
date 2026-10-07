@@ -268,9 +268,17 @@ void RecomputePanel::draw_dense(const Source& src, bool busy,
     const std::string out_dir = dense_out_dir(_model);
     ui::TextColoredWrapped(kDim, dgmsg::panel_explain,
                            {shown_path(src.dataset, _model), shown_path(src.dataset, out_dir)});
-    const bool ready = !src.draw_checkpoint || src.draw_checkpoint();
+    const bool ready = !src.draw_checkpoint || src.draw_checkpoint(_source);
 
     ImGui::BeginDisabled(running || busy);
+    ImGui::SetNextItemWidth(px(200.0f));
+    ui::Combo(dgmsg::source_from, &_source,
+              {&dgmsg::source_auto, &dgmsg::source_roma, &dgmsg::source_moge,
+               &dgmsg::source_hybrid});
+    ui::help_on_hover(dgmsg::source_help);
+    if (_source == kSourceAuto)
+        ui::TextDisabledWrapped(densify_has_depth_maps(src.dataset) ? dgmsg::source_auto_hybrid
+                                                                    : dgmsg::source_auto_roma);
     ImGui::SetNextItemWidth(px(200.0f));
     ImGui::BeginDisabled(!densify_has_flag("--preset"));
     int preset = _preset;
@@ -313,6 +321,7 @@ void RecomputePanel::draw_dense(const Source& src, bool busy,
     if (ui::Button(dgmsg::panel_run) && start(device)) {
         DensifyJob j;
         j.model = fs::relative(_model, src.dataset).generic_string();
+        j.source = _source;
         j.preset = _preset;
         j.refs = _refs;
         j.neighbours = _neighbours;

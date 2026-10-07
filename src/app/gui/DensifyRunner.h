@@ -20,6 +20,10 @@ inline constexpr const char* kDensifyPresets[] = {"auto", "turbo", "fast", "base
 inline constexpr int kNumDensifyPresets = 6;
 // `--neighbour-rule`; index 0 sends nothing.
 inline constexpr const char* kDensifyRules[] = {"auto", "covis", "pose"};
+// `--source`, in the order the combo lists them; index 0 sends nothing.
+inline constexpr const char* kDensifySources[] = {"auto", "roma", "moge", "hybrid"};
+inline constexpr int kNumDensifySources = 4;
+inline constexpr int kSourceAuto = 0, kSourceRoma = 1, kSourceMoge = 2, kSourceHybrid = 3;
 
 // Every number is 0 for "let the tool choose", which is also what the CLI does.
 struct DensifyJob {
@@ -33,6 +37,7 @@ struct DensifyJob {
     int matches_per_ref = 0;
     int max_points = 0;
     int min_track = 0;
+    int source = kSourceAuto;   // kDensifySources
     bool use_masks = true;
     bool overwrite = false;     // set by the plan, never by the user
 };
@@ -41,6 +46,15 @@ struct DensifyJob {
 std::vector<std::string> densify_args(const DensifyJob& job, const std::string& dataset,
                                       const std::string& images, const std::string& masks,
                                       bool masks_flipped, bool preset_supported);
+
+// Auto as the CLI resolves it: hybrid when the dataset has depth maps, else roma.
+// A fixed source resolves to itself.
+int densify_resolved_source(int source, bool have_depth_maps);
+// Does `depths/` of this dataset hold anything?
+bool densify_has_depth_maps(const std::string& dataset);
+// RoMa and its licences are needed by every source but moge; auto is roma or
+// hybrid, so it needs them whatever the dataset holds.
+bool densify_needs_roma(const DensifyJob& job);
 
 // What a new settings block does to the model the screen is on. A preset leaves
 // it (it names one capture's folder); a batch row starts from the tool's own pick.
