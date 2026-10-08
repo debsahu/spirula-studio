@@ -378,6 +378,7 @@ TwoImageRun two_image_run(const DenseConfig& config, const char* name) {
 // two-image points routed past the rule; the free-space switch ignored; "off" ignored.
 void reconstruction_two_image_admission() {
     auto config = small_config();
+    config.two_image_points = "auto";
     const auto on = two_image_run(config, "on");
     config.free_space_test = false;
     const auto no_free_space = two_image_run(config, "nofs");
@@ -413,7 +414,7 @@ ReconstructionStatistics wall_run(const DenseConfig& config, const FilterPlan* p
 }
 
 // Mutant: the plan's bar never checked. Best pairs are 0.17 (baseline 0.75) or 0.25 (0.5) per cell;
-// 600 is the deterministic count of points whose best pair is the shorter one.
+// 536 is the deterministic count of points whose best pair is the shorter one.
 void reconstruction_depth_precision() {
     const auto config = small_config();
     const auto none = wall_run(config, nullptr, "noplan");
@@ -421,7 +422,7 @@ void reconstruction_depth_precision() {
     FilterPlan tight; tight.depth_precision = 0.2;
     const auto a = wall_run(config, &loose, "loose"), b = wall_run(config, &tight, "tight");
     check(none.imprecise == 0 && a.imprecise == 0, "points dropped with no bar or a loose one");
-    check(b.imprecise == 600 && b.exported > 0, "a 0.2 bar dropped " + std::to_string(b.imprecise) + " points");
+    check(b.imprecise == 536 && b.exported > 0, "a 0.2 bar dropped " + std::to_string(b.imprecise) + " points");
     check(b.depth_precision == 0.2, "the plan was not recorded");
 }
 
@@ -530,6 +531,7 @@ void reprojection_histogram_quantiles() {
 // Mutant: the check's switch ignored. End to end, fusion's drift stays under 0.5 px here.
 void reconstruction_written_reprojection() {
     auto config = small_config();
+    config.reprojection_check = true;
     ParsedDataset dataset;
     dataset.center = {4000000.123456789, 5, -2};
     dataset.raw_to_file = {0,-1,0,10, 1,0,0,20, 0,0,1,30, 0,0,0,1};
@@ -555,17 +557,17 @@ void all_filters_off_matches_the_base_pipeline() {
 }
 
 // Mutants: a filter setting missing from the field table (lost in JSON, presets and the CLI);
-// validation accepting an unknown two-image mode or a non-finite bar; defaults other than on.
+// validation accepting an unknown two-image mode or a non-finite bar; defaults other than the chosen ones.
 void filter_settings_round_trip_and_validate() {
     const DenseConfig defaults;
-    check(defaults.two_image_points == "auto" && defaults.free_space_test && defaults.far_isolated &&
-          defaults.reprojection_check && defaults.max_depth_error_per_cell == 0 && defaults.max_baseline == 0, "defaults");
+    check(defaults.two_image_points == "off" && defaults.free_space_test && defaults.far_isolated &&
+          !defaults.reprojection_check && defaults.max_depth_error_per_cell == -1 && defaults.max_baseline == 0, "defaults");
     DenseConfig c;
-    c.two_image_points = "off"; c.free_space_test = false; c.far_isolated = false; c.reprojection_check = false;
+    c.two_image_points = "auto"; c.free_space_test = false; c.far_isolated = false; c.reprojection_check = true;
     c.max_depth_error_per_cell = 0.05; c.max_baseline = -1;
     DenseConfig d;
     read_config(d, json_parse(config_json(c)));
-    check(d.two_image_points == "off" && !d.free_space_test && !d.far_isolated && !d.reprojection_check &&
+    check(d.two_image_points == "auto" && !d.free_space_test && !d.far_isolated && d.reprojection_check &&
           d.max_depth_error_per_cell == 0.05 && d.max_baseline == -1, "a filter setting did not survive JSON");
     auto bad = defaults; bad.two_image_points = "maybe";
     bool refused = false;

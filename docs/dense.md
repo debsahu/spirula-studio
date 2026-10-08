@@ -397,9 +397,10 @@ The default density uses every matching-grid pixel (`--stride 1`). Filters
 require overlap of at least 0.5, a triangulation angle of at least 1 degree,
 reprojection error at most 2 working-view pixels, and relative depth
 agreement within 1%. The initial support requirement is three original
-images. Set `--min-source-images 2` deliberately for two-view data. With the
-default three, `--two-image-points auto` admits a two-image point only under
-the conditions in [Point filters](#point-filters); `off` never admits one.
+images. Set `--min-source-images 2` deliberately for two-view data; the
+pipeline never lowers support by default. With three, the opt-in
+`--two-image-points auto` admits a two-image point only under the conditions
+in [Point filters](#point-filters).
 
 Source-mode sampling is performed once per reference, after masks, valid rays,
 confidence rejection, and configured cycle checks. Fifteen percent of the
@@ -492,7 +493,7 @@ run and are separate from the persistent pair-prediction cache.
 Five filters act on refined points. Each is a setting, each is counted in the
 manifest's `filters` block, and the command prints one summary line.
 
-- `--two-image-points auto|off` (default `auto`, only with three-image support).
+- `--two-image-points auto|off` (default `off`; `auto` acts only with three-image support).
   A point seen by exactly two original images is kept when its reprojection
   error is no worse than the median error of the run's three-or-more-image
   points. With `--free-space-test true` (default) it must also not be seen
@@ -501,13 +502,15 @@ manifest's `filters` block, and the command prints one summary line.
   in front of the nearest of the 3 x 3 cells around it, in a view of an image
   outside its own pair, is dropped. A cell with no observation is no evidence.
   The bar is an exact median and the grid is sized by the views, so the host
-  budget cannot change the cloud.
-- `--max-depth-error-per-cell` (default 0, automatic; negative is off). A point
+  budget cannot change the cloud. It is opt-in because it is slow: samples that
+  three-image grouping would drop at once go through full refinement instead.
+- `--max-depth-error-per-cell` (default -1, off; 0 is automatic). A point
   is dropped when its best pair moves its depth by more than this share per
   matcher cell: `1 / (f sin(parallax))`, `f` the coarser view's focal length in
   matcher cells. Automatic is `max(2 %, 1 / (f sin(theta / 2)))`, with `theta`
   the median angle the planned image pairs subtend at the sparse points both
-  see, and `f` the median view focal. Without shared sparse points it is off.
+  see, and `f` the median view focal. Without shared sparse points automatic
+  is off.
 - `--far-isolated true|false` (default true). After fusion and before the point
   limit, a point more than a margin outside the sparse points' p0.5 to p99.5
   box (max-norm) with at most two other points within a radius is dropped. The
@@ -518,7 +521,7 @@ manifest's `filters` block, and the command prints one summary line.
   pairing on a metric model, a neighbour farther than 3 x the median planned
   baseline is refused and the next-ranked image takes its place. A positive
   value applies as given, on any model.
-- `--reprojection-check true|false` (default true) removes nothing. The written
+- `--reprojection-check true|false` (default false) removes nothing. The written
   PLY is read back, the output transform undone, and each point projected into
   the views whose observations produced it. A fused point carries the id of its
   best-supported member, so the figure includes fusion's displacement. The
