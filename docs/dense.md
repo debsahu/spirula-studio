@@ -530,7 +530,33 @@ manifest's `filters` block, and the command prints one summary line.
   with the cloud. With the check off, and the two-image rule off, no
   observation files are written.
 
-MEASUREMENTS_PLACEHOLDER
+Measured on a basement capture: the 24 equirectangular panoramas that see a
+staircase most, 69 explicit image pairs, the `balanced` preset, masks
+inverted. Every arm uses one binary and one set of cached predictions, so only
+the filters differ. Violations are the share of stairs points within 1 cm of
+5,000 sampled camera-to-sparse-point segments; sd is over 3 segment draws.
+Adding 1 % synthetic floaters to arm A reads 1.285 %, so the measure sees
+floaters.
+
+| Arm | Filters | Points | Stairs points | Violations | Seconds |
+|---|---|---|---|---|---|
+| A | none | 1,943,024 | 144,795 | 0.441 % (sd 0.025) | 197, 184 |
+| B | all | 4,009,116 | 332,670 | 0.402 % (sd 0.022) | 1,027, 1,025 |
+| C | two-image and free space | 4,416,243 | 373,304 | 0.483 % (sd 0.020) | 1,236 |
+| D | two-image, no free space | 4,578,979 | 396,753 | 0.511 % (sd 0.023) | 1,252 |
+| E | depth precision | 1,915,587 | 143,408 | 0.449 % (sd 0.029) | 183 |
+| F | far isolated | 1,943,023 | 144,795 | 0.441 % | 187 |
+
+These arms ran with the reprojection check on, which adds about 31 s (181.5 s
+against 150.5 s on one binary). E removes 27,437 points and a random removal
+of as many reads 0.444 %, so the bar shows no benefit here and is off by
+default. F removes one point, outside the stairs. Two-image points cost about
+6.5 times the run, because samples that three-image grouping drops at once go
+through full refinement; they are opt-in. For B's denser cloud, run with
+`--two-image-points auto --max-depth-error-per-cell 0`.
+
+With every filter off the cloud is byte-identical to the pipeline without
+them, and with the defaults it differs only by the far isolated points.
 
 ## Outputs, caching, and cancellation
 
