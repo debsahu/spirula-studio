@@ -5,9 +5,10 @@
 
 A gated download opens the licence dialog instead of failing. Every family's
 Accept stays off until the "I have read and accept" tick, cancelling downloads
-nothing and says so, and accepting starts the download by itself. Private config
-and cache, so the licences and the models are this run's own. The one download
-that is allowed to start is cancelled the moment it is seen running.
+nothing and says so, and accepting starts the download by itself; a batch asks
+up front, for the built-in families and a registered one (RoMa) alike. Private
+config and cache, so the licences and the models are this run's own. A download
+it lets start is seen running, then cancelled by quitting the window.
 """
 import argparse
 import contextlib
@@ -241,6 +242,44 @@ def main():
         check(accepted("gdino") and s["license_prompt"] == "" and
               until(lambda: state()["model_download"] == "running", "the fetch", 20),
               "after the last answer the batch fetches what it needs by itself")
+
+        # ---- a registered family: a dense row asks for RoMa up front too ------
+        # No built-in preset turns dense on, so the row reads one written here.
+        quit_gui(pid, exe)
+        until(lambda: not alive(pid), "the second window to close", 20)
+        shutil.rmtree(cfg, ignore_errors=True)
+        shutil.rmtree(cache, ignore_errors=True)
+        preset = cfg / "spirula-studio" / "presets" / "dataset" / "dense-on.json"
+        preset.parent.mkdir(parents=True)
+        preset.write_text(json.dumps({"kind": "dataset", "name": "dense-on",
+                                      "settings": {"dense_enable": True}}))
+        (cfg / "spirula-studio" / "batch.json").write_text(json.dumps({"rows": [{
+            "sources": [str(imgs)], "dataset": str(work / "ds"),
+            "dataset_preset": {"path": str(preset), "name": "dense-on"},
+            "stages": [True, False, False, False], "enabled": True}]}))
+        roma = lambda: any(models.glob("romav2.0.1.pt*")) if models.exists() else False
+        pid = json.loads(ctl("launch", "--exe", exe, "--offscreen", "--port", str(a.port),
+                             "--log", str(work / "gui3.log")))["pid"]
+        until(lambda: state()["app_ready"], "the third window")
+        ctl("click", "home_batch")
+        until(lambda: state()["screen"] == "batch", "the Batch screen")
+        ctl("click", "batch_start")
+        s = state()
+        check(s["license_prompt"] == "roma" and not s["batch_fetching"] and not roma(),
+              "RoMa: Start asks for its licence before anything runs (prompt=%r)" %
+              s["license_prompt"])
+        shot("roma_batch.png")
+        ctl("click", "cancel")
+        s = state()
+        check(s["license_prompt"] == "" and not s["batch_fetching"] and s["license_notice"] and
+              not accepted("roma") and not roma(),
+              "RoMa: declining stops the batch, records nothing, downloads nothing")
+        ctl("click", "batch_start")
+        ctl("click", "license_accept_tick")
+        ctl("click", "license_accept")
+        until(lambda: state()["batch_fetching"], "the batch to start fetching", 20)
+        check(accepted("roma") and until(roma, "the RoMa download", 30),
+              "RoMa: after accepting, the batch fetches the checkpoint by itself")
     finally:
         quit_gui(pid, exe)
         shutil.rmtree(work, ignore_errors=True)

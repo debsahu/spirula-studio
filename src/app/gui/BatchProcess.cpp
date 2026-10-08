@@ -366,6 +366,8 @@ bool batch_model_needs(const BatchRow& row, BatchModelNeeds& out) {
     out.mask_detector_id = s.mask_detector_id;
     out.geometry = s.sfm.geometry.enable;
     out.geometry_model = s.sfm.geometry.model;
+    out.dense = s.sfm.dense.enable;
+    out.dense_checkpoint = s.sfm.dense.config.checkpoint;
     return true;
 }
 
@@ -447,6 +449,11 @@ void check_dataset_stage(const BatchRow& row, const BatchCapabilities& caps,
             out.push_back(issue_of(msg::chk_geometry_model_missing, kSt, true,
                                    s.sfm.geometry.model));
     }
+
+    if (s.sfm.dense.enable && caps.dense_model_ready &&
+        !caps.dense_model_ready(s.sfm.dense.config.checkpoint))
+        out.push_back(issue_of(msg::chk_dense_model_missing, kSt, true,
+                               s.sfm.dense.config.checkpoint));
 
     // A preset made for photographs, pointed at a video (or the other way
     // round): it still runs, and it picks the wrong pairing strategy.

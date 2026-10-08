@@ -216,7 +216,7 @@ std::vector<std::string> video_dialog_filters() {
 static ModelContent classify_recent_model(const std::string& path);
 
 GuiApp::GuiApp() {
-    register_dense_license();
+    init_dense();
     load_settings();
     // Before the first frame, so an entry that is gone is never drawn.
     _recent.start_probe(classify_recent_model);
@@ -1493,6 +1493,10 @@ BatchCapabilities GuiApp::batch_capabilities() const {
     };
     caps.geometry_model_ready = [](const std::string& id) {
         return geometry_model_cached(id);
+    };
+    // A local checkpoint path is the dense step's own to report.
+    caps.dense_model_ready = [](const std::string& checkpoint) {
+        return checkpoint != dense_model_entry().id || model_is_cached(dense_model_entry());
     };
     return caps;
 }
@@ -3491,7 +3495,7 @@ void GuiApp::draw_language_menu() {
         } else {
             if (ui::Button(msg::font_download, ImVec2(340, 0))) {
                 _font_fetching = f;
-                _font_download.start(f->url, cjk_face_download_path(*f), f->bytes);
+                _font_download.start(PendingDownload{f->url, cjk_face_download_path(*f), f->bytes});
             }
             if (_font_download.state() == FileDownload::State::Failed)
                 ui::TextColoredWrapped(kErr, msg::font_failed,
@@ -8011,6 +8015,8 @@ void GuiApp::draw_license_modal() {
     // The terms in full, not a summary of them: the tick below is acceptance of
     // THIS text, for every family alike. Embedded, so it is on screen with no network.
     ui::TextDisabled(dmsg::license_full_text);
+    // ImGui keeps a child's scroll by id, and every family shares this one.
+    if (ImGui::IsWindowAppearing()) ImGui::SetNextWindowScroll(ImVec2(0.0f, 0.0f));
     ImGui::BeginChild("##license_text", ImVec2(0, 260), ImGuiChildFlags_Borders);
     ui::TextWrappedRaw(std::string(li.full_text));
     ImGui::EndChild();

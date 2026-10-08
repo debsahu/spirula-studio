@@ -98,6 +98,12 @@ int main() {
           "leading flag: the full terms were printed first");
 
     fresh();
+    r = run("--accept-license roma=yes --version");
+    check(r.code == 0 && has(slurp(gui_conf()), "accepted_license=roma\n") &&
+              has(r.out, "DINOv3 License") && has(r.out, "Johan Edstedt"),
+          "a registered family (RoMa): known to the CLI, both texts printed, recorded");
+
+    fresh();
     r = run("--version --accept-license=birefnet=yes");
     check(r.code == 0 && has(slurp(gui_conf()), "accepted_license=birefnet\n"),
           "trailing --accept-license=family=yes spelling is consumed too");

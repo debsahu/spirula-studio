@@ -36,6 +36,21 @@ void follow_preset(spirula::dense::DenseConfig& config) {
 
 }  // namespace
 
+void GuiApp::init_dense() {
+    register_dense_license();
+    add_batch_fetcher({
+        [](const BatchModelNeeds& n, std::vector<std::string>& families) {
+            const ModelEntry& e = dense_model_entry();
+            if (!n.dense || n.dense_checkpoint != e.id || model_is_cached(e)) return false;
+            families.push_back(e.family);
+            return true;
+        },
+        [this]() -> FileDownload* {
+            return _dense_download.state() == FileDownload::State::Running ? &_dense_download : nullptr;
+        },
+        [this] { _dense_download.start(dense_model_entry()); }});
+}
+
 bool GuiApp::dense_model_missing() const {
     return _dense.enable && _dense.config.checkpoint == "romav2.0.1" && !model_is_cached(dense_model_entry());
 }

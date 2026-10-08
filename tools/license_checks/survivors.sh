@@ -33,8 +33,8 @@ has 1 $G 'const std::string tmp = spirula::license::scratch_path_for(settings_pa
 has 1 $G 'if (ok && closed) fs::rename(tmp, settings_path(), ec);'
 none $G 'std::fopen(settings_path().c_str(), "w")'
 # The download queue refuses a licence-gated file that is not accepted.
-has 1 src/app/gui/ModelCache.cpp 'spirula::license::missing(license_family)'
-has 1 src/app/gui/ModelCache.cpp '_dl.start(d.url, d.dest, d.bytes, d.mirror, d.license_family);'
+has 1 src/app/gui/ModelCache.cpp 'spirula::license::missing(d.license_family)'
+has 1 src/app/gui/ModelCache.cpp '_dl.start(d);'
 none src/app/gui/ModelCache.cpp 'model_mirror_url'
 none src/app/gui/SfmRunner.cpp 'model_mirror_url'
 none src/app/gui/GeometryRunner.cpp 'model_mirror_url'

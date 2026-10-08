@@ -130,6 +130,15 @@ MaskModelFiles cached_mask_model(const std::string& id, const std::string& detec
 // weight loader, and a screen that called it ready would have lied.
 bool file_is_cached(const std::string& path, uint64_t bytes);
 
+// One file a run needs on disk before it can start.
+struct PendingDownload {
+    std::string url, dest;
+    uint64_t bytes = 0;          // for the progress readout; 0: unknown
+    std::string mirror;          // tried when `url` fails; empty: none
+    std::string license_family;  // empty: none needed
+    std::string sha256;          // lowercase hex the file must match; empty: unchecked
+};
+
 // A single background download. One at a time is enough for the GUI, so this
 // is a plain object the screen owns rather than a queue.
 //
@@ -142,12 +151,9 @@ public:
 
     ~FileDownload();
 
-    // `expected_bytes` feeds the progress readout (0: unknown); empty `mirror`/`sha256`: none.
     // A `license_family` not yet accepted fails at once: a backstop, the GUI asks
     // first (GuiApp::request_licenses).
-    void start(const std::string& url, const std::string& dest,
-               uint64_t expected_bytes, const std::string& mirror = "",
-               const std::string& license_family = "", const std::string& sha256 = "");
+    void start(const PendingDownload& d);
     // The first file of the pair that is not on disk yet, false if none is;
     // the caller starts the next one when this is Done.
     bool start(const ModelEntry& e, const TextDetector* d = nullptr);
@@ -178,13 +184,6 @@ private:
 // almost always a model.
 using ModelDownload = FileDownload;
 
-// One file a run needs on disk before it can start.
-struct PendingDownload {
-    std::string url, dest;
-    uint64_t bytes = 0;
-    std::string mirror;          // empty: none
-    std::string license_family;  // empty: none needed
-};
 
 // Several of them, fetched one at a time: a checkpoint that comes in two
 // parts, or a front end whose detector and matcher are separate artifacts.

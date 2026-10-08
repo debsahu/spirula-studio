@@ -963,6 +963,8 @@ private:
     double _dense_probe_time = -1.0;
     bool _dense_probe_found = false;
     bool _seed_other = false;          // "Other PLY file" picked, no file yet
+    // RoMa's licence and its batch fetcher. Once, before anything asks either.
+    void init_dense();
     void request_dense_download();
     bool dense_model_missing() const;
     GeometryPanel _geometry_panel;

@@ -680,8 +680,9 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   (SAM 3, SAM 2.1, Grounding DINO, BiRefNet) has its verbatim text in `LICENSES/`,
   embedded by `tools/gen_license_texts.py`, and is accepted in one place:
   `core/LicenseConsent.h`'s `accepted_license=` lines of gui.conf. A model with
-  licences of its own adds them with `license::register_terms()` at startup and
-  gives the GUI its wording with `register_license_info()`. The GUI shows the
+  licences of its own (RoMa: `roma`) adds its terms in `app/ModelLicenses.h`,
+  which Main.cpp and the GUI register at startup, and gives the GUI its wording
+  with `register_license_info()`. The GUI shows the
   whole text with a required "I have read and accept the terms of <name>" tick
   for EVERY family (`accept_enabled`), and a download continues by itself once it
   is accepted; a batch asks for every family up front (`GuiApp::begin_batch`),
