@@ -67,6 +67,8 @@ struct DenseConfig {
     void validate_run() const;
     uint64_t resolved_image_cache_bytes() const;
     bool effective_cycle_check() const { return cycle_check && match.bidirectional; }
+    // Two-image points are admitted only on top of the three-image default.
+    bool two_image_active() const { return two_image_points == "auto" && geometry.min_source_images == 3; }
 };
 
 }  // namespace spirula::dense

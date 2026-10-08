@@ -1,11 +1,14 @@
 #include "dense/Filters.h"
 
 #include "data/Knn.h"
+#include "dense/DiskTable.h"
 #include "dense/ExternalSort.h"
 #include "dense/PairSelection.h"
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <string>
 #include <limits>
 #include <unordered_map>
 
@@ -257,15 +260,80 @@ FilterPlan plan_depth_precision(const std::vector<PairImage>& images, const std:
     return plan;
 }
 
-ReprojectionSummary summarize_reprojection(std::vector<double> pixels, std::vector<double> cells, uint64_t invalid) {
+void ReprojectionHistogram::add(double pixels, double cells) {
+    ++pixels_[std::min(kBins, (size_t)(pixels / kBin))];
+    ++cells_[std::min(kBins, (size_t)(cells / kBin))];
+    sum_ += pixels; ++count_;
+}
+
+ReprojectionSummary ReprojectionHistogram::summary() const {
     ReprojectionSummary s;
-    s.observations = pixels.size() + invalid; s.invalid = invalid;
-    if (pixels.empty()) return s;
-    double sum = 0; for (double v : pixels) sum += v;
-    s.mean_pixels = sum / (double)pixels.size();
-    s.p50_pixels = percentile(pixels, 50); s.p95_pixels = percentile(pixels, 95);
-    s.p95_cells = percentile(std::move(cells), 95);
+    s.observations = count_ + invalid_; s.invalid = invalid_;
+    if (!count_) return s;
+    // The bin centre where the cumulative count first reaches q of the total; the open bin reads as its edge.
+    auto quantile = [&](const std::vector<uint64_t>& bins, double q) {
+        const uint64_t want = std::max<uint64_t>(1, (uint64_t)std::ceil(q * (double)count_));
+        uint64_t seen = 0;
+        for (size_t b = 0; b < bins.size(); ++b)
+            if ((seen += bins[b]) >= want) return b == kBins ? kBins * kBin : (b + 0.5) * kBin;
+        return kBins * kBin;
+    };
+    s.mean_pixels = sum_ / (double)count_;
+    s.p50_pixels = quantile(pixels_, 0.5); s.p95_pixels = quantile(pixels_, 0.95);
+    s.p95_cells = quantile(cells_, 0.95);
     return s;
+}
+
+ReprojectionSummary reproject_written(const std::filesystem::path& ply, const std::filesystem::path& ids_path,
+                                      const std::filesystem::path& ranges_path, const std::filesystem::path& observations_path,
+                                      const std::vector<View>& views, const std::array<double,16>& m,
+                                      const std::array<double,3>& center, int grid_width, int grid_height,
+                                      uint64_t budget, const std::function<void()>& check) {
+    std::ifstream input(ply, std::ios::binary), ids(ids_path, std::ios::binary);
+    std::string line, header;
+    uint64_t count = 0;
+    while (std::getline(input, line) && line != "end_header") {
+        header += line + "\n";
+        if (line.rfind("element vertex ", 0) == 0) count = std::stoull(line.substr(15));
+    }
+    if (!input || header.find("format binary_little_endian 1.0") == std::string::npos ||
+        header.find("property double x\nproperty double y\nproperty double z\nproperty uchar red\n"
+                    "property uchar green\nproperty uchar blue\n") == std::string::npos)
+        throw std::runtime_error("dense reprojection check expects the writer's double PLY");
+    DiskTable<ObservationRange> ranges(ranges_path, std::max<uint64_t>(4096, budget / 2));
+    DiskTable<TrackObservation> observations(observations_path, std::max<uint64_t>(4096, budget / 2));
+    const double a[9] = {m[0],m[1],m[2], m[4],m[5],m[6], m[8],m[9],m[10]};
+    const double det = a[0]*(a[4]*a[8]-a[5]*a[7]) - a[1]*(a[3]*a[8]-a[5]*a[6]) + a[2]*(a[3]*a[7]-a[4]*a[6]);
+    if (!(std::fabs(det) > 0)) throw std::runtime_error("dense output transform is singular");
+    const double inverse[9] = {(a[4]*a[8]-a[5]*a[7])/det, (a[2]*a[7]-a[1]*a[8])/det, (a[1]*a[5]-a[2]*a[4])/det,
+                               (a[5]*a[6]-a[3]*a[8])/det, (a[0]*a[8]-a[2]*a[6])/det, (a[2]*a[3]-a[0]*a[5])/det,
+                               (a[3]*a[7]-a[4]*a[6])/det, (a[1]*a[6]-a[0]*a[7])/det, (a[0]*a[4]-a[1]*a[3])/det};
+    ReprojectionHistogram histogram;
+    for (uint64_t i = 0; i < count; ++i) {
+        if (check) check();
+        double xyz[3]; uint8_t rgb[3]; uint64_t id = 0;
+        if (!input.read(reinterpret_cast<char*>(xyz), sizeof xyz) || !input.read(reinterpret_cast<char*>(rgb), sizeof rgb))
+            throw std::runtime_error("truncated dense cloud in the reprojection check");
+        if (!read_disk_record(ids, id) || id >= ranges.size()) throw std::runtime_error("dense exported point has no observations");
+        double shifted[3], raw[3];
+        for (int c = 0; c < 3; ++c) shifted[c] = xyz[c] - m[c * 4 + 3];
+        for (int c = 0; c < 3; ++c) raw[c] = inverse[c*3]*shifted[0] + inverse[c*3+1]*shifted[1] + inverse[c*3+2]*shifted[2];
+        const sfm::Vec3 point{raw[0] - center[0], raw[1] - center[1], raw[2] - center[2]};
+        const auto range = ranges.get(id);
+        for (uint64_t k = 0; k < range.count; ++k) {
+            const auto o = observations.get(range.offset + k);
+            if (o.view >= views.size()) throw std::runtime_error("dense observation names an unknown view");
+            const View& view = views[o.view];
+            sfm::Vec2 projected;
+            if (!project(view, point, projected)) { histogram.add_invalid(); continue; }
+            const auto r = pixel_residual(view, projected, {o.pixel[0], o.pixel[1]});
+            if (!std::isfinite(r.x) || !std::isfinite(r.y)) { histogram.add_invalid(); continue; }
+            const double sx = view.source_camera ? view.grid_scale[0] : (double)grid_width / view.camera.width;
+            const double sy = view.source_camera ? view.grid_scale[1] : (double)grid_height / view.camera.height;
+            histogram.add(std::hypot(r.x, r.y), std::hypot(r.x * sx, r.y * sy));
+        }
+    }
+    return histogram.summary();
 }
 
 }  // namespace spirula::dense

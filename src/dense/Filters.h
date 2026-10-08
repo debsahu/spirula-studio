@@ -94,6 +94,29 @@ struct ReprojectionSummary {
     uint64_t observations = 0, invalid = 0;
     double mean_pixels = 0, p50_pixels = 0, p95_pixels = 0, p95_cells = 0;
 };
-ReprojectionSummary summarize_reprojection(std::vector<double> pixels, std::vector<double> cells, uint64_t invalid);
+
+// Residuals in 0.01 bins up to 100, the last bin open, so the summary's memory is fixed.
+class ReprojectionHistogram {
+public:
+    void add(double pixels, double cells);
+    void add_invalid() { ++invalid_; }
+    ReprojectionSummary summary() const;
+private:
+    static constexpr double kBin = 0.01;
+    static constexpr size_t kBins = 10000;
+    std::vector<uint64_t> pixels_ = std::vector<uint64_t>(kBins + 1), cells_ = std::vector<uint64_t>(kBins + 1);
+    uint64_t count_ = 0, invalid_ = 0;
+    double sum_ = 0;
+};
+
+struct ObservationRange { uint64_t offset = 0, count = 0; };
+
+// Streams a written binary PLY (double x y z, uchar rgb), undoes `raw_to_file` and `center`, and
+// projects point i into each observation of record `ids[i]` (ranges into `observations`).
+ReprojectionSummary reproject_written(const std::filesystem::path& ply, const std::filesystem::path& ids,
+                                      const std::filesystem::path& ranges, const std::filesystem::path& observations,
+                                      const std::vector<View>& views, const std::array<double,16>& raw_to_file,
+                                      const std::array<double,3>& center, int grid_width, int grid_height,
+                                      uint64_t budget, const std::function<void()>& check = {});
 
 }  // namespace spirula::dense

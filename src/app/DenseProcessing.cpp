@@ -1357,7 +1357,7 @@ DenseResult run_dense(const std::string& dataset_path, const spirula::dense::Den
         const auto& st = result.statistics;
         manifest.key("filters").object();
         manifest.key("two_image_points").object().field("setting", config.two_image_points)
-            .field("active", config.two_image_points == "auto" && config.geometry.min_source_images == 3)
+            .field("active", config.two_image_active())
             .field("free_space_test", config.free_space_test).field("error_bar", st.two_image_bar)
             .field("candidates", (long long)st.two_image_candidates).field("admitted", (long long)st.two_image_admitted)
             .field("over_error_bar", (long long)st.two_image_over_bar).field("seen_through", (long long)st.seen_through)

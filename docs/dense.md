@@ -522,10 +522,10 @@ manifest's `filters` block, and the command prints one summary line.
   PLY is read back, the output transform undone, and each point projected into
   the views whose observations produced it. A fused point carries the id of its
   best-supported member, so the figure includes fusion's displacement. The
-  manifest records p50 and p95 in view pixels and p95 in matcher cells.
-
-These were measured first on another RoMa v2 densifier over the same basement
-capture; the measurements on this pipeline are below.
+  manifest records p50 and p95 in view pixels and p95 in matcher cells, from a
+  fixed histogram of 0.01 bins up to 100, so the check's memory does not grow
+  with the cloud. With the check off, and the two-image rule off, no
+  observation files are written.
 
 MEASUREMENTS_PLACEHOLDER
 

@@ -5,6 +5,8 @@
 #include "dense/PairSelection.h"
 #include "dense/Reconstruction.h"
 #include "core/CameraModel.h"
+#include "core/Sha256.h"
+#include "data/SparseEdit.h"
 
 #include <algorithm>
 #include <chrono>
@@ -109,7 +111,7 @@ void free_space_grid_spans_512_cells_per_turn() {
     check(grid.cells_x(7) == 100, "a small image has more cells than pixels");
 }
 
-// Mutants: the mean, or the lower middle, instead of the reference's upper median; a budget
+// Mutants: the mean, or the lower middle, instead of the upper median; a budget
 // small enough to spill changing the answer.
 void two_image_bar_is_the_median() {
     const auto dir = scratch("median");
@@ -137,8 +139,7 @@ void depth_precision_takes_the_best_pair_and_coarser_focal() {
     check(std::fabs(cell_focal(source, 64, 64) - 16) < 1e-12, "a source view's cell focal ignores grid_scale");
 }
 
-// The reference's two recorded bars: 2.6 % on the basement (13.8 degrees) and 11.3 % on
-// aerial0720 (3.17 degrees), f = 320. Mutants: the full angle; no 2 % floor.
+// 13.8 degrees at f = 320 gives 2.6 %, 3.17 degrees gives 11.3 %. Mutants: the full angle; no 2 % floor.
 void automatic_depth_precision_reproduces_the_measured_bars() {
     const double d = 3.14159265358979323846 / 180;
     check(std::fabs(automatic_depth_precision(13.8 * d, 320) - 0.0260) < 5e-4, "basement bar " + std::to_string(automatic_depth_precision(13.8 * d, 320)));
@@ -147,7 +148,7 @@ void automatic_depth_precision_reproduces_the_measured_bars() {
     check(automatic_depth_precision(0, 320) == 0.02, "no measured angle");
 }
 
-// The reference's fixture (box [0,10]^3, margin 2, radius 0.9). Mutants: isolation ignored;
+// Box [0,10]^3, margin 2, radius 0.9. Mutants: isolation ignored;
 // the margin ignored or the 2-norm used; neighbours counted among far points only; at most 2
 // turned into fewer than 2 or at most 3; the neighbour scan limited to the point's own cell.
 void far_isolated_drops_only_isolated_far_points() {
@@ -411,7 +412,8 @@ ReconstructionStatistics wall_run(const DenseConfig& config, const FilterPlan* p
     return stats;
 }
 
-// Mutant: the plan's bar never checked. Best pairs are 0.17 (baseline 0.75) or 0.25 (0.5) per cell.
+// Mutant: the plan's bar never checked. Best pairs are 0.17 (baseline 0.75) or 0.25 (0.5) per cell;
+// 600 is the deterministic count of points whose best pair is the shorter one.
 void reconstruction_depth_precision() {
     const auto config = small_config();
     const auto none = wall_run(config, nullptr, "noplan");
@@ -419,7 +421,7 @@ void reconstruction_depth_precision() {
     FilterPlan tight; tight.depth_precision = 0.2;
     const auto a = wall_run(config, &loose, "loose"), b = wall_run(config, &tight, "tight");
     check(none.imprecise == 0 && a.imprecise == 0, "points dropped with no bar or a loose one");
-    check(b.imprecise > 50 && b.exported > 0, "a 0.2 bar dropped " + std::to_string(b.imprecise) + " points");
+    check(b.imprecise == 600 && b.exported > 0, "a 0.2 bar dropped " + std::to_string(b.imprecise) + " points");
     check(b.depth_precision == 0.2, "the plan was not recorded");
 }
 
@@ -456,8 +458,76 @@ void reconstruction_far_isolated_runs_before_the_limit() {
     fs::remove(with_far); fs::remove(without_far); fs::remove(limited);
 }
 
-// Mutants: the written file read back without undoing the output transform; observations
-// looked up by export order instead of the carried id.
+// 200 points written through an output transform, each observed by two views 0.3 px off in x,
+// ids a permutation of export order. Mutants: the transform or the centre not undone;
+// observations looked up by export order instead of the id; the histogram's bin edges misread.
+void reproject_written_measures_a_known_offset() {
+    const auto dir = scratch("reproject-unit");
+    const std::vector<View> views{pinhole(0, {0, 0, 0}), pinhole(1, {0.5, 0, 0})};
+    const std::array<double,16> transform{0,-1,0,10, 1,0,0,20, 0,0,1,30, 0,0,0,1};
+    const std::array<double,3> center{100, 5, -2};
+    const int n = 200;
+    std::vector<ObservationRange> ranges(n);
+    std::vector<TrackObservation> observations;
+    {
+        spirula::PointCloudWriter writer((dir / "cloud.ply").string(), spirula::PlyCoordinates::Float64);
+        std::ofstream ids(dir / "ids.bin", std::ios::binary);
+        std::vector<std::vector<TrackObservation>> by_id(n);
+        for (int k = 0; k < n; ++k) {
+            const Vec3 p{-0.5 + 0.005 * k, 0.3 * std::sin(k), 4 + 0.01 * k};
+            const double raw[3] = {p.x + center[0], p.y + center[1], p.z + center[2]};
+            double xyz[3];
+            for (int c = 0; c < 3; ++c) xyz[c] = transform[c * 4] * raw[0] + transform[c * 4 + 1] * raw[1] + transform[c * 4 + 2] * raw[2] + transform[c * 4 + 3];
+            const uint8_t rgb[3] = {1, 2, 3};
+            writer.append(xyz, rgb);
+            const uint64_t id = (uint64_t)(k * 7) % n;
+            write_disk_record(ids, id);
+            for (uint32_t v = 0; v < 2; ++v) {
+                sfm::Vec2 px;
+                if (!project(views[v], p, px)) throw std::runtime_error("fixture point outside a view");
+                by_id[id].push_back({v, {(float)(px.x + 0.3), (float)px.y}});
+            }
+        }
+        writer.finish();
+        for (int id = 0; id < n; ++id) {
+            ranges[id] = {observations.size(), by_id[id].size()};
+            for (const auto& o : by_id[id]) observations.push_back(o);
+        }
+        std::ofstream r(dir / "ranges.bin", std::ios::binary), o(dir / "observations.bin", std::ios::binary);
+        for (const auto& x : ranges) write_disk_record(r, x);
+        for (const auto& x : observations) write_disk_record(o, x);
+    }
+    auto run = [&](const std::array<double,16>& m, const std::array<double,3>& c) {
+        return reproject_written(dir / "cloud.ply", dir / "ids.bin", dir / "ranges.bin", dir / "observations.bin",
+                                 views, m, c, 32, 32, 1 << 20);
+    };
+    const auto good = run(transform, center);
+    check(good.observations == 400 && good.invalid == 0, "observations " + std::to_string(good.observations));
+    check(std::fabs(good.p50_pixels - 0.3) < 0.011 && std::fabs(good.p95_pixels - 0.3) < 0.011,
+          "p50 " + std::to_string(good.p50_pixels) + ", p95 " + std::to_string(good.p95_pixels) + ", injected 0.3");
+    check(std::fabs(good.mean_pixels - 0.3) < 1e-4, "mean " + std::to_string(good.mean_pixels));
+    const std::array<double,16> identity{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    const auto wrong = run(identity, center);
+    check(wrong.invalid > 0 || wrong.p95_pixels > 5, "a wrong output transform read p95 " + std::to_string(wrong.p95_pixels));
+    const auto no_center = run(transform, {0, 0, 0});
+    check(no_center.invalid > 0 || no_center.p95_pixels > 5, "an ignored centre read p95 " + std::to_string(no_center.p95_pixels));
+    fs::remove_all(dir);
+}
+
+// Residuals 0.1, 0.2 ... 10 px. Mutants: p95 read as p50; bin edges for centres; the open bin dropped.
+void reprojection_histogram_quantiles() {
+    ReprojectionHistogram h;
+    for (int k = 1; k <= 100; ++k) h.add(0.1 * k, 0.2 * k);
+    h.add_invalid();
+    auto s = h.summary();
+    check(s.observations == 101 && s.invalid == 1, "counts");
+    check(std::fabs(s.p50_pixels - 5.005) < 1e-9 && std::fabs(s.p95_pixels - 9.505) < 1e-9, "p50 " + std::to_string(s.p50_pixels) + " p95 " + std::to_string(s.p95_pixels));
+    check(std::fabs(s.p95_cells - 19.005) < 1e-9 && std::fabs(s.mean_pixels - 5.05) < 1e-9, "cells or mean");
+    for (int k = 0; k < 200; ++k) h.add(500, 500);
+    check(h.summary().p95_pixels == 100, "the open bin read " + std::to_string(h.summary().p95_pixels));
+}
+
+// Mutant: the check's switch ignored. End to end, fusion's drift stays under 0.5 px here.
 void reconstruction_written_reprojection() {
     auto config = small_config();
     ParsedDataset dataset;
@@ -469,6 +539,19 @@ void reconstruction_written_reprojection() {
     check(s.reprojection.p95_pixels < 0.5, "p95 " + std::to_string(s.reprojection.p95_pixels) + " px");
     config.reprojection_check = false;
     check(wall_run(config, nullptr, "reproject-off", dataset).reprojection.observations == 0, "the check ran while off");
+}
+
+// The plane scenario with every filter off. GOLDEN is that scenario's cloud from 95b27a4b,
+// before these filters existed. Mutant: any filter, id or side file changing the off path.
+void all_filters_off_matches_the_base_pipeline() {
+    auto config = small_config();
+    config.two_image_points = "off"; config.far_isolated = false; config.reprojection_check = false;
+    config.max_depth_error_per_cell = -1; config.max_baseline = -1;
+    std::string ply;
+    wall_run(config, nullptr, "all-off", metric_wall_dataset(), [](int x, int y) { return x % 8 == 4 && y % 8 == 4 ? 12.0 : 4.0; }, &ply);
+    const auto hash = spirula::sha256_file(ply);
+    check(hash == "e86ee06443c04f5e44ca5d23c2701a49e60279d6b4dd437110a5c693d36bd34f", "all filters off gave " + hash);
+    fs::remove(ply);
 }
 
 // Mutants: a filter setting missing from the field table (lost in JSON, presets and the CLI);
@@ -516,6 +599,9 @@ int main() {
         {"reconstruction_far_isolated_runs_before_the_limit", reconstruction_far_isolated_runs_before_the_limit},
         {"reconstruction_written_reprojection", reconstruction_written_reprojection},
         {"filter_settings_round_trip_and_validate", filter_settings_round_trip_and_validate},
+        {"reproject_written_measures_a_known_offset", reproject_written_measures_a_known_offset},
+        {"reprojection_histogram_quantiles", reprojection_histogram_quantiles},
+        {"all_filters_off_matches_the_base_pipeline", all_filters_off_matches_the_base_pipeline},
     };
     for (const auto& test : tests) {
         current = test.name;

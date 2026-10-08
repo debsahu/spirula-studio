@@ -12,7 +12,7 @@ struct Surface {
     float color[3]{};
     uint32_t support = 0;
     int64_t cell[3]{};
-    // Names the point's observations; a fused cluster keeps its best-supported member's.
+    // Names the point's observations. At each merge a cluster keeps the id of the side with more accumulated support.
     uint64_t id = 0;
 };
 

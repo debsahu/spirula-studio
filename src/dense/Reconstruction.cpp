@@ -38,7 +38,6 @@ struct RefinedSurface {
     double error = 0;
 };
 
-struct ObservationRange { uint64_t offset = 0, count = 0; };
 
 struct SourceRecord {
     int64_t source;
@@ -104,7 +103,7 @@ struct Reconstruction::Impl {
     struct ReferenceResult { fs::path file, tracks; ReconstructionStatistics statistics; double seconds = 0; };
     FilterPlan plan;
     GeometryOptions support_geometry;
-    bool two_image_rule = false;
+    bool two_image_rule = false, keep_tracks = false;
     std::unique_ptr<FreeSpaceGrid> free_space;
     uint64_t long_tracks = 0, kept_points = 0, observation_count = 0;
     std::ofstream two_image_output, observation_output, range_output, error_output;
@@ -120,7 +119,8 @@ struct Reconstruction::Impl {
         config.validate();
         config.image_cache_bytes = c.resolved_image_cache_bytes();
         config.geometry = c.resolved_geometry();
-        run_records = std::max<uint64_t>(1, config.image_cache_bytes / (8 * sizeof(Surface)));
+        // Without the id, so the spacing sample, and with it the automatic voxel, match a run before ids.
+        run_records = std::max<uint64_t>(1, config.image_cache_bytes / (8 * (sizeof(Surface) - sizeof(Surface::id))));
         pending_limit = std::max<uint64_t>(sizeof(Record), config.image_cache_bytes / 8);
         const unsigned hardware = std::max(1u, std::thread::hardware_concurrency());
         const uint64_t requested = c.matching_space == "source" && c.samples_per_reference ?
@@ -134,8 +134,8 @@ struct Reconstruction::Impl {
         completed.resize(views.size());
         for (const auto& view : views) view.validate();
         fs::create_directories(work);
-        // Two-image points are admitted only on top of a three-image default (docs/dense.md).
-        two_image_rule = config.two_image_points == "auto" && config.geometry.min_source_images == 3;
+        two_image_rule = config.two_image_active();
+        keep_tracks = two_image_rule || config.reprojection_check;
         support_geometry = config.geometry;
         if (two_image_rule) support_geometry.min_source_images = 2;
         // Sized by the views, never by the budget: a budget must not change the cloud.
@@ -147,9 +147,12 @@ struct Reconstruction::Impl {
             two_image_output.open(work / "two-image.bin", std::ios::binary | std::ios::trunc);
             error_output.open(work / "long-track-errors.bin", std::ios::binary | std::ios::trunc);
         }
-        observation_output.open(work / "observations.bin", std::ios::binary | std::ios::trunc);
-        range_output.open(work / "observation-ranges.bin", std::ios::binary | std::ios::trunc);
-        if ((two_image_rule && (!two_image_output || !error_output)) || !observation_output || !range_output)
+        if (config.reprojection_check) {
+            observation_output.open(work / "observations.bin", std::ios::binary | std::ios::trunc);
+            range_output.open(work / "observation-ranges.bin", std::ios::binary | std::ios::trunc);
+        }
+        if ((two_image_rule && (!two_image_output || !error_output)) ||
+            (config.reprojection_check && (!observation_output || !range_output)))
             throw std::runtime_error("cannot write dense point observations");
         surface_output.open(work / "surfaces.bin", std::ios::binary | std::ios::trunc);
         if (!surface_output) throw std::runtime_error("cannot write dense surfaces");
@@ -471,8 +474,8 @@ struct Reconstruction::Impl {
                 }
                 RefinedSurface p; p.pixel = pixel;
                 if (refine(v,records,p.surface,p.spacing,track,p.error,result.statistics,reference_budget)) {
-                    p.track_count = (uint32_t)track.size();
-                    for (const auto& o : track) tracks.push_back(o);
+                    p.track_count = keep_tracks ? (uint32_t)track.size() : 0;
+                    if (keep_tracks) for (const auto& o : track) tracks.push_back(o);
                     accepted.push_back(p);
                 }
             });
@@ -501,9 +504,11 @@ struct Reconstruction::Impl {
             write_disk_record(output,entry);
         }
         output.flush(); if (!output) throw std::runtime_error("cannot write refined dense reference");
-        std::ofstream track_output(result.tracks,std::ios::binary | std::ios::trunc);
-        for (const auto o : tracks) write_disk_record(track_output,o);
-        track_output.flush(); if (!track_output) throw std::runtime_error("cannot write dense point tracks");
+        if (keep_tracks) {
+            std::ofstream track_output(result.tracks,std::ios::binary | std::ios::trunc);
+            for (const auto o : tracks) write_disk_record(track_output,o);
+            track_output.flush(); if (!track_output) throw std::runtime_error("cannot write dense point tracks");
+        }
         result.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         return result;
     }
@@ -515,8 +520,9 @@ struct Reconstruction::Impl {
         stats.reference_work_seconds += result.seconds;
         stats.imprecise += result.statistics.imprecise;
         {
-            std::ifstream input(result.file,std::ios::binary), track_input(result.tracks,std::ios::binary);
-            if (!input || !track_input) throw std::runtime_error("cannot read refined dense reference");
+            std::ifstream input(result.file,std::ios::binary), track_input;
+            if (keep_tracks) track_input.open(result.tracks,std::ios::binary);
+            if (!input || (keep_tracks && !track_input)) throw std::runtime_error("cannot read refined dense reference");
             RefinedSurface entry; std::vector<TrackObservation> track;
             while (read_disk_record(input,entry)) {
                 check();
@@ -535,7 +541,7 @@ struct Reconstruction::Impl {
                 emit(entry,track);
             }
         }
-        fs::remove(result.file); fs::remove(result.tracks); ++published_references;
+        fs::remove(result.file); if (keep_tracks) fs::remove(result.tracks); ++published_references;
     }
 
     void read_track(std::ifstream& input, const RefinedSurface& entry, std::vector<TrackObservation>& track) {
@@ -555,6 +561,11 @@ struct Reconstruction::Impl {
     // Quality statistics describe what is published, so a dropped two-image candidate never enters them.
     void emit(RefinedSurface entry, const std::vector<TrackObservation>& track) {
         entry.surface.id = kept_points++; ++stats.refined;
+        if (config.reprojection_check) {
+            write_disk_record(range_output,ObservationRange{observation_count,track.size()});
+            for (const auto& o : track) write_disk_record(observation_output,o);
+            observation_count += track.size();
+        }
         stats.max_reference_reprojection_error = std::max(stats.max_reference_reprojection_error,entry.error);
         stats.sum_reference_max_reprojection_error += entry.error;
         const uint64_t support = entry.surface.support;
@@ -564,9 +575,6 @@ struct Reconstruction::Impl {
         const auto bin = std::min<size_t>(stats.reference_reprojection_histogram.size() - 1,
             (size_t)(entry.error / config.geometry.max_reprojection_error * stats.reference_reprojection_histogram.size()));
         ++stats.reference_reprojection_histogram[bin];
-        write_disk_record(range_output,ObservationRange{observation_count,track.size()});
-        for (const auto& o : track) write_disk_record(observation_output,o);
-        observation_count += track.size();
         if (entry.spacing > 0 && std::isfinite(entry.spacing)) {
             if (spacings.size() < run_records) spacings.push_back(entry.spacing);
             else { const auto index = sampling_hash(kept_points) % kept_points; if (index < spacings.size()) spacings[index] = entry.spacing; }
@@ -652,9 +660,11 @@ struct Reconstruction::Impl {
         }
         while (!references.empty()) { drain_references(true); if (progress) progress("refine",published_references,views.size()); }
         if (two_image_rule) admit_two_image_points();
-        observation_output.flush(); range_output.flush();
-        if (!observation_output || !range_output) throw std::runtime_error("dense point observation write failed");
-        observation_output.close(); range_output.close();
+        if (config.reprojection_check) {
+            observation_output.flush(); range_output.flush();
+            if (!observation_output || !range_output) throw std::runtime_error("dense point observation write failed");
+            observation_output.close(); range_output.close();
+        }
         surface_output.flush(); if (!surface_output) throw std::runtime_error("dense surface write failed");
         surface_output.close();
         if (!kept_points) throw std::runtime_error("dense filtering produced no points; check overlap, baseline, masks and distinct-image support");
@@ -677,7 +687,8 @@ struct Reconstruction::Impl {
         stats.fusion_workers = result.workers; stats.fusion_partitions = result.partitions;
         stats.fusion_boundary_candidates = result.boundary_candidates;
         const uint64_t records = drop_far_isolated(fused, dataset);
-        std::ofstream exported_ids(work / "exported-ids.bin", std::ios::binary | std::ios::trunc);
+        std::ofstream exported_ids;
+        if (config.reprojection_check) exported_ids.open(work / "exported-ids.bin", std::ios::binary | std::ios::trunc);
         PointCloudWriter writer(ply, PlyCoordinates::Float64);
         reset_preview();
         if (!config.remove_outliers) {
@@ -695,7 +706,7 @@ struct Reconstruction::Impl {
                 }
                 uint8_t rgb[3];
                 for (int c = 0; c < 3; ++c) rgb[c] = (uint8_t)std::lround(std::clamp(p.color[c], 0.f, 1.f) * 255);
-                writer.append(xyz, rgb); write_disk_record(exported_ids, p.id);
+                writer.append(xyz, rgb); if (exported_ids.is_open()) write_disk_record(exported_ids, p.id);
                 remember(p.point, p.color);
             }
         }
@@ -771,12 +782,12 @@ struct Reconstruction::Impl {
                 }
                 uint8_t rgb[3];
                 for (int c = 0; c < 3; ++c) rgb[c] = (uint8_t)std::lround(std::clamp(p.color[c], 0.f, 1.f) * 255);
-                writer.append(xyz_source, rgb); write_disk_record(exported_ids, p.id);
+                writer.append(xyz_source, rgb); if (exported_ids.is_open()) write_disk_record(exported_ids, p.id);
                 remember(p.point, p.color);
             }
         }
         writer.finish();
-        flush_disk_output(exported_ids); exported_ids.close();
+        if (exported_ids.is_open()) { flush_disk_output(exported_ids); exported_ids.close(); }
         stats.exported = writer.count();
         if (!stats.exported) throw std::runtime_error("dense fusion and outlier filtering produced an empty cloud");
         if (config.reprojection_check) stats.reprojection = check_written(ply, dataset);
@@ -819,42 +830,10 @@ struct Reconstruction::Impl {
         return stats.fused - drop.size();
     }
 
-    // Reads the published file back and projects each point into the views whose
-    // observations made it: covers the writer's frame transform and fusion's drift.
     ReprojectionSummary check_written(const std::string& ply, const ParsedDataset& dataset) {
-        const auto cloud = read_ply_points(ply);
-        std::ifstream ids(work / "exported-ids.bin",std::ios::binary);
-        DiskTable<ObservationRange> ranges(work / "observation-ranges.bin",config.image_cache_bytes / 64);
-        DiskTable<TrackObservation> observations(work / "observations.bin",config.image_cache_bytes / 64);
-        const auto& m = dataset.raw_to_file;
-        const double a[9] = {m[0],m[1],m[2], m[4],m[5],m[6], m[8],m[9],m[10]};
-        const double det = a[0]*(a[4]*a[8]-a[5]*a[7]) - a[1]*(a[3]*a[8]-a[5]*a[6]) + a[2]*(a[3]*a[7]-a[4]*a[6]);
-        if (!(std::fabs(det) > 0)) throw std::runtime_error("dense output transform is singular");
-        const double inverse[9] = {(a[4]*a[8]-a[5]*a[7])/det, (a[2]*a[7]-a[1]*a[8])/det, (a[1]*a[5]-a[2]*a[4])/det,
-                                   (a[5]*a[6]-a[3]*a[8])/det, (a[0]*a[8]-a[2]*a[6])/det, (a[2]*a[3]-a[0]*a[5])/det,
-                                   (a[3]*a[7]-a[4]*a[6])/det, (a[1]*a[6]-a[0]*a[7])/det, (a[0]*a[4]-a[1]*a[3])/det};
-        std::vector<double> pixels, cells; uint64_t invalid = 0, id = 0;
-        for (int64_t i = 0; i < cloud.num(); ++i) {
-            check();
-            if (!read_disk_record(ids,id) || id >= ranges.size()) throw std::runtime_error("dense exported point has no observations");
-            double shifted[3], raw[3];
-            for (int c = 0; c < 3; ++c) shifted[c] = cloud.xyz[(size_t)i * 3 + c] - m[c * 4 + 3];
-            for (int c = 0; c < 3; ++c) raw[c] = inverse[c*3]*shifted[0] + inverse[c*3+1]*shifted[1] + inverse[c*3+2]*shifted[2];
-            const sfm::Vec3 point{raw[0] - dataset.center[0], raw[1] - dataset.center[1], raw[2] - dataset.center[2]};
-            const auto range = ranges.get(id);
-            for (uint64_t k = 0; k < range.count; ++k) {
-                const auto o = observations.get(range.offset + k);
-                const View& view = views[o.view];
-                sfm::Vec2 projected;
-                if (!project(view, point, projected)) { ++invalid; continue; }
-                const auto r = pixel_residual(view, projected, {o.pixel[0], o.pixel[1]});
-                const double sx = view.source_camera ? view.grid_scale[0] : (double)width / view.camera.width;
-                const double sy = view.source_camera ? view.grid_scale[1] : (double)height / view.camera.height;
-                if (!std::isfinite(r.x) || !std::isfinite(r.y)) { ++invalid; continue; }
-                pixels.push_back(std::hypot(r.x, r.y)); cells.push_back(std::hypot(r.x * sx, r.y * sy));
-            }
-        }
-        return summarize_reprojection(std::move(pixels), std::move(cells), invalid);
+        return reproject_written(ply, work / "exported-ids.bin", work / "observation-ranges.bin", work / "observations.bin",
+                                 views, dataset.raw_to_file, dataset.center, width, height, config.image_cache_bytes / 16,
+                                 [&] { check(); });
     }
 };
 
