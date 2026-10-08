@@ -196,6 +196,19 @@ std::vector<BatchIssue> batch_check_row(const BatchRow& row,
                                         int index,
                                         const BatchCapabilities& caps);
 
+// The checkpoints a row's Dataset stage will read. Nothing is checked against the
+// disk: it names what the preset switches on, so the queue can ask for every
+// licence it needs once, up front, rather than stop halfway to ask.
+struct BatchModelNeeds {
+    bool mask = false;
+    std::string mask_model_id, mask_detector_id;
+    bool geometry = false;
+    std::string geometry_model;
+};
+// False for a row that is off, has no Dataset stage, or whose preset cannot be read
+// (the pre-flight reports that one); `out` is then untouched.
+bool batch_model_needs(const BatchRow& row, BatchModelNeeds& out);
+
 // ---- what each stage runs with ------------------------------------------
 //
 // Each returns false with `error` (English) when a preset file has gone

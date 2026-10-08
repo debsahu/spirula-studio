@@ -269,6 +269,9 @@ inline bool InvisibleButtonRaw(const char* id, const ImVec2& size,
 inline bool Checkbox(const Msg& m, bool* v) {
     return ImGui::Checkbox(detail::label(m), v);
 }
+inline bool Checkbox(const Msg& m, std::initializer_list<Arg> a, bool* v) {
+    return ImGui::Checkbox(detail::label(format(m, a), m), v);
+}
 inline bool CheckboxRaw(const char* id, bool* v) {
     return ImGui::Checkbox(id, v);
 }

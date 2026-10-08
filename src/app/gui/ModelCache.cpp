@@ -5,16 +5,20 @@
 
 #include "app/AppPaths.h"
 #include "app/gui/Subprocess.h"
+#include "core/LicenseConsent.h"
+#include "core/LicenseFamilies.h"
 #include "core/ModelMirror.h"
 
 #include "i18n/catalog/Dataset.h"
 
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
 
 namespace fs = std::filesystem;
 namespace dmsg = spirula::i18n::msg::dataset;
+namespace lic = spirula::license::family;
 
 namespace gui {
 
@@ -67,30 +71,30 @@ const std::vector<ModelEntry>& model_catalog() {
     static const std::vector<ModelEntry> kCatalog = {
         {"sam3-q4_0", "sam3-q4_0.ggml",
          &dmsg::model_sam3_label, &dmsg::model_sam3_blurb,
-         "sam3", 707ull << 20, true},
+         lic::kSam3, 707ull << 20, true},
         {"sam3-f16", "sam3-f16.ggml",
          &dmsg::model_sam3_f16_label, &dmsg::model_sam3_f16_blurb,
-         "sam3", 1884ull << 20, true},
+         lic::kSam3, 1884ull << 20, true},
         {"sam2.1-large", "sam2.1_hiera_large_f16.ggml",
          &dmsg::model_sam21_large_label, &dmsg::model_sam21_large_blurb,
-         "sam2", 430ull << 20, false},
+         lic::kSam2, 430ull << 20, false},
         {"sam2.1-base-plus", "sam2.1_hiera_base_plus_f16.ggml",
          &dmsg::model_sam21_baseplus_label, &dmsg::model_sam21_baseplus_blurb,
-         "sam2", 156ull << 20, false},
+         lic::kSam2, 156ull << 20, false},
         {"sam2.1-small", "sam2.1_hiera_small_f16.ggml",
          &dmsg::model_sam21_small_label, &dmsg::model_sam21_small_blurb,
-         "sam2", 89ull << 20, false},
+         lic::kSam2, 89ull << 20, false},
         {"sam2.1-tiny", "sam2.1_hiera_tiny_f16.ggml",
          &dmsg::model_sam21_tiny_label, &dmsg::model_sam21_tiny_blurb,
-         "sam2", 76ull << 20, false},
+         lic::kSam2, 76ull << 20, false},
         {"birefnet", "birefnet-general.safetensors",
          &dmsg::model_birefnet_label, &dmsg::model_birefnet_blurb,
-         "birefnet", 444473596ull, false, MaskModelKind::Subject,
+         lic::kBirefnet, 444473596ull, false, MaskModelKind::Subject,
          "https://huggingface.co/ZhengPeng7/BiRefNet/resolve/main/model.safetensors",
          "https://modelscope.cn/models/modelscope/BiRefNet/resolve/master/model.safetensors"},
         {"birefnet-lite", "birefnet-lite.safetensors",
          &dmsg::model_birefnet_lite_label, &dmsg::model_birefnet_lite_blurb,
-         "birefnet", 177634392ull, false, MaskModelKind::Subject,
+         lic::kBirefnet, 177634392ull, false, MaskModelKind::Subject,
          "https://huggingface.co/ZhengPeng7/BiRefNet_lite/resolve/main/model.safetensors",
          "https://modelscope.cn/models/1038lab/BiRefNet/resolve/master/"
          "BiRefNet_lite.safetensors"},
@@ -104,25 +108,45 @@ const ModelEntry* find_model(const std::string& id) {
     return nullptr;
 }
 
-const LicenseInfo& license_for(const std::string& family) {
-    // Written for someone who has not read a licence before. What they need to
-    // know is (a) it is not ours, (b) whether they are agreeing to anything
-    // beyond the ordinary, and (c) where the actual text is.
-    static const LicenseInfo kSam3{
-        "sam3", &dmsg::license_sam3_title, &dmsg::license_sam3_summary,
-        "https://github.com/facebookresearch/sam3/blob/main/LICENSE", true};
-    static const LicenseInfo kSam2{
-        "sam2", &dmsg::license_sam2_title, &dmsg::license_sam2_summary,
-        "https://github.com/facebookresearch/sam2/blob/main/LICENSE", false};
-    static const LicenseInfo kGdino{
-        "gdino", &dmsg::license_gdino_title, &dmsg::license_gdino_summary,
-        "https://github.com/IDEA-Research/GroundingDINO/blob/main/LICENSE", false};
-    static const LicenseInfo kBirefnet{
-        "birefnet", &dmsg::license_birefnet_title, &dmsg::license_birefnet_summary,
-        "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE", false};
-    if (family == "gdino") return kGdino;
-    if (family == "birefnet") return kBirefnet;
-    return family == "sam2" ? kSam2 : kSam3;
+namespace {
+
+std::deque<LicenseInfo>& license_infos() {
+    // Written for someone who has not read a licence before: whose it is, and where
+    // the text is. The text itself is the licensor's, embedded (core/LicenseConsent),
+    // and every family's dialog shows all of it and wants the same tick.
+    static std::deque<LicenseInfo> v = [] {
+        std::deque<LicenseInfo> out;
+        const struct { const char* fam; const ::spirula::i18n::Msg *title, *summary; } kBuiltin[] = {
+            {lic::kSam3, &dmsg::license_sam3_title, &dmsg::license_sam3_summary},
+            {lic::kSam2, &dmsg::license_sam2_title, &dmsg::license_sam2_summary},
+            {lic::kGdino, &dmsg::license_gdino_title, &dmsg::license_gdino_summary},
+            {lic::kBirefnet, &dmsg::license_birefnet_title, &dmsg::license_birefnet_summary}};
+        for (const auto& e : kBuiltin) {
+            const spirula::license::Terms* t = spirula::license::terms_for(e.fam);
+            out.push_back({e.fam, e.title, e.summary, t->url, t->text});
+        }
+        return out;
+    }();
+    return v;
+}
+
+}  // namespace
+
+void register_license_info(const char* family, const ::spirula::i18n::Msg* title,
+                           const ::spirula::i18n::Msg* summary) {
+    const spirula::license::Terms* t = spirula::license::terms_for(family);
+    if (!t || license_for(family)) return;
+    license_infos().push_back({t->family, title, summary, t->url, t->text});
+}
+
+const LicenseInfo* license_for(const std::string& family) {
+    for (const LicenseInfo& li : license_infos())
+        if (family == li.family) return &li;
+    return nullptr;
+}
+
+bool accept_license(const std::string& family) {
+    return spirula::license::record(family);
 }
 
 std::string model_path(const ModelEntry& e) {
@@ -196,9 +220,18 @@ FileDownload::~FileDownload() {
 }
 
 void FileDownload::start(const std::string& url, const std::string& dest,
-                         uint64_t expected_bytes, const std::string& mirror) {
+                         uint64_t expected_bytes, const std::string& mirror,
+                         const std::string& license_family) {
     if (_state.load() == State::Running) return;
     if (_worker.joinable()) _worker.join();
+    if (const auto missing = spirula::license::missing(license_family); !missing.empty()) {
+        std::lock_guard<std::mutex> lk(_mu);
+        _status = spirula::i18n::format(spirula::i18n::msg::dataset::license_not_accepted_download,
+                                        {missing.front()});
+        _path.clear();
+        _state = State::Failed;
+        return;
+    }
     _cancel = false;
     _progress = -1.0f;
     {
@@ -217,13 +250,14 @@ void FileDownload::start(const std::string& url, const std::string& dest,
 bool FileDownload::start(const ModelEntry& e, const TextDetector* d) {
     if (!model_is_cached(e)) {
         start(e.url ? std::string(e.url) : std::string(kBaseUrl) + e.file, model_path(e),
-              e.bytes, e.mirror ? std::string(e.mirror) : spirula::model_mirror_url(e.file));
+              e.bytes, spirula::mirror_for(e.file, e.mirror), e.family);
         return true;
     }
     if (d)
         for (const ExtraFile* x : {d->weights, d->vocab})
             if (!file_is_cached(cache_file(x->file), x->bytes)) {
-                start(x->url, cache_file(x->file), x->bytes, x->mirror);
+                start(x->url, cache_file(x->file), x->bytes,
+                      spirula::mirror_for(x->file, x->mirror), lic::kGdino);
                 return true;
             }
     return false;
@@ -360,7 +394,7 @@ void DownloadQueue::pump() {
     if (_rest.empty()) return;
     const PendingDownload d = _rest.front();
     _rest.erase(_rest.begin());
-    _dl.start(d.url, d.dest, d.bytes, d.mirror);
+    _dl.start(d.url, d.dest, d.bytes, d.mirror, d.license_family);
 }
 
 void DownloadQueue::cancel() {
