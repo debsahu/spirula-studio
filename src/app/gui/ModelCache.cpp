@@ -7,7 +7,12 @@
 #include "app/gui/Subprocess.h"
 #include "core/LicenseConsent.h"
 #include "core/LicenseFamilies.h"
+#include "core/LicenseTexts.h"
 #include "core/ModelMirror.h"
+#include "core/AtomicFile.h"
+#include "core/Sha256.h"
+#include "roma/model/Fetch.h"
+#include "i18n/catalog/Dense.h"
 
 #include "i18n/catalog/Dataset.h"
 
@@ -219,9 +224,29 @@ FileDownload::~FileDownload() {
     if (_worker.joinable()) _worker.join();
 }
 
+const ModelEntry& dense_model_entry() {
+    const auto& source = spirula::roma::kOfficialCheckpoint;
+    static const ModelEntry entry{"romav2.0.1", source.file, &spirula::i18n::msg::dense::title,
+        &spirula::i18n::msg::dense::terms, "roma", source.bytes, false, MaskModelKind::Subject,
+        source.url, source.url, source.sha256};
+    return entry;
+}
+
+void register_dense_license() {
+    // One family, two licences: the checkpoint carries DINOv3's weights inside RoMa's.
+    static const std::string text = std::string(spirula::license::kDinov3License) +
+                                    "\n---\n\n" + spirula::license::kRomaMit;
+    static const spirula::license::Terms terms{
+        dense_model_entry().family, "DINOv3 License (Meta) and RoMa v2 License (MIT)",
+        spirula::roma::kDinoTerms, text.c_str()};
+    spirula::license::register_terms(&terms);
+    register_license_info(terms.family, &spirula::i18n::msg::dense::license_title,
+                          &spirula::i18n::msg::dense::terms);
+}
+
 void FileDownload::start(const std::string& url, const std::string& dest,
                          uint64_t expected_bytes, const std::string& mirror,
-                         const std::string& license_family) {
+                         const std::string& license_family, const std::string& sha256) {
     if (_state.load() == State::Running) return;
     if (_worker.joinable()) _worker.join();
     if (const auto missing = spirula::license::missing(license_family); !missing.empty()) {
@@ -242,15 +267,15 @@ void FileDownload::start(const std::string& url, const std::string& dest,
     _state = State::Running;
     std::vector<std::string> urls{url};
     if (!mirror.empty()) urls.push_back(mirror);
-    _worker = std::thread([this, urls, dest, expected_bytes] {
-        run(urls, dest, expected_bytes);
+    _worker = std::thread([this, urls, dest, expected_bytes, sha256] {
+        run(urls, dest, expected_bytes, sha256);
     });
 }
 
 bool FileDownload::start(const ModelEntry& e, const TextDetector* d) {
     if (!model_is_cached(e)) {
         start(e.url ? std::string(e.url) : std::string(kBaseUrl) + e.file, model_path(e),
-              e.bytes, spirula::mirror_for(e.file, e.mirror), e.family);
+              e.bytes, spirula::mirror_for(e.file, e.mirror), e.family, e.sha256 ? e.sha256 : "");
         return true;
     }
     if (d)
@@ -323,7 +348,7 @@ int FileDownload::fetch(const std::string& url, const std::string& part,
 }
 
 void FileDownload::run(std::vector<std::string> urls, std::string dest,
-                       uint64_t expected_bytes) {
+                       uint64_t expected_bytes, std::string sha256) {
     auto fail = [&](const std::string& why) {
         std::lock_guard<std::mutex> lk(_mu);
         _status = why;
@@ -361,8 +386,13 @@ void FileDownload::run(std::vector<std::string> urls, std::string dest,
         return fail("download failed (curl exit " + std::to_string(rc) +
                     "); see the log");
 
-    fs::rename(part, dst, ec);
-    if (ec) return fail("cannot move the download into place: " + ec.message());
+    if (!sha256.empty() && spirula::sha256_file(part.string()) != sha256) {
+        fs::remove(part, ec);
+        return fail("checkpoint SHA-256 mismatch");
+    }
+    if (_cancel.load()) return fail("cancelled");
+    try { spirula::replace_file(part, dst); }
+    catch (const std::exception& e) { return fail(e.what()); }
 
     _progress = 1.0f;
     {

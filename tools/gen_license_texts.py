@@ -17,6 +17,8 @@ OUTPUTS = [
         ("kSam2Apache", "LICENSES/Apache-2.0-SAM2.txt"),
         ("kGdinoApache", "LICENSES/Apache-2.0-GroundingDINO.txt"),
         ("kBirefnetMit", "LICENSES/MIT-BiRefNet.txt"),
+        ("kRomaMit", "LICENSES/MIT-RoMaV2.txt"),
+        ("kDinov3License", "LICENSES/DINOv3-License.txt"),
     ]),
 ]
 

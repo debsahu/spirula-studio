@@ -12,6 +12,7 @@
 #include "app/Tools.h"
 #include "i18n/Locale.h"
 #include "i18n/catalog/Cli.h"
+#include "i18n/catalog/Dense.h"
 #ifdef SS_TOOL_SAM
 #include "app/cli/LicenseCli.h"   // --accept-license: the inference layer is in this build
 #endif
@@ -78,6 +79,9 @@ const std::vector<Tool>& tools() {
 #endif
 #ifdef SS_TOOL_GEOMETRY
         {app::kToolGeometry, &cmsg::tool_geometry, spirula_geometry_main},
+#endif
+#ifdef SS_TOOL_DENSE
+        {app::kToolDense, &spirula::i18n::msg::dense::title, spirula_dense_main},
 #endif
 #ifdef SS_TOOL_MESH
         {app::kToolMesh, &cmsg::tool_mesh, spirula_mesh_main},
