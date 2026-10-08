@@ -249,6 +249,27 @@ void max_baseline_refuses_far_neighbours() {
           ", refused " + std::to_string(directed_refused));
     check(of_zero == std::set<uint32_t>{1, 2}, "the refused neighbour was not replaced by the next-ranked one");
     check(automatic_max_baseline({1, 2, 3, 10}) == 9, "3 x the median");
+    // Two images split in three faces each, all nine face pairs sharing points, and a third
+    // image 10 away: nine face pairs at 1 outvote the image pairs. Mutant: each face pair counted.
+    std::vector<PairImage> faces;
+    for (int img = 0; img < 2; ++img) for (int f = 0; f < 3; ++f) {
+        PairImage v; v.source_image = img; v.face = f; v.name = "f" + std::to_string(img * 3 + f);
+        v.center = {(double)img, 0, 0}; v.visible_points = {1, 2, 3};
+        faces.push_back(v);
+    }
+    PairImage distant; distant.source_image = 2; distant.name = "distant"; distant.center = {10, 0, 0}; distant.visible_points = {9};
+    faces.push_back(distant); faces[0].visible_points = {1, 2, 3, 9};
+    PairOptions all; all.neighbors = 8;
+    std::vector<double> by_face, by_image;
+    std::set<std::pair<int64_t,int64_t>> seen;
+    select_pairs(faces, all, [&](ImagePair p) {
+        const double b = (faces[p.first].center - faces[p.second].center).norm();
+        by_face.push_back(b);
+        if (seen.insert(std::minmax(faces[p.first].source_image, faces[p.second].source_image)).second) by_image.push_back(b);
+    });
+    check(automatic_max_baseline(by_face) != automatic_max_baseline(by_image), "fixture lost its power: face and image medians agree");
+    check(resolve_max_baseline(faces, all, 0, true) == automatic_max_baseline(by_image), "split faces weighted the median: limit " +
+          std::to_string(resolve_max_baseline(faces, all, 0, true)) + ", by image pair " + std::to_string(automatic_max_baseline(by_image)));
 }
 
 // Mutants: the angle at the origin or over every point; the setting ignored; a bar with no shared points.
