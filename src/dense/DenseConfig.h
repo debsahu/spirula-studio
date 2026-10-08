@@ -44,6 +44,10 @@ struct DenseConfig {
     double min_overlap = 0.5, max_cycle_error = 1;
     bool cycle_check = true;
     double voxel_size = 0;
+    // Point filters (dense/Filters.h). 0 resolves automatically; a negative value turns one off.
+    std::string two_image_points = "auto";
+    bool free_space_test = true, far_isolated = true, reprojection_check = true;
+    double max_depth_error_per_cell = 0, max_baseline = 0;
     bool remove_outliers = false;
     int outlier_neighbors = 16;
     double outlier_stddev = 2;
