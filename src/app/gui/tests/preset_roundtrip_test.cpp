@@ -115,7 +115,7 @@ static void test_dataset_preset() {
     s.sfm.dense.config.far_isolated = false;
     s.sfm.dense.config.reprojection_check = true;
     s.sfm.dense.config.max_depth_error_per_cell = 0.05;
-    s.sfm.dense.config.max_baseline = -1;
+    s.sfm.dense.config.max_baseline = 0;
     s.sfm.geometry.model = "moge2-vitl";
     s.sfm.geometry.max_size = 800;
     s.sfm.geometry.num_tokens = 2400;

@@ -1111,7 +1111,8 @@ DenseResult run_dense(const std::string& dataset_path, const spirula::dense::Den
     planned_pairs.erase(std::unique(planned_pairs.begin(), planned_pairs.end()), planned_pairs.end());
     const FilterPlan filter_plan = plan_depth_precision(images, planned_pairs, ds.points.xyz, views,
         config.match.high_width ? config.match.high_width : config.match.low_width,
-        config.match.high_height ? config.match.high_height : config.match.low_height, config.max_depth_error_per_cell);
+        config.match.high_height ? config.match.high_height : config.match.low_height, config.max_depth_error_per_cell,
+        config.two_image_active());
     reconstruction.set_filter_plan(filter_plan);
     result.refused_pairs = refused_by_baseline;
     auto order_jobs = [](const PairIndex& a,const PairIndex& b) { return std::tie(a.a,a.b) < std::tie(b.a,b.b); };
@@ -1359,6 +1360,7 @@ DenseResult run_dense(const std::string& dataset_path, const spirula::dense::Den
         manifest.key("two_image_points").object().field("setting", config.two_image_points)
             .field("active", config.two_image_active())
             .field("free_space_test", config.free_space_test).field("error_bar", st.two_image_bar)
+            .field("depth_bar", filter_plan.two_image_depth_precision)
             .field("candidates", (long long)st.two_image_candidates).field("admitted", (long long)st.two_image_admitted)
             .field("over_error_bar", (long long)st.two_image_over_bar).field("seen_through", (long long)st.seen_through)
             .field("grid_bytes", (long long)st.free_space_bytes).end();

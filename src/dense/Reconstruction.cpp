@@ -380,8 +380,14 @@ struct Reconstruction::Impl {
             track.push_back({(uint32_t)(o.view - views.data()), {(float)o.pixel.x, (float)o.pixel.y}});
             if (o.view->source_image != view.source_image) others.push_back(o.view);
         }
-        if (plan.depth_precision > 0 &&
-            !(best_depth_per_cell(result.position, view, others, width, height) <= plan.depth_precision)) {
+        double bar = plan.depth_precision;
+        if (two_image_rule && plan.two_image_depth_precision > 0) {
+            std::vector<int64_t> sources{view.source_image};
+            for (const View* other : others) sources.push_back(other->source_image);
+            std::sort(sources.begin(),sources.end());
+            if (std::unique(sources.begin(),sources.end()) - sources.begin() == 2) bar = plan.two_image_depth_precision;
+        }
+        if (bar > 0 && !(best_depth_per_cell(result.position, view, others, width, height) <= bar)) {
             ++statistics.imprecise; return false;
         }
         error = result.max_reprojection_error;
@@ -629,7 +635,7 @@ struct Reconstruction::Impl {
             if (block.size() == 65536) judge();
         }
         judge();
-        fs::remove(work / "two-image.bin");
+        input.close(); fs::remove(work / "two-image.bin");
     }
 
     void drain_references(bool wait) {

@@ -231,7 +231,7 @@ double automatic_max_baseline(std::vector<double> baselines) {
 
 FilterPlan plan_depth_precision(const std::vector<PairImage>& images, const std::vector<std::pair<uint32_t,uint32_t>>& pairs,
                                 const std::vector<double>& xyz, const std::vector<View>& views,
-                                int grid_width, int grid_height, double setting) {
+                                int grid_width, int grid_height, double setting, bool two_image) {
     FilterPlan plan;
     std::vector<double> angles, focals;
     for (const auto& pair : pairs) {
@@ -254,9 +254,11 @@ FilterPlan plan_depth_precision(const std::vector<PairImage>& images, const std:
     };
     if (!angles.empty()) plan.median_pair_angle_degrees = median(angles) * 180 / kPi;
     if (!focals.empty()) plan.median_cell_focal = median(focals);
+    const double automatic = angles.empty() ? -1 :
+        automatic_depth_precision(plan.median_pair_angle_degrees * kPi / 180, plan.median_cell_focal);
     if (setting > 0) plan.depth_precision = setting;
-    else if (setting == 0 && !angles.empty())
-        plan.depth_precision = automatic_depth_precision(plan.median_pair_angle_degrees * kPi / 180, plan.median_cell_focal);
+    else if (setting == 0) plan.depth_precision = automatic;
+    if (two_image) plan.two_image_depth_precision = plan.depth_precision > 0 ? plan.depth_precision : automatic;
     return plan;
 }
 

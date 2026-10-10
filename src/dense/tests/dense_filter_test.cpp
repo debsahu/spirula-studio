@@ -195,8 +195,11 @@ void far_filter_is_scale_free() {
         for (double v : {0.3 * x, 0.3 * y, 0.3 * z}) lattice.push_back(v);
     check(std::fabs(median_neighbour_spacing(lattice) - 0.3) < 1e-6, "median spacing of a 0.3 lattice");
     check(std::fabs(resolve_far_filter(lattice, false).radius - 2.4) < 1e-5, "radius from the measured spacing");
+    check(!m.active() && u.active(), "a radius of 4 past a margin of 2 left the filter on");
+    check(resolve_far_filter(xyz, true, 0.24).active() && !resolve_far_filter(xyz, true, 0.25).active(),
+          "metric filter not off once 8 x the spacing reaches the margin");
     xyz.resize(99 * 3);
-    check(!resolve_far_filter(xyz, true, 0.5).active(), "a filter on 99 sparse points");
+    check(!resolve_far_filter(xyz, true, 0.1).active(), "a filter on 99 sparse points");
 }
 
 std::vector<PairImage> line_of_images() {
@@ -272,7 +275,8 @@ void max_baseline_refuses_far_neighbours() {
           std::to_string(resolve_max_baseline(faces, all, 0, true)) + ", by image pair " + std::to_string(automatic_max_baseline(by_image)));
 }
 
-// Mutants: the angle at the origin or over every point; the setting ignored; a bar with no shared points.
+// Mutants: the angle at the origin or over every point; the setting ignored; a bar with no shared points;
+// two-image points without a bar when the setting is off, or with the automatic one over an explicit setting.
 void plan_depth_precision_uses_shared_points() {
     std::vector<PairImage> images(2);
     images[0].center = {0, 0, 0}; images[1].center = {1, 0, 0};
@@ -280,15 +284,23 @@ void plan_depth_precision_uses_shared_points() {
     const std::vector<double> xyz{0.5, 0, 2, 0.5, 0, 4, 0.5, 0, 100};
     const std::vector<View> views{pinhole(0, {0, 0, 0}), pinhole(1, {1, 0, 0})};
     const std::vector<std::pair<uint32_t,uint32_t>> pairs{{0, 1}};
-    const auto plan = plan_depth_precision(images, pairs, xyz, views, 32, 32, 0);
+    const auto plan = plan_depth_precision(images, pairs, xyz, views, 32, 32, 0, false);
     const double angle = 2 * std::atan(0.5 / 3) * 180 / 3.14159265358979323846;
+    const double automatic = automatic_depth_precision(angle * 3.14159265358979323846 / 180, 32);
     check(std::fabs(plan.median_pair_angle_degrees - angle) < 1e-9, "angle " + std::to_string(plan.median_pair_angle_degrees));
     check(plan.median_cell_focal == 32, "focal");
-    check(std::fabs(plan.depth_precision - automatic_depth_precision(angle * 3.14159265358979323846 / 180, 32)) < 1e-12, "bar");
-    check(plan_depth_precision(images, pairs, xyz, views, 32, 32, 0.5).depth_precision == 0.5, "explicit setting");
-    check(plan_depth_precision(images, pairs, xyz, views, 32, 32, -1).depth_precision < 0, "negative is off");
+    check(std::fabs(plan.depth_precision - automatic) < 1e-12, "bar");
+    check(plan.two_image_depth_precision < 0, "a two-image bar without two-image points");
+    check(plan_depth_precision(images, pairs, xyz, views, 32, 32, 0.5, false).depth_precision == 0.5, "explicit setting");
+    check(plan_depth_precision(images, pairs, xyz, views, 32, 32, -1, false).depth_precision < 0, "negative is off");
+    const auto off = plan_depth_precision(images, pairs, xyz, views, 32, 32, -1, true);
+    check(off.depth_precision < 0 && std::fabs(off.two_image_depth_precision - automatic) < 1e-12,
+          "two-image bar " + std::to_string(off.two_image_depth_precision) + " with the setting off");
+    const auto given = plan_depth_precision(images, pairs, xyz, views, 32, 32, 0.5, true);
+    check(given.depth_precision == 0.5 && given.two_image_depth_precision == 0.5, "two-image bar ignored the setting");
     images[1].visible_points = {7};
-    check(plan_depth_precision(images, pairs, xyz, views, 32, 32, 0).depth_precision < 0, "a bar without shared points");
+    const auto unshared = plan_depth_precision(images, pairs, xyz, views, 32, 32, 0, true);
+    check(unshared.depth_precision < 0 && unshared.two_image_depth_precision < 0, "a bar without shared points");
 }
 
 // Mutants: a cluster keeping its first member's id; ties not broken by the lower id.
@@ -306,7 +318,7 @@ void fusion_keeps_the_best_supported_id() {
         std::ifstream in(dir / "out.bin", std::ios::binary);
         Surface s{}; uint64_t n = 0, id = ~0ull;
         while (read_disk_record(in, s)) { ++n; id = s.id; }
-        fs::remove_all(dir);
+        in.close(); fs::remove_all(dir);
         return n == 1 ? id : ~0ull;
     };
     check(fuse_two(2, 7, 5, 9) == 9, "the better-supported member's id was not kept");
@@ -374,13 +386,14 @@ uint64_t count_z(const std::string& ply, double lo, double hi) {
 
 struct TwoImageRun { ReconstructionStatistics stats; uint64_t floaters = 0; };
 
-TwoImageRun two_image_run(const DenseConfig& config, const char* name) {
+TwoImageRun two_image_run(const DenseConfig& config, const char* name, const FilterPlan* plan = nullptr) {
     const auto dir = scratch(name);
     auto views = wall_views();
     views.push_back(pinhole(4, {0, 0.5, 0}));       // matched to view 0 on a false layer at z = 2
     views.push_back(pinhole(5, {-0.25, 0.25, 0}));  // matched to view 0 on the wall, exactly
     views.push_back(pinhole(6, {-0.5, 0, 0}));      // matched to view 0 on the wall, 0.2 px off the epipolar line
     Reconstruction r((dir / "work").string(), views, config);
+    if (plan) r.set_filter_plan(*plan);
     const std::function<double(int,int)> wall = [](int, int) { return 4.0; }, layer = [](int, int) { return 2.0; };
     add_wall_pairs(r, views, wall, 0.01);
     const auto pixels = grey();
@@ -417,6 +430,21 @@ void reconstruction_two_image_admission() {
           "with the free-space test off the false layer was not admitted");
     check(off.stats.two_image_candidates == 0 && off.stats.two_image_admitted == 0 && off.floaters == 0, "\"off\" still admitted two-image points");
     check(s.free_space_bytes == 7 * 32 * 32 * sizeof(float), "grid bytes " + std::to_string(s.free_space_bytes));
+}
+
+// A 0.2 two-image bar drops the wall pairs with views 5 and 6 (0.36 and 0.25 per cell) and keeps the
+// layer pair with view 4 (0.13). Mutants: the two-image bar ignored, applied to every point, or inverted.
+void reconstruction_two_image_depth_bar() {
+    auto config = small_config();
+    config.two_image_points = "auto";
+    const auto none = two_image_run(config, "bar-none");
+    FilterPlan plan; plan.two_image_depth_precision = 0.2;
+    const auto barred = two_image_run(config, "bar-two", &plan);
+    const auto& s = barred.stats;
+    check(s.imprecise > 100, "only " + std::to_string(s.imprecise) + " imprecise two-image points dropped");
+    check(s.two_image_candidates + s.imprecise == none.stats.two_image_candidates, "the bar dropped points with three images");
+    check(s.refined - s.two_image_admitted == none.stats.refined - none.stats.two_image_admitted, "three-image points changed");
+    check(s.seen_through == none.stats.seen_through && barred.floaters == 0, "the bar dropped the well-conditioned layer pair");
 }
 
 ReconstructionStatistics wall_run(const DenseConfig& config, const FilterPlan* plan, const char* name, ParsedDataset dataset = {},
@@ -582,14 +610,14 @@ void all_filters_off_matches_the_base_pipeline() {
 void filter_settings_round_trip_and_validate() {
     const DenseConfig defaults;
     check(defaults.two_image_points == "off" && defaults.free_space_test && defaults.far_isolated &&
-          !defaults.reprojection_check && defaults.max_depth_error_per_cell == -1 && defaults.max_baseline == 0, "defaults");
+          !defaults.reprojection_check && defaults.max_depth_error_per_cell == -1 && defaults.max_baseline == -1, "defaults");
     DenseConfig c;
     c.two_image_points = "auto"; c.free_space_test = false; c.far_isolated = false; c.reprojection_check = true;
-    c.max_depth_error_per_cell = 0.05; c.max_baseline = -1;
+    c.max_depth_error_per_cell = 0.05; c.max_baseline = 0;
     DenseConfig d;
     read_config(d, json_parse(config_json(c)));
     check(d.two_image_points == "auto" && !d.free_space_test && !d.far_isolated && d.reprojection_check &&
-          d.max_depth_error_per_cell == 0.05 && d.max_baseline == -1, "a filter setting did not survive JSON");
+          d.max_depth_error_per_cell == 0.05 && d.max_baseline == 0, "a filter setting did not survive JSON");
     auto bad = defaults; bad.two_image_points = "maybe";
     bool refused = false;
     try { bad.validate(); } catch (const std::exception&) { refused = true; }
@@ -618,6 +646,7 @@ int main() {
         {"plan_depth_precision_uses_shared_points", plan_depth_precision_uses_shared_points},
         {"fusion_keeps_the_best_supported_id", fusion_keeps_the_best_supported_id},
         {"reconstruction_two_image_admission", reconstruction_two_image_admission},
+        {"reconstruction_two_image_depth_bar", reconstruction_two_image_depth_bar},
         {"reconstruction_depth_precision", reconstruction_depth_precision},
         {"reconstruction_far_isolated_runs_before_the_limit", reconstruction_far_isolated_runs_before_the_limit},
         {"reconstruction_written_reprojection", reconstruction_written_reprojection},

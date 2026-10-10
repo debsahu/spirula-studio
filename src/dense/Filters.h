@@ -60,11 +60,12 @@ struct FarFilter {
     sfm::Vec3 low, high;
     double margin = 0, radius = 0;
     int max_neighbours = 2;
-    bool active() const { return margin > 0 && radius > 0; }
+    // A radius reaching the margin would count points inside the box, and hold the whole cloud.
+    bool active() const { return radius > 0 && margin > radius; }
 };
 // Box: per-axis p0.5 and p99.5 of the sparse points. Margin: 2 units when metric,
 // else 0.2 x the box diagonal. Radius: 8 x the median nearest-neighbour spacing.
-// Inactive under 100 sparse points.
+// Inactive under 100 sparse points, or when the radius reaches the margin.
 FarFilter resolve_far_filter(const std::vector<double>& xyz, bool metric);
 FarFilter resolve_far_filter(const std::vector<double>& xyz, bool metric, double spacing);
 double median_neighbour_spacing(const std::vector<double>& xyz);
@@ -81,14 +82,14 @@ struct PairImage;
 // Resolved before matching. A negative precision is off, which is also what
 // Reconstruction does when no plan is set.
 struct FilterPlan {
-    double depth_precision = -1, median_pair_angle_degrees = 0, median_cell_focal = 0;
+    double depth_precision = -1, two_image_depth_precision = -1, median_pair_angle_degrees = 0, median_cell_focal = 0;
 };
-// The depth-precision bar from the planned image pairs: each pair's angle at the
-// centroid of the sparse points both see, and the views' cell focals. `setting`
-// > 0 is used as given, < 0 is off; 0 is automatic, and off with no shared points.
+// The bar from the planned pairs' angles at the centroid of the sparse points both see, and the cell focals.
+// `setting` > 0 is used as given, < 0 is off, 0 is automatic (off with no shared points). With
+// `two_image`, two-image points always get a bar: the setting's, else the automatic one (B against C, docs/dense.md).
 FilterPlan plan_depth_precision(const std::vector<PairImage>& images, const std::vector<std::pair<uint32_t,uint32_t>>& pairs,
                                 const std::vector<double>& sparse_xyz, const std::vector<View>& views,
-                                int grid_width, int grid_height, double setting);
+                                int grid_width, int grid_height, double setting, bool two_image);
 
 struct ReprojectionSummary {
     uint64_t observations = 0, invalid = 0;

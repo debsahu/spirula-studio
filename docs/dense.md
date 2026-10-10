@@ -497,14 +497,18 @@ manifest's `filters` block, and the command prints one summary line.
   A point seen by exactly two original images is kept when its reprojection
   error is no worse than the median error of the run's three-or-more-image
   points. With `--free-space-test true` (default) it must also not be seen
-  through: per view, a grid of 512 cells per turn holds the nearest distance at
-  which a three-image point was seen there. A two-image point more than 5 %
+  through: per view, a grid holds the nearest distance at which a three-image
+  point was seen there, 512 cells per turn on a panorama or a split image and
+  512 across an ordinary photo. A two-image point more than 5 %
   in front of the nearest of the 3 x 3 cells around it, in a view of an image
   outside its own pair, is dropped. A cell with no observation is no evidence.
+  Two-image points also carry the depth-precision bar below: the setting's
+  when it is on, else the automatic one.
   The bar is an exact median and the grid is sized by the views, so the host
   budget cannot change the cloud. It is opt-in because it is slow: samples that
   three-image grouping would drop at once go through full refinement instead.
-- `--max-depth-error-per-cell` (default -1, off; 0 is automatic). A point
+- `--max-depth-error-per-cell` (default -1, off for points with three or more
+  images; 0 is automatic). A point
   is dropped when its best pair moves its depth by more than this share per
   matcher cell: `1 / (f sin(parallax))`, `f` the coarser view's focal length in
   matcher cells. Automatic is `max(2 %, 1 / (f sin(theta / 2)))`, with `theta`
@@ -516,11 +520,15 @@ manifest's `filters` block, and the command prints one summary line.
   box (max-norm) with at most two other points within a radius is dropped. The
   margin is 2 on a model whose `gauge.txt` says metric, else 0.2 x the box
   diagonal. The radius is 8 x the sparse points' median nearest-neighbour
-  spacing. Under 100 sparse points it does not run.
-- `--max-baseline` (default 0, automatic; negative is off). In automatic
+  spacing. Under 100 sparse points it does not run, nor when the radius reaches
+  the margin (a metric model whose sparse points are 0.25 or more apart): the
+  neighbour search would then count points inside the box and hold the whole
+  cloud in memory.
+- `--max-baseline` (default -1, off; 0 is automatic). In automatic
   pairing on a metric model, a neighbour farther than 3 x the median planned
   baseline is refused and the next-ranked image takes its place. A positive
-  value applies as given, on any model.
+  value applies as given, on any model. It is unmeasured: the arms below use
+  explicit pairs, which it does not touch.
 - `--reprojection-check true|false` (default false) removes nothing. The written
   PLY is read back, the output transform undone, and each point projected into
   the views whose observations produced it. A fused point carries the id of its
@@ -549,11 +557,15 @@ floaters.
 
 These arms ran with the reprojection check on, which adds about 31 s (181.5 s
 against 150.5 s on one binary). E removes 27,437 points and a random removal
-of as many reads 0.444 %, so the bar shows no benefit here and is off by
-default. F removes one point, outside the stairs. Two-image points cost about
+of as many reads 0.444 %, so on points with three images the bar shows no
+benefit and is off by default. On two-image points it does: B against C, it
+lowers violations from 0.483 % to 0.402 %, which is why two-image points carry
+it. F removes one point, outside the stairs. Two-image points cost about
 6.5 times the run, because samples that three-image grouping drops at once go
-through full refinement; they are opt-in. For B's denser cloud, run with
-`--two-image-points auto --max-depth-error-per-cell 0`.
+through full refinement; they are opt-in. B is
+`--two-image-points auto --max-depth-error-per-cell 0`; `--two-image-points
+auto` alone differs from it by keeping the three-image points the bar removes
+(E's 27,437), and is unmeasured.
 
 With every filter off the cloud is byte-identical to the pipeline without
 them, and with the defaults it differs only by the far isolated points.

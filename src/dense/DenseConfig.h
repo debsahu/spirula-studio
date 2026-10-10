@@ -48,7 +48,7 @@ struct DenseConfig {
     // Two-image points are opt-in: they send the samples three-image grouping drops into full refinement.
     std::string two_image_points = "off";
     bool free_space_test = true, far_isolated = true, reprojection_check = false;
-    double max_depth_error_per_cell = -1, max_baseline = 0;
+    double max_depth_error_per_cell = -1, max_baseline = -1;
     bool remove_outliers = false;
     int outlier_neighbors = 16;
     double outlier_stddev = 2;
