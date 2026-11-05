@@ -150,7 +150,17 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
     std::shared_ptr<flexglue::DenseFeatures> f[2];
     std::vector<float> kp[2];
     for (int s = 0; s < 2; ++s) {
-        const nn::Image im = nn::load_image((root / "images" / stems[s] / "image.png").string());
+        const fs::path id = root / "images" / stems[s];
+        nn::Image im;
+        std::vector<double> u8;
+        std::vector<int64_t> ushape;
+        if (fs::exists(id / "image.png")) {
+            im = nn::load_image((id / "image.png").string());
+        } else if (read_npy(id / "u8.npy", u8, &ushape) && ushape.size() == 3 && ushape[2] == 3) {
+            im.height = (int)ushape[0];   // the full tier's decoded RGB
+            im.width = (int)ushape[1];
+            im.data.assign(u8.begin(), u8.end());
+        }
         if (im.empty()) {
             check(false, "%s: cannot read %s/image.png", pair.c_str(), stems[s].c_str());
             return;
@@ -160,9 +170,13 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
         f[s] = model.describe(im.data.data(), im.width, im.height);
         const double dt = now_s() - t0;
         std::vector<double> idx, val;
-        const fs::path id = root / "images" / stems[s];
-        if (read_npy(id / "features.probe_idx.npy", idx) &&
-            read_npy(id / "features.probe_val.npy", val) && idx.size() == val.size()) {
+        if (read_npy(id / "features.npy", val)) {   // the full tier
+            idx.resize(val.size());
+            for (size_t i = 0; i < idx.size(); ++i) idx[i] = (double)i;
+        }
+        if ((!idx.empty() || (read_npy(id / "features.probe_idx.npy", idx) &&
+                              read_npy(id / "features.probe_val.npy", val))) &&
+            idx.size() == val.size()) {
             const std::vector<float> got = model.download(*f[s]);
             std::vector<double> ours(idx.size());
             for (size_t i = 0; i < idx.size(); ++i) ours[i] = got[(size_t)idx[i]];
