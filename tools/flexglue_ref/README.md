@@ -156,3 +156,33 @@ by the floor wherever torch disagrees with itself by more.
 uv run tools/flexglue_ref/compare.py check --dump DUMP --pair berlin              # committed tier
 uv run tools/flexglue_ref/compare.py check --dump DUMP --ref FULLROOT --pair berlin
 ```
+
+`--expect-gated N` adds a failing row when the gated count is not N. A dump that
+lost a stage scores fewer rows and can otherwise pass; the six committed pairs
+gate 91 rows each in the fp32 tier.
+
+### The fp16 tier
+
+`--tier fp16` scores a run of the opt-in fp16 matcher (`flexglue_test --fp16`,
+MPSGraph fp16 attention and GEMM on Apple) against the same fp32 reference. fp16
+operands cannot meet the bars above: PyTorch's own fp16 autocast of the
+transformer fails 33 of 89 gated rows on `berlin` and 41 on `sacre_x_dsc`. This
+tier gates only what a match run ends in and reports every other stage:
+
+| stage | metric | fp16 bar |
+|---|---|---|
+| every `matches0` (`nostop`, `colmap`, `colmap_decay02`) | mutual-match pairs that differ, mod copies | 0.01 |
+| every `stop_layer` | exact | 0 |
+
+The bars were fixed before any fp16 run of ours was scored. PyTorch's fp16
+autocast dump passes them on `berlin`, `sacre_x_dsc` and `lamar_lookalike`, with
+0 differing matches. They are blind by construction to a change that leaves the
+matches alone. Of six known model mutants scored on those three pairs,
+`no_qk_norm` and `backbone_ln_eps` fail them on two pairs, `argmax_readout` and
+`unshuffle_order` on one, and `zero_padding` and `no_offset` on none, while the
+fp32 tier fails every one on every pair by 4-81 rows. A pass here says the
+matches are the same, not that the model is.
+
+```bash
+uv run tools/flexglue_ref/compare.py check --dump DUMP --pair berlin --tier fp16
+```

@@ -6,6 +6,7 @@
 """Score a FlexGlue stage dump against the reference fixtures, one row per stage.
 
     uv run tools/flexglue_ref/compare.py check --dump DUMP --ref ROOT --pair NAME [--json OUT]
+                                               [--tier fp32|fp16] [--expect-gated N]
     uv run tools/flexglue_ref/compare.py flatten --ref ROOT --pair NAME --out DUMP
 
 DUMP is a flat directory: one <name>.npy per stage (names in README.md) plus a
@@ -14,6 +15,11 @@ files the manifest lists are read, and an unfinished or failed dump is refused.
 ROOT is either tier of flexglue_ref.py's output, and needs no torch. Each bar is
 max(fixed bar, FLOOR_FACTOR x the torch-vs-torch floor recorded beside the
 reference). Exit status is 1 when any gated row misses its bar.
+
+--tier fp16 scores a run of the opt-in fp16 path against the same fp32 reference
+and gates only what a match run ends in: every matches0 and every stop_layer.
+Every other stage is reported, not gated, because fp16 operands miss the fp32
+bars by design (PyTorch's own fp16 autocast fails 33-41 of 89 rows).
 """
 import argparse
 import json
@@ -34,6 +40,9 @@ REL_L2_READOUT = 1e-3                # values downstream of the 3x3 entmax windo
 EPE_P50_PX, EPE_P99_PX = 0.01, 0.1   # predicted points, 512-frame pixels
 COV_ABS = 1e-4
 DISCRETE_FRAC = 0.002                # indices and masks: fraction of entries that differ
+# The fp16 tier's own bars, fixed before any fp16 run of ours was scored.
+FP16_MATCHES_FRAC = 0.01             # matches0: fraction of mutual-match pairs that differ
+FP16_STOP_LAYER = 0                  # stop_layer: layers it may differ by
 REQUIRED = ("colmap.matches0", "colmap.mscores0", "colmap.covisibility_score",
             "colmap.stop_layer", "colmap_decay02.stop_layer", "colmap_decay02.matches0",
             "kpts0", "kpts1")
@@ -241,6 +250,20 @@ def check(a):
         else:
             row(name, "rel L2", rel_l2(ov, rv), None)
 
+    if a.tier == "fp16":
+        for r in rows:
+            base = r["stage"].rsplit(".", 1)[-1]
+            if r["metric"] == "missing":
+                continue
+            if base == "matches0" and r["bar"] is not None:
+                r["bar"] = FP16_MATCHES_FRAC
+            elif base == "stop_layer" and r["bar"] is not None:
+                r["bar"] = float(FP16_STOP_LAYER)
+            else:
+                r["bar"] = None
+            r["ok"] = None if r["bar"] is None else bool(np.isfinite(r["value"]) and
+                                                        r["value"] <= r["bar"])
+
     cm = np.load(dump["colmap.matches0"]) if "colmap.matches0" in dump else None
     if cm is not None:
         n_ours = int((cm >= 0).sum())
@@ -250,7 +273,12 @@ def check(a):
     gated = [r for r in rows if r["ok"] is not None]
     bad = [r for r in gated if not r["ok"]]
     unscored = sorted(set(ref.names()) - set(dump))
-    print(f"pair {a.pair}: {len(rows)} rows, {len(gated)} gated, {len(bad)} failed; "
+    if a.expect_gated is not None and len(gated) != a.expect_gated:
+        rows.append(dict(stage="harness", metric=f"{len(gated)} gated rows, expected "
+                         f"{a.expect_gated}", value=float("inf"), bar=0.0, floor=None, ok=False))
+        gated.append(rows[-1])
+        bad.append(rows[-1])
+    print(f"tier {a.tier}, pair {a.pair}: {len(rows)} rows, {len(gated)} gated, {len(bad)} failed; "
           f"{len(unscored)} reference stages not in the dump")
     for r in rows:
         flag = "" if r["ok"] is None else ("ok" if r["ok"] else "FAIL")
@@ -258,7 +286,7 @@ def check(a):
         fl = "" if r["floor"] is None else f"  (floor {r['floor']:.3g})"
         print(f"  {r['stage']:<28} {r['metric']:<26} {r['value']:.3e} {bar:<11} {flag}{fl}")
     if a.json:
-        pathlib.Path(a.json).write_text(json.dumps(dict(pair=a.pair, rows=rows, failed=len(bad),
+        pathlib.Path(a.json).write_text(json.dumps(dict(pair=a.pair, tier=a.tier, rows=rows, failed=len(bad),
                                                         unscored=unscored), indent=1))
     return 1 if bad else 0
 
@@ -289,6 +317,8 @@ def main():
     ap.add_argument("--pair", required=True)
     ap.add_argument("--out")
     ap.add_argument("--json")
+    ap.add_argument("--tier", choices=("fp32", "fp16"), default="fp32")
+    ap.add_argument("--expect-gated", type=int)
     a = ap.parse_args()
     if a.command == "flatten":
         if not a.out:
