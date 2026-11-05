@@ -1047,72 +1047,72 @@ SS_MSG(license_dinov3_title,
     TR("DINOv3 Lisans Sözleşmesi (Meta)"));
 
 SS_MSG(license_dinov3_summary,
-    EN("The RoMa v2 file contains Meta's DINOv3 model weights. They are Meta's, "
+    EN("This model file contains Meta's DINOv3 model weights. They are Meta's, "
        "not part of Spirula Studio, and come with Meta's DINOv3 License "
        "Agreement, shown in full below. Please read it: accepting it here means "
-       "you agree to be bound by it. The file is downloaded from the RoMa v2 "
-       "authors' release; it is never bundled with the app."),
-    JA("RoMa v2 のファイルには、Meta の DINOv3 モデルの重みが含まれています。"
+       "you agree to be bound by it. The file is downloaded from its authors' "
+       "release; it is never bundled with the app."),
+    JA("このモデルのファイルには、Meta の DINOv3 モデルの重みが含まれています。"
        "これは Meta のものであり Spirula Studio の一部ではなく、Meta の DINOv3 "
        "ライセンス契約が適用されます。契約の全文を下に表示しますので、お読みください。"
        "ここで同意すると、この契約に拘束されることに同意したことになります。"
-       "ファイルは RoMa v2 の作者のリリースからダウンロードされ、アプリに同梱される"
+       "ファイルは 作者のリリースからダウンロードされ、アプリに同梱される"
        "ことはありません。"),
-    ZH_HANS("RoMa v2 的文件包含 Meta 的 DINOv3 模型权重。它们属于 Meta，不属于 "
+    ZH_HANS("该模型文件包含 Meta 的 DINOv3 模型权重。它们属于 Meta，不属于 "
             "Spirula Studio，并适用 Meta 的 DINOv3 许可协议，协议全文显示在下方。"
-            "请阅读：在此接受即表示你同意受其约束。该文件从 RoMa v2 作者的发布页下载，"
+            "请阅读：在此接受即表示你同意受其约束。该文件从作者的发布页下载，"
             "不会随应用一起打包。"),
-    ZH_HANT("RoMa v2 的檔案包含 Meta 的 DINOv3 模型權重。它們屬於 Meta，不屬於 "
+    ZH_HANT("此模型檔案包含 Meta 的 DINOv3 模型權重。它們屬於 Meta，不屬於 "
             "Spirula Studio，並適用 Meta 的 DINOv3 授權協議，協議全文顯示在下方。"
-            "請閱讀：在此接受即表示你同意受其約束。該檔案從 RoMa v2 作者的發布頁下載，"
+            "請閱讀：在此接受即表示你同意受其約束。該檔案從作者的發布頁下載，"
             "不會隨應用程式一起打包。"),
-    KO("RoMa v2 파일에는 Meta의 DINOv3 모델 가중치가 들어 있습니다. 이는 Meta의 "
+    KO("이 모델 파일에는 Meta의 DINOv3 모델 가중치가 들어 있습니다. 이는 Meta의 "
        "것이며 Spirula Studio의 일부가 아니고, 아래에 전문을 표시한 Meta의 DINOv3 "
        "라이선스 계약이 적용됩니다. 읽어 보세요. 여기서 동의하면 이 계약에 구속되는 "
-       "데 동의하는 것입니다. 파일은 RoMa v2 저자의 릴리스에서 내려받으며 앱에 "
+       "데 동의하는 것입니다. 파일은 저자의 릴리스에서 내려받으며 앱에 "
        "포함되지 않습니다."),
-    DE("Die RoMa-v2-Datei enthält die DINOv3-Modellgewichte von Meta. Sie gehören "
+    DE("Diese Modelldatei enthält die DINOv3-Modellgewichte von Meta. Sie gehören "
        "Meta, sind nicht Teil von Spirula Studio und unterliegen Metas DINOv3 "
        "License Agreement, das unten vollständig angezeigt wird. Bitte lesen Sie "
        "es: Mit der Annahme hier erklären Sie sich daran gebunden. Die Datei wird "
-       "aus dem Release der RoMa-v2-Autoren heruntergeladen und nie mit der "
+       "aus dem Release ihrer Autoren heruntergeladen und nie mit der "
        "Anwendung mitgeliefert."),
-    FR("Le fichier RoMa v2 contient les poids du modèle DINOv3 de Meta. Ils "
+    FR("Ce fichier de modèle contient les poids du modèle DINOv3 de Meta. Ils "
        "appartiennent à Meta, ne font pas partie de Spirula Studio et sont soumis "
        "au DINOv3 License Agreement de Meta, affiché en entier ci-dessous. Lisez-le "
        ": l'accepter ici signifie que vous acceptez d'être lié par ses termes. Le "
-       "fichier est téléchargé depuis la publication des auteurs de RoMa v2 ; il "
+       "fichier est téléchargé depuis la publication de ses auteurs ; il "
        "n'est jamais fourni avec l'application."),
-    ES("El archivo de RoMa v2 contiene los pesos del modelo DINOv3 de Meta. Son de "
+    ES("Este archivo de modelo contiene los pesos del modelo DINOv3 de Meta. Son de "
        "Meta, no forman parte de Spirula Studio y se rigen por el DINOv3 License "
        "Agreement de Meta, que se muestra completo abajo. Léelo: al aceptarlo aquí "
        "aceptas quedar obligado por él. El archivo se descarga de la publicación de "
-       "los autores de RoMa v2; nunca se incluye con la aplicación."),
-    PT("O arquivo do RoMa v2 contém os pesos do modelo DINOv3 da Meta. Eles "
+       "sus autores; nunca se incluye con la aplicación."),
+    PT("Este arquivo de modelo contém os pesos do modelo DINOv3 da Meta. Eles "
        "pertencem à Meta, não fazem parte do Spirula Studio e estão sujeitos ao "
        "DINOv3 License Agreement da Meta, exibido por inteiro abaixo. Leia-o: ao "
        "aceitá-lo aqui, você concorda em ficar vinculado a ele. O arquivo é baixado "
-       "da release dos autores do RoMa v2 e nunca é incluído no aplicativo."),
-    IT("Il file di RoMa v2 contiene i pesi del modello DINOv3 di Meta. Sono di "
+       "da release de seus autores e nunca é incluído no aplicativo."),
+    IT("Questo file di modello contiene i pesi del modello DINOv3 di Meta. Sono di "
        "Meta, non fanno parte di Spirula Studio e sono soggetti al DINOv3 License "
        "Agreement di Meta, mostrato per intero qui sotto. Leggilo: accettandolo qui "
-       "accetti di esserne vincolato. Il file viene scaricato dalla release degli "
-       "autori di RoMa v2 e non viene mai incluso nell'app."),
-    NL("Het RoMa v2-bestand bevat de DINOv3-modelgewichten van Meta. Die zijn van "
+       "accetti di esserne vincolato. Il file viene scaricato dalla release dei suoi "
+       "autori e non viene mai incluso nell'app."),
+    NL("Dit modelbestand bevat de DINOv3-modelgewichten van Meta. Die zijn van "
        "Meta, maken geen deel uit van Spirula Studio en vallen onder Meta's DINOv3 "
        "License Agreement, hieronder volledig weergegeven. Lees het: door het hier "
        "te aanvaarden stem je ermee in eraan gebonden te zijn. Het bestand wordt "
-       "gedownload van de release van de auteurs van RoMa v2 en wordt nooit met de "
+       "gedownload van de release van de auteurs en wordt nooit met de "
        "app meegeleverd."),
-    RU("Файл RoMa v2 содержит веса модели DINOv3 от Meta. Они принадлежат Meta, не "
+    RU("Этот файл модели содержит веса модели DINOv3 от Meta. Они принадлежат Meta, не "
        "входят в Spirula Studio и распространяются на условиях Meta DINOv3 License "
        "Agreement, полный текст которого показан ниже. Прочитайте его: приняв его "
        "здесь, вы соглашаетесь быть связанным его условиями. Файл загружается из "
-       "релиза авторов RoMa v2 и никогда не поставляется вместе с приложением."),
-    TR("RoMa v2 dosyası, Meta'nın DINOv3 model ağırlıklarını içerir. Bunlar Meta'ya "
+       "релиза его авторов и никогда не поставляется вместе с приложением."),
+    TR("Bu model dosyası, Meta'nın DINOv3 model ağırlıklarını içerir. Bunlar Meta'ya "
        "aittir, Spirula Studio'nun parçası değildir ve tam metni aşağıda gösterilen "
        "Meta'nın DINOv3 License Agreement'ına tabidir. Lütfen okuyun: burada kabul "
-       "etmeniz, onunla bağlı olmayı kabul ettiğiniz anlamına gelir. Dosya, RoMa v2 "
+       "etmeniz, onunla bağlı olmayı kabul ettiğiniz anlamına gelir. Dosya, "
        "yazarlarının sürümünden indirilir; uygulamayla birlikte asla verilmez."));
 
 SS_MSG(license_romav2_title,

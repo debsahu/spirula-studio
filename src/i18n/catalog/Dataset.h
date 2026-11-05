@@ -7860,6 +7860,120 @@ SS_MSG(matcher_loma,
     IT("LoMa (appreso)"), NL("LoMa (geleerd)"),
     RU("LoMa (обученный)"), TR("LoMa (öğrenilmiş)"));
 
+SS_MSG(matcher_flexglue,
+    EN("FlexGlue (learned, any features)"),
+    JA("FlexGlue（学習型、任意の特徴）"), ZH_HANS("FlexGlue（学习型，任意特征）"),
+    ZH_HANT("FlexGlue（學習型，任意特徵）"), KO("FlexGlue(학습형, 모든 특징)"),
+    DE("FlexGlue (gelernt, alle Merkmale)"), FR("FlexGlue (appris, toutes caractéristiques)"),
+    ES("FlexGlue (aprendido, cualquier característica)"),
+    PT("FlexGlue (aprendido, quaisquer características)"),
+    IT("FlexGlue (appreso, qualsiasi caratteristica)"), NL("FlexGlue (geleerd, alle kenmerken)"),
+    RU("FlexGlue (обученный, любые признаки)"), TR("FlexGlue (öğrenilmiş, her öznitelik)"));
+
+SS_MSG(matcher_flexglue_help,
+    EN("FlexGlue matches the keypoints of any detector through features of the images "
+       "themselves, and rejects a pair whose views do not overlap -- a repeated facade, "
+       "a look-alike room. About a second a pair, so it suits a shortlist of pairs. It "
+       "downloads a 570 MB model on first use."),
+    JA("FlexGlue は画像そのものの特徴を通じて任意の検出器のキーポイントを照合し、"
+       "視野が重ならないペア（繰り返す外壁、似た部屋）を棄却します。1 ペア約 1 秒なので、"
+       "絞り込んだペアに向きます。初回使用時に 570 MB のモデルをダウンロードします。"),
+    ZH_HANS("FlexGlue 通过图像本身的特征匹配任意检测器的关键点，并拒绝视野不重叠的"
+            "像对（重复的立面、相似的房间）。每对约 1 秒，适合筛选后的像对。首次使用"
+            "时下载 570 MB 的模型。"),
+    ZH_HANT("FlexGlue 透過影像本身的特徵比對任意偵測器的關鍵點，並拒絕視野不重疊的"
+            "影像對（重複的立面、相似的房間）。每對約 1 秒，適合篩選後的影像對。首次"
+            "使用時下載 570 MB 的模型。"),
+    KO("FlexGlue 는 이미지 자체의 특징으로 어떤 검출기의 키포인트든 맞추고, 시야가 "
+       "겹치지 않는 쌍(반복되는 외벽, 닮은 방)을 버립니다. 쌍당 약 1초라 추린 쌍에 "
+       "알맞습니다. 처음 쓸 때 570 MB 모델을 내려받습니다."),
+    DE("FlexGlue ordnet die Schlüsselpunkte jedes Detektors über Merkmale der Bilder "
+       "selbst zu und verwirft ein Paar, dessen Ansichten sich nicht überlappen -- eine "
+       "wiederholte Fassade, ein ähnlicher Raum. Etwa eine Sekunde je Paar, also für "
+       "eine Auswahl an Paaren. Beim ersten Einsatz lädt es ein 570-MB-Modell."),
+    FR("FlexGlue apparie les points clés de n'importe quel détecteur à travers des "
+       "caractéristiques des images elles-mêmes, et rejette une paire dont les vues ne "
+       "se recouvrent pas -- une façade répétée, une pièce semblable. Environ une "
+       "seconde par paire, donc pour une sélection de paires. Il télécharge un modèle "
+       "de 570 Mo à la première utilisation."),
+    ES("FlexGlue empareja los puntos clave de cualquier detector mediante "
+       "características de las propias imágenes, y rechaza un par cuyas vistas no se "
+       "solapan: una fachada repetida, una habitación parecida. Cerca de un segundo por "
+       "par, así que conviene para una selección de pares. Descarga un modelo de 570 MB "
+       "en el primer uso."),
+    PT("O FlexGlue emparelha os pontos-chave de qualquer detector por meio de "
+       "características das próprias imagens, e rejeita um par cujas vistas não se "
+       "sobrepõem -- uma fachada repetida, um cômodo parecido. Cerca de um segundo por "
+       "par, então serve para uma seleção de pares. Baixa um modelo de 570 MB no "
+       "primeiro uso."),
+    IT("FlexGlue abbina i punti chiave di qualsiasi rilevatore attraverso "
+       "caratteristiche delle immagini stesse, e scarta una coppia le cui viste non si "
+       "sovrappongono -- una facciata ripetuta, una stanza simile. Circa un secondo per "
+       "coppia, quindi adatto a una selezione di coppie. Al primo uso scarica un modello "
+       "da 570 MB."),
+    NL("FlexGlue matcht de sleutelpunten van elke detector via kenmerken van de beelden "
+       "zelf, en verwerpt een paar waarvan de aanzichten niet overlappen -- een herhaalde "
+       "gevel, een gelijkende kamer. Ongeveer een seconde per paar, dus voor een selectie "
+       "van paren. Bij het eerste gebruik downloadt het een model van 570 MB."),
+    RU("FlexGlue сопоставляет ключевые точки любого детектора через признаки самих "
+       "изображений и отбрасывает пару, виды которой не перекрываются, -- повторяющийся "
+       "фасад, похожую комнату. Около секунды на пару, поэтому подходит для отобранных "
+       "пар. При первом использовании скачивает модель размером 570 МБ."),
+    TR("FlexGlue, herhangi bir bulucunun anahtar noktalarını görüntülerin kendi "
+       "öznitelikleri üzerinden eşleştirir ve görünümleri örtüşmeyen bir çifti -- "
+       "tekrarlayan bir cephe, benzer bir oda -- reddeder. Çift başına yaklaşık bir "
+       "saniye, bu yüzden seçilmiş çiftlere uygundur. İlk kullanımda 570 MB'lık bir "
+       "model indirir."));
+
+SS_MSG(license_flexglue_title,
+    EN("FlexGlue licence (MIT)"), JA("FlexGlue のライセンス（MIT）"),
+    ZH_HANS("FlexGlue 许可协议（MIT）"), ZH_HANT("FlexGlue 授權條款（MIT）"),
+    KO("FlexGlue 라이선스(MIT)"), DE("Lizenz von FlexGlue (MIT)"),
+    FR("Licence de FlexGlue (MIT)"), ES("Licencia de FlexGlue (MIT)"),
+    PT("Licença do FlexGlue (MIT)"), IT("Licenza di FlexGlue (MIT)"),
+    NL("Licentie van FlexGlue (MIT)"), RU("Лицензия FlexGlue (MIT)"),
+    TR("FlexGlue lisansı (MIT)"));
+
+// LEGAL -- human review in every language: states only what the MIT licence says.
+SS_MSG(license_flexglue_summary,
+    EN("FlexGlue (Computer Vision and Geometry Lab) is released under the MIT licence, "
+       "shown in full below. Its model file is downloaded from its authors' release "
+       "rather than bundled with the app."),
+    JA("FlexGlue（Computer Vision and Geometry Lab）は MIT ライセンスで公開されています。"
+       "全文を下に表示します。モデルのファイルは、アプリに同梱せず、作者のリリースから"
+       "ダウンロードします。"),
+    ZH_HANS("FlexGlue（Computer Vision and Geometry Lab）以 MIT 许可协议发布，全文显示在"
+            "下方。模型文件从作者的发布页下载，而不是随应用打包。"),
+    ZH_HANT("FlexGlue（Computer Vision and Geometry Lab）以 MIT 授權條款發布，全文顯示在"
+            "下方。模型檔案從作者的發布頁下載，而不是隨應用程式打包。"),
+    KO("FlexGlue(Computer Vision and Geometry Lab)는 MIT 라이선스로 공개되어 있으며 "
+       "전문은 아래에 표시됩니다. 모델 파일은 앱에 포함하지 않고 저자의 릴리스에서 "
+       "내려받습니다."),
+    DE("FlexGlue (Computer Vision and Geometry Lab) steht unter der MIT-Lizenz, unten "
+       "vollständig angezeigt. Die Modelldatei wird aus dem Release der Autoren "
+       "heruntergeladen und nicht mit der Anwendung mitgeliefert."),
+    FR("FlexGlue (Computer Vision and Geometry Lab) est publié sous licence MIT, "
+       "affichée en entier ci-dessous. Le fichier du modèle est téléchargé depuis la "
+       "publication de ses auteurs plutôt que fourni avec l'application."),
+    ES("FlexGlue (Computer Vision and Geometry Lab) se publica bajo la licencia MIT, "
+       "que se muestra completa abajo. El archivo del modelo se descarga de la "
+       "publicación de sus autores en lugar de incluirse con la aplicación."),
+    PT("O FlexGlue (Computer Vision and Geometry Lab) é publicado sob a licença MIT, "
+       "exibida por inteiro abaixo. O arquivo do modelo é baixado da release dos "
+       "autores em vez de vir com o aplicativo."),
+    IT("FlexGlue (Computer Vision and Geometry Lab) è rilasciato con licenza MIT, "
+       "mostrata per intero qui sotto. Il file del modello viene scaricato dalla "
+       "release degli autori invece di essere incluso nell'app."),
+    NL("FlexGlue (Computer Vision and Geometry Lab) is uitgebracht onder de "
+       "MIT-licentie, hieronder volledig weergegeven. Het modelbestand wordt gedownload "
+       "van de release van de auteurs in plaats van met de app meegeleverd."),
+    RU("FlexGlue (Computer Vision and Geometry Lab) распространяется по лицензии MIT, "
+       "полный текст которой показан ниже. Файл модели загружается из релиза авторов, "
+       "а не поставляется вместе с приложением."),
+    TR("FlexGlue (Computer Vision and Geometry Lab) MIT lisansıyla yayımlanmıştır; tam "
+       "metni aşağıda gösterilir. Model dosyası uygulamayla birlikte verilmez, "
+       "yazarların sürümünden indirilir."));
+
 SS_MSG(matcher_help,
     EN("How descriptors are matched. LightGlue is a learned matcher: it "
        "generally gives a better success rate on hard pairs, at the cost of "
