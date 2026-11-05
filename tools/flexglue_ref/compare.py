@@ -45,6 +45,45 @@ def rel_l2(a, b):
     return float(np.linalg.norm(a - b) / max(np.linalg.norm(b), 1e-30))
 
 
+def first_copy(k):
+    """Row -> first row with identical coordinates; None when every row is unique.
+
+    COLMAP's SIFT emits one keypoint per dominant orientation, so ~20% of real
+    keypoints share a location. Their predictions are identical, so which copy wins
+    the mutual NN is an argmin tie: any copy is correct, and indices are compared
+    modulo copies.
+    """
+    _, first, inv = np.unique(k, axis=0, return_index=True, return_inverse=True)
+    if len(first) == len(k):
+        return None
+    return first[inv.ravel()]
+
+
+def kpt_roles(name):
+    """(image whose rows the tensor has, image its values index) for keypoint indices."""
+    base = name.rsplit(".", 1)[-1]
+    if base in ("matches0", "m0", "nn0"):
+        return 0, 1
+    if base in ("m1", "nn1"):
+        return 1, 0
+    return 0, None
+
+
+def canonical_diff(name, ours, ref, c_src, c_dst):
+    """Mismatch fraction with duplicate keypoints identified."""
+    n_src = len(ref)
+    cs = c_src if c_src is not None else np.arange(n_src)
+    base = name.rsplit(".", 1)[-1]
+    if base.startswith("nn"):
+        keep = cs == np.arange(n_src)
+        diff = c_dst[np.asarray(ours)[keep]] != c_dst[np.asarray(ref)[keep]]
+        return float(diff.sum()) / max(int(keep.sum()), 1), "fraction differing, mod copies"
+    pairs = [{(int(cs[i]), int(c_dst[v])) for i, v in enumerate(np.asarray(m)) if v >= 0}
+             for m in (ours, ref)]
+    return (float(len(pairs[0] ^ pairs[1])) / max(len(pairs[1]), 1),
+            "pairs differing, mod copies")
+
+
 def scalar(x):
     """Scalars are stored as shape [1] (np.ascontiguousarray promotes 0-d); accept either."""
     x = np.asarray(x)
@@ -150,6 +189,7 @@ def check(a):
             if len(r) == 0:
                 sys.exit(f"{name}: zero keypoints in the reference")
 
+    canon = [first_copy(np.load(ref.pdir / f"kpts{s}.npy")) for s in (0, 1)]
     for name in ref.names():
         if name not in dump:
             continue
@@ -182,8 +222,13 @@ def check(a):
             n = max(int(np.asarray(rv).size), 1)
             fl = ref.floor.get(name)
             bar = max(DISCRETE_FRAC, FLOOR_FACTOR * fl / n) if fl is not None else DISCRETE_FRAC
-            row(name, "fraction differing", float((np.asarray(ov) != np.asarray(rv)).sum()) / n,
-                bar, None if fl is None else fl / n)
+            src, dst = kpt_roles(name)
+            if dst is not None and canon[dst] is not None:
+                value, metric = canonical_diff(name, ov, rv, canon[src], canon[dst])
+            else:
+                value, metric = float((np.asarray(ov) != np.asarray(rv)).sum()) / n, \
+                    "fraction differing"
+            row(name, metric, value, bar, None if fl is None else fl / n)
         elif kind == "exact":
             row(name, f"ours {int(scalar(ov))} ref {int(scalar(rv))}",
                 float(int(scalar(ov)) != int(scalar(rv))), 0.0)

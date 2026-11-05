@@ -138,6 +138,16 @@ never needs torch.
 | argmax, nn*, m*, valid, matches0 | fraction of entries that differ | 0.002 |
 | stop_layer | exact | 0 |
 
+Keypoint indices (`matches0`, `m0`, `m1`, `nn0`, `nn1`) are compared **modulo
+duplicate keypoints**. COLMAP's SIFT emits one keypoint per dominant
+orientation, so about 20% of real keypoints share their exact location with
+another. Copies get identical predictions, so which copy wins the mutual NN is
+an argmin tie, and any copy is correct. On real 8192-keypoint pairs, ONNX
+Runtime and torch disagreed on 22-115 raw `matches0` rows per pair, and all of
+those disagreements were ties between copies: there were 0 differing pairs once
+copies were identified. The public fixtures use deduplicated keypoints, so
+they are unaffected.
+
 The fixed bars are the same as RoMa's f32 bars. The 1e-3 for readout values and
 the 0.002 discrete fraction are **choices, not measurements**. They are widened
 by the floor wherever torch disagrees with itself by more.
