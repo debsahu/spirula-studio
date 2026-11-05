@@ -44,6 +44,14 @@ def rel_l2(a, b):
     return float(np.linalg.norm(a - b) / max(np.linalg.norm(b), 1e-30))
 
 
+def scalar(x):
+    """Scalars are stored as shape [1] (np.ascontiguousarray promotes 0-d); accept either."""
+    x = np.asarray(x)
+    if x.size != 1:
+        raise ValueError(f"expected one value, got shape {x.shape}")
+    return float(x.ravel()[0])
+
+
 class Ref:
     """One pair of a reference tree, full or probe tier."""
 
@@ -162,7 +170,7 @@ def check(a):
             row(name, "rel L2", rel_l2(ov, rv), bar, fl)
         elif kind == "scalar":
             bar, fl = floor_bar(ref, name, COV_ABS)
-            row(name, "abs", abs(float(ov) - float(rv)), bar, fl)
+            row(name, "abs", abs(scalar(ov) - scalar(rv)), bar, fl)
         elif kind == "points":
             e = np.linalg.norm((np.asarray(ov, np.float64) - rv) * (SIZE / 2), axis=-1)
             for q, fixed in ((50, EPE_P50_PX), (99, EPE_P99_PX)):
@@ -176,7 +184,8 @@ def check(a):
             row(name, "fraction differing", float((np.asarray(ov) != np.asarray(rv)).sum()) / n,
                 bar, None if fl is None else fl / n)
         elif kind == "exact":
-            row(name, f"ours {int(ov)} ref {int(rv)}", float(int(ov) != int(rv)), 0.0)
+            row(name, f"ours {int(scalar(ov))} ref {int(scalar(rv))}",
+                float(int(scalar(ov)) != int(scalar(rv))), 0.0)
         elif kind == "input":
             row(name, "max abs", float(np.abs(np.asarray(ov, np.float64) - rv).max()), None)
         else:

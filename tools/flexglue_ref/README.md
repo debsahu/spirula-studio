@@ -75,7 +75,7 @@ Conventions:
   pixel centre is (0.5, 0.5). The `p2d` and `coarse_p2d` points are instead
   normalized to [-1, 1] in the other image.
 - **Indices** are int64, as the ONNX graph's `matches0`. `-1` means none.
-- **Masks** are uint8 0/1. Scalars are 0-d arrays.
+- **Masks** are uint8 0/1. **Scalars** are shape `[1]`; `compare.py` also accepts 0-d.
 
 ### Per image (`img0.` / `img1.` in a flat dump)
 
@@ -99,7 +99,7 @@ Conventions:
 | `posenc_proj` | [4096,32] | `Wr @ pos`, before cos/sin |
 | `tokens{s}` | [4096,512] | after `input_proj` |
 | `x{s}_layer{k}`, k=1..9 | [4096,512] | after transformer layer k |
-| `cov_layer{k}`, k=1..9 | [] | covisibility score after layer k, fp32 |
+| `cov_layer{k}`, k=1..9 | [1] | covisibility score after layer k, fp32 |
 | `search{i}` | [4096,64] | normalized search features of image j, for direction i -> j |
 | `fquery{i}` `fmatch{i}` | [M_i,512] | border/bilinear samples of `cf_i` at kpts and of `cf_j` at `coarse_p2d` |
 | `logits{i}` | [M_i,4096] | `q . search * temperature` |
@@ -110,8 +110,8 @@ Conventions:
 | `valid{i}` | [M_i] u8 | inside-border checks (min covisibility 0) |
 | `nn0` `nn1` | [M0] [M1] | raw argmin of the 4-D squared distance |
 | `m0` `m1` | [M0] [M1] | mutual NN, -1 where not mutual (before gating) |
-| `nostop.matches0` `nostop.mscores0` `nostop.covisibility_score` | [M0] [M0] [] | min covisibility 0 |
-| `colmap.matches0` `colmap.mscores0` `colmap.covisibility_score` `colmap.stop_layer` | [M0] [M0] [] [] | COLMAP's graph with its defaults |
+| `nostop.matches0` `nostop.mscores0` `nostop.covisibility_score` | [M0] [M0] [1] | min covisibility 0 |
+| `colmap.matches0` `colmap.mscores0` `colmap.covisibility_score` `colmap.stop_layer` | [M0] [M0] [1] [1] | COLMAP's graph with its defaults |
 
 A C++ dump is one flat directory: `<name>.npy` per stage, with the image
 stages prefixed `img0.` / `img1.`, plus `manifest.json` set to
