@@ -71,17 +71,20 @@ def kpt_roles(name):
 
 def canonical_diff(name, ours, ref, c_src, c_dst):
     """Mismatch fraction with duplicate keypoints identified."""
+    ours = np.rint(np.asarray(ours, np.float64)).astype(np.int64)   # dumps may carry indices as f32
+    ref = np.asarray(ref).astype(np.int64)
     n_src = len(ref)
     cs = c_src if c_src is not None else np.arange(n_src)
     base = name.rsplit(".", 1)[-1]
     if base.startswith("nn"):
         keep = cs == np.arange(n_src)
         diff = c_dst[np.asarray(ours)[keep]] != c_dst[np.asarray(ref)[keep]]
-        return float(diff.sum()) / max(int(keep.sum()), 1), "fraction differing, mod copies"
+        denom = max(int(keep.sum()), 1)
+        return float(diff.sum()) / denom, "fraction differing, mod copies", denom
     pairs = [{(int(cs[i]), int(c_dst[v])) for i, v in enumerate(np.asarray(m)) if v >= 0}
              for m in (ours, ref)]
-    return (float(len(pairs[0] ^ pairs[1])) / max(len(pairs[1]), 1),
-            "pairs differing, mod copies")
+    denom = max(len(pairs[1]), 1)
+    return float(len(pairs[0] ^ pairs[1])) / denom, "pairs differing, mod copies", denom
 
 
 def scalar(x):
@@ -219,15 +222,16 @@ def check(a):
                 row(name, f"EPE p{q} px", float(np.percentile(e, q)), bar, fl)
             row(name, "EPE max px", float(e.max()), None)
         elif kind == "discrete":
+            # The floor is a count of differing entries, so it shares the metric's denominator.
             n = max(int(np.asarray(rv).size), 1)
             fl = ref.floor.get(name)
-            bar = max(DISCRETE_FRAC, FLOOR_FACTOR * fl / n) if fl is not None else DISCRETE_FRAC
             src, dst = kpt_roles(name)
             if dst is not None and canon[dst] is not None:
-                value, metric = canonical_diff(name, ov, rv, canon[src], canon[dst])
+                value, metric, n = canonical_diff(name, ov, rv, canon[src], canon[dst])
             else:
                 value, metric = float((np.asarray(ov) != np.asarray(rv)).sum()) / n, \
                     "fraction differing"
+            bar = max(DISCRETE_FRAC, FLOOR_FACTOR * fl / n) if fl is not None else DISCRETE_FRAC
             row(name, metric, value, bar, None if fl is None else fl / n)
         elif kind == "exact":
             row(name, f"ours {int(scalar(ov))} ref {int(scalar(rv))}",
