@@ -8,6 +8,7 @@
 #include "app/cli/LicenseCli.h"
 #include "app/gui/FetchSource.h"
 #include "core/LicenseConsent.h"
+#include "core/LicenseTexts.h"
 #include "i18n/Message.h"
 #include "i18n/catalog/DenseGui.h"
 #include "nn/core/Error.h"
@@ -110,15 +111,15 @@ void test_registration() {
     check(lic::unique_families({"sam3", "dinov3,romav2", "romav2"}) ==
               std::vector<std::string>{"sam3", "dinov3", "romav2"},
           "unique_families: the checkpoint's list, each family once, in its order");
-    check(d && r && std::string(d->text) == roma::kDinov3Agreement &&
+    check(d && r && std::string(d->text) == spirula::license::kDinov3Agreement &&
               std::string(r->text) == roma::kRomaV2Mit,
           "terms_for carries the generated texts");
     const fs::path lic_dir = fs::path(SS_REPO_ROOT) / "LICENSES";
     check(fs::exists(lic_dir / "MIT-RoMaV2.txt") &&
-              slurp(lic_dir / "DINOv3-License-Agreement.md") == roma::kDinov3Agreement &&
+              slurp(lic_dir / "DINOv3-License-Agreement.md") == spirula::license::kDinov3Agreement &&
               slurp(lic_dir / "MIT-RoMaV2.txt") == roma::kRomaV2Mit,
           "the embedded texts are LICENSES/DINOv3-License-Agreement.md and MIT-RoMaV2.txt");
-    check(std::string(roma::kDinov3Agreement).size() > 500 && std::string(roma::kRomaV2Mit).size() > 500,
+    check(std::string(spirula::license::kDinov3Agreement).size() > 500 && std::string(roma::kRomaV2Mit).size() > 500,
           "both texts are non-trivial");
 }
 
@@ -129,10 +130,10 @@ void test_terms_shown() {
     io.out = cap.f;
     app::accept_licenses("dinov3=yes,romav2=yes", io);
     const std::string shown = cap.text();
-    check(has(shown, roma::kDinov3Agreement), "the DINOv3 Agreement is printed in full, verbatim");
+    check(has(shown, spirula::license::kDinov3Agreement), "the DINOv3 Agreement is printed in full, verbatim");
     check(has(shown, roma::kRomaV2Mit), "the RoMa v2 MIT text is printed in full, verbatim");
     std::string ours = shown;
-    for (const std::string& t : {std::string(roma::kDinov3Agreement), std::string(roma::kRomaV2Mit)})
+    for (const std::string& t : {std::string(spirula::license::kDinov3Agreement), std::string(roma::kRomaV2Mit)})
         ours.erase(ours.find(t), t.size());
     check(!has(licwording::lower(ours), "commercial") && !has(licwording::lower(ours), "redistribut"),
           "our framing adds no commercial-use or redistribution wording");

@@ -28,6 +28,10 @@ const Terms* terms_for(const std::string& family);
 // per family.
 void register_terms(const Terms* t);
 
+// Registers "dinov3", Meta's DINOv3 License: every checkpoint that bundles a
+// DINOv3 backbone (RoMa v2, FlexGlue) asks for this one family. Idempotent.
+void register_dinov3();
+
 // Every family terms_for() knows, built in first and then in registration
 // order, comma separated: what an "unknown licence" error names as the choices.
 std::string known_families();

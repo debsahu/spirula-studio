@@ -79,6 +79,13 @@ void register_terms(const Terms* t) {
     registered().push_back(t);
 }
 
+void register_dinov3() {
+    static const Terms kDinov3{
+        "dinov3", "DINOv3 License Agreement (Meta)",
+        "https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md", kDinov3Agreement};
+    register_terms(&kDinov3);
+}
+
 std::string known_families() {
     size_t n = 0;
     const Terms* const* all = builtin_terms(n);

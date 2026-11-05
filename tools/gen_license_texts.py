@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """LICENSES/*  ->  the .cpp files that embed each licence text, so the consent
 dialog and the CLI can show a licence in full with no file to find at run time.
-The output is committed. The RoMa v2 file's two licences are a separate output
-beside the model, so the core table carries only the families that are not RoMa's.
+The output is committed. DINOv3's text is in the core output because two models (RoMa v2,
+FlexGlue) ship its weights; each model's own licence is an output beside it.
 
     python3 tools/gen_license_texts.py           rewrite them
     python3 tools/gen_license_texts.py --check   exit 1 if any is stale
@@ -18,10 +18,13 @@ OUTPUTS = [
         ("kSam2Apache", "LICENSES/Apache-2.0-SAM2.txt"),
         ("kGdinoApache", "LICENSES/Apache-2.0-GroundingDINO.txt"),
         ("kBirefnetMit", "LICENSES/MIT-BiRefNet.txt"),
+        ("kDinov3Agreement", "LICENSES/DINOv3-License-Agreement.md"),
     ]),
     ("src/roma/model/LicenseTexts.cpp", "roma/model/LicenseTexts.h", "roma", [
-        ("kDinov3Agreement", "LICENSES/DINOv3-License-Agreement.md"),
         ("kRomaV2Mit", "LICENSES/MIT-RoMaV2.txt"),
+    ]),
+    ("src/flexglue/model/LicenseTexts.cpp", "flexglue/model/LicenseTexts.h", "flexglue", [
+        ("kFlexGlueMit", "LICENSES/MIT-FlexGlue.txt"),
     ]),
 ]
 
