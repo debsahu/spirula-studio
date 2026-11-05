@@ -69,8 +69,10 @@ public:
     MatchResult match(const DenseFeatures& f0, const Keypoints& k0, const DenseFeatures& f1,
                       const Keypoints& k1, const MatchOptions& opts = {});
 
-    // SS_FLEXGLUE_DUMP=<dir> writes every stage as <prefix><stage>.npy.
-    void setDumpPrefix(const std::string& prefix);
+    // SS_FLEXGLUE_DUMP=<dir>: <prefix><stage>.npy per stage when `stages`, and
+    // match()'s outputs as <outputs><name>.npy (tools/flexglue_ref/README.md).
+    void setDump(const std::string& prefix, const std::string& outputs = "",
+                 bool stages = true);
 
     // Host copy of a feature map, [64, 64, 256] channel-last.
     std::vector<float> download(const DenseFeatures& f) const;

@@ -1,19 +1,20 @@
-// FlexGlue: the checkpoint, the descriptor and the matcher, against a
-// reference pair written by tools/flexglue_ref/ (PyTorch, mp=None, COLMAP's
-// settings).
+// FlexGlue against the committed reference pairs in tools/flexglue_ref/fixtures
+// (PyTorch, fp32, COLMAP's configuration; README.md there has the format and
+// the tolerance policy, whose fixed bars are used here).
 //
-//   flexglue_test --ref DIR [--checkpoint PATH] [--bench N]
+//   flexglue_test [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] [--bench N]
 //
-// DIR holds image{0,1}_rgb512.npy ([512, 512, 3] in [0, 1]), kpts{0,1}.npy
-// ([n, 2], 512-frame pixels) and the reference outputs features{0,1}.npy,
-// covisibility_score.npy, stop_layer.npy, matches0.npy, mscores0.npy. With
-// SS_FLEXGLUE_DUMP set every stage is written for tools/flexglue_ref's compare.
+// Each pair runs twice, as the reference did: `nostop` (min covisibility 0, so
+// the readout always runs) and `colmap` (COLMAP's defaults, early stops on).
+// With SS_FLEXGLUE_DUMP=<dir> and one --pair, every stage is written there for
+// tools/flexglue_ref/compare.py, which also applies the torch-vs-torch floors.
 // Without a checkpoint on disk it SKIPS.
 
 #include "flexglue/FlexGlue.h"
 #include "flexglue/model/Fetch.h"
-#include "nn/core/Log.h"
-#include "nn/io/StageDump.h"
+#include "nn/io/Image.h"
+
+#include "core/Env.h"
 
 #include <algorithm>
 #include <chrono>
@@ -22,6 +23,8 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -31,6 +34,9 @@ namespace {
 
 int g_failures = 0;
 int g_checks = 0;
+// Pairs where the final covisibility gate removes matches nostop keeps: the
+// count that says the gate check below could fail at all.
+int g_gate_bites = 0;
 
 void check(bool ok, const char* fmt, ...) {
     ++g_checks;
@@ -43,21 +49,69 @@ void check(bool ok, const char* fmt, ...) {
     if (!ok) ++g_failures;
 }
 
-bool load(const fs::path& dir, const char* name, std::vector<float>& v,
-          std::vector<int64_t>* shape = nullptr) {
+// A little-endian .npy of f4, f8, i4, i8 or u1, as doubles.
+bool read_npy(const fs::path& p, std::vector<double>& v, std::vector<int64_t>* shape = nullptr) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f) return false;
+    char magic[8];
+    f.read(magic, 8);
+    if (std::memcmp(magic, "\x93NUMPY", 6) != 0) return false;
+    uint32_t hl = 0;
+    if (magic[6] == 1) {
+        uint16_t h = 0;
+        f.read((char*)&h, 2);
+        hl = h;
+    } else {
+        f.read((char*)&hl, 4);
+    }
+    std::string hdr(hl, ' ');
+    f.read(&hdr[0], hl);
+    const size_t d = hdr.find("'descr': '");
+    if (d == std::string::npos || hdr.find("'fortran_order': False") == std::string::npos)
+        return false;
+    const std::string descr = hdr.substr(d + 10, 3);
     std::vector<int64_t> s;
-    if (!nn::read_npy_f32((dir / (std::string(name) + ".npy")).string(), v, s)) return false;
+    const size_t a = hdr.find('(', hdr.find("'shape'")), b = hdr.find(')', a);
+    std::stringstream ss(hdr.substr(a + 1, b - a - 1));
+    for (std::string tok; std::getline(ss, tok, ',');)
+        if (tok.find_first_not_of(' ') != std::string::npos) s.push_back(std::stoll(tok));
+    int64_t n = 1;
+    for (int64_t x : s) n *= x;
+    v.resize((size_t)n);
+    auto take = [&](auto tag) {
+        using T = decltype(tag);
+        std::vector<T> raw((size_t)n);
+        f.read((char*)raw.data(), (std::streamsize)(n * sizeof(T)));
+        for (int64_t i = 0; i < n; ++i) v[(size_t)i] = (double)raw[(size_t)i];
+    };
+    if (descr == "<f4") take(float{});
+    else if (descr == "<f8") take(double{});
+    else if (descr == "<i4") take(int32_t{});
+    else if (descr == "<i8") take(int64_t{});
+    else if (descr == "|u1") take(uint8_t{});
+    else return false;
     if (shape) *shape = s;
-    return true;
+    return (bool)f;
 }
 
-// Relative L2 error of `got` against `want`.
-double rel_l2(const std::vector<float>& got, const std::vector<float>& want) {
+std::vector<std::string> json_strings(const std::string& text, const char* key) {
+    std::vector<std::string> out;
+    size_t k = text.find(std::string("\"") + key + "\"");
+    if (k == std::string::npos) return out;
+    const size_t a = text.find('[', k), b = text.find(']', a);
+    for (size_t q = text.find('"', a); q < b; q = text.find('"', q + 1)) {
+        const size_t e = text.find('"', q + 1);
+        out.push_back(text.substr(q + 1, e - q - 1));
+        q = e;
+    }
+    return out;
+}
+
+double rel_l2(const std::vector<double>& got, const std::vector<double>& want) {
     double e = 0, n = 0;
     for (size_t i = 0; i < want.size(); ++i) {
-        const double d = (double)got[i] - want[i];
-        e += d * d;
-        n += (double)want[i] * want[i];
+        e += (got[i] - want[i]) * (got[i] - want[i]);
+        n += want[i] * want[i];
     }
     return std::sqrt(e / std::max(n, 1e-30));
 }
@@ -67,18 +121,200 @@ double now_s() {
         .count();
 }
 
+std::vector<double> to_d(const std::vector<float>& v) { return {v.begin(), v.end()}; }
+
+// The fraction of entries that differ, and the counts of non-negative entries.
+double frac_diff(const std::vector<double>& a, const std::vector<double>& b) {
+    size_t d = 0;
+    for (size_t i = 0; i < a.size(); ++i) d += a[i] != b[i];
+    return (double)d / (double)std::max<size_t>(a.size(), 1);
+}
+
+size_t count_matched(const std::vector<double>& m) {
+    return (size_t)std::count_if(m.begin(), m.end(), [](double x) { return x >= 0; });
+}
+
+void run_pair(flexglue::Model& model, const fs::path& root, const std::string& pair, int bench) {
+    const fs::path pdir = root / "pairs" / pair;
+    std::ifstream mf(pdir / "manifest.json");
+    std::stringstream ms;
+    ms << mf.rdbuf();
+    const std::vector<std::string> stems = json_strings(ms.str(), "images");
+    std::printf("\n%s (%s, %s)\n", pair.c_str(), stems.size() > 0 ? stems[0].c_str() : "?",
+                stems.size() > 1 ? stems[1].c_str() : "?");
+    if (stems.size() != 2) {
+        check(false, "%s: the manifest names %zu images", pair.c_str(), stems.size());
+        return;
+    }
+
+    std::shared_ptr<flexglue::DenseFeatures> f[2];
+    std::vector<float> kp[2];
+    for (int s = 0; s < 2; ++s) {
+        const nn::Image im = nn::load_image((root / "images" / stems[s] / "image.png").string());
+        if (im.empty()) {
+            check(false, "%s: cannot read %s/image.png", pair.c_str(), stems[s].c_str());
+            return;
+        }
+        model.setDump("img" + std::to_string(s) + ".");
+        const double t0 = now_s();
+        f[s] = model.describe(im.data.data(), im.width, im.height);
+        const double dt = now_s() - t0;
+        std::vector<double> idx, val;
+        const fs::path id = root / "images" / stems[s];
+        if (read_npy(id / "features.probe_idx.npy", idx) &&
+            read_npy(id / "features.probe_val.npy", val) && idx.size() == val.size()) {
+            const std::vector<float> got = model.download(*f[s]);
+            std::vector<double> ours(idx.size());
+            for (size_t i = 0; i < idx.size(); ++i) ours[i] = got[(size_t)idx[i]];
+            const double e = rel_l2(ours, val);
+            check(e < 1e-4, "img%d features rel L2 %.3g on %zu probes (bar 1e-4), %.0f ms", s, e,
+                  idx.size(), dt * 1e3);
+        } else {
+            check(false, "%s: no features probes for %s", pair.c_str(), stems[s].c_str());
+        }
+        std::vector<double> k;
+        if (!read_npy(pdir / ("kpts" + std::to_string(s) + ".npy"), k) || k.empty()) {
+            check(false, "%s: no kpts%d.npy", pair.c_str(), s);
+            return;
+        }
+        kp[s].assign(k.begin(), k.end());
+    }
+    // kpts{s} are in the 512 frame already, so the frame is 512 x 512 and the
+    // rescale to it is exact.
+    flexglue::Keypoints k[2];
+    for (int s = 0; s < 2; ++s) {
+        k[s].xy = kp[s].data();
+        k[s].n = (uint32_t)(kp[s].size() / 2);
+        k[s].width = k[s].height = 512;
+    }
+
+    // ---- nostop: the readout always runs ----
+    flexglue::MatchOptions nostop;
+    nostop.min_covisibility = 0.0f;
+    nostop.keep_correspondences = true;
+    model.setDump("", "nostop.");
+    double t0 = now_s();
+    const flexglue::MatchResult r = model.match(*f[0], k[0], *f[1], k[1], nostop);
+    const double t_nostop = now_s() - t0;
+    std::vector<double> want, want2;
+    for (int s = 0; s < 2; ++s) {
+        if (read_npy(pdir / ("p2d" + std::to_string(s) + ".npy"), want) &&
+            want.size() == r.p2d[s].size()) {
+            std::vector<double> err;
+            for (size_t i = 0; i < want.size(); i += 2)
+                err.push_back(256.0 * std::hypot(r.p2d[s][i] - want[i],
+                                                 r.p2d[s][i + 1] - want[i + 1]));
+            std::sort(err.begin(), err.end());
+            const double p50 = err[err.size() / 2], p99 = err[(size_t)(0.99 * (err.size() - 1))];
+            check(p50 <= 0.01 && p99 <= 0.1,
+                  "p2d%d EPE p50 %.3g px, p99 %.3g px, max %.3g px (bars 0.01 / 0.1)", s, p50,
+                  p99, err.back());
+        } else {
+            check(false, "%s: p2d%d missing or a different size", pair.c_str(), s);
+        }
+        if (read_npy(pdir / ("conf" + std::to_string(s) + ".npy"), want) &&
+            want.size() == r.conf[s].size()) {
+            const double e = rel_l2(to_d(r.conf[s]), want);
+            check(e <= 1e-3, "conf%d rel L2 %.3g (bar 1e-3)", s, e);
+        } else {
+            check(false, "%s: conf%d missing or a different size", pair.c_str(), s);
+        }
+    }
+    if (read_npy(pdir / "cov_layer9.npy", want) && want.size() == 1)
+        check(std::fabs(r.covisibility - want[0]) <= 1e-4, "covisibility %.6f vs %.6f (bar 1e-4)",
+              r.covisibility, want[0]);
+    if (read_npy(pdir / "nostop.matches0.npy", want) && want.size() == r.matches0.size() &&
+        read_npy(pdir / "nostop.mscores0.npy", want2)) {
+        const std::vector<double> ours(r.matches0.begin(), r.matches0.end());
+        check(frac_diff(ours, want) <= 0.002,
+              "nostop matches0: %zu ours, %zu reference, %.3f%% of entries differ (bar 0.2%%)",
+              count_matched(ours), count_matched(want), 100 * frac_diff(ours, want));
+        const double e = rel_l2(to_d(r.scores0), want2);
+        check(e <= 1e-3, "nostop mscores0 rel L2 %.3g (bar 1e-3)", e);
+    } else {
+        check(false, "%s: nostop.matches0 missing or a different size", pair.c_str());
+    }
+
+    // ---- COLMAP's gate: its defaults, and decay 0.2, which separates checking
+    // after layers 2/4/6/8 from checking after every layer ----
+    flexglue::MatchResult c;
+    double t_colmap = 0;
+    for (const float decay : {0.5f, 0.2f}) {
+        const std::string tag = decay == 0.5f ? "colmap." : "colmap_decay02.";
+        flexglue::MatchOptions o;
+        o.early_stop_decay = decay;
+        model.setDump("", tag, false);
+        t0 = now_s();
+        const flexglue::MatchResult g = model.match(*f[0], k[0], *f[1], k[1], o);
+        if (decay == 0.5f) {
+            t_colmap = now_s() - t0;
+            c = g;
+        }
+        const char* t = tag.c_str();
+        if (read_npy(pdir / (tag + "stop_layer.npy"), want) && want.size() == 1)
+            check(g.stop_layer == (int)want[0], "%sstop_layer %d vs %d", t, g.stop_layer,
+                  (int)want[0]);
+        else
+            check(false, "%s: %sstop_layer missing", pair.c_str(), t);
+        if (read_npy(pdir / (tag + "covisibility_score.npy"), want) && want.size() == 1)
+            check(std::fabs(g.covisibility - want[0]) <= 1e-4,
+                  "%scovisibility %.6f vs %.6f (bar 1e-4)", t, g.covisibility, want[0]);
+        if (read_npy(pdir / (tag + "matches0.npy"), want) && want.size() == g.matches0.size()) {
+            const std::vector<double> ours(g.matches0.begin(), g.matches0.end());
+            check(frac_diff(ours, want) <= 0.002,
+                  "%smatches0: %zu ours, %zu reference, %.3f%% of entries differ (bar 0.2%%)", t,
+                  count_matched(ours), count_matched(want), 100 * frac_diff(ours, want));
+        } else {
+            check(false, "%s: %smatches0 missing or a different size", pair.c_str(), t);
+        }
+    }
+    // ---- the final gate alone: no early stop, so every pair reaches it ----
+    {
+        flexglue::MatchOptions o;
+        o.early_stop_decay = 1.0f;
+        model.setDump("", "", false);
+        const flexglue::MatchResult g = model.match(*f[0], k[0], *f[1], k[1], o);
+        const bool pass = r.covisibility >= o.min_covisibility;
+        std::vector<int32_t> expect = r.matches0;
+        if (!pass) std::fill(expect.begin(), expect.end(), -1);
+        if (!pass && count_matched({r.matches0.begin(), r.matches0.end()}) > 0) ++g_gate_bites;
+        check(g.stop_layer == 9 && g.matches0 == expect,
+              "final gate: covisibility %.4f %s 0.5, %zu matches (nostop %zu)", g.covisibility,
+              pass ? ">=" : "<", count_matched({g.matches0.begin(), g.matches0.end()}),
+              count_matched({r.matches0.begin(), r.matches0.end()}));
+    }
+    std::printf("  match %u x %u: nostop %.0f ms, colmap %.0f ms (stop layer %d)\n", k[0].n,
+                k[1].n, t_nostop * 1e3, t_colmap * 1e3, c.stop_layer);
+
+    if (bench > 0) {
+        double tm = 0;
+        for (int it = 0; it < bench; ++it) {
+            t0 = now_s();
+            model.match(*f[0], k[0], *f[1], k[1], {});
+            tm += now_s() - t0;
+        }
+        std::printf("  bench: %.1f ms/pair over %d runs, COLMAP settings\n", tm / bench * 1e3,
+                    bench);
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string ref, ckpt;
+    std::string root = std::string(SS_REPO_ROOT) + "/tools/flexglue_ref/fixtures";
+    std::string only, ckpt;
     int bench = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
-        if (a == "--ref" && i + 1 < argc) ref = argv[++i];
+        if (a == "--fixtures" && i + 1 < argc) root = argv[++i];
+        else if (a == "--pair" && i + 1 < argc) only = argv[++i];
         else if (a == "--checkpoint" && i + 1 < argc) ckpt = argv[++i];
         else if (a == "--bench" && i + 1 < argc) bench = std::atoi(argv[++i]);
         else {
-            std::fprintf(stderr, "usage: %s --ref DIR [--checkpoint PATH] [--bench N]\n", argv[0]);
+            std::fprintf(stderr,
+                         "usage: %s [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] "
+                         "[--bench N]\n",
+                         argv[0]);
             return 2;
         }
     }
@@ -89,114 +325,40 @@ int main(int argc, char** argv) {
     }
     check(nn::sha256_file(ckpt) == flexglue::checkpoint_file().sha256,
           "checkpoint SHA-256 matches the pinned release");
-    if (ref.empty()) {
-        std::printf("SKIP: no --ref pair\n");
-        return g_failures ? 1 : 0;
+    const char* dump = spirula::env("FLEXGLUE_DUMP");
+    const bool dumping = dump && *dump;
+    if (dumping && only.empty()) {
+        std::fprintf(stderr, "SS_FLEXGLUE_DUMP needs one --pair\n");
+        return 2;
     }
+
+    std::vector<std::string> pairs;
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(fs::path(root) / "pairs", ec))
+        if (e.is_directory() && (only.empty() || e.path().filename() == only))
+            pairs.push_back(e.path().filename().string());
+    std::sort(pairs.begin(), pairs.end());
+    check(!pairs.empty(), "fixture pairs under %s", root.c_str());
 
     flexglue::Model model;
     model.load(ckpt);
-    const fs::path dir(ref);
-    std::vector<float> img[2], kp[2];
-    for (int s = 0; s < 2; ++s) {
-        const std::string i = std::to_string(s);
-        std::vector<int64_t> shape;
-        if (!load(dir, ("image" + i + "_rgb512").c_str(), img[s], &shape) || shape.size() != 3 ||
-            shape[0] != 512 || shape[1] != 512 || shape[2] != 3) {
-            std::printf("FAIL: %s has no [512, 512, 3] image%d_rgb512.npy\n", ref.c_str(), s);
-            return 1;
-        }
-        if (!load(dir, ("kpts" + i).c_str(), kp[s]) || kp[s].empty()) {
-            std::printf("FAIL: %s has no kpts%d.npy\n", ref.c_str(), s);
-            return 1;
-        }
-    }
+    for (const std::string& p : pairs) run_pair(model, root, p, bench);
 
-    std::shared_ptr<flexglue::DenseFeatures> f[2];
-    for (int s = 0; s < 2; ++s) {
-        model.setDumpPrefix("image" + std::to_string(s) + "_");
-        const double t0 = now_s();
-        f[s] = model.describeResized(img[s].data());
-        std::printf("describe image%d: %.1f ms\n", s, (now_s() - t0) * 1e3);
-        std::vector<float> want;
-        if (load(dir, ("features" + std::to_string(s)).c_str(), want)) {
-            const std::vector<float> got = model.download(*f[s]);
-            const double e = got.size() == want.size() ? rel_l2(got, want) : 1e9;
-            check(e < 1e-4, "features%d relative L2 %.3g (bar 1e-4)", s, e);
-        }
-    }
-
-    flexglue::Keypoints k[2];
-    for (int s = 0; s < 2; ++s) {
-        k[s].xy = kp[s].data();
-        k[s].n = (uint32_t)(kp[s].size() / 2);
-        k[s].width = k[s].height = 512;
-    }
-    model.setDumpPrefix("");
-    flexglue::MatchOptions opts;
-    opts.keep_correspondences = true;
-    double t0 = now_s();
-    const flexglue::MatchResult r = model.match(*f[0], k[0], *f[1], k[1], opts);
-    std::printf("match %u x %u: %.1f ms, covisibility %.6f, stop layer %d\n", k[0].n, k[1].n,
-                (now_s() - t0) * 1e3, r.covisibility, r.stop_layer);
-
-    std::vector<float> want;
-    for (int s = 0; s < 2 && r.stop_layer == 9; ++s) {
-        // Predicted points in 512-frame pixels: the readout's own unit.
-        std::vector<float> wp, wc;
-        if (load(dir, ("p2d" + std::to_string(s)).c_str(), wp) && wp.size() == r.p2d[s].size()) {
-            std::vector<double> err;
-            for (size_t i = 0; i < wp.size(); i += 2)
-                err.push_back(256.0 * std::hypot(r.p2d[s][i] - wp[i], r.p2d[s][i + 1] - wp[i + 1]));
-            std::sort(err.begin(), err.end());
-            const double p99 = err[(size_t)(0.99 * (double)(err.size() - 1))], mx = err.back();
-            check(p99 < 0.01, "p2d%d error p99 %.3g px, max %.3g px (bar p99 0.01 px)", s, p99, mx);
-        }
-        if (load(dir, ("conf" + std::to_string(s)).c_str(), wc) && wc.size() == r.conf[s].size()) {
-            double mx = 0;
-            for (size_t i = 0; i < wc.size(); ++i)
-                mx = std::max(mx, (double)std::fabs(r.conf[s][i] - wc[i]));
-            check(mx < 1e-3, "conf%d max |diff| %.3g (bar 1e-3)", s, mx);
-        }
-    }
-    if (load(dir, "covisibility_score", want) && !want.empty())
-        check(std::fabs(r.covisibility - want[0]) < 1e-4, "covisibility %.6f vs %.6f",
-              r.covisibility, want[0]);
-    if (load(dir, "stop_layer", want) && !want.empty())
-        check(r.stop_layer == (int)want[0], "stop layer %d vs %d", r.stop_layer, (int)want[0]);
-    std::vector<float> wm, ws;
-    if (load(dir, "matches0", wm) && load(dir, "mscores0", ws) && wm.size() == r.matches0.size()) {
-        size_t ref_n = 0, ours_n = 0, same = 0;
-        double max_ds = 0;
-        for (size_t i = 0; i < wm.size(); ++i) {
-            const int w = (int)wm[i], o = r.matches0[i];
-            ref_n += w >= 0;
-            ours_n += o >= 0;
-            if (w >= 0 && w == o) {
-                ++same;
-                max_ds = std::max(max_ds, (double)std::fabs(r.scores0[i] - ws[i]));
+    if (only.empty())
+        check(g_gate_bites > 0,
+              "%d pair(s) where the covisibility gate removes matches (the gate check can fail)",
+              g_gate_bites);
+    if (dumping) {
+        std::ofstream m(fs::path(dump) / "manifest.json");
+        m << "{\"finished\": true, \"exit_status\": " << (g_failures ? 1 : 0) << ", \"files\": [";
+        bool first = true;
+        for (const auto& e : fs::directory_iterator(dump, ec))
+            if (e.path().extension() == ".npy") {
+                m << (first ? "" : ", ") << '"' << e.path().stem().string() << '"';
+                first = false;
             }
-        }
-        const double agree = ref_n ? (double)same / ref_n : (ours_n == 0 ? 1.0 : 0.0);
-        std::printf("matches: ours %zu, reference %zu, identical %zu\n", ours_n, ref_n, same);
-        check(agree >= 0.99 && ours_n <= ref_n + ref_n / 100 + 1,
-              "matches identical to the reference: %.2f%% (bar 99%%)", 100 * agree);
-        check(max_ds < 1e-3, "score max |diff| over shared matches %.3g (bar 1e-3)", max_ds);
+        m << "]}\n";
     }
-
-    if (bench > 0) {
-        double td = 0, tm = 0;
-        for (int it = 0; it < bench; ++it) {
-            t0 = now_s();
-            f[0] = model.describeResized(img[0].data());
-            td += now_s() - t0;
-            t0 = now_s();
-            model.match(*f[0], k[0], *f[1], k[1], opts);
-            tm += now_s() - t0;
-        }
-        std::printf("bench: describe %.1f ms/image, match %.1f ms/pair (%d runs)\n",
-                    td / bench * 1e3, tm / bench * 1e3, bench);
-    }
-    std::printf("%d checks, %d failures\n", g_checks, g_failures);
+    std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

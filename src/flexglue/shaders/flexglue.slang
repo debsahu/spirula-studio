@@ -22,6 +22,7 @@ struct ReadoutParams {
     uint*  logits;   // [R, stride] f32, C = h * w used per row
     float* pos;      // [R, 2] normalized (x, y)
     float* mass;     // [R]
+    float* cell;     // [R, 2]: the arg-max cell and tau, for parity dumps
     uint   R;
     uint   stride;
     uint   h;
@@ -178,6 +179,8 @@ void readout(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID, uniform Reado
     p.pos[2u * row] = sx / sp;
     p.pos[2u * row + 1u] = sy / sp;
     p.mass[row] = m;
+    p.cell[2u * row] = float(idx);
+    p.cell[2u * row + 1u] = tau;
 }
 
 // ---------------------------------------------------------------------------

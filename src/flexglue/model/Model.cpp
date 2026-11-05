@@ -6,6 +6,7 @@
 #include "flexglue/FlexGlue.h"
 
 #include "flexglue/model/Fetch.h"
+#include "nn/Blocks.h"
 #include "nn/Ops.h"
 #include "nn/Tensor.h"
 #include "nn/WeightStore.h"
@@ -61,7 +62,7 @@ constexpr float kStd[3] = {0.229f, 0.224f, 0.225f};
 constexpr int64_t kQueryChunk = 4096;   // the reference's query_chunk_size
 
 struct ReadoutParams {
-    uint64_t logits, pos, mass;
+    uint64_t logits, pos, mass, cell;
     uint32_t R, stride, h, w, groups_per_row;
 };
 struct OffsetParams {
@@ -85,7 +86,10 @@ struct Model::Impl {
     nn::WeightStore w;
     vk::Arena arena{"flexglue"};
     nn::StageDump dump{"FLEXGLUE_DUMP"};
-    std::string prefix;
+    std::string prefix;       // stage dumps
+    std::string out_prefix;   // the final outputs: "colmap." or "nostop."
+    bool stages = true;
+    std::vector<float> rope_proj;   // [4096, 32], Wr . cell centre
     // SS_FLEXGLUE_PROFILE=1: syncs around attention and the readout and
     // prints where a pair's time went.
     bool profile = spirula::env_on("FLEXGLUE_PROFILE");
@@ -102,7 +106,7 @@ struct Model::Impl {
                       const Keypoints& k1, const MatchOptions& o);
 
     void dumpT(const std::string& name, const Tensor& t) const {
-        if (!dump.on()) return;
+        if (!dump.on() || !stages) return;
         std::vector<int64_t> shape(t.shape, t.shape + t.ndim);
         dump.tensor((prefix + name).c_str(), t, shape);
     }
@@ -242,6 +246,7 @@ void Model::Impl::load(const std::string& path) {
             const float px = (x + 0.5f) / kGrid * 2 - 1, py = (y + 0.5f) / kGrid * 2 - 1;
             for (int i = 0; i < kHeadDim / 2; ++i) {
                 const float a = wr.data[2 * i] * px + wr.data[2 * i + 1] * py;
+                rope_proj.push_back(a);
                 const size_t o = ((size_t)(y * kGrid + x) * (kHeadDim / 2) + i) * 2;
                 rope[o] = std::cos(a);
                 rope[o + 1] = std::sin(a);
@@ -391,22 +396,17 @@ Tensor Model::Impl::encode(const Tensor& img) {
 // ---------------------------------------------------------------------------
 
 void Model::Impl::ffn(const Tensor& x, const Tensor& message, int64_t n, const std::string& b) {
-    vk::ArenaScope scope(arena);
-    Tensor cat = nn::arena_tensor(arena, DType::F32, n, 2 * kDim);
-    nn::strided_copy(cat, x, n, kDim, kDim, 2 * kDim);
-    Tensor mn = nn::arena_tensor(arena, DType::F32, n, kDim);
-    nn::layer_norm(mn, message, g(b + "message_norm.weight"), g(b + "message_norm.bias"), kEps);
-    nn::strided_copy(cat.offsetElems(kDim), mn, n, kDim, kDim, 2 * kDim);
-    Tensor h = nn::arena_tensor(arena, DType::F32, n, 2 * kDim);
-    LinearOpts l0;
-    l0.bias = g(b + "ffn.0.bias");
-    nn::linear(h, cat, g(b + "ffn.0.weight"), l0);
-    nn::layer_norm(h, h, g(b + "ffn.1.weight"), g(b + "ffn.1.bias"), kEps);
-    nn::unary(h, h, Act::GeluErf);
-    LinearOpts l1;
-    l1.bias = g(b + "ffn.3.bias");
-    l1.residual = x;
-    nn::linear(x, h, g(b + "ffn.3.weight"), l1);
+    nn::ConcatFfn f;
+    f.w0 = g(b + "ffn.0.weight");
+    f.b0 = g(b + "ffn.0.bias");
+    f.ln_w = g(b + "ffn.1.weight");
+    f.ln_b = g(b + "ffn.1.bias");
+    f.w3 = g(b + "ffn.3.weight");
+    f.b3 = g(b + "ffn.3.bias");
+    f.msg_ln_w = g(b + "message_norm.weight");
+    f.msg_ln_b = g(b + "message_norm.bias");
+    f.eps = kEps;
+    nn::concat_ffn(arena, x, message, n, kDim, f);
 }
 
 void Model::Impl::attend(const Tensor& ctx, const Tensor& q, const Tensor& k,
@@ -538,11 +538,13 @@ void Model::Impl::correspond(const Tensor& cf_i, const Tensor& cf_j,
 
         Tensor pos = nn::arena_tensor(arena, DType::F32, m, 2);
         Tensor mass = nn::arena_tensor(arena, DType::F32, m);
+        Tensor cell = nn::arena_tensor(arena, DType::F32, m, 2);
         {
             ReadoutParams p{};
             p.logits = logits.ptr;
             p.pos = pos.ptr;
             p.mass = mass.ptr;
+            p.cell = cell.ptr;
             p.R = (uint32_t)m;
             p.stride = kTokens;
             p.h = p.w = kGrid;
@@ -552,9 +554,21 @@ void Model::Impl::correspond(const Tensor& cf_i, const Tensor& cf_j,
                                        fold.rows, 1, &p, sizeof p,
                                        (double)m * kTokens * 8 * vk::Stream::kElemWork);
         }
-        if (dump.on() && M <= kQueryChunk) {
+        Tensor coarse;
+        if (dump.on() && stages && M <= kQueryChunk) {
+            dumpT("logits" + d, logits);
             dumpT("coarse_p2d" + d, pos);
             dumpT("mass" + d, mass);
+            std::vector<float> c((size_t)m * 2), am((size_t)m), tau((size_t)m);
+            nn::tensor_to_host(cell, c.data(), m * 2);
+            for (int64_t r = 0; r < m; ++r) {
+                am[(size_t)r] = c[2 * r];
+                tau[(size_t)r] = c[2 * r + 1];
+            }
+            dump.host((prefix + "argmax" + d).c_str(), am.data(), {m});
+            dump.host((prefix + "tau" + d).c_str(), tau.data(), {m});
+            coarse = nn::arena_tensor(arena, DType::F32, m, 2);
+            nn::copy(coarse, pos);
         }
         Tensor fm = nn::arena_tensor(arena, DType::F32, m, kDim);
         nn::grid_sample_points(fm, map_j, pos, false, nn::GridPad::Border);
@@ -583,6 +597,11 @@ void Model::Impl::correspond(const Tensor& cf_i, const Tensor& cf_j,
             p.h = p.w = kGrid;
             vk::Stream::get().dispatchFlat("flexglue.offset", vk::SpecList{0u, 0u}, m, 256, &p,
                                            sizeof p, &p.groups_per_row);
+        }
+        if (coarse.valid()) {
+            Tensor off = nn::arena_tensor(arena, DType::F32, m, 2);
+            nn::add(off, pos, coarse, 1.0f, -1.0f);
+            dumpT("offset" + d, off);
         }
         if (dump.on() && M <= kQueryChunk) {
             dumpT("fquery" + d, fq);
@@ -626,6 +645,17 @@ MatchResult Model::Impl::match(const Tensor& f0, const Keypoints& k0, const Tens
         nn::linear(x[s], f[s].view(kTokens, kFeat), g("matcher.input_proj.weight"), lo);
         dumpT("tokens" + std::to_string(s), x[s]);
     }
+    if (dump.on() && stages)
+        dump.host((prefix + "posenc_proj").c_str(), rope_proj.data(), {kTokens, kHeadDim / 2});
+    auto dump_outputs = [&]() {
+        if (!dump.on()) return;
+        std::vector<float> mm(r.matches0.begin(), r.matches0.end());
+        const float stop = (float)r.stop_layer;
+        dump.host((out_prefix + "matches0").c_str(), mm.data(), {M});
+        dump.host((out_prefix + "mscores0").c_str(), r.scores0.data(), {M});
+        dump.host((out_prefix + "covisibility_score").c_str(), &r.covisibility, {1});
+        dump.host((out_prefix + "stop_layer").c_str(), &stop, {1});
+    };
 
     const bool stopping = o.min_covisibility > 0 && o.early_stop_decay < 1;
     for (int l = 0; l < kLayers; ++l) {
@@ -642,16 +672,18 @@ MatchResult Model::Impl::match(const Tensor& f0, const Keypoints& k0, const Tens
                            o.check_layers.end();
         if (k == kLayers || (stopping && check) || dump.on()) {
             const float score = covisibility(x[0], x[1], k);
-            if (dump.on()) {
+            if (dump.on() && stages) {
                 const std::string nm = prefix + fmt("cov_layer%d", k);
-                dump.host(nm.c_str(), &score, {});
+                dump.host(nm.c_str(), &score, {1});
             }
             r.covisibility = score;
             r.stop_layer = k;
             if (k < kLayers && stopping && check &&
                 score < o.min_covisibility * std::pow(1.0f - o.early_stop_decay,
-                                                      (float)(kLayers - k)))
+                                                      (float)(kLayers - k))) {
+                dump_outputs();
                 return r;
+            }
         }
     }
     const bool covisible = r.covisibility >= o.min_covisibility;
@@ -752,15 +784,24 @@ MatchResult Model::Impl::match(const Tensor& f0, const Keypoints& k0, const Tens
         r.matches0[(size_t)m] = j;
         r.scores0[(size_t)m] = score;
     }
-    if (dump.on()) {
-        std::vector<float> a(m0.begin(), m0.end()), b(m1.begin(), m1.end()),
-            mm(r.matches0.begin(), r.matches0.end());
-        dump.host((prefix + "m0").c_str(), a.data(), {M});
-        dump.host((prefix + "m1").c_str(), b.data(), {N});
-        dump.host((prefix + "matches0").c_str(), mm.data(), {M});
-        dump.host((prefix + "mscores0").c_str(), r.scores0.data(), {M});
-        dump.host((prefix + "covisibility_score").c_str(), &r.covisibility, {});
+    if (dump.on() && stages) {
+        // nn: the raw argmins; m: mutual, -1 elsewhere, before any gate.
+        std::vector<float> a(m0.begin(), m0.end()), b(m1.begin(), m1.end()), ma(a), mb(b),
+            v0(valid[0].begin(), valid[0].end()), v1(valid[1].begin(), valid[1].end());
+        for (int64_t m = 0; m < M; ++m)
+            if (m0[(size_t)m] < 0 || m1[(size_t)m0[(size_t)m]] != (int32_t)m) ma[(size_t)m] = -1;
+        for (int64_t n = 0; n < N; ++n)
+            if (m1[(size_t)n] < 0 || m0[(size_t)m1[(size_t)n]] != (int32_t)n) mb[(size_t)n] = -1;
+        dump.host((prefix + "nn0").c_str(), a.data(), {M});
+        dump.host((prefix + "nn1").c_str(), b.data(), {N});
+        dump.host((prefix + "m0").c_str(), ma.data(), {M});
+        dump.host((prefix + "m1").c_str(), mb.data(), {N});
+        dump.host((prefix + "valid0").c_str(), v0.data(), {M});
+        dump.host((prefix + "valid1").c_str(), v1.data(), {N});
+        dump.host((prefix + "kpts0").c_str(), k512[0].data(), {M, 2});
+        dump.host((prefix + "kpts1").c_str(), k512[1].data(), {N, 2});
     }
+    dump_outputs();
     return r;
 }
 
@@ -803,7 +844,11 @@ std::vector<float> squash_rgb(const uint8_t* rgb, int width, int height, int out
 Model::Model() : impl_(new Impl) {}
 Model::~Model() = default;
 bool Model::loaded() const { return impl_->loaded; }
-void Model::setDumpPrefix(const std::string& prefix) { impl_->prefix = prefix; }
+void Model::setDump(const std::string& prefix, const std::string& outputs, bool stages) {
+    impl_->prefix = prefix;
+    impl_->out_prefix = outputs;
+    impl_->stages = stages;
+}
 
 void Model::load(const std::string& model) {
     NN_ENSURE_EMBEDDED_MODULES(flexglue);
