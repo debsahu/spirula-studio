@@ -25,6 +25,8 @@ struct MatchOptions {
     // 1 never stops.
     float early_stop_decay = 0.5f;
     std::vector<int> check_layers = {2, 4, 6, 8};
+    // Also return each keypoint's predicted point and confidence (tests).
+    bool keep_correspondences = false;
 };
 
 struct MatchResult {
@@ -33,6 +35,9 @@ struct MatchResult {
     float covisibility = 0.0f;       // the score of the last layer run
     int   stop_layer = 0;            // 9 when no early stop fired
     bool  covisible_pair = false;    // ran to the end and scored >= min_covisibility
+    // keep_correspondences: per direction i -> j, normalized [-1, 1] points in
+    // j ([n_i, 2]) and their confidence ([n_i]), before any gate.
+    std::vector<float> p2d[2], conf[2];
 };
 
 struct DenseFeatures;   // one image's [64, 64, 256] map, resident on the device

@@ -270,3 +270,4 @@ void nearest(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID, uniform Neare
     }
     if (live) p.out[i] = bi;
 }
+

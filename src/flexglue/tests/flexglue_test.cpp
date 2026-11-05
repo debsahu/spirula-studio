@@ -133,13 +133,32 @@ int main(int argc, char** argv) {
         k[s].width = k[s].height = 512;
     }
     model.setDumpPrefix("");
-    const flexglue::MatchOptions opts;
+    flexglue::MatchOptions opts;
+    opts.keep_correspondences = true;
     double t0 = now_s();
     const flexglue::MatchResult r = model.match(*f[0], k[0], *f[1], k[1], opts);
     std::printf("match %u x %u: %.1f ms, covisibility %.6f, stop layer %d\n", k[0].n, k[1].n,
                 (now_s() - t0) * 1e3, r.covisibility, r.stop_layer);
 
     std::vector<float> want;
+    for (int s = 0; s < 2 && r.stop_layer == 9; ++s) {
+        // Predicted points in 512-frame pixels: the readout's own unit.
+        std::vector<float> wp, wc;
+        if (load(dir, ("p2d" + std::to_string(s)).c_str(), wp) && wp.size() == r.p2d[s].size()) {
+            std::vector<double> err;
+            for (size_t i = 0; i < wp.size(); i += 2)
+                err.push_back(256.0 * std::hypot(r.p2d[s][i] - wp[i], r.p2d[s][i + 1] - wp[i + 1]));
+            std::sort(err.begin(), err.end());
+            const double p99 = err[(size_t)(0.99 * (double)(err.size() - 1))], mx = err.back();
+            check(p99 < 0.01, "p2d%d error p99 %.3g px, max %.3g px (bar p99 0.01 px)", s, p99, mx);
+        }
+        if (load(dir, ("conf" + std::to_string(s)).c_str(), wc) && wc.size() == r.conf[s].size()) {
+            double mx = 0;
+            for (size_t i = 0; i < wc.size(); ++i)
+                mx = std::max(mx, (double)std::fabs(r.conf[s][i] - wc[i]));
+            check(mx < 1e-3, "conf%d max |diff| %.3g (bar 1e-3)", s, mx);
+        }
+    }
     if (load(dir, "covisibility_score", want) && !want.empty())
         check(std::fabs(r.covisibility - want[0]) < 1e-4, "covisibility %.6f vs %.6f",
               r.covisibility, want[0]);

@@ -86,6 +86,10 @@ struct Model::Impl {
     vk::Arena arena{"flexglue"};
     nn::StageDump dump{"FLEXGLUE_DUMP"};
     std::string prefix;
+    // SS_FLEXGLUE_PROFILE=1: syncs around attention and the readout and
+    // prints where a pair's time went.
+    bool profile = spirula::env_on("FLEXGLUE_PROFILE");
+    double t_attn = 0, t_head = 0;
     float temperature = 0.0f;
     std::vector<float> rope;   // [4096, 32, 2] (cos, sin)
     bool loaded = false;
@@ -105,6 +109,7 @@ struct Model::Impl {
 
     // x[n, d] <- x + ffn(cat(x, LN(message))).
     void ffn(const Tensor& x, const Tensor& message, int64_t n, const std::string& b);
+    void attend(const Tensor& ctx, const Tensor& q, const Tensor& k, const Tensor& v);
     void selfBlock(const Tensor& x, const Tensor& freqs, const std::string& b);
     void crossBlock(const Tensor& x0, const Tensor& x1, const std::string& b);
     float covisibility(const Tensor& x0, const Tensor& x1, int layer);
@@ -119,7 +124,9 @@ struct Model::Impl {
 
 void Model::Impl::load(const std::string& path) {
     const nn::TorchCheckpoint f(path);
-    const bool half = spirula::env_on("FLEXGLUE_F16_WEIGHTS");
+    // f32 weights: without tensor cores f16 measured slower here (attention
+    // dominates) and cost the descriptor 4e-4 relative L2.
+    const bool half = false;
     auto take = [&](const std::string& name, bool matrix = false,
                     std::vector<int64_t> shape = {}) {
         if (!f.has(name)) nn::fail("'%s' has no tensor '%s'; is this flexglue.pth?",
@@ -402,6 +409,19 @@ void Model::Impl::ffn(const Tensor& x, const Tensor& message, int64_t n, const s
     nn::linear(x, h, g(b + "ffn.3.weight"), l1);
 }
 
+void Model::Impl::attend(const Tensor& ctx, const Tensor& q, const Tensor& k,
+                         const Tensor& v) {
+    nn::AttnOpts ao;
+    ao.n_heads = kHeads;
+    ao.head_dim = kHeadDim;
+    ao.arena = &arena;
+    if (profile) vk::Stream::get().sync();
+    const double t0 = nn::now_ms();
+    nn::attention(ctx, q, k, v, kTokens, kTokens, ao);
+    if (profile) vk::Stream::get().sync();
+    t_attn += nn::now_ms() - t0;
+}
+
 void Model::Impl::selfBlock(const Tensor& x, const Tensor& freqs, const std::string& b) {
     vk::ArenaScope scope(arena);
     const int64_t n = kTokens;
@@ -421,11 +441,7 @@ void Model::Impl::selfBlock(const Tensor& x, const Tensor& freqs, const std::str
     nn::rope(qkv[0], freqs, kHeads, kHeadDim, n);
     nn::rope(qkv[1], freqs, kHeads, kHeadDim, n);
     Tensor ctx = nn::arena_tensor(arena, DType::F32, n, kDim);
-    nn::AttnOpts ao;
-    ao.n_heads = kHeads;
-    ao.head_dim = kHeadDim;
-    ao.arena = &arena;
-    nn::attention(ctx, qkv[0], qkv[1], qkv[2], n, n, ao);
+    attend(ctx, qkv[0], qkv[1], qkv[2]);
     Tensor msg = qkv[0];
     LinearOpts lo;
     lo.bias = g(b + "out_proj.bias");
@@ -451,11 +467,7 @@ void Model::Impl::crossBlock(const Tensor& x0, const Tensor& x1, const std::stri
     }
     for (int s = 0; s < 2; ++s) {
         Tensor ctx = nn::arena_tensor(arena, DType::F32, n, kDim);
-        nn::AttnOpts ao;
-        ao.n_heads = kHeads;
-        ao.head_dim = kHeadDim;
-        ao.arena = &arena;
-        nn::attention(ctx, qk[s], qk[1 - s], v[1 - s], n, n, ao);
+        attend(ctx, qk[s], qk[1 - s], v[1 - s]);
         msg[s] = nn::arena_tensor(arena, DType::F32, n, kDim);
         LinearOpts lo;
         lo.bias = g(b + "to_out.bias");
@@ -592,6 +604,17 @@ MatchResult Model::Impl::match(const Tensor& f0, const Keypoints& k0, const Tens
     if (M == 0 || N == 0) return r;
 
     vk::ArenaScope root(arena);
+    const double t_start = nn::now_ms();
+    t_attn = t_head = 0;
+    struct Report {
+        Impl* m;
+        double t0;
+        ~Report() {
+            if (m->profile)
+                std::fprintf(stderr, "[flexglue] pair %.1f ms: attention %.1f, readout %.1f\n",
+                             nn::now_ms() - t0, m->t_attn, m->t_head);
+        }
+    } report{this, t_start};
     Tensor freqs = nn::arena_tensor(arena, DType::F32, (int64_t)kTokens * (kHeadDim / 2), 2);
     nn::tensor_from_host(freqs, rope.data(), (int64_t)rope.size());
     Tensor x[2];
@@ -649,8 +672,16 @@ MatchResult Model::Impl::match(const Tensor& f0, const Keypoints& k0, const Tens
             kn[s][2 * i + 1] = k512[s][2 * i + 1] / (float)kSize * 2 - 1;
         }
     }
+    if (profile) vk::Stream::get().sync();
+    const double th = nn::now_ms();
     correspond(x[0], x[1], kn[0], kLayers, p2dn[0], conf[0], 0);
     correspond(x[1], x[0], kn[1], kLayers, p2dn[1], conf[1], 1);
+    t_head += nn::now_ms() - th;
+    if (o.keep_correspondences)
+        for (int s = 0; s < 2; ++s) {
+            r.p2d[s] = p2dn[s];
+            r.conf[s] = conf[s];
+        }
 
     // sparse_matches with exact_nn, in 512-frame pixels.
     std::vector<float> p2d[2], valid[2];
