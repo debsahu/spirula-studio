@@ -1,0 +1,96 @@
+{
+ "images": {
+  "berlin1": {
+   "url": "https://raw.githubusercontent.com/cvg/FlexGlue/c6cbc7a933bb70ab58608e8835d99b6cc4adca1a/assets/berlin1.jpg",
+   "sha256": "c48d94f7f6f30fbb2802e9aeeea73c2982e600b561c15c744c7f83de9ed026b2",
+   "source": "FlexGlue repo, MIT",
+   "border_keypoints": true
+  },
+  "berlin2": {
+   "url": "https://raw.githubusercontent.com/cvg/FlexGlue/c6cbc7a933bb70ab58608e8835d99b6cc4adca1a/assets/berlin2.jpg",
+   "sha256": "98b9e8643929998a8e54ca2bd05490f4314c84f1c2bb6c5f9182001e1597e32a",
+   "source": "FlexGlue repo, MIT",
+   "border_keypoints": true
+  },
+  "lamar_cab_1446": {
+   "url": "https://raw.githubusercontent.com/cvg/FlexGlue/c6cbc7a933bb70ab58608e8835d99b6cc4adca1a/assets/lamar_cab_1446.jpg",
+   "sha256": "24d82b286a6bd47e3555e684355b517b465f821a0df6bd335ee02731ee4131c0",
+   "source": "FlexGlue repo, MIT",
+   "border_keypoints": true
+  },
+  "lamar_cab_1450": {
+   "url": "https://raw.githubusercontent.com/cvg/FlexGlue/c6cbc7a933bb70ab58608e8835d99b6cc4adca1a/assets/lamar_cab_1450.jpg",
+   "sha256": "e59874d699342c1af08091c33ba3a448a336c29053b72450b75d9bb4c50f529d",
+   "source": "FlexGlue repo, MIT",
+   "border_keypoints": true
+  },
+  "sacre_coeur1": {
+   "url": "https://raw.githubusercontent.com/cvg/LightGlue/5a650c444718caffc2669dc0094cde908f42dd73/assets/sacre_coeur1.jpg",
+   "sha256": "d274c3780b671fe637040bc976166962e2e48f8f512fb7ce939b71b07c85af83",
+   "source": "LightGlue repo, Apache-2.0",
+   "border_keypoints": true
+  },
+  "sacre_coeur2": {
+   "url": "https://raw.githubusercontent.com/cvg/LightGlue/5a650c444718caffc2669dc0094cde908f42dd73/assets/sacre_coeur2.jpg",
+   "sha256": "c6c0339235087c7c6c38faca5c6545250699bb59120b94b06f0fcf8227fbe64e",
+   "source": "LightGlue repo, Apache-2.0",
+   "border_keypoints": true
+  },
+  "DSC_0410": {
+   "url": "https://raw.githubusercontent.com/cvg/LightGlue/5a650c444718caffc2669dc0094cde908f42dd73/assets/DSC_0410.JPG",
+   "sha256": "1d6a86be44519faf4c86e9a869c5b298a5a7e1478f7479400c28aa2d018bd1b0",
+   "source": "LightGlue repo, Apache-2.0",
+   "border_keypoints": true
+  },
+  "DSC_0411": {
+   "url": "https://raw.githubusercontent.com/cvg/LightGlue/5a650c444718caffc2669dc0094cde908f42dd73/assets/DSC_0411.JPG",
+   "sha256": "7211ee48ec2fbc082d2dabf8dbf503c853a473712375c2ad32a29d538a168a47",
+   "source": "LightGlue repo, Apache-2.0",
+   "border_keypoints": true
+  }
+ },
+ "pairs": {
+  "berlin": {
+   "images": [
+    "berlin1",
+    "berlin2"
+   ],
+   "expect": "overlapping"
+  },
+  "sacre_coeur": {
+   "images": [
+    "sacre_coeur1",
+    "sacre_coeur2"
+   ],
+   "expect": "overlapping"
+  },
+  "dsc": {
+   "images": [
+    "DSC_0410",
+    "DSC_0411"
+   ],
+   "expect": "overlapping"
+  },
+  "lamar_lookalike": {
+   "images": [
+    "lamar_cab_1446",
+    "lamar_cab_1450"
+   ],
+   "expect": "look-alike, not covisible"
+  },
+  "berlin_x_lamar": {
+   "images": [
+    "berlin1",
+    "lamar_cab_1446"
+   ],
+   "expect": "different places"
+  },
+  "sacre_x_dsc": {
+   "images": [
+    "sacre_coeur1",
+    "DSC_0410"
+   ],
+   "expect": "different places"
+  }
+ }
+}

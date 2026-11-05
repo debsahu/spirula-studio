@@ -52,7 +52,7 @@ Both tiers use the same names and layout.
   is the tier to develop against. It is never committed.
 - **probe**: `flexglue_ref.py fixtures`, written to `fixtures/` and committed.
   Tensors under 65536 elements are written whole. Larger float tensors are
-  written as `<name>.probe_idx.npy`, holding 8192 sorted int64 flat indices
+  written as `<name>.probe_idx.npy`, holding 4096 sorted int32 flat indices
   into the C-order tensor and seeded by the name, plus `<name>.probe_val.npy`
   (f32) and `<name>.stats.json` (shape, dtype, L2 norm, max abs, mean). Images
   are saved as `image.png`, a lossless copy of the decoded RGB the reference
