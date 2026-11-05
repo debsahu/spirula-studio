@@ -112,6 +112,7 @@ Conventions:
 | `m0` `m1` | [M0] [M1] | mutual NN, -1 where not mutual (before gating) |
 | `nostop.matches0` `nostop.mscores0` `nostop.covisibility_score` | [M0] [M0] [1] | min covisibility 0 |
 | `colmap.matches0` `colmap.mscores0` `colmap.covisibility_score` `colmap.stop_layer` | [M0] [M0] [1] [1] | COLMAP's graph with its defaults |
+| `colmap_decay02.*` | same | COLMAP's graph with `early_stop_decay 0.2`. The defaults never stop a public pair at an odd layer, so only this setting separates checks at 2/4/6/8 from checks at every layer: `lamar_lookalike` stops at 4 here, and would stop at 3 under every-layer checks. |
 
 A C++ dump is one flat directory: `<name>.npy` per stage, with the image
 stages prefixed `img0.` / `img1.`, plus `manifest.json` set to

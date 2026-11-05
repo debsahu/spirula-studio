@@ -78,7 +78,11 @@
   "kpts0_px": "full",
   "img0.size": "full",
   "kpts1_px": "full",
-  "img1.size": "full"
+  "img1.size": "full",
+  "colmap_decay02.matches0": "full",
+  "colmap_decay02.mscores0": "full",
+  "colmap_decay02.covisibility_score": "full",
+  "colmap_decay02.stop_layer": "full"
  },
  "image_files": {
   "DSC_0410": {
@@ -127,7 +131,17 @@
   "n_layers": 9,
   "descriptor_size": 512,
   "reference_precision": "fp32 (mp=None)",
-  "exact_nn": true
+  "exact_nn": true,
+  "gates": {
+   "colmap": {
+    "min_covisibility": 0.5,
+    "early_stop_decay": 0.5
+   },
+   "colmap_decay02": {
+    "min_covisibility": 0.5,
+    "early_stop_decay": 0.2
+   }
+  }
  },
  "upstream": {
   "commit": "c6cbc7a933bb70ab58608e8835d99b6cc4adca1a",

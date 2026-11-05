@@ -35,7 +35,8 @@ EPE_P50_PX, EPE_P99_PX = 0.01, 0.1   # predicted points, 512-frame pixels
 COV_ABS = 1e-4
 DISCRETE_FRAC = 0.002                # indices and masks: fraction of entries that differ
 REQUIRED = ("colmap.matches0", "colmap.mscores0", "colmap.covisibility_score",
-            "colmap.stop_layer", "kpts0", "kpts1")
+            "colmap.stop_layer", "colmap_decay02.stop_layer", "colmap_decay02.matches0",
+            "kpts0", "kpts1")
 
 
 def rel_l2(a, b):

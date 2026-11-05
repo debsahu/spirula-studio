@@ -48,6 +48,11 @@ SIZE = 512                      # COLMAP's descriptor input, squashed
 COLMAP = dict(filter_threshold=0.1, max_distance_px=3.0, min_covisibility=0.5,
               early_stop_decay=0.5)
 CHECK_LAYERS = (2, 4, 6, 8)
+# (min_covisibility, early_stop_decay) per output prefix. COLMAP's defaults never stop a
+# public pair at an odd layer, so they cannot tell 2/4/6/8 from every-layer checks;
+# decay 0.2 stops lamar_lookalike at 3 under every-layer checks and at 4 under COLMAP's.
+GATES = {"colmap": (COLMAP["min_covisibility"], COLMAP["early_stop_decay"]),
+         "colmap_decay02": (COLMAP["min_covisibility"], 0.2)}
 N_LAYERS = 9
 
 PROBES = 4096
@@ -363,9 +368,9 @@ def match(m, feat0, feat1, kpts512):
     for k, v in nostop.items():
         out[f"nostop.{k}"] = v
     out["nostop.covisibility_score"] = np.float32(cov[N_LAYERS])
-    col = colmap_gate(cov, nostop, COLMAP["min_covisibility"], COLMAP["early_stop_decay"])
-    for k, v in col.items():
-        out[f"colmap.{k}"] = v
+    for label, (mc, dec) in GATES.items():
+        for k, v in colmap_gate(cov, nostop, mc, dec).items():
+            out[f"{label}.{k}"] = v
 
     # Upstream end to end, as onnx/export.py traces it, must give the same answer.
     for label, mc in (("nostop", 0.0), ("colmap", COLMAP["min_covisibility"])):
@@ -531,6 +536,8 @@ def write_pair(root, pname, pair_spec, imgs, pair, tier, extra):
                            points="512-frame pixels / normalized [-1, 1], corner origin",
                            indices="int64", masks="uint8 0/1"),
                settings=dict(colmap=COLMAP, check_layers=list(CHECK_LAYERS), n_layers=N_LAYERS,
+                             gates={k: dict(min_covisibility=v[0], early_stop_decay=v[1])
+                                    for k, v in GATES.items()},
                              descriptor_size=SIZE, reference_precision="fp32 (mp=None)",
                              exact_nn=True),
                upstream=dict(commit=UPSTREAM_COMMIT, checkpoint=CHECKPOINT[0],
