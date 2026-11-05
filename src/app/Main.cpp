@@ -18,6 +18,10 @@
 #ifdef SS_TOOL_DENSIFY
 #include "roma/model/Fetch.h"
 #endif
+#if defined(SS_TOOL_SFM) && defined(SS_HAVE_FLEXGLUE) && SS_HAVE_FLEXGLUE
+#include "flexglue/model/Fetch.h"
+#define SS_APP_FLEXGLUE 1
+#endif
 
 #include <cctype>
 #include <exception>
@@ -191,6 +195,9 @@ int main(int argc, char** argv) {
         app::install_license_gate();
 #ifdef SS_TOOL_DENSIFY
         roma::register_licenses();
+#endif
+#ifdef SS_APP_FLEXGLUE
+        flexglue::register_licenses();
 #endif
         app::consume_accept_license_args(argc, argv);
     } catch (const std::exception& e) {
