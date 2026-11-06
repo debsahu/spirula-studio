@@ -98,6 +98,7 @@ std::string metal_status();
 struct MetalCounts {
     uint64_t attention = 0, gemm = 0;   // ops MPSGraph ran
     uint64_t compiles = 0;              // MPSGraph executables built
+    uint64_t evictions = 0;             // and dropped from the LRU
     uint64_t sections = 0;              // Vulkan -> Metal -> Vulkan hand-offs
     uint64_t rotations = 0;             // must stay 0, see nn/vk/MetalInterop.h
 };

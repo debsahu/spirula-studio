@@ -2,7 +2,7 @@
 // (PyTorch, fp32, COLMAP's configuration; README.md there has the format and
 // the tolerance policy, whose fixed bars are used here).
 //
-//   flexglue_test [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] [--bench N] [--require-model] [--warm-cache] [--fp16]
+//   flexglue_test [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] [--bench N] [--require-model] [--warm-cache] [--fp16] [--require-metal]
 //
 // Each pair runs twice, as the reference did: `nostop` (min covisibility 0, so
 // the readout always runs) and `colmap` (COLMAP's defaults, early stops on).
@@ -246,6 +246,43 @@ void test_self_cache(flexglue::Model& model, const fs::path& root) {
           (unsigned long long)(s3.hits - s2.hits), s3.entries);
     f[0].reset();
     check(model.selfCacheStats().entries == 0, "an image's entry dies with its features");
+    // An fp16 match must neither read the fp32 entries nor add its own, whether
+    // it asked for fp16 or runs inside a caller's Fp16Scope.
+    if (nn::metal_enabled()) {
+        nn::Image im;
+        load_fixture_image(root, stems[0], im);
+        f[0] = model.describe(im.data.data(), im.width, im.height);
+        flexglue::MatchOptions o16 = o;
+        o16.fp16 = true;
+        auto run16 = [&](int p) {
+            return model.match(*f[pairs[p][0].img], k[p][0], *f[pairs[p][1].img], k[p][1], o16);
+        };
+        model.setSelfCache(0);
+        const flexglue::MatchResult ref16 = run16(1);
+        check(!same_result(ref16, ref[1]),
+              "fp16 and fp32 results differ, so a cache read would show");
+        model.setSelfCache(64);
+        auto same_stats = [](const flexglue::Model::SelfCacheStats& a,
+                             const flexglue::Model::SelfCacheStats& b) {
+            return a.hits == b.hits && a.misses == b.misses && a.entries == b.entries;
+        };
+        const flexglue::Model::SelfCacheStats c0 = model.selfCacheStats();
+        check(same_result(run16(1), ref16) && same_stats(model.selfCacheStats(), c0),
+              "fp16, cold cache: no entry added, output unchanged");
+        run(1);
+        const flexglue::Model::SelfCacheStats c1 = model.selfCacheStats();
+        check(same_result(run16(1), ref16) && same_stats(model.selfCacheStats(), c1),
+              "fp16, warm cache: the fp32 entries are not read");
+        flexglue::MatchResult rs;
+        {
+            nn::Fp16Scope half(true);
+            rs = run(1);
+        }
+        check(same_result(rs, ref16) && same_stats(model.selfCacheStats(), c1),
+              "fp16 from a caller's scope: the cache is bypassed too");
+    } else {
+        std::printf("  --   fp16 cache bypass: SKIP (%s)\n", nn::metal_status().c_str());
+    }
     model.setSelfCache(64);
 }
 
@@ -450,7 +487,7 @@ int main(int argc, char** argv) {
     std::string root = std::string(SS_REPO_ROOT) + "/tools/flexglue_ref/fixtures";
     std::string only, ckpt;
     int bench = 0;
-    bool require_model = false, warm = false;
+    bool require_model = false, warm = false, require_metal = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--fixtures" && i + 1 < argc) root = argv[++i];
@@ -460,10 +497,11 @@ int main(int argc, char** argv) {
         else if (a == "--require-model") require_model = true;
         else if (a == "--warm-cache") warm = true;
         else if (a == "--fp16") g_fp16 = true;
+        else if (a == "--require-metal") require_metal = true;
         else {
             std::fprintf(stderr,
                          "usage: %s [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] "
-                         "[--bench N] [--require-model] [--warm-cache] [--fp16]\n",
+                         "[--bench N] [--require-model] [--warm-cache] [--fp16] [--require-metal]\n",
                          argv[0]);
             return 2;
         }
@@ -496,6 +534,13 @@ int main(int argc, char** argv) {
     model.load(ckpt);
     std::printf("metal: %s; tier %s\n", nn::metal_status().c_str(),
                 g_fp16 ? "fp16 (the fp32 bars below do not apply; compare.py --tier fp16)" : "fp32");
+    // The fp16 tier exists only on the Metal path: without it --fp16 would score
+    // an fp32 run as fp16.
+    if ((g_fp16 || require_metal) && !nn::metal_enabled()) {
+        std::printf("FAIL %s needs the Metal path: %s\n", g_fp16 ? "--fp16" : "--require-metal",
+                    nn::metal_status().c_str());
+        return 1;
+    }
     if (only.empty() && !g_fp16) test_self_cache(model, root);
     for (const std::string& p : pairs) run_pair(model, root, p, bench, warm);
     {
@@ -511,7 +556,9 @@ int main(int argc, char** argv) {
               g_gate_bites);
     if (dumping) {
         std::ofstream m(fs::path(dump) / "manifest.json");
-        m << "{\"finished\": true, \"exit_status\": " << (g_failures ? 1 : 0) << ", \"files\": [";
+        m << "{\"finished\": true, \"exit_status\": " << (g_failures ? 1 : 0)
+          << ", \"tier\": \"" << (g_fp16 ? "fp16" : "fp32") << "\", \"metal\": \""
+          << nn::metal_status() << "\", \"files\": [";
         bool first = true;
         for (const auto& e : fs::directory_iterator(dump, ec))
             if (e.path().extension() == ".npy") {

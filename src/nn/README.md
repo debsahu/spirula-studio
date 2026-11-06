@@ -190,38 +190,43 @@ same way, so the tolerances stay tight rather than being widened to absorb it.
 
 ## The Metal path (macOS)
 
-On Apple GPUs MoltenVK's SPIR-V kernels reach a fraction of the ALUs
-(docs/notes/flexglue-apple-speed.md), so `OpMetal.mm` hands attention and the
-large GEMMs to MPSGraph. It is in the build on macOS (`-DSS_NN_METAL=ON`, the
-default there) and runs unless `SS_NN_METAL=0`, wherever the device passes
-`nn/vk/MetalInterop.mm`'s probe; everything else, and every other platform,
-runs the Vulkan kernels unchanged.
+On Apple GPUs the SPIR-V kernels, translated by MoltenVK, use a fraction of the
+ALUs. `OpMetal.mm` therefore runs attention and the large GEMMs on MPSGraph.
+It is built on macOS (`-DSS_NN_METAL=ON`, the default there) and runs unless
+`SS_NN_METAL=0`, on any device that passes `nn/vk/MetalInterop.mm`'s probe.
+Every other op, and every other platform, runs the Vulkan kernels unchanged.
 
 - **Which ops.** `attention` with no bias, packed rows and a head dim of 16,
-  32, 64 or 128, any batch. `linear` / `matmul_nt` with fp32 activations, an fp32 or fp16 weight,
-  any epilogue but the rarer activations, and an output of at least 128 x 128.
-  GEMM executables leave M dynamic, because FlexGlue's readout rows follow the
-  keypoint count and a compile per count would cost more than the GEMM.
-- **Memory.** Every allocation is made exportable (`VkExportMetalObjectCreateInfoEXT`),
-  and a tensor becomes a 1-D `MPSNDArray` over the allocation's `MTLBuffer` at
-  its byte offset. Each wrap checks that the range lies inside the allocation and
-  the buffer, and that the buffer's GPU address is the Vulkan device address,
-  which is the only proof the two objects alias.
+  32, 64 or 128, at any batch. `linear` and `matmul_nt` with fp32 activations,
+  an fp32 or fp16 weight, an output of at least 128 x 128, and no neighbour
+  gather. GEMM executables leave M dynamic, so a row count that follows the
+  input (keypoints, chunk tails) does not compile a graph per call. The
+  executables live in an LRU of 128.
+- **Memory.** Every allocation is made exportable
+  (`VkExportMetalObjectCreateInfoEXT`). A tensor becomes a 1-D `MPSNDArray` over
+  its allocation's `MTLBuffer`, at its byte offset. Each wrap checks that the
+  range lies inside the allocation and the buffer. It also checks that the
+  buffer's GPU address equals the Vulkan device address, which is what proves
+  the two objects alias.
 - **Ordering, with no host stall.** Consecutive Metal ops share one command
   buffer on a queue of our own (a section). Opening one flushes the stream and
-  waits on its timeline's `MTLSharedEvent` for the last submission; closing it
-  signals the next value, and the next Vulkan submission waits on that.
-  `Stream` closes an open section before it records again or syncs. A section
-  that fails aborts the process: it never signals, and Vulkan would wait on it
-  forever.
-- **In place.** MPSGraph says nothing about a result aliasing an input, so the
-  residual FFN (`x = W h + b + x`) writes a graph-owned result and copies it
-  out.
+  waits on its timeline's `MTLSharedEvent`. Closing it signals the next value,
+  and the next Vulkan submission waits on that. `Stream` closes an open section
+  before it records again or syncs. A failed command buffer aborts the process,
+  because it never signals and Vulkan would wait forever. So does a section
+  that MPSGraph moves to a second command buffer, which nothing would order.
+- **In place.** MPSGraph does not say whether a result may alias an input. An
+  in-place op (`x = W h + b + x`) writes a graph-owned result and copies it out.
 - **fp16 tier.** `nn::Fp16Scope` makes the Metal path cast operands to fp16,
-  which the M5's GPU neural accelerators run. It fails the fp32 parity bars by
-  design, so a model opts in with its own flag and is scored against its own
-  bars (FlexGlue: `flexglue_test --fp16`, `compare.py --tier fp16`).
-- **Not covered.** `SS_PROFILE` times Vulkan dispatches only; Metal work shows
+  which the M5's GPU neural accelerators run. It fails fp32 parity bars by design, so a model
+  opts in with its own flag and its own bars (FlexGlue: `flexglue_test --fp16`,
+  `compare.py --tier fp16`). Nothing in `nn` sets it.
+- **MPS bugs it avoids** (macOS 26.6). SDPA aborts the process at head dim 96,
+  is wrong at head dim 256, and aborts when the whole problem is one score
+  (batch x heads x queries x keys = 1). Those shapes stay on Vulkan.
+  `nn_ops_test --probe-attn B,nq,nk,H,D` runs one shape in its own process, to
+  check a new OS.
+- **Not covered.** `SS_PROFILE` times Vulkan dispatches only. Metal work shows
   up as the gap between them.
 
 It is on by default where it is available, from these measurements (Apple M5
@@ -242,12 +247,10 @@ MoGe's stages agree with the Vulkan path to <= 3.2e-6 relative L2 and LoMa's
 descriptors to 2.0e-6, with identical keypoints and match counts. The fp16 tier
 passes its own bars on all six pairs and misses 34-58 of the 91 fp32 ones.
 
-MPS's SDPA aborts the process at head dim 96 and is wrong at 256 on this OS,
-so attention takes only 16, 32, 64 and 128; the rest stays on Vulkan.
-
-`nn_ops_test` reruns its suite with the Metal path on and adds cases for the
-hand-off ordering, aliasing, unaligned offsets, the range check and the fp16
-tier; `nn_ops_test --bench` prints both paths side by side.
+`nn_ops_test` reruns its suite with the Metal path on. It adds cases for
+hand-off ordering in both directions, aliasing, unaligned offsets, the range
+check, the smallest shapes and the fp16 tier. `nn_ops_test --bench` prints both
+paths side by side.
 
 ## Portability rules for new kernels
 

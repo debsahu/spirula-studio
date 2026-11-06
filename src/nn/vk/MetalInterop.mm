@@ -17,6 +17,10 @@ namespace metal {
 
 namespace {
 
+// FLOPs one section carries before it is submitted: ~0.25 s at the 4-6 TFLOP/s
+// MPSGraph reaches, far inside Metal's command-buffer timeout.
+constexpr double kSectionWork = 1e12;
+
 struct State {
     uint64_t           generation = 0;
     bool               ok = false;
@@ -150,23 +154,30 @@ Range resolve(DevicePtr p, uint64_t bytes, const char* what) {
 
 void check_range(DevicePtr p, uint64_t bytes, const char* what) { resolve(p, bytes, what); }
 
+// A failed section never signals, and Vulkan would wait on it forever.
+void check_completed(id<MTLCommandBuffer> done) {
+    if (done.status == MTLCommandBufferStatusCompleted) return;
+    std::fprintf(stderr, "[nn] metal command buffer failed (status %d): %s\n", (int)done.status,
+                 done.error.localizedDescription.UTF8String);
+    std::abort();
+}
+
 void close() {
     State& s = state();
     if (!s.open) return;
     MPSCommandBuffer* cb = s.open;
     s.open = nil;
     s.work = 0;
-    if (cb.commandBuffer != cb.rootCommandBuffer && s.stats.rotations++ == 0)
-        NN_LOG_WARN("[nn] metal: MPSGraph split a section across command buffers\n");
+    // MPSGraph committed the waiting buffer and went on in a fresh one, which
+    // nothing orders after the Vulkan work. It is not committed yet, so stop
+    // here before it can read early. Never seen (0 in every measured run).
+    if (cb.commandBuffer != cb.rootCommandBuffer) {
+        ++s.stats.rotations;
+        std::fprintf(stderr, "[nn] metal: MPSGraph split a section across command buffers; "
+                             "its reads would be unordered. Rerun with SS_NN_METAL=0.\n");
+        std::abort();
+    }
     [cb encodeSignalEvent:s.event value:s.signal];
-    [cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
-        // A failed section never signals, and Vulkan would wait on it forever.
-        if (done.status != MTLCommandBufferStatusCompleted) {
-            std::fprintf(stderr, "[nn] metal command buffer failed (status %d): %s\n",
-                         (int)done.status, done.error.localizedDescription.UTF8String);
-            std::abort();
-        }
-    }];
     [cb commit];
 }
 
@@ -174,11 +185,12 @@ MPSCommandBuffer* section(double work) {
     State& s = live();
     NN_CHECK(s.ok, "metal: %s", s.reason.c_str());
     Stream& st = Stream::get();
-    if (s.open && s.work > 0 && s.work + work > st.workCap()) close();
+    if (s.open && s.work > 0 && s.work + work > kSectionWork) close();
     if (!s.open) {
         st.setExternalCloser(&close);
         const Stream::Handoff h = st.handOff();
         id<MTLCommandBuffer> cb = [s.queue commandBuffer];
+        [cb addCompletedHandler:^(id<MTLCommandBuffer> d) { check_completed(d); }];
         [cb encodeWaitForEvent:s.event value:h.wait];
         s.open = [MPSCommandBuffer commandBufferWithCommandBuffer:cb];
         s.signal = h.signal;

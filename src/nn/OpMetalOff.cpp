@@ -1,6 +1,7 @@
 // The Metal path where the build has none (OpMetal.mm is macOS-only).
 #if !SS_HAVE_NN_METAL
 #include "nn/OpMetal.h"
+#include "nn/vk/MetalInterop.h"
 
 namespace nn {
 
@@ -21,9 +22,24 @@ bool metal_attention(const Tensor&, const Tensor&, const Tensor&, const Tensor&,
     return false;
 }
 bool metal_gemm(const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, Act,
-                float, int64_t) {
+                float, int64_t, float) {
     return false;
 }
+
+namespace vk {
+namespace metal {
+
+bool available() { return false; }
+const std::string& reason() {
+    static const std::string r = "not built with SS_NN_METAL";
+    return r;
+}
+void close() {}
+Stats stats() { return {}; }
+void check_range(DevicePtr, uint64_t, const char*) {}
+
+}  // namespace metal
+}  // namespace vk
 
 }  // namespace nn
 #endif

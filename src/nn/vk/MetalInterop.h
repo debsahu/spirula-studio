@@ -27,8 +27,8 @@ void close();
 
 struct Stats {
     uint64_t sections = 0;
-    // A section whose encode moved to a second command buffer: Metal does not
-    // order those against the first one's event wait, so it should stay 0.
+    // A section MPSGraph moved to a second command buffer, which nothing orders
+    // after the Vulkan work. close() aborts on the first one.
     uint64_t rotations = 0;
 };
 Stats stats();
@@ -47,7 +47,7 @@ struct Range {
 Range resolve(DevicePtr p, uint64_t bytes, const char* what);
 
 // The open section's command buffer, opening one on first use. `work` is the
-// caller's FLOPs; a section it would push past Stream's budget is closed first.
+// caller's FLOPs; a section it would push past kSectionWork is closed first.
 MPSCommandBuffer* section(double work);
 #endif
 

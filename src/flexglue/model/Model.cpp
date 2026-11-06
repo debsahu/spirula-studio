@@ -718,10 +718,12 @@ MatchResult Model::Impl::match(const DenseFeatures& d0, const Keypoints& k0,
     Tensor x[2];
     const DenseFeatures* d[2] = {&d0, &d1};
     nn::DevicePtr self1[2];
-    // Cached entries are fp32 layer-1 outputs; an fp16 match neither reads nor writes them.
+    // Cached entries are fp32 layer-1 outputs. An fp16 match, asked for here or
+    // by a caller's own scope, neither reads nor writes them.
     nn::Fp16Scope half(o.fp16);
-    const bool caching = !o.fp16 && self_cache->capacity > 0;
-    for (int s = 0; s < 2; ++s) self1[s] = o.fp16 ? 0 : self_cache->find(d[s]->id);
+    const bool fp32 = !nn::fp16_active();
+    const bool caching = fp32 && self_cache->capacity > 0;
+    for (int s = 0; s < 2; ++s) self1[s] = fp32 ? self_cache->find(d[s]->id) : 0;
     const uint64_t x_bytes = (uint64_t)kTokens * kDim * 4;
     for (int s = 0; s < 2; ++s) {
         x[s] = nn::arena_tensor(arena, DType::F32, kTokens, kDim);

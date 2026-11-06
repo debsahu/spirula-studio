@@ -180,6 +180,8 @@ def classify(name):
 def check(a):
     ref = Ref(a.ref, a.pair)
     dump, dman = load_dump(a.dump)
+    if dman.get("tier", a.tier) != a.tier:
+        sys.exit(f"{a.dump}: the dump is from the {dman['tier']} tier, scored here as {a.tier}")
     rows = []
 
     def row(stage, metric, value, bar, floor=None):

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <list>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -20,8 +21,8 @@ namespace nn {
 
 namespace {
 
-// On by default: FlexGlue 926 -> 474 ms/pair, MoGe-2 ViT-L 940 -> 800 ms, at
-// parity (src/nn/README.md has the table).
+// On by default: measured faster at parity on every model that uses these ops
+// (src/nn/README.md has the table).
 constexpr bool kMetalDefault = true;
 // Below this on either output axis the hand-off costs more than the GEMM.
 constexpr int64_t kMinGemmEdge = 128;
@@ -48,10 +49,42 @@ struct Graph {
     std::vector<int>     order;   // exe.feedTensors[i] is our input order[i]
 };
 
-std::unordered_map<std::string, Graph>& cache() {
-    static std::unordered_map<std::string, Graph> c;
-    return c;
+// LRU over shapes. One model needs a few dozen executables; a model whose
+// shapes keep changing would otherwise grow this without bound.
+constexpr size_t kMaxGraphs = 128;
+
+struct Cache {
+    std::list<std::string> order;   // most recent first
+    std::unordered_map<std::string, std::pair<Graph, std::list<std::string>::iterator>> map;
+};
+
+// The executable for `key`, or a fresh empty slot to compile into.
+Graph& cached(const std::string& key) {
+    static Cache c;
+    auto it = c.map.find(key);
+    if (it != c.map.end()) {
+        c.order.splice(c.order.begin(), c.order, it->second.second);
+        return it->second.first;
+    }
+    if (c.map.size() >= kMaxGraphs) {
+        c.map.erase(c.order.back());
+        c.order.pop_back();
+        ++g_counts.evictions;
+    }
+    c.order.push_front(key);
+    return c.map.emplace(key, std::make_pair(Graph{}, c.order.begin())).first->second.first;
 }
+
+// The totals at exit, for SS_NN_LOG=2 runs of any model.
+struct ExitReport {
+    ~ExitReport() {
+        if (g_counts.attention + g_counts.gemm == 0) return;
+        NN_LOG_INFO("[nn] metal: %llu attention, %llu gemm, %llu compiles, %llu evictions\n",
+                    (unsigned long long)g_counts.attention, (unsigned long long)g_counts.gemm,
+                    (unsigned long long)g_counts.compiles,
+                    (unsigned long long)g_counts.evictions);
+    }
+} g_exit_report;
 
 // n = -1 leaves the length to each encode.
 MPSGraphTensor* input(MPSGraph* g, NSMutableArray<MPSGraphTensor*>* ins,
@@ -219,7 +252,9 @@ bool metal_attention(const Tensor& out, const Tensor& q, const Tensor& k, const 
     // MPS's SDPA (macOS 26.6) aborts the process at head dim 96 ("exceeds available
     // stack space") and is wrong at 256 (rel L2 0.24 on 100 tokens; nn_ops_test).
     const bool pow2 = o.head_dim >= 16 && o.head_dim <= 128 && (o.head_dim & (o.head_dim - 1)) == 0;
-    if (!pow2) return false;
+    // A single score (B*H*nq*nk == 1) aborts MPSGraph's compiler ("MLIR pass
+    // manager failed"), uncatchably; the probe in nn_ops_test --probe-attn maps the rest.
+    if (!pow2 || (int64_t)o.batch * o.n_heads * nq * nk == 1) return false;
     if (o.bias_mode != AttnBias::None || !packed(o.q_stride) || !packed(o.k_stride) ||
         !packed(o.v_stride) || !packed(o.out_stride) || q.dtype != DType::F32 ||
         k.dtype != DType::F32 || v.dtype != DType::F32 || out.dtype != DType::F32 ||
@@ -232,7 +267,7 @@ bool metal_attention(const Tensor& out, const Tensor& q, const Tensor& k, const 
         char key[160];
         std::snprintf(key, sizeof key, "attn %lld %lld %lld %lld %lld %a %d", (long long)B,
                       (long long)nq, (long long)nk, (long long)H, (long long)D, scale, half);
-        Graph& gr = cache()[key];
+        Graph& gr = cached(key);
         if (!gr.exe || gr.generation != vk::Context::generation()) {
             MPSGraph* g = [MPSGraph new];
             NSMutableArray<MPSGraphTensor*>* ins = [NSMutableArray array];
@@ -269,7 +304,8 @@ bool metal_attention(const Tensor& out, const Tensor& q, const Tensor& k, const 
 }
 
 bool metal_gemm(const Tensor& out, const Tensor& x, const Tensor& w_in, const Tensor& bias,
-                const Tensor& residual, Act act, float alpha, int64_t x_row_stride) {
+                const Tensor& residual, Act act, float alpha, int64_t x_row_stride,
+                float x_scale) {
     const Tensor w = w_in.asMatrix();
     const int64_t M = out.rows(), N = out.cols(), K = w.cols();
     if (M < kMinGemmEdge || N < kMinGemmEdge || x.dtype != DType::F32 ||
@@ -281,10 +317,12 @@ bool metal_gemm(const Tensor& out, const Tensor& x, const Tensor& w_in, const Te
         const bool half = g_fp16;
         char key[160];
         // M is left dynamic: the readout's row counts follow the keypoint count.
-        std::snprintf(key, sizeof key, "gemm %lld %lld %d %d %d %d %a %d",
+        // x_scale matters only where x is rounded to fp16, as in the Vulkan kernels.
+        const float xs = half ? x_scale : 1.0f;
+        std::snprintf(key, sizeof key, "gemm %lld %lld %d %d %d %d %a %a %d",
                       (long long)N, (long long)K, (int)w.dtype, bias.valid(), residual.valid(),
-                      (int)act, alpha, half);
-        Graph& gr = cache()[key];
+                      (int)act, alpha, xs, half);
+        Graph& gr = cached(key);
         if (!gr.exe || gr.generation != vk::Context::generation()) {
             MPSGraph* g = [MPSGraph new];
             NSMutableArray<MPSGraphTensor*>* ins = [NSMutableArray array];
@@ -295,6 +333,8 @@ bool metal_gemm(const Tensor& out, const Tensor& x, const Tensor& w_in, const Te
             MPSGraphTensor* tw = input(g, ins, feeds, N * K, mps_type(w.dtype));
             tx = [g reshapeTensor:tx withShape:@[@-1, @(K)] name:nil];
             tw = [g reshapeTensor:tw withShape:@[@(N), @(K)] name:nil];
+            auto scalar = [&](double v) { return [g constantWithScalar:v dataType:MPSDataTypeFloat32]; };
+            if (xs != 1.0f) tx = [g multiplicationWithPrimaryTensor:tx secondaryTensor:scalar(xs) name:nil];
             if (op != MPSDataTypeFloat32) tx = [g castTensor:tx toType:op name:nil];
             if (mps_type(w.dtype) != op) tw = [g castTensor:tw toType:op name:nil];
             MPSGraphTensor* y = [g matrixMultiplicationWithPrimaryTensor:tx
@@ -302,6 +342,7 @@ bool metal_gemm(const Tensor& out, const Tensor& x, const Tensor& w_in, const Te
                                                                                 withDimension:1 name:nil]
                                                                     name:nil];
             if (half) y = [g castTensor:y toType:MPSDataTypeFloat32 name:nil];
+            if (xs != 1.0f) y = [g multiplicationWithPrimaryTensor:y secondaryTensor:scalar(1.0 / xs) name:nil];
             if (alpha != 1.0f)
                 y = [g multiplicationWithPrimaryTensor:y
                                        secondaryTensor:[g constantWithScalar:alpha

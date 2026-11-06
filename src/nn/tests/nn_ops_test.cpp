@@ -775,9 +775,8 @@ void test_metal(vk::Arena& arena) {
     char buf[160];
     set_metal_enabled(true);
 
-    // FlexGlue's self and cross shapes, at a quarter of its 4096 tokens so the
-    // fp64 reference stays quick. The 1e-5 relative L2 bar is the speed note's
-    // falsifier for the fp32 path.
+    // A 4096-token matcher's shapes at a quarter of the tokens, so the fp64
+    // reference stays quick. 1e-5 relative L2 is what an fp32 SDPA must reach.
     struct Case { int B, nq, nk, H, HD; const char* name; };
     const Case cases[] = {
         {1, 1024, 1024, 8, 64, "metal attn 1024 h8 d64"},
@@ -922,6 +921,83 @@ void test_metal(vk::Arena& arena) {
               pwant, 3e-4f);
         check("metal hand-off order", got, want, 2e-4f);
         expect(n.second == 4, "metal hand-off ran on metal", "");
+    }
+
+    // Metal -> Vulkan -> Metal. The Vulkan add waits on the first section's
+    // event; the second section is committed behind it, and only its own wait
+    // keeps it from reading the add's output before the add has run.
+    {
+        vk::ArenaScope scope(arena);
+        const int T = 4096, H = 8, D = 64, dim = H * D, N = 4096, step = 64;
+        auto q = randn((size_t)T * dim), w = randn((size_t)N * dim, 0.05f);
+        Tensor tq = upload_f32(arena, q, T, dim);
+        Tensor p = arena_tensor(arena, DType::F32, T, dim);
+        Tensor p2 = arena_tensor(arena, DType::F32, T, dim);
+        Tensor y = arena_tensor(arena, DType::F32, T, N);
+        Tensor tw = upload_f32(arena, w, N, dim);
+        vk::Stream::get().zero(p.ptr, (uint64_t)T * dim * 4);
+        vk::Stream::get().zero(p2.ptr, (uint64_t)T * dim * 4);
+        vk::Stream::get().zero(y.ptr, (uint64_t)T * N * 4);
+        vk::Stream::get().sync();
+        AttnOpts o;
+        o.n_heads = H;
+        o.head_dim = D;
+        const auto n1 = metal_ops([&] {
+            for (int i = 0; i < 8; ++i) attention(p, tq, tq, tq, T, T, o);
+        });
+        set_metal_enabled(false);
+        add(p2, p, p);
+        set_metal_enabled(true);
+        const auto n2 = metal_ops([&] { matmul_nt(y, p2, tw); });
+        const auto pp = readback(p), yy = readback(y);
+        std::vector<float> got, want;
+        for (int t = 0; t < T; t += step)
+            for (int j = 0; j < N; ++j) {
+                double acc = 0;
+                for (int c = 0; c < dim; ++c)
+                    acc += 2.0 * pp[(size_t)t * dim + c] * w[(size_t)j * dim + c];
+                want.push_back((float)acc);
+                got.push_back(yy[(size_t)t * N + j]);
+            }
+        check("metal M-V-M order", got, want, 2e-4f);
+        expect(n1.first == 8 && n2.second == 1, "metal M-V-M ran on metal", "");
+    }
+
+    // The smallest shapes, nq or nk of 1 and 2: MPSGraph aborts the process on
+    // some of them, so this is only that they come back right on either path.
+    {
+        struct E { int B, nq, nk, H, HD; };
+        const E es[] = {{1, 1, 1, 1, 64}, {1, 1, 2, 1, 16}, {1, 2, 1, 1, 16}, {1, 2, 2, 1, 16},
+                        {2, 1, 1, 1, 16}, {1, 1, 1, 4, 16}, {1, 1, 7, 8, 64}, {1, 2, 2, 8, 128}};
+        for (const auto& c : es) {
+            vk::ArenaScope scope(arena);
+            const int dim = c.H * c.HD;
+            auto q = randn((size_t)c.B * c.nq * dim), k = randn((size_t)c.B * c.nk * dim),
+                 v = randn((size_t)c.B * c.nk * dim);
+            Tensor tq = upload_f32(arena, q, c.B, c.nq, dim), tk = upload_f32(arena, k, c.B, c.nk, dim),
+                   tv = upload_f32(arena, v, c.B, c.nk, dim);
+            Tensor to = arena_tensor(arena, DType::F32, c.B, c.nq, dim);
+            AttnOpts o;
+            o.n_heads = c.H;
+            o.head_dim = c.HD;
+            o.batch = c.B;
+            const auto n = metal_ops([&] { attention(to, tq, tk, tv, c.nq, c.nk, o); });
+            std::vector<float> want;
+            for (int b = 0; b < c.B; ++b) {
+                auto sl = [&](const std::vector<float>& t, int64_t m) {
+                    return std::vector<float>(t.begin() + b * m * dim, t.begin() + (b + 1) * m * dim);
+                };
+                std::vector<float> ob;
+                attn_reference(sl(q, c.nq), sl(k, c.nk), sl(v, c.nk), c.nq, c.nk, c.H, c.HD,
+                               1.0f / std::sqrt((float)c.HD), nullptr, AttnBias::None, ob);
+                want.insert(want.end(), ob.begin(), ob.end());
+            }
+            const double e = rel_l2(readback(to), want);
+            std::snprintf(buf, sizeof buf, "B%d nq%d nk%d H%d d%d: rel L2 %.3g, %llu MPSGraph op",
+                          c.B, c.nq, c.nk, c.H, c.HD, e, (unsigned long long)n.first);
+            const bool single = (int64_t)c.B * c.H * c.nq * c.nk == 1;
+            expect(e <= 1e-5 && (!single || n.first == 0), "metal attn tiny", buf);
+        }
     }
 
     // The fp16 tier: against the fp32 reference to fp16 accuracy, and it must
@@ -2112,8 +2188,8 @@ void bench(vk::Arena& arena) {
 }
 
 
-// Vulkan against MPSGraph fp32 and fp16 at FlexGlue's and SAM 3's shapes,
-// fp32 weights as FlexGlue holds them.
+// Vulkan against MPSGraph fp32 and fp16 at a 4096-token matcher's shapes and
+// SAM 3's, with fp32 weights.
 void bench_metal(vk::Arena& arena) {
     std::printf("\nMetal  (%s)\n", metal_status().c_str());
     std::printf("  %-22s %9s %8s %9s %8s %9s %8s\n", "shape", "vk ms", "TFLOP/s", "mps32 ms",
@@ -2131,9 +2207,9 @@ void bench_metal(vk::Arena& arena) {
     };
     struct G { int64_t M, N, K; const char* name; };
     const G gemms[] = {
-        {4096, 512, 512, "flexglue q/k/v"},
-        {4096, 1024, 1024, "flexglue ffn0"},
-        {4096, 512, 1024, "flexglue ffn3"},
+        {4096, 512, 512, "matcher q/k/v"},
+        {4096, 1024, 1024, "matcher ffn0"},
+        {4096, 512, 1024, "matcher ffn3"},
         {5184, 4736, 1024, "vit mlp1"},
         {4096, 4096, 4096, "square 4096"},
     };
@@ -2148,7 +2224,7 @@ void bench_metal(vk::Arena& arena) {
     }
     struct A { int nq, nk, H, HD; const char* name; };
     const A attns[] = {
-        {4096, 4096, 8, 64, "flexglue attention"},
+        {4096, 4096, 8, 64, "matcher attention"},
         {5184, 5184, 16, 64, "vit global"},
     };
     for (const auto& a : attns) {
@@ -2165,6 +2241,64 @@ void bench_metal(vk::Arena& arena) {
         row(a.name, 4.0 * a.H * (double)a.nq * a.nk * a.HD,
             [&] { attention(o, q, k, k, a.nq, a.nk, ao); });
     }
+}
+
+
+// One op on the Metal path in its own process: MPSGraph rejects some shapes by
+// aborting, which no in-process test survives. Exit 0 when the result is right.
+int probe(vk::Arena& arena, const std::string& kind, const std::string& spec) {
+    int a[5] = {0, 0, 0, 0, 0};
+    const int n = std::sscanf(spec.c_str(), "%d,%d,%d,%d,%d", &a[0], &a[1], &a[2], &a[3], &a[4]);
+    set_metal_enabled(true);
+    vk::ArenaScope scope(arena);
+    std::vector<float> got, want;
+    MetalCounts c0 = metal_counts();
+    if (kind == "--probe-attn" && n == 5) {
+        const int B = a[0], nq = a[1], nk = a[2], H = a[3], D = a[4], dim = H * D;
+        auto q = randn((size_t)B * nq * dim), k = randn((size_t)B * nk * dim),
+             v = randn((size_t)B * nk * dim);
+        Tensor to = arena_tensor(arena, DType::F32, B, nq, dim);
+        AttnOpts o;
+        o.n_heads = H;
+        o.head_dim = D;
+        o.batch = B;
+        attention(to, upload_f32(arena, q, B, nq, dim), upload_f32(arena, k, B, nk, dim),
+                  upload_f32(arena, v, B, nk, dim), nq, nk, o);
+        got = readback(to);
+        for (int b = 0; b < B; ++b) {
+            auto sl = [&](const std::vector<float>& t, int64_t m) {
+                return std::vector<float>(t.begin() + b * m * dim, t.begin() + (b + 1) * m * dim);
+            };
+            std::vector<float> ob;
+            attn_reference(sl(q, nq), sl(k, nk), sl(v, nk), nq, nk, H, D,
+                           1.0f / std::sqrt((float)D), nullptr, AttnBias::None, ob);
+            want.insert(want.end(), ob.begin(), ob.end());
+        }
+    } else if (kind == "--probe-gemm" && n == 3) {
+        const int M = a[0], N = a[1], K = a[2];
+        auto x = randn((size_t)M * K), w = randn((size_t)N * K, 0.1f);
+        Tensor to = arena_tensor(arena, DType::F32, M, N);
+        // Explicit 2-D views: a trailing dim of 1 would otherwise drop to 1-D.
+        Tensor tx(upload_f32(arena, x, (int64_t)M * K).ptr, DType::F32, M, K);
+        Tensor tw(upload_f32(arena, w, (int64_t)N * K).ptr, DType::F32, N, K);
+        matmul_nt(to, tx, tw);
+        got = readback(to);
+        want.resize((size_t)M * N);
+        for (int m = 0; m < M; ++m)
+            for (int j = 0; j < N; ++j) {
+                double s = 0;
+                for (int kk = 0; kk < K; ++kk) s += (double)x[(size_t)m * K + kk] * w[(size_t)j * K + kk];
+                want[(size_t)m * N + j] = (float)s;
+            }
+    } else {
+        std::printf("usage: --probe-attn B,nq,nk,H,D | --probe-gemm M,N,K\n");
+        return 2;
+    }
+    const MetalCounts c1 = metal_counts();
+    const double e = rel_l2(got, want);
+    std::printf("probe %s %s: metal %llu, rel L2 %.3g\n", kind.c_str() + 8, spec.c_str(),
+                (unsigned long long)(c1.attention - c0.attention + c1.gemm - c0.gemm), e);
+    return e <= 1e-5 ? 0 : 1;
 }
 
 }  // namespace
@@ -2226,6 +2360,16 @@ int main(int argc, char** argv) {
         vk::Arena arena("test");
         arena.reserve(bench_only ? (768u << 20) : (256u << 20));
 
+        for (int i = 1; i + 1 < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--probe-attn" || a == "--probe-gemm") {
+                const int rc = probe(arena, a, argv[i + 1]);
+                vk::Stream::shutdown();
+                vk::Pipelines::get().shutdown();
+                vk::VramPool::get().releaseAll();
+                return rc;
+            }
+        }
         if (bench_only) {
             bench(arena);
             set_metal_enabled(true);
