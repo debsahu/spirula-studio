@@ -21,17 +21,86 @@
 #include "core/Env.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <list>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 NN_DECLARE_EMBEDDED_MODULES(flexglue)
 
 namespace flexglue {
 
+namespace {
+
+// x after layer 1's self block, per live image, least recently used last.
+// Entries are only freed by trim() and drop(), both called with the GPU idle.
+struct SelfCache {
+    std::mutex mu;
+    int capacity = 64;
+    std::list<std::pair<uint64_t, nn::DevicePtr>> lru;
+    std::unordered_map<uint64_t, std::list<std::pair<uint64_t, nn::DevicePtr>>::iterator> at;
+    Model::SelfCacheStats stats;
+
+    nn::DevicePtr find(uint64_t id) {
+        std::lock_guard<std::mutex> l(mu);
+        if (capacity <= 0) return 0;
+        auto it = at.find(id);
+        if (it == at.end()) {
+            ++stats.misses;
+            return 0;
+        }
+        ++stats.hits;
+        lru.splice(lru.begin(), lru, it->second);
+        return it->second->second;
+    }
+    // Never evicts, so a pointer find() returned this pair stays valid.
+    nn::DevicePtr insert(uint64_t id, uint64_t bytes) {
+        std::lock_guard<std::mutex> l(mu);
+        if (auto it = at.find(id); it != at.end()) return it->second->second;
+        lru.emplace_front(id, nn::vk::device_alloc(bytes, "flexglue-self1"));
+        at[id] = lru.begin();
+        return lru.front().second;
+    }
+    bool overfull() {
+        std::lock_guard<std::mutex> l(mu);
+        return (int)lru.size() > std::max(capacity, 0);
+    }
+    void trim() {
+        std::lock_guard<std::mutex> l(mu);
+        while ((int)lru.size() > std::max(capacity, 0)) {
+            nn::vk::device_free(lru.back().second);
+            at.erase(lru.back().first);
+            lru.pop_back();
+            ++stats.evictions;
+        }
+    }
+    void drop(uint64_t id) {
+        std::lock_guard<std::mutex> l(mu);
+        auto it = at.find(id);
+        if (it == at.end()) return;
+        nn::vk::device_free(it->second->second);
+        lru.erase(it->second);
+        at.erase(it);
+    }
+    ~SelfCache() {
+        for (auto& e : lru) nn::vk::device_free(e.second);
+    }
+};
+
+std::atomic<uint64_t> g_next_id{1};
+
+}  // namespace
+
 struct DenseFeatures {
     nn::DevicePtr ptr = 0;
+    uint64_t id = 0;   // never reused, so a dead image cannot alias a live one's entry
+    std::weak_ptr<SelfCache> self;
     ~DenseFeatures() {
+        if (auto c = self.lock()) c->drop(id);
         if (ptr) nn::vk::device_free(ptr);
     }
 };
@@ -97,12 +166,13 @@ struct Model::Impl {
     float temperature = 0.0f;
     std::vector<float> rope;   // [4096, 32, 2] (cos, sin)
     bool loaded = false;
+    std::shared_ptr<SelfCache> self_cache = std::make_shared<SelfCache>();
 
     Tensor g(const std::string& n) const { return w.get(n); }
 
     void load(const std::string& path);
     Tensor encode(const Tensor& img);   // [512, 512, 3] normalized -> [64, 64, 256]
-    MatchResult match(const Tensor& f0, const Keypoints& k0, const Tensor& f1,
+    MatchResult match(const DenseFeatures& f0, const Keypoints& k0, const DenseFeatures& f1,
                       const Keypoints& k1, const MatchOptions& o);
 
     void dumpT(const std::string& name, const Tensor& t) const {
@@ -614,8 +684,9 @@ void Model::Impl::correspond(const Tensor& cf_i, const Tensor& cf_j,
     }
 }
 
-MatchResult Model::Impl::match(const Tensor& f0, const Keypoints& k0, const Tensor& f1,
-                               const Keypoints& k1, const MatchOptions& o) {
+MatchResult Model::Impl::match(const DenseFeatures& d0, const Keypoints& k0,
+                               const DenseFeatures& d1, const Keypoints& k1,
+                               const MatchOptions& o) {
     MatchResult r;
     const int64_t M = k0.n, N = k1.n;
     r.matches0.assign((size_t)M, -1);
@@ -634,15 +705,28 @@ MatchResult Model::Impl::match(const Tensor& f0, const Keypoints& k0, const Tens
                              nn::now_ms() - t0, m->t_attn, m->t_head);
         }
     } report{this, t_start};
+    struct Trim {
+        SelfCache& c;
+        ~Trim() {
+            if (!c.overfull()) return;
+            vk::Stream::get().sync();
+            c.trim();
+        }
+    } trim{*self_cache};
     Tensor freqs = nn::arena_tensor(arena, DType::F32, (int64_t)kTokens * (kHeadDim / 2), 2);
     nn::tensor_from_host(freqs, rope.data(), (int64_t)rope.size());
     Tensor x[2];
-    const Tensor f[2] = {f0, f1};
+    const DenseFeatures* d[2] = {&d0, &d1};
+    nn::DevicePtr self1[2];
+    for (int s = 0; s < 2; ++s) self1[s] = self_cache->find(d[s]->id);
+    const uint64_t x_bytes = (uint64_t)kTokens * kDim * 4;
     for (int s = 0; s < 2; ++s) {
         x[s] = nn::arena_tensor(arena, DType::F32, kTokens, kDim);
+        if (self1[s] && !(dump.on() && stages)) continue;
         LinearOpts lo;
         lo.bias = g("matcher.input_proj.bias");
-        nn::linear(x[s], f[s].view(kTokens, kFeat), g("matcher.input_proj.weight"), lo);
+        nn::linear(x[s], Tensor(d[s]->ptr, DType::F32, kTokens, kFeat),
+                   g("matcher.input_proj.weight"), lo);
         dumpT("tokens" + std::to_string(s), x[s]);
     }
     if (dump.on() && stages)
@@ -660,8 +744,15 @@ MatchResult Model::Impl::match(const Tensor& f0, const Keypoints& k0, const Tens
     const bool stopping = o.min_covisibility > 0 && o.early_stop_decay < 1;
     for (int l = 0; l < kLayers; ++l) {
         const std::string sa = fmt("matcher.transformers.%d.self_attn.", l);
-        selfBlock(x[0], freqs, sa);
-        selfBlock(x[1], freqs, sa);
+        for (int s = 0; s < 2; ++s) {
+            if (l == 0 && self1[s]) {
+                vk::Stream::get().copy(x[s].ptr, self1[s], x_bytes);
+                continue;
+            }
+            selfBlock(x[s], freqs, sa);
+            if (l == 0 && self_cache->capacity > 0)
+                vk::Stream::get().copy(self_cache->insert(d[s]->id, x_bytes), x[s].ptr, x_bytes);
+        }
         crossBlock(x[0], x[1], fmt("matcher.transformers.%d.cross_attn.", l));
         const int k = l + 1;
         if (dump.on()) {
@@ -841,7 +932,10 @@ std::vector<float> squash_rgb(const uint8_t* rgb, int width, int height, int out
     return out;
 }
 
-Model::Model() : impl_(new Impl) {}
+Model::Model() : impl_(new Impl) {
+    if (const char* e = spirula::env("FLEXGLUE_SELF_CACHE"); e && *e)
+        impl_->self_cache->capacity = std::max(std::atoi(e), 0);
+}
 Model::~Model() = default;
 bool Model::loaded() const { return impl_->loaded; }
 void Model::setDump(const std::string& prefix, const std::string& outputs, bool stages) {
@@ -867,6 +961,8 @@ std::shared_ptr<DenseFeatures> Model::describeResized(const float* rgb512) {
     for (size_t i = 0; i < norm.size(); ++i)
         norm[i] = (rgb512[i] - kMean[i % 3]) / kStd[i % 3];
     auto out = std::make_shared<DenseFeatures>();
+    out->id = g_next_id++;
+    out->self = impl_->self_cache;
     out->ptr = vk::device_alloc((uint64_t)kTokens * kFeat * 4, "flexglue-features");
     vk::ArenaScope scope(impl_->arena);
     Tensor img = nn::arena_tensor(impl_->arena, DType::F32, kSize, kSize, 3);
@@ -881,8 +977,27 @@ std::shared_ptr<DenseFeatures> Model::describeResized(const float* rgb512) {
 MatchResult Model::match(const DenseFeatures& f0, const Keypoints& k0, const DenseFeatures& f1,
                          const Keypoints& k1, const MatchOptions& opts) {
     NN_CHECK(impl_->loaded, "flexglue::Model::match before load()");
-    const Tensor t0(f0.ptr, DType::F32, kTokens, kFeat), t1(f1.ptr, DType::F32, kTokens, kFeat);
-    return impl_->match(t0, k0, t1, k1, opts);
+    return impl_->match(f0, k0, f1, k1, opts);
+}
+
+void Model::setSelfCache(int entries) {
+    SelfCache& c = *impl_->self_cache;
+    {
+        std::lock_guard<std::mutex> l(c.mu);
+        c.capacity = std::max(entries, 0);
+    }
+    if (!c.overfull()) return;
+    vk::Stream::get().sync();
+    c.trim();
+}
+
+Model::SelfCacheStats Model::selfCacheStats() const {
+    SelfCache& c = *impl_->self_cache;
+    std::lock_guard<std::mutex> l(c.mu);
+    SelfCacheStats s = c.stats;
+    s.entries = (int)c.lru.size();
+    s.capacity = c.capacity;
+    return s;
 }
 
 std::vector<float> Model::download(const DenseFeatures& f) const {

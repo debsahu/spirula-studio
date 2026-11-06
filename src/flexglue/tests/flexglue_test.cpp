@@ -2,13 +2,14 @@
 // (PyTorch, fp32, COLMAP's configuration; README.md there has the format and
 // the tolerance policy, whose fixed bars are used here).
 //
-//   flexglue_test [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] [--bench N]
+//   flexglue_test [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] [--bench N] [--require-model] [--warm-cache]
 //
 // Each pair runs twice, as the reference did: `nostop` (min covisibility 0, so
 // the readout always runs) and `colmap` (COLMAP's defaults, early stops on).
 // With SS_FLEXGLUE_DUMP=<dir> and one --pair, every stage is written there for
 // tools/flexglue_ref/compare.py, which also applies the torch-vs-torch floors.
-// Without a checkpoint on disk it SKIPS.
+// No checkpoint SKIPS (fails under --require-model); --warm-cache makes the
+// dumped run take the layer-1 self-cache hit path.
 
 #include "flexglue/FlexGlue.h"
 #include "flexglue/model/Fetch.h"
@@ -134,7 +135,118 @@ size_t count_matched(const std::vector<double>& m) {
     return (size_t)std::count_if(m.begin(), m.end(), [](double x) { return x >= 0; });
 }
 
-void run_pair(flexglue::Model& model, const fs::path& root, const std::string& pair, int bench) {
+bool load_fixture_image(const fs::path& root, const std::string& stem, nn::Image& im) {
+    const fs::path id = root / "images" / stem;
+    std::vector<double> u8;
+    std::vector<int64_t> ushape;
+    if (fs::exists(id / "image.png")) {
+        im = nn::load_image((id / "image.png").string());
+    } else if (read_npy(id / "u8.npy", u8, &ushape) && ushape.size() == 3 && ushape[2] == 3) {
+        im.height = (int)ushape[0];   // the full tier's decoded RGB
+        im.width = (int)ushape[1];
+        im.data.assign(u8.begin(), u8.end());
+    }
+    return !im.empty();
+}
+
+bool same_bits(const std::vector<float>& a, const std::vector<float>& b) {
+    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * 4) == 0;
+}
+
+bool same_result(const flexglue::MatchResult& a, const flexglue::MatchResult& b) {
+    return a.matches0 == b.matches0 && same_bits(a.scores0, b.scores0) &&
+           std::memcmp(&a.covisibility, &b.covisibility, 4) == 0 &&
+           a.stop_layer == b.stop_layer && same_bits(a.p2d[0], b.p2d[0]) &&
+           same_bits(a.p2d[1], b.p2d[1]) && same_bits(a.conf[0], b.conf[0]) &&
+           same_bits(a.conf[1], b.conf[1]);
+}
+
+// Three images in three pairs, each image in two of them and in both slots:
+// cached output must equal uncached bit for bit, and the cache must be hit.
+void test_self_cache(flexglue::Model& model, const fs::path& root) {
+    std::printf("\nself-block cache: 3 fixture images in 3 pairs\n");
+    const char* stems[3] = {"berlin1", "berlin2", "lamar_cab_1446"};
+    std::shared_ptr<flexglue::DenseFeatures> f[3];
+    for (int i = 0; i < 3; ++i) {
+        nn::Image im;
+        if (!load_fixture_image(root, stems[i], im)) {
+            check(false, "self cache: cannot read %s", stems[i]);
+            return;
+        }
+        model.setDump("cache" + std::to_string(i) + ".", "", false);
+        f[i] = model.describe(im.data.data(), im.width, im.height);
+    }
+    // (image a, its kpts file), (image b, its kpts file)
+    struct Side {
+        int img;
+        const char* pair;
+        int slot;
+    };
+    const Side pairs[3][2] = {{{0, "berlin", 0}, {1, "berlin", 1}},
+                              {{0, "berlin_x_lamar", 0}, {2, "berlin_x_lamar", 1}},
+                              {{2, "berlin_x_lamar", 1}, {1, "berlin", 1}}};
+    std::vector<float> kp[3][2];
+    flexglue::Keypoints k[3][2];
+    for (int p = 0; p < 3; ++p)
+        for (int s = 0; s < 2; ++s) {
+            const Side& sd = pairs[p][s];
+            std::vector<double> v;
+            if (!read_npy(root / "pairs" / sd.pair / ("kpts" + std::to_string(sd.slot) + ".npy"),
+                          v) || v.empty()) {
+                check(false, "self cache: no kpts in %s", sd.pair);
+                return;
+            }
+            kp[p][s].assign(v.begin(), v.end());
+            k[p][s].xy = kp[p][s].data();
+            k[p][s].n = (uint32_t)(kp[p][s].size() / 2);
+            k[p][s].width = k[p][s].height = 512;
+        }
+    flexglue::MatchOptions o;
+    o.min_covisibility = 0.0f;
+    o.keep_correspondences = true;
+    model.setDump("", "", false);
+    auto run = [&](int p) {
+        return model.match(*f[pairs[p][0].img], k[p][0], *f[pairs[p][1].img], k[p][1], o);
+    };
+    model.setSelfCache(0);
+    flexglue::MatchResult ref[3];
+    for (int p = 0; p < 3; ++p) ref[p] = run(p);
+    check(model.selfCacheStats().entries == 0, "cache off holds nothing");
+
+    model.setSelfCache(64);
+    const flexglue::Model::SelfCacheStats s0 = model.selfCacheStats();
+    for (int p = 0; p < 3; ++p) {
+        const flexglue::MatchResult r = run(p);
+        check(same_result(r, ref[p]), "pair %d (%s x %s): cached == uncached, bit for bit, %zu "
+              "matches", p, stems[pairs[p][0].img], stems[pairs[p][1].img],
+              (size_t)std::count_if(r.matches0.begin(), r.matches0.end(),
+                                    [](int32_t m) { return m >= 0; }));
+    }
+    const flexglue::Model::SelfCacheStats s1 = model.selfCacheStats();
+    check(s1.hits - s0.hits == 3 && s1.misses - s0.misses == 3 && s1.entries == 3,
+          "3 hits, 3 misses, 3 entries (got %llu, %llu, %d)",
+          (unsigned long long)(s1.hits - s0.hits), (unsigned long long)(s1.misses - s0.misses),
+          s1.entries);
+
+    model.setSelfCache(1);
+    const flexglue::Model::SelfCacheStats s2 = model.selfCacheStats();
+    check(s2.entries == 1 && s2.evictions - s1.evictions == 2,
+          "capacity 1 evicts down to one entry (%d entries, %llu evicted)", s2.entries,
+          (unsigned long long)(s2.evictions - s1.evictions));
+    // pair 2 used berlin2 last, so it is the survivor: pair 0 hits once.
+    const flexglue::MatchResult r0 = run(0);
+    const flexglue::Model::SelfCacheStats s3 = model.selfCacheStats();
+    check(same_result(r0, ref[0]) && s3.hits - s2.hits == 1 && s3.misses - s2.misses == 1 &&
+              s3.entries == 1,
+          "capacity 1: LRU survivor hits, output unchanged (%llu hit, %d entries)",
+          (unsigned long long)(s3.hits - s2.hits), s3.entries);
+    f[0].reset();
+    check(model.selfCacheStats().entries == 0, "an image's entry dies with its features");
+    model.setSelfCache(64);
+}
+
+void run_pair(flexglue::Model& model, const fs::path& root, const std::string& pair, int bench,
+              bool warm) {
     const fs::path pdir = root / "pairs" / pair;
     std::ifstream mf(pdir / "manifest.json");
     std::stringstream ms;
@@ -152,16 +264,7 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
     for (int s = 0; s < 2; ++s) {
         const fs::path id = root / "images" / stems[s];
         nn::Image im;
-        std::vector<double> u8;
-        std::vector<int64_t> ushape;
-        if (fs::exists(id / "image.png")) {
-            im = nn::load_image((id / "image.png").string());
-        } else if (read_npy(id / "u8.npy", u8, &ushape) && ushape.size() == 3 && ushape[2] == 3) {
-            im.height = (int)ushape[0];   // the full tier's decoded RGB
-            im.width = (int)ushape[1];
-            im.data.assign(u8.begin(), u8.end());
-        }
-        if (im.empty()) {
+        if (!load_fixture_image(root, stems[s], im)) {
             check(false, "%s: cannot read %s/image.png", pair.c_str(), stems[s].c_str());
             return;
         }
@@ -206,6 +309,10 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
     flexglue::MatchOptions nostop;
     nostop.min_covisibility = 0.0f;
     nostop.keep_correspondences = true;
+    if (warm) {
+        model.setDump("", "warm.", false);
+        model.match(*f[0], k[0], *f[1], k[1], nostop);
+    }
     model.setDump("", "nostop.");
     double t0 = now_s();
     const flexglue::MatchResult r = model.match(*f[0], k[0], *f[1], k[1], nostop);
@@ -301,14 +408,22 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
                 k[1].n, t_nostop * 1e3, t_colmap * 1e3, c.stop_layer);
 
     if (bench > 0) {
-        double tm = 0;
-        for (int it = 0; it < bench; ++it) {
-            t0 = now_s();
-            model.match(*f[0], k[0], *f[1], k[1], {});
-            tm += now_s() - t0;
-        }
-        std::printf("  bench: %.1f ms/pair over %d runs, COLMAP settings\n", tm / bench * 1e3,
-                    bench);
+        // Both images hit the self cache after the first run; capacity 0 is
+        // the uncached arm. Interleaved so drift lands on both.
+        const int cap = model.selfCacheStats().capacity;
+        double tm[2] = {0, 0};
+        for (int it = 0; it < bench; ++it)
+            for (int arm = 0; arm < 2; ++arm) {
+                model.setSelfCache(arm == 0 ? cap : 0);
+                if (arm == 0) model.match(*f[0], k[0], *f[1], k[1], {});
+                t0 = now_s();
+                model.match(*f[0], k[0], *f[1], k[1], {});
+                tm[arm] += now_s() - t0;
+            }
+        model.setSelfCache(cap);
+        std::printf("  bench: %.1f ms/pair self-cached (capacity %d), %.1f ms/pair uncached, "
+                    "over %d runs, COLMAP settings\n",
+                    tm[0] / bench * 1e3, cap, tm[1] / bench * 1e3, bench);
     }
 }
 
@@ -318,16 +433,19 @@ int main(int argc, char** argv) {
     std::string root = std::string(SS_REPO_ROOT) + "/tools/flexglue_ref/fixtures";
     std::string only, ckpt;
     int bench = 0;
+    bool require_model = false, warm = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--fixtures" && i + 1 < argc) root = argv[++i];
         else if (a == "--pair" && i + 1 < argc) only = argv[++i];
         else if (a == "--checkpoint" && i + 1 < argc) ckpt = argv[++i];
         else if (a == "--bench" && i + 1 < argc) bench = std::atoi(argv[++i]);
+        else if (a == "--require-model") require_model = true;
+        else if (a == "--warm-cache") warm = true;
         else {
             std::fprintf(stderr,
                          "usage: %s [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] "
-                         "[--bench N]\n",
+                         "[--bench N] [--require-model] [--warm-cache]\n",
                          argv[0]);
             return 2;
         }
@@ -335,7 +453,9 @@ int main(int argc, char** argv) {
     if (ckpt.empty()) ckpt = nn::cached_path(flexglue::checkpoint_file());
     if (!fs::exists(ckpt)) {
         std::printf("SKIP: no checkpoint at %s\n", ckpt.c_str());
-        return 0;
+        if (!require_model) return 0;
+        std::printf("FAIL --require-model and no checkpoint\n");
+        return 1;
     }
     check(nn::sha256_file(ckpt) == flexglue::checkpoint_file().sha256,
           "checkpoint SHA-256 matches the pinned release");
@@ -356,7 +476,14 @@ int main(int argc, char** argv) {
 
     flexglue::Model model;
     model.load(ckpt);
-    for (const std::string& p : pairs) run_pair(model, root, p, bench);
+    if (only.empty()) test_self_cache(model, root);
+    for (const std::string& p : pairs) run_pair(model, root, p, bench, warm);
+    {
+        const flexglue::Model::SelfCacheStats st = model.selfCacheStats();
+        std::printf("\nself cache: %llu hits, %llu misses, %llu evictions, %d of %d entries\n",
+                    (unsigned long long)st.hits, (unsigned long long)st.misses,
+                    (unsigned long long)st.evictions, st.entries, st.capacity);
+    }
 
     if (only.empty())
         check(g_gate_bites > 0,

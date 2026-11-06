@@ -36,7 +36,16 @@ its image directory and `match` needs `--flexglue-images`. Every flag has
 COLMAP's default; `--flexglue-min-covisibility` is the pair filter (0 keeps
 every pair) and `--flexglue-early-stop-decay` how early a clear non-pair stops.
 The dense features of the last `--flexglue-cache` images stay resident (4 MB
-each), and a pair the fisheye focal search matched is not matched again.
+each). A pair the focal or gyro sample matched is not matched again; those
+results are held until reused, within 256 MB.
+
+Layer 1's self block (input projection, self attention, FFN) reads one image
+only, so `match()` keeps its output, 8 MB, for the 64 most recently used live
+images (`SS_FLEXGLUE_SELF_CACHE=N`, 0 off) and starts a hit at the cross block.
+With both images hit it saves 50-57 ms of a ~930 ms pair (Apple M5 Pro, six
+`--bench 5` runs).
+It is bit-identical to the uncached path (`flexglue_test`'s self-cache checks;
+`--warm-cache` dumps the hit path for `compare.py`).
 
 ## Parity
 

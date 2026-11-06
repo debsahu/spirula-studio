@@ -77,6 +77,16 @@ public:
     // Host copy of a feature map, [64, 64, 256] channel-last.
     std::vector<float> download(const DenseFeatures& f) const;
 
+    // Layer 1's self block depends on one image only, so match() keeps its
+    // output (8 MB) for the `entries` most recently used live images, 0 = off.
+    // Default 64, or SS_FLEXGLUE_SELF_CACHE. Entries die with their features.
+    void setSelfCache(int entries);
+    struct SelfCacheStats {
+        uint64_t hits = 0, misses = 0, evictions = 0;
+        int entries = 0, capacity = 0;
+    };
+    SelfCacheStats selfCacheStats() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
