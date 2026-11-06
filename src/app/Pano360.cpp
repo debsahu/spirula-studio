@@ -3,6 +3,7 @@
 #include "app/Pano360.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -136,11 +137,35 @@ bool eac_layout(int width, int height, Pano360Layout& out) {
     return true;
 }
 
+// A stitched export: the whole sphere, one track, no padding. 4 | width keeps
+// canvasW() the track's own width.
+bool equirect_layout(int width, int height, Pano360Layout& out) {
+    if (width <= 0 || height <= 0 || width % 4 != 0 ||
+        std::abs(width - 2 * height) * 100 > width)
+        return false;
+    out.packing = Pano360Packing::Sphere;
+    out.track_w = width;
+    out.track_h = height;
+    out.face = width / 4;
+    out.margin = 0;
+    return true;
+}
+
 }  // namespace
+
+bool pano360_equirect_layout(int width, int height, Pano360Layout& out) {
+    out = Pano360Layout{};
+    if (equirect_layout(width, height, out)) return true;
+    out = Pano360Layout{};
+    return false;
+}
 
 bool pano360_detect(int tracks, int width, int height, const Pano360Meta& meta,
                     Pano360Layout& out) {
     out = Pano360Layout{};
+    if (tracks == 1)
+        return meta.spherical == "equirectangular" &&
+               pano360_equirect_layout(width, height, out);
     if (tracks != 2 || width <= 0 || height <= 0) return false;
     if (!meta.projection.empty() && meta.projection != "EACO") return false;
     // The cube map is read off the shape, which every MAX mode fits and nothing
@@ -149,13 +174,15 @@ bool pano360_detect(int tracks, int width, int height, const Pano360Meta& meta,
     return sphere_layout(width, height, meta.mode, out);
 }
 
+
 bool pano360_unsupported(int tracks, int width, int height,
                          const Pano360Meta& meta) {
     Pano360Layout l;
-    // Only a .360 names a projection at all, so naming one and not being placed
-    // is a packing this build has not met -- not an ordinary two-lens file.
-    return tracks == 2 && !meta.projection.empty() &&
-           !pano360_detect(tracks, width, height, meta, l);
+    // Only a 360 file names a projection at all, so naming one and not being
+    // placed is a packing this build has not met -- not an ordinary file.
+    const bool named = tracks == 2 ? !meta.projection.empty()
+                                   : tracks == 1 && !meta.spherical.empty();
+    return named && !pano360_detect(tracks, width, height, meta, l);
 }
 
 std::vector<Eac360Slice> eac360_slices(const Pano360Layout& l) {
@@ -235,9 +262,9 @@ std::vector<Pano360View> pano360_views(const Pano360Layout& l,
 
     const int side = o.size > 0 ? o.size : pano360_default_size(l, o);
     if (l.sphere()) {
-        // A cube stood on a corner: its six faces still cover the sphere, but
-        // none is centred on a pole, where a panorama's own rows fan out into a
-        // starburst -- and every one of them holds some horizon.
+        // A cube stood on a corner: no face is centred on a pole, where the
+        // rows fan out into a starburst, and every one holds some horizon.
+        // Kept level, 100 deg leaves 2.3% of the sphere in no face; 109.5 closes it.
         const double tilt = std::asin(1.0 / std::sqrt(3.0));   // 35.26 degrees
         for (int k = 0; k < 6; k++) {
             const double up = (k % 2) ? -tilt : tilt;

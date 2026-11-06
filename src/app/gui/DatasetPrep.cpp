@@ -742,18 +742,19 @@ Pano360Probe probe_pano360(const std::string& ffmpeg_exe,
         if (ffmpeg_probe_video(ffmpeg_exe, path, facts, cancel))
             tracks = facts.tracks;
     }
-    if (tracks.size() != 2 || tracks[0] != tracks[1]) return out;
+    const bool pair = tracks.size() == 2 && tracks[0] == tracks[1];
+    if (!pair && tracks.size() != 1) return out;
     app::Pano360Meta meta;
 #ifdef SS_TOOL_SFM
     // What the camera says it wrote beats what the frame size suggests: two
-    // GoPro generations pack 5952x1920 differently and only the tag tells them
-    // apart.
+    // GoPro generations pack 5952x1920 differently, and a 2:1 track is as
+    // often two fisheyes as a panorama.
     const sfm::VideoProjection pr = sfm::video_projection(path);
-    meta = app::Pano360Meta{pr.name, pr.mode};
+    meta = app::Pano360Meta{pr.name, pr.mode, pr.spherical};
 #endif
-    const int w = tracks[0].first, h = tracks[0].second;
-    if (!app::pano360_detect(2, w, h, meta, out.layout))
-        out.unsupported = app::pano360_unsupported(2, w, h, meta);
+    const int n = (int)tracks.size(), w = tracks[0].first, h = tracks[0].second;
+    if (!app::pano360_detect(n, w, h, meta, out.layout))
+        out.unsupported = app::pano360_unsupported(n, w, h, meta);
 
     return out;
 }

@@ -5,6 +5,8 @@
 #endif
 #include "app/gui/DatasetPrep.h"
 
+#include <cstdlib>
+
 namespace gui {
 
 namespace {
@@ -36,7 +38,11 @@ SourceProbeInfo probe(const std::string& path, const std::string& ffmpeg_exe,
             out.video_tracks = (int)facts.tracks.size();
         }
     }
-    if (!cancel.load() && out.video_tracks == 2 && is_pano360_path(path)) {
+    // One track is a candidate only at 2:1; the tag decides (app::pano360_detect).
+    const bool single_2to1 = out.video_tracks == 1 && out.height > 0 &&
+                             std::abs(out.width - 2 * out.height) * 100 <= out.width;
+    if (!cancel.load() &&
+        ((out.video_tracks == 2 && is_pano360_path(path)) || single_2to1)) {
         const Pano360Probe p = probe_pano360(ffmpeg_exe, path, cancel);
         out.pano360 = p.layout;
         out.pano360_unsupported = p.unsupported;

@@ -13,6 +13,7 @@
 #include "i18n/catalog/Log.h"
 
 #include "app/AppPaths.h"
+#include "app/Pano360Rig.h"
 #include "app/gui/Subprocess.h"
 #ifdef SS_TOOL_SFM
 // The stage tags the child prints and the manifest it reads; a build without the
@@ -523,26 +524,8 @@ bool apply_known_lenses(const PrepJob& prep, const PrepResult* res, const PrepIn
     for (const PrepCapture& c : res->captures)
         if (c.path == in.path && c.subdir == in.subdir) lockstep = c.lockstep;
     if (!lockstep) return false;
-    if (in.pano360.valid()) {
-        std::vector<app::Pano360View> views;
-        for (app::Pano360View& v : app::pano360_views(in.pano360, prep.pano))
-            if (!v.dir.empty()) views.push_back(v);
-        if (views.size() != d.members.size()) return false;
-        // Faces of an EAC packing: five per lens, lens by lens; a stitched
-        // panorama's all share one centre. The rotations are refined all the
-        // same: a GoPro calibrates 0.1-0.5 deg off the cut ones, 6 px here.
-        const size_t per_lens = in.pano360.sphere() ? views.size() : views.size() / 2;
-        for (size_t m = 0; m < views.size(); m++) {
-            sfm::RigMemberDef& md = d.members[m];
-            md.has_ext = true;
-            for (int r = 0; r < 3; r++)
-                for (int c = 0; c < 3; c++) md.ext.R[3 * r + c] = views[m].rot[3 * c + r];
-            md.ext.t = {0, 0, 0};
-            md.ext_fixed = false;
-            md.dof = m < per_lens ? sfm::kRigDofRotation : sfm::kRigDofAll;
-        }
-        return true;
-    }
+    if (in.pano360.valid())
+        return app::pano360_rig_members(in.pano360, app::pano360_views(in.pano360, prep.pano), d);
     if (is_dual_fisheye_path(in.path) && d.members.size() == 2) {
         d.kind = "dual-fisheye";
         return sfm::applyRigKind(d).empty();

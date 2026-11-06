@@ -425,7 +425,7 @@ bool extract_frames(const FrameExtractJob& job_in, const FrameExtractSinks& sink
                                       error, on_frame);
     };
     if (pano) {
-        stats.tracks = 2;
+        stats.tracks = pano360_needs_track1(job.eac) ? 2 : 1;
         ok = extract_pair(job, sinks, decode, dec, base, pool, stats, error);
     } else if (synced) {
         ok = extract_synced(job, sinks, decode, tracks, base, pool, stats);

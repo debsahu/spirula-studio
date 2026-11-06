@@ -694,42 +694,50 @@ SS_MSG(xh_360_section,
     TR("360 kameralar:"));
 
 SS_MSG(xh_360,
-    EN("what a GoPro MAX .360 becomes: faces (ten seam-free perspective views, "
-       "five per lens), equirect (one 2:1 panorama) or off (the raw tracks). "
-       "Default: faces"),
-    JA("GoPro MAX の .360 の変換先: faces（継ぎ目のない透視ビュー 10 枚、レンズ"
-       "ごとに 5 枚）、equirect（2:1 のパノラマ 1 枚）、off（生のトラック）。既定は "
+    EN("what a GoPro MAX .360 or a stitched panorama becomes: faces (ten "
+       "seam-free perspective views, five per lens; six for a panorama), "
+       "equirect (one 2:1 panorama) or off (the raw tracks). Default: faces"),
+    JA("GoPro MAX の .360 またはステッチ済みパノラマの変換先: faces（継ぎ目のない"
+       "透視ビュー 10 枚、レンズごとに 5 枚。パノラマは 6 枚）、equirect（2:1 の"
+       "パノラマ 1 枚）、off（生のトラック）。既定は faces"),
+    ZH_HANS("GoPro MAX .360 或已拼接全景的展开方式：faces（十个无拼缝透视视角，每镜头"
+            "五个；全景为六个）、equirect（一张 2:1 全景）或 off（原始轨道）。默认 faces"),
+    ZH_HANT("GoPro MAX .360 或已拼接全景的展開方式：faces（十個無拼縫透視視角，每鏡頭"
+            "五個；全景為六個）、equirect（一張 2:1 全景）或 off（原始軌道）。預設 faces"),
+    KO("GoPro MAX .360 또는 스티칭된 파노라마를 무엇으로 바꿀지: faces(이음매 없는 "
+       "원근 뷰 10장, 렌즈당 5장. 파노라마는 6장), equirect(2:1 파노라마 1장), "
+       "off(원본 트랙). 기본값 faces"),
+    DE("wozu eine GoPro-MAX-.360 oder ein gestitchtes Panorama wird: faces (zehn "
+       "nahtfreie perspektivische Ansichten, fünf je Objektiv; sechs bei einem "
+       "Panorama), equirect (ein 2:1-Panorama) oder off (die rohen Spuren). "
+       "Vorgabe: faces"),
+    FR("ce que devient un .360 GoPro MAX ou un panorama assemblé : faces (dix "
+       "vues en perspective sans couture, cinq par objectif ; six pour un "
+       "panorama), equirect (un panorama 2:1) ou off (les pistes brutes). "
+       "Défaut : faces"),
+    ES("en qué se convierte un .360 de GoPro MAX o un panorama ya cosido: faces "
+       "(diez vistas en perspectiva sin costuras, cinco por objetivo; seis para "
+       "un panorama), equirect (un panorama 2:1) u off (las pistas en bruto). "
+       "Por defecto: faces"),
+    PT("no que um .360 da GoPro MAX ou um panorama já costurado se torna: faces "
+       "(dez vistas em perspectiva sem emendas, cinco por lente; seis para um "
+       "panorama), equirect (um panorama 2:1) ou off (as faixas brutas). "
+       "Padrão: faces"),
+    IT("in che cosa diventa un .360 GoPro MAX o un panorama già cucito: faces "
+       "(dieci viste prospettiche senza cuciture, cinque per obiettivo; sei per "
+       "un panorama), equirect (un panorama 2:1) oppure off (le tracce grezze). "
+       "Predefinito: faces"),
+    NL("wat een GoPro MAX-.360 of een gestitcht panorama wordt: faces (tien "
+       "naadloze perspectiefaanzichten, vijf per lens; zes voor een panorama), "
+       "equirect (één 2:1-panorama) of off (de ruwe sporen). Standaard: faces"),
+    RU("во что превращается .360 с GoPro MAX или сшитая панорама: faces (десять "
+       "перспективных видов без швов, по пять на объектив; шесть для панорамы), "
+       "equirect (одна панорама 2:1) или off (исходные дорожки). По умолчанию: "
        "faces"),
-    ZH_HANS("GoPro MAX .360 的展开方式：faces（十个无拼缝透视视角，每镜头五个）、"
-            "equirect（一张 2:1 全景）或 off（原始轨道）。默认 faces"),
-    ZH_HANT("GoPro MAX .360 的展開方式：faces（十個無拼縫透視視角，每鏡頭五個）、"
-            "equirect（一張 2:1 全景）或 off（原始軌道）。預設 faces"),
-    KO("GoPro MAX .360을 무엇으로 바꿀지: faces(이음매 없는 원근 뷰 10장, 렌즈당 "
-       "5장), equirect(2:1 파노라마 1장), off(원본 트랙). 기본값 faces"),
-    DE("wozu eine GoPro-MAX-.360 wird: faces (zehn nahtfreie perspektivische "
-       "Ansichten, fünf je Objektiv), equirect (ein 2:1-Panorama) oder off (die "
-       "rohen Spuren). Vorgabe: faces"),
-    FR("ce que devient un .360 GoPro MAX : faces (dix vues en perspective sans "
-       "couture, cinq par objectif), equirect (un panorama 2:1) ou off (les "
-       "pistes brutes). Défaut : faces"),
-    ES("en qué se convierte un .360 de GoPro MAX: faces (diez vistas en "
-       "perspectiva sin costuras, cinco por objetivo), equirect (un panorama "
-       "2:1) u off (las pistas en bruto). Por defecto: faces"),
-    PT("no que um .360 da GoPro MAX se torna: faces (dez vistas em perspectiva "
-       "sem emendas, cinco por lente), equirect (um panorama 2:1) ou off (as "
-       "faixas brutas). Padrão: faces"),
-    IT("in che cosa diventa un .360 GoPro MAX: faces (dieci viste prospettiche "
-       "senza cuciture, cinque per obiettivo), equirect (un panorama 2:1) "
-       "oppure off (le tracce grezze). Predefinito: faces"),
-    NL("wat een GoPro MAX-.360 wordt: faces (tien naadloze perspectiefaanzichten, "
-       "vijf per lens), equirect (één 2:1-panorama) of off (de ruwe sporen). "
-       "Standaard: faces"),
-    RU("во что превращается .360 с GoPro MAX: faces (десять перспективных видов "
-       "без швов, по пять на объектив), equirect (одна панорама 2:1) или off "
-       "(исходные дорожки). По умолчанию: faces"),
-    TR("GoPro MAX .360 dosyasının neye dönüşeceği: faces (dikişsiz on perspektif "
-       "görünüm, objektif başına beş), equirect (tek 2:1 panorama) veya off (ham "
-       "izler). Varsayılan: faces"));
+    TR("GoPro MAX .360 dosyasının ya da dikilmiş bir panoramanın neye dönüşeceği: "
+       "faces (dikişsiz on perspektif görünüm, objektif başına beş; panoramada "
+       "altı), equirect (tek 2:1 panorama) veya off (ham izler). Varsayılan: "
+       "faces"));
 
 SS_MSG(xh_360_size,
     EN("pixels a side for each face, or the width of the equirectangular "
@@ -780,6 +788,81 @@ SS_MSG(xh_360_orient,
        "0,0,180 переворачивает перевёрнутое крепление"),
     TR("kameranın nasıl tutulduğu: derece cinsinden sapma,yunuslama,yalpa; "
        "tüm küreye uygulanır. 0,0,180 ters takılan kamerayı düzeltir"));
+
+SS_MSG(xh_360_source,
+    EN("what a single 2:1 video track is: auto (a panorama only when the file "
+       "is tagged equirectangular, as a DJI or Insta360 export is) or equirect "
+       "(a panorama whatever the tags say, for a re-encode that dropped them). "
+       "Untagged 2:1 is usually two fisheyes side by side. Default: auto"),
+    JA("2:1 の単一ビデオトラックの扱い: auto（ファイルに正距円筒のタグがあるときだけ"
+       "パノラマ。DJI や Insta360 の書き出しにはあります）か equirect（タグに関係なく"
+       "パノラマ。再エンコードでタグが落ちたとき用）。タグのない 2:1 はふつう魚眼 2 枚の"
+       "横並びです。既定は auto"),
+    ZH_HANS("单条 2:1 视频轨道是什么：auto（只有文件标记为等距柱状时才算全景，DJI 或 "
+            "Insta360 导出的文件都有此标记）或 equirect（不管标记都当全景，用于重新编码后"
+            "标记丢失的文件）。没有标记的 2:1 通常是两个并排的鱼眼。默认 auto"),
+    ZH_HANT("單條 2:1 視訊軌道是什麼：auto（只有檔案標記為等距柱狀時才算全景，DJI 或 "
+            "Insta360 匯出的檔案都有此標記）或 equirect（不管標記都當全景，用於重新編碼後"
+            "標記遺失的檔案）。沒有標記的 2:1 通常是兩個並排的魚眼。預設 auto"),
+    KO("2:1 단일 비디오 트랙의 의미: auto(파일에 등장방형 태그가 있을 때만 파노라마. "
+       "DJI나 Insta360 내보내기에는 있습니다) 또는 equirect(태그와 상관없이 파노라마. "
+       "재인코딩으로 태그가 빠진 파일용). 태그 없는 2:1은 보통 어안 두 개가 나란히 "
+       "있는 것입니다. 기본값 auto"),
+    DE("was eine einzelne 2:1-Videospur ist: auto (nur dann ein Panorama, wenn die "
+       "Datei als äquirektangulär markiert ist, wie ein DJI- oder Insta360-Export) "
+       "oder equirect (ein Panorama, was auch immer die Markierung sagt, für eine "
+       "Neukodierung, die sie verloren hat). Unmarkiertes 2:1 sind meist zwei "
+       "Fischaugen nebeneinander. Vorgabe: auto"),
+    FR("ce qu'est une piste vidéo 2:1 unique : auto (un panorama seulement si le "
+       "fichier est marqué équirectangulaire, comme un export DJI ou Insta360) "
+       "ou equirect (un panorama quelle que soit la marque, pour un réencodage "
+       "qui l'a perdue). Un 2:1 non marqué est d'ordinaire deux fisheyes côte à "
+       "côte. Défaut : auto"),
+    ES("qué es una única pista de vídeo 2:1: auto (un panorama solo si el archivo "
+       "está marcado como equirectangular, como una exportación de DJI o "
+       "Insta360) o equirect (un panorama diga lo que diga la marca, para una "
+       "recodificación que la perdió). Un 2:1 sin marca suele ser dos ojos de "
+       "pez lado a lado. Por defecto: auto"),
+    PT("o que é uma única faixa de vídeo 2:1: auto (um panorama só quando o "
+       "arquivo está marcado como equirretangular, como uma exportação da DJI ou "
+       "da Insta360) ou equirect (um panorama seja qual for a marca, para uma "
+       "recodificação que a perdeu). Um 2:1 sem marca costuma ser duas olho de "
+       "peixe lado a lado. Padrão: auto"),
+    IT("che cos'è una singola traccia video 2:1: auto (un panorama solo se il "
+       "file è marcato equirettangolare, come un export DJI o Insta360) oppure "
+       "equirect (un panorama qualunque cosa dica la marcatura, per una "
+       "ricodifica che l'ha persa). Un 2:1 non marcato di solito è due fisheye "
+       "affiancati. Predefinito: auto"),
+    NL("wat een enkel 2:1-videospoor is: auto (alleen een panorama als het "
+       "bestand als equirectangulair is gemarkeerd, zoals een DJI- of "
+       "Insta360-export) of equirect (een panorama wat de markering ook zegt, "
+       "voor een hercodering die haar kwijtraakte). Ongemarkeerd 2:1 is meestal "
+       "twee fisheyes naast elkaar. Standaard: auto"),
+    RU("что такое одна видеодорожка 2:1: auto (панорама, только если файл "
+       "помечен как равнопромежуточный, как экспорт DJI или Insta360) или "
+       "equirect (панорама при любой пометке, для перекодированного файла, "
+       "который её потерял). Непомеченное 2:1 — обычно два «рыбьих глаза» "
+       "рядом. По умолчанию: auto"),
+    TR("tek bir 2:1 video izinin ne olduğu: auto (yalnızca dosya eş dikdörtgen "
+       "olarak etiketliyse panorama; DJI ve Insta360 dışa aktarımları "
+       "etiketlidir) veya equirect (etiket ne derse desin panorama; etiketi "
+       "yeniden kodlamada kaybolmuş dosyalar için). Etiketsiz 2:1 genelde yan "
+       "yana iki balık gözüdür. Varsayılan: auto"));
+
+SS_MSG(xh_360_source_refused,
+    EN("--360-source equirect: the file is not one 2:1 video track"),
+    JA("--360-source equirect: このファイルは 2:1 の単一ビデオトラックではありません"),
+    ZH_HANS("--360-source equirect：该文件不是单条 2:1 视频轨道"),
+    ZH_HANT("--360-source equirect：該檔案不是單條 2:1 視訊軌道"),
+    KO("--360-source equirect: 이 파일은 2:1 단일 비디오 트랙이 아닙니다"),
+    DE("--360-source equirect: die Datei ist nicht eine einzelne 2:1-Videospur"),
+    FR("--360-source equirect : le fichier n'est pas une piste vidéo 2:1 unique"),
+    ES("--360-source equirect: el archivo no es una única pista de vídeo 2:1"),
+    PT("--360-source equirect: o arquivo não é uma única faixa de vídeo 2:1"),
+    IT("--360-source equirect: il file non è una singola traccia video 2:1"),
+    NL("--360-source equirect: het bestand is niet één 2:1-videospoor"),
+    RU("--360-source equirect: файл не одна видеодорожка 2:1"),
+    TR("--360-source equirect: dosya tek bir 2:1 video izi değil"));
 
 SS_MSG(xh_masking,
     EN("Masking (needs --model)"),

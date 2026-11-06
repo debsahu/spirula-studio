@@ -10,15 +10,16 @@
 // step across the seam between the two tracks. docs/datasets.md records where
 // the layout numbers were measured.
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace app {
 
-// What a camera's two tracks hold. A MAX writes one equi-angular cube map
-// across both; a MAX 2 writes a whole panorama per track, each padded at the
-// sides by the other lens's copy of the far side.
+// A MAX writes one equi-angular cube map across two tracks; a MAX 2 a whole
+// panorama per track, padded at the sides by the other lens's copy of the far
+// side; a stitched export one unpadded panorama in one track.
 enum class Pano360Packing { Eac, Sphere };
 
 // Eac: a 3x2 cube map, a `strip`-wide overlap inserted at the lens seam down
@@ -36,23 +37,29 @@ struct Pano360Layout {
     int canvasH() const { return sphere() ? track_h : 2 * face; }
 };
 
-// What the camera itself says its two tracks are, when the file says: a GoPro's
-// PRJT and the PMOD beside it, as sfm::VideoProjection carries them. Copied
-// rather than included so that the geometry here needs nothing off a container.
+// What the file says its tracks are, copied from sfm::VideoProjection so the
+// geometry here needs nothing off a container: a GoPro's PRJT and PMOD, and
+// the Spherical Video tag.
 struct Pano360Meta {
     std::string projection;
     std::vector<uint32_t> mode;
+    std::string spherical;
 };
 
-// Two equal video tracks their shape, or the camera's own numbers, say are a 360
-// packing: a MAX cube map (4096x1344 at 5.6K, 2272x736 at 3K) or a MAX 2
-// panorama pair (5952x1920), which only its own PMOD places.
+// A MAX cube map (4096x1344, 2272x736), a MAX 2 panorama pair (5952x1920,
+// placed by its PMOD), or one track TAGGED equirectangular: a bare 2:1 frame is
+// as often two fisheye circles side by side (.lrv, Osmo .LRF), untagged.
 bool pano360_detect(int tracks, int width, int height, const Pano360Meta& meta,
                     Pano360Layout& out);
 
-// The file says it is a 360 packing -- only a .360 names a projection -- and it
-// is not one this build can place. For the line that says the tracks are being
-// left as they are, instead of quietly treating them as two ordinary lenses.
+// One track taken as a full equirectangular panorama on the caller's word, for
+// a file whose tag was lost in a re-encode. Its width a multiple of 4 and
+// within 1% of twice its height.
+bool pano360_equirect_layout(int width, int height, Pano360Layout& out);
+
+// The file names a 360 packing (a .360's projection, a spherical tag) this
+// build cannot place: for the line that says the tracks are left as they are,
+// instead of quietly treating them as ordinary lenses.
 bool pano360_unsupported(int tracks, int width, int height,
                          const Pano360Meta& meta);
 
@@ -92,12 +99,18 @@ struct Pano360View {
 
 // Faces over an EAC packing gives five views per lens -- the face on its axis
 // and the near half of its four sides -- so every view is fed by ONE lens
-// (docs/datasets.md). A panorama is stitched already, so it gets a cube of six.
+// (docs/datasets.md). A stitched panorama gets a cube of six on a corner.
 std::vector<Pano360View> pano360_views(const Pano360Layout& l,
                                        const Pano360Options& o);
 
 // What `size` = 0 resolves to: the face side, or the panorama's width.
 int pano360_default_size(const Pano360Layout& l, const Pano360Options& o);
+
+// A pinhole view's focal length over its width; 0 for an equirectangular one.
+inline double pano360_focal_factor(const Pano360View& v) {
+    return v.fov > 0.0f ? 0.5 / std::tan(v.fov * 3.14159265358979323846 / 360.0)
+                        : 0.0;
+}
 
 // Where each output pixel reads from the canvas. Built once per view and
 // reused for every frame; ~8 bytes a pixel.

@@ -382,6 +382,11 @@ add_executable(packed_lens_test
     ${SS_SRC}/app/Pano360.cpp)
 ss_configure_app(packed_lens_test)
 
+add_executable(pano360_test
+    ${SS_SRC}/app/tests/pano360_test.cpp
+    ${SS_SRC}/app/Pano360.cpp)
+ss_configure_app(pano360_test)
+
 # A scan written out as a dataset, then read back by the trainer's parser.
 add_executable(e57_dataset_test
     ${SS_SRC}/app/tests/e57_dataset_test.cpp

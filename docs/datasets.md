@@ -570,7 +570,7 @@ reconstruction.
 A caller with no image decoders leaves `probe_image_size` null and gets the
 reconstruction's resolution unchanged; the WebAssembly viewer does exactly that.
 
-## 360 cameras (GoPro MAX and MAX 2 `.360`)
+## 360 cameras (GoPro MAX and MAX 2 `.360`, stitched panoramas)
 
 The ten views of a frame share one file stem under `cam0/` .. `cam9/`, so
 `--rig cam0,cam1,...,cam9` (Spirula Studio: the input's rig row, on by
@@ -685,6 +685,9 @@ overlap on 5.9% of the sphere.
 
 All ten share one focal length in pixels (`S/2`), so a single `--focal` covers
 them; `--camera-mode single` then leaves three cameras, one per image shape.
+A panorama's six 100-degree faces share `S / (2 tan 50deg)` = 0.420 S instead;
+the GUI and `sam extract`'s manifest both take it from the plan's first view
+(`pano360_focal_factor`).
 The pixel budget is 12.6 MP a frame at the default `S`, against 13.6 MP for the
 six-face cube this replaced.
 
@@ -703,12 +706,13 @@ lenses into one spherical camera, seam and all, and reconstruction downsamples
 it to `--max-image-size` (1600 px for the learned front ends at `--quality
 high`) -- about 4.4 px per degree, against 16.7 for a 1504 px face.
 
-### A MAX 2's views
+### A MAX 2's views, and any stitched panorama's
 
 A stitched panorama has no seam to keep views off, so faces mode gives it a
 plain **cube of six** at 100 degrees, and equirect mode hands the panorama
 over as it is. The cube is stood on a corner -- face centres at +-35.26
-degrees of elevation, 120 apart in azimuth -- rather than axis-aligned:
+degrees of elevation, 120 apart in azimuth (alternating up and down, 60 apart
+in turn) -- rather than axis-aligned:
 
 - A panorama's poles are its own weak point, a few rows of source stretched
   around the whole frame. A face pointed straight up or down is a starburst
@@ -718,6 +722,51 @@ degrees of elevation, 120 apart in azimuth -- rather than axis-aligned:
   Measured on 38 frames of an 8K clip: **56% of images registered**
   axis-aligned, **74%** stood on a corner, at 0.61 px mean reprojection. The
   two faces that still lag are the ones looking at the operator and the mount.
+
+Each face keeps the panorama's up, so it is rolled off the cube's own edges,
+and at 100 degrees the six do **not** quite cover the sphere: **2.26%** of it
+(area-weighted, 2M random directions) lies in no face, in wedges between
+neighbouring faces that reach down to 14.6 degrees of elevation. 105 degrees
+leaves 0.51%, 108 leaves 0.05%, and **109.5** closes it. `pano360_test` pins
+the gap so that a change to the plan shows up there.
+
+### A stitched panorama in an ordinary video
+
+A DJI Studio or Insta360 Studio export, or any other stitched 360 video, is
+one 2:1 equirectangular track. It is the MAX 2 case without the padding:
+`Pano360Layout` with `margin = 0`, `face = W/4`, so it takes the same corner
+cube, the same resampler and, in the GUI, the same rig row.
+
+The frame's shape is **not** enough to recognise it. A 2:1 frame is just as
+often two fisheye circles side by side -- an Insta360 `.lrv` proxy, a DJI Osmo
+360 `.LRF` -- and those must stay on their own path. What tells them apart is
+the file's own **Spherical Video** tag, which every stitching exporter writes
+and no raw-lens file carries:
+
+- V2: an `sv3d > proj > equi` box inside the video sample entry. Non-zero
+  `equi` bounds mean a cropped panorama, which is not taken.
+- V1: a `uuid` box (`ffcc8263-f855-4a93-8814-587a02521fdd`) of XML on the
+  video `trak` with `<GSpherical:ProjectionType>equirectangular`; a
+  `Stitched` of `false`, or a cropped area smaller than the full panorama, is
+  not taken. A DJI export puts this box on its audio track as well, which does
+  not count.
+
+`sfm::video_projection` reads both (`VideoProjection::spherical`). A single
+track is a panorama when it is tagged `equirectangular`, its width a multiple
+of 4 and within 1% of twice its height. A cubemap, mesh or cropped tag is
+reported as a 360 file this build cannot place. Measured on hand: a DJI
+Studio 8K export carries both tags and is taken; the same capture's `.LRF`
+(2048x1024, two fisheyes) carries neither and is not. ffmpeg keeps the V2
+box through `-c copy -strict unofficial`, so a trimmed clip is still
+recognised; a re-encode usually drops it, and `sam extract --360-source
+equirect` then takes one 2:1 track as a panorama on the user's word.
+
+`sam extract --360 faces` also writes `<images>.manifest.yaml` beside the
+image folder: `camera_mode: single`, one pinhole camera at the faces' focal
+length, and a rig whose members start at the rotations the views were cut at,
+refining rotation only. `spirula sfm auto <images> --manifest
+<images>.manifest.yaml` then reconstructs the views the way Spirula Studio
+hands them over. (This applies to a `.360` as well.)
 
 ### What it cannot do for you
 

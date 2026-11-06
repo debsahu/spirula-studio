@@ -129,10 +129,10 @@ PrepInput make_source(const std::string& path, bool use_found_masks) {
 void probe_sources(std::vector<PrepInput>& sources,
                    const std::string& ffmpeg_exe) {
     static const std::atomic<bool> never{false};
-    // What a .360 actually holds: the extraction plan and the lens both follow
-    // from the packing, not from the extension.
+    // What a .360 or a tagged panorama holds: the extraction plan and the lens
+    // both follow from the packing, not from the extension.
     for (PrepInput& s : sources) {
-        if (!s.is_video || s.pano360.valid() || !is_pano360_path(s.path)) continue;
+        if (!s.is_video || s.pano360.valid()) continue;
         const Pano360Probe p = probe_pano360(ffmpeg_exe, s.path, never);
         s.pano360 = p.layout;
         s.pano360_unsupported = p.unsupported;
@@ -420,14 +420,17 @@ void apply_pano_lens(std::vector<PrepInput>& sources, SfmJob& sfm,
     const app::Pano360Options& p = sfm.prep.pano;
     if (p.mode == app::Pano360Mode::Off) return;
     const bool faces = p.mode == app::Pano360Mode::Faces;
-    // All ten views share one focal length in PIXELS, and the factor is
-    // resolved against the first image in the tree -- cam0, the view on the
-    // lens axis, which is the 90-degree one this halves (build_manifest).
-    const float focal = faces ? 0.5f : 0.0f;
+    // Every view of a plan shares one focal length in PIXELS, and the factor
+    // is resolved against cam0, the first image in the tree (build_manifest):
+    // S/2 for an EAC packing's 90-degree axial view, less for a panorama's 100.
+    float focal = 0.0f;
     for (PrepInput& s : sources) {
         if (!s.pano360.valid()) continue;
+        const std::vector<app::Pano360View> views = app::pano360_views(s.pano360, p);
         s.camera_model = faces ? "pinhole" : "equirectangular";
-        s.focal_factor = focal;
+        s.focal_factor =
+            faces && !views.empty() ? (float)app::pano360_focal_factor(views[0]) : 0.0f;
+        if (focal == 0.0f) focal = s.focal_factor;
         for (SubCamera& sc : s.subcameras) {
             sc.camera_model.clear();
             sc.focal_factor = 0.0f;

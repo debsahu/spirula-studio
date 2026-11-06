@@ -67,6 +67,8 @@ struct TrackSpec {
     uint32_t timescale;
     uint32_t sample_delta;
     std::vector<Bytes> samples;
+    Bytes entry_children;   // boxes after a visual sample entry's 78 bytes
+    Bytes trak_extra;       // boxes after mdia
 };
 
 // ftyp, mdat (every track's samples in order), moov.
@@ -104,7 +106,8 @@ static Bytes build_mp4(const std::vector<TrackSpec>& tracks, uint32_t mv_timesca
         for (int i = 0; i < 3; i++) put_be32(hdlr_p, 0);
         put_str(hdlr_p, t.handler_name); put_u8(hdlr_p, 0);
 
-        Bytes entry_p(8, 0);
+        Bytes entry_p(t.entry_children.empty() ? 8 : 78, 0);
+        put_raw(entry_p, t.entry_children);
         Bytes stsd_p; put_be32(stsd_p, 1); put_raw(stsd_p, box(t.sample_type, entry_p));
         Bytes stts_p; put_be32(stts_p, 1); put_be32(stts_p, (uint32_t)t.samples.size()); put_be32(stts_p, t.sample_delta);
         Bytes stsc_p; put_be32(stsc_p, 1); put_be32(stsc_p, 1); put_be32(stsc_p, (uint32_t)t.samples.size()); put_be32(stsc_p, 1);
@@ -122,6 +125,7 @@ static Bytes build_mp4(const std::vector<TrackSpec>& tracks, uint32_t mv_timesca
         put_raw(mdia_p, box("minf", minf_p));
         Bytes trak_p;
         put_raw(trak_p, full("tkhd", tkhd_p)); put_raw(trak_p, box("mdia", mdia_p));
+        put_raw(trak_p, t.trak_extra);
         put_raw(moov_p, box("trak", trak_p));
     }
     Bytes out = ftyp;
@@ -253,6 +257,66 @@ static void test_gpmf() {
         check(close_to(tm.gps[0].t, 0.0, 1e-9) && close_to(tm.gps[2].t, 1.0, 1e-9), "gpmf: GPS anchored to its own first payload");
     }
     check(tm.gravity.size() == 4 && close_to(tm.gravity[0].y, -1.0, 1e-4) && tm.orientation_axes == "XYZ", "gpmf: GRAV swapped into the ORIN frame");
+}
+
+// Spherical Video V2 (sv3d) and V1 (uuid XML). Catches: either tag missed,
+// cropped bounds read as a whole sphere, and the V1 box an audio track also
+// carries answering for a video track that says nothing.
+static void test_spherical() {
+    auto read = [](const std::vector<TrackSpec>& tracks) {
+        const Bytes file = build_mp4(tracks, 1000, 1000, 0);
+        Telemetry tm;
+        std::string err;
+        telemetry_read(file.data(), file.size(), tm, err);
+        return tm.projection.spherical;
+    };
+    auto v2 = [](const Bytes& proj_child) {
+        Bytes prhd_p(12, 0);
+        Bytes proj_p = full("prhd", prhd_p);
+        put_raw(proj_p, proj_child);
+        Bytes sv3d_p;
+        Bytes svhd_p; put_str(svhd_p, "x"); put_u8(svhd_p, 0);
+        put_raw(sv3d_p, full("svhd", svhd_p));
+        put_raw(sv3d_p, box("proj", proj_p));
+        return box("sv3d", sv3d_p);
+    };
+    auto equi = [](uint32_t top) {
+        Bytes p; put_be32(p, top); put_be32(p, 0); put_be32(p, 0); put_be32(p, 0);
+        return full("equi", p);
+    };
+    auto v1 = [](const char* xml) {
+        Bytes p;
+        const uint8_t id[16] = {0xff, 0xcc, 0x82, 0x63, 0xf8, 0x55, 0x4a, 0x93,
+                                0x88, 0x14, 0x58, 0x7a, 0x02, 0x52, 0x1f, 0xdd};
+        for (uint8_t c : id) put_u8(p, c);
+        put_str(p, xml);
+        return box("uuid", p);
+    };
+    const char* kV1 = "<rdf:SphericalVideo><GSpherical:Spherical>true</GSpherical:Spherical>"
+                      "<GSpherical:Stitched>true</GSpherical:Stitched><GSpherical:ProjectionType>"
+                      "equirectangular</GSpherical:ProjectionType></rdf:SphericalVideo>";
+    const Bytes sample(16, 0);
+    TrackSpec vid{"hvc1", "vide", "Core Media Video", 600, 25, {sample}};
+    TrackSpec aud{"mp4a", "soun", "Core Media Audio", 48000, 1024, {sample}};
+
+    check(read({vid}).empty(), "spherical: an untagged video says nothing");
+    TrackSpec t = vid;
+    t.entry_children = v2(equi(0));
+    check(read({t}) == "equirectangular", "spherical: V2 equi, whole sphere");
+    t.entry_children = v2(equi(0x10000000));
+    check(read({t}) == "equirectangular-cropped", "spherical: V2 equi with bounds is cropped");
+    Bytes cbmp_p(12, 0);
+    t.entry_children = v2(full("cbmp", cbmp_p));
+    check(read({t}) == "cubemap", "spherical: V2 cubemap");
+    t = vid;
+    t.trak_extra = v1(kV1);
+    check(read({t, aud}) == "equirectangular", "spherical: V1 XML on the video track");
+    TrackSpec a = aud;
+    a.trak_extra = v1(kV1);
+    check(read({vid, a}).empty(), "spherical: V1 XML on the audio track alone is not the video's");
+    t.trak_extra = v1("<GSpherical:Stitched>false</GSpherical:Stitched>"
+                      "<GSpherical:ProjectionType>equirectangular</GSpherical:ProjectionType>");
+    check(read({t}).empty(), "spherical: V1 unstitched is not a panorama");
 }
 
 static Bytes insta_trailer(const Bytes& meta, const Bytes& gyro, const Bytes& gps) {
@@ -793,6 +857,7 @@ static int cmdTelemetryTest(int argc, char** argv) {
     }
     test_camm();
     test_gpmf();
+    test_spherical();
     test_insta360(false);
     test_insta360(true);
     test_dji();

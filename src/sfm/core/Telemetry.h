@@ -22,6 +22,10 @@ namespace sfm {
 struct VideoProjection {
     std::string name;
     std::vector<uint32_t> mode;
+    // The first video track's Spherical Video tag (V2 sv3d, else V1 XML):
+    // "equirectangular", "equirectangular-cropped", "cubemap", "mesh"; empty
+    // when untagged.
+    std::string spherical;
 };
 
 // Every `t` is seconds from the first video frame, on the container's clock.

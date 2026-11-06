@@ -321,6 +321,64 @@ void gpmf_projection(const uint8_t* p, size_t n, int depth, VideoProjection& out
     }
 }
 
+// A video trak's Spherical Video tag (google/spatial-media): V2's sv3d in the
+// sample entry, else V1's XML in a trak-level uuid box. "" when untagged.
+std::string spherical_tag(const uint8_t* trak, size_t size) {
+    Box mdia, minf, stbl, stsd;
+    if (!find_box(trak, size, fourcc("mdia"), mdia)) return {};
+    // 78 bytes of VisualSampleEntry fields precede the entry's own boxes.
+    constexpr size_t kVisualEntry = 78;
+    Box entry, sv3d, proj;
+    if (find_box(mdia.payload, mdia.payload_size, fourcc("minf"), minf) &&
+        find_box(minf.payload, minf.payload_size, fourcc("stbl"), stbl) &&
+        find_box(stbl.payload, stbl.payload_size, fourcc("stsd"), stsd) && stsd.payload_size > 8 &&
+        read_box(stsd.payload + 8, stsd.payload_size - 8, entry) &&
+        entry.payload_size > kVisualEntry &&
+        find_box(entry.payload + kVisualEntry, entry.payload_size - kVisualEntry, fourcc("sv3d"),
+                 sv3d) &&
+        find_box(sv3d.payload, sv3d.payload_size, fourcc("proj"), proj)) {
+        std::string kind;
+        each_box(proj.payload, proj.payload_size, [&](const Box& c) {
+            if (!kind.empty()) return;
+            if (c.type == fourcc("equi")) {
+                // Full box, then the crop off each edge as 0.32 fractions.
+                bool whole = c.payload_size >= 20;
+                for (size_t i = 4; whole && i < 20; i += 4) whole = be32(c.payload + i) == 0;
+                kind = whole ? "equirectangular" : "equirectangular-cropped";
+            } else if (c.type == fourcc("cbmp")) {
+                kind = "cubemap";
+            } else if (c.type == fourcc("mshp")) {
+                kind = "mesh";
+            }
+        });
+        if (!kind.empty()) return kind;
+    }
+    static const uint8_t kV1[16] = {0xff, 0xcc, 0x82, 0x63, 0xf8, 0x55, 0x4a, 0x93,
+                                    0x88, 0x14, 0x58, 0x7a, 0x02, 0x52, 0x1f, 0xdd};
+    std::string kind;
+    each_box(trak, size, [&](const Box& u) {
+        if (!kind.empty() || u.type != fourcc("uuid") || u.payload_size <= 16 ||
+            std::memcmp(u.payload, kV1, 16) != 0)
+            return;
+        const std::string xml((const char*)u.payload + 16, u.payload_size - 16);
+        auto tag = [&](const char* name) {
+            const std::string open = std::string("<GSpherical:") + name + ">";
+            const size_t a = xml.find(open);
+            if (a == std::string::npos) return std::string();
+            const size_t e = xml.find('<', a + open.size());
+            return xml.substr(a + open.size(), e == std::string::npos ? std::string::npos
+                                                                      : e - a - open.size());
+        };
+        if (tag("ProjectionType") != "equirectangular" || tag("Stitched") == "false") return;
+        const std::string crop_w = tag("CroppedAreaImageWidthPixels");
+        const std::string crop_h = tag("CroppedAreaImageHeightPixels");
+        const bool cropped = (!crop_w.empty() && crop_w != tag("FullPanoWidthPixels")) ||
+                             (!crop_h.empty() && crop_h != tag("FullPanoHeightPixels"));
+        kind = cropped ? "equirectangular-cropped" : "equirectangular";
+    });
+    return kind;
+}
+
 // Scans the top-level boxes for moov, which may follow mdat, and stops at the
 // first thing that is not a box (an Insta360 trailer, say).
 bool read_movie(const Source& src, Movie& mv, bool& is_mp4, std::string& error) {
@@ -351,6 +409,7 @@ bool read_movie(const Source& src, Movie& mv, bool& is_mp4, std::string& error) 
     }
     if (moov.empty()) return false;
 
+    bool seen_video = false;
     each_box(moov.data(), moov.size(), [&](const Box& b) {
         if (b.type == fourcc("mvhd") && b.payload_size >= 20) {
             if (b.payload[0] == 1 && b.payload_size >= 32) {
@@ -365,6 +424,16 @@ bool read_movie(const Source& src, Movie& mv, bool& is_mp4, std::string& error) 
         } else if (b.type == fourcc("trak")) {
             Track tk;
             if (parse_trak(b.payload, b.payload_size, tk)) mv.tracks.push_back(std::move(tk));
+            // The first video track's word only: a second may be a thumbnail.
+            if (!seen_video) {
+                Box mdia, h;
+                if (find_box(b.payload, b.payload_size, fourcc("mdia"), mdia) &&
+                    find_box(mdia.payload, mdia.payload_size, fourcc("hdlr"), h) &&
+                    h.payload_size >= 12 && be32(h.payload + 8) == fourcc("vide")) {
+                    seen_video = true;
+                    mv.projection.spherical = spherical_tag(b.payload, b.payload_size);
+                }
+            }
         } else if (b.type == fourcc("udta")) {
             Box g;
             if (find_box(b.payload, b.payload_size, fourcc("GPMF"), g))
@@ -1701,6 +1770,7 @@ std::string telemetry_report(const Telemetry& t, const TelemetryCheck& c) {
         for (uint32_t v : t.projection.mode) o << " " << v;
         o << "\n";
     }
+    if (!t.projection.spherical.empty()) o << "spherical    : " << t.projection.spherical << "\n";
     o << "video        : " << fmt("%.1f s", t.video_duration);
     if (t.video_fps > 0) o << fmt(", %.2f fps", t.video_fps);
     if (t.frame_readout > 0) o << fmt(", readout %.1f ms", t.frame_readout * 1e3);

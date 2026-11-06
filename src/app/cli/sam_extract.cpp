@@ -19,6 +19,8 @@
 #include "birefnet/BiRefNet.h"
 #include "sam/Masking.h"
 #ifdef SS_TOOL_SFM
+#include "app/Pano360Rig.h"
+#include "sfm/core/Manifest.h"
 #include "sfm/core/Telemetry.h"
 #endif
 
@@ -26,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 
@@ -87,6 +90,7 @@ void usage() {
     help_row("    --360 <mode>", H::xh_360);
     help_row("    --360-size <n>", H::xh_360_size);
     help_row("    --360-orient <y,p,r>", H::xh_360_orient);
+    help_row("    --360-source <auto|equirect>", H::xh_360_source);
 
     std::fprintf(stderr, "\n%s\n", H::xh_masking.get());
     for (const std::string& l : spirula::i18n::wrap(H::model_kinds.get(), 76))
@@ -128,6 +132,7 @@ struct Options {
     std::string ffmpeg = "ffmpeg";
 
     std::string pano_mode = "faces";
+    std::string pano_source = "auto";
     app::Pano360Options pano;
 
     std::string model, text, neg_text, device, detector;
@@ -184,6 +189,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         }
         else if (a == "--ffmpeg") o.ffmpeg = next("--ffmpeg");
         else if (a == "--360") o.pano_mode = next("--360");
+        else if (a == "--360-source") o.pano_source = next("--360-source");
         else if (a == "--360-size") o.pano.size = std::atoi(next("--360-size"));
         else if (a == "--360-orient") {
             const char* v = next("--360-orient");
@@ -234,6 +240,12 @@ bool parse_args(int argc, char** argv, Options& o) {
         }
     }
     if (o.input.empty()) return false;
+    if (o.pano_source != "auto" && o.pano_source != "equirect") {
+        std::fprintf(stderr, "%s\n",
+                     spirula::i18n::format(spirula::i18n::msg::cli::sam_unexpected_argument,
+                                           {"--360-source " + o.pano_source}).c_str());
+        return false;
+    }
     if (o.skip < 1) o.skip = 1;
     if (o.keep < 0) o.keep = (int)(0.5 * o.skip + 0.5);
     if (o.rotate % 90 != 0) {
@@ -243,6 +255,36 @@ bool parse_args(int argc, char** argv, Options& o) {
     }
     return true;
 }
+
+#ifdef SS_TOOL_SFM
+// What Spirula Studio hands a reconstruction of these views, for `sfm auto
+// --manifest`: one pinhole camera, and the views as one rig at their cut
+// rotations. Beside the image folder, which it names relative to itself.
+bool write_pano_manifest(const app::FrameExtractJob& job, const fs::path& images) {
+    sfm::Manifest m;
+    m.image_dir = images.filename().string();
+    m.camera_mode = "single";
+    sfm::ManifestCamera cam;
+    cam.model = "pinhole";
+    cam.focal = job.views[0].width * app::pano360_focal_factor(job.views[0]);
+    m.cameras.push_back(cam);
+    sfm::RigDef rig;
+    rig.name = "pano360";
+    for (const app::Pano360View& v : job.views) rig.members.push_back({v.dir});
+    if (!app::pano360_rig_members(job.eac, job.views, rig)) return false;
+    m.rigs.push_back(std::move(rig));
+    const fs::path path = images.parent_path() / (images.filename().string() + ".manifest.yaml");
+    std::ofstream f(path, std::ios::binary);
+    f << sfm::manifest_write(m);
+    if (!f) {
+        std::fprintf(stderr, "cannot write %s\n", path.string().c_str());
+        return false;
+    }
+    std::fprintf(stderr, "360: rig and lens for `sfm auto --manifest` -> %s\n",
+                 path.string().c_str());
+    return true;
+}
+#endif
 
 }  // namespace
 
@@ -307,11 +349,23 @@ int sam_cli_extract(int argc, char** argv) {
         app::Pano360Meta meta;
 #ifdef SS_TOOL_SFM
         const sfm::VideoProjection pr = sfm::video_projection(o.input);
-        meta = app::Pano360Meta{pr.name, pr.mode};
+        meta = app::Pano360Meta{pr.name, pr.mode, pr.spherical};
 #endif
-        if (tracks.size() == 2 && tracks[0] == tracks[1] &&
-            app::pano360_detect(2, tracks[0].first, tracks[0].second, meta,
-                                job.eac)) {
+        bool found = false;
+        if (tracks.size() == 2 && tracks[0] == tracks[1])
+            found = app::pano360_detect(2, tracks[0].first, tracks[0].second, meta, job.eac);
+        else if (tracks.size() == 1)
+            found = o.pano_source == "equirect"
+                        ? app::pano360_equirect_layout(tracks[0].first, tracks[0].second,
+                                                       job.eac)
+                        : app::pano360_detect(1, tracks[0].first, tracks[0].second, meta,
+                                              job.eac);
+        if (!found && o.pano_source == "equirect") {
+            std::fprintf(stderr, "%s\n",
+                         spirula::i18n::msg::samhelp::xh_360_source_refused.get());
+            return 2;
+        }
+        if (found) {
             o.pano.mode = o.pano_mode == "equirect" ? app::Pano360Mode::Equirect
                                                     : app::Pano360Mode::Faces;
             job.views = app::pano360_views(job.eac, o.pano);
@@ -355,6 +409,11 @@ int sam_cli_extract(int argc, char** argv) {
     }
     std::printf("%s", app::format_extract_stats(stats, base.string(),
                                                 !o.model.empty()).c_str());
+#ifdef SS_TOOL_SFM
+    if (rc == 0 && job.eac.valid() && job.views.size() > 1 &&
+        !write_pano_manifest(job, base))
+        rc = 1;
+#endif
     if (stats.write_failures) {
         std::fprintf(stderr, "%s %s\n",
                      spirula::i18n::msg::data::word_warning.get(),
