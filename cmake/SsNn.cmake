@@ -120,11 +120,12 @@ if(SS_ENABLE_PATENTED)
 endif()
 target_link_libraries(ss_nn PUBLIC ss_vulkan Threads::Threads)
 if(SS_NN_METAL)
-    enable_language(OBJCXX)
+    # Compiled as CXX, which clang reads as Objective-C++ from the extension.
+    # No enable_language(OBJCXX): it would turn every .m (GLFW's Cocoa layer)
+    # into Objective-C++ too; cmake/SsApps.cmake does NativeDialogMac.mm the same way.
     target_sources(ss_nn PRIVATE ${SS_SRC}/nn/OpMetal.mm ${SS_SRC}/nn/vk/MetalInterop.mm)
     set_source_files_properties(${SS_SRC}/nn/OpMetal.mm ${SS_SRC}/nn/vk/MetalInterop.mm
-        PROPERTIES COMPILE_OPTIONS "-fobjc-arc;-O3")
-    set_property(TARGET ss_nn PROPERTY OBJCXX_STANDARD 17)
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_compile_definitions(ss_nn PRIVATE SS_HAVE_NN_METAL=1)
     target_link_libraries(ss_nn PUBLIC "-framework Metal" "-framework Foundation"
         "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
