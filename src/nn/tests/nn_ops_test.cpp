@@ -12,10 +12,12 @@
 #include "nn/Blocks.h"
 #include "nn/Ops.h"
 #include "nn/vk/Context.h"
+#include "nn/vk/MetalInterop.h"
 #include "nn/vk/Stream.h"
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 #include <random>
@@ -739,6 +741,253 @@ void test_attention(vk::Arena& arena) {
             check("attn split-k (memory attn) [coop]", readback(to), want16, 3e-4f);
         }
     }
+}
+
+// ================
+// Metal (MPSGraph)
+// ================
+
+double rel_l2(const std::vector<float>& a, const std::vector<float>& b) {
+    double num = 0, den = 0;
+    for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
+        num += ((double)a[i] - b[i]) * ((double)a[i] - b[i]);
+        den += (double)b[i] * b[i];
+    }
+    return a.size() == b.size() ? std::sqrt(num / std::max(den, 1e-30)) : 1e30;
+}
+
+void expect(bool ok, const char* name, const char* detail) {
+    ++g_checks;
+    std::printf("  %s %-28s %s\n", ok ? "ok  " : "FAIL", name, detail);
+    if (!ok) ++g_failures;
+}
+
+// How many MPSGraph ops `fn` ran, as (attention, gemm).
+template <class F>
+std::pair<uint64_t, uint64_t> metal_ops(F&& fn) {
+    const MetalCounts a = metal_counts();
+    fn();
+    const MetalCounts b = metal_counts();
+    return {b.attention - a.attention, b.gemm - a.gemm};
+}
+
+void test_metal(vk::Arena& arena) {
+    char buf[160];
+    set_metal_enabled(true);
+
+    // FlexGlue's self and cross shapes, at a quarter of its 4096 tokens so the
+    // fp64 reference stays quick. The 1e-5 relative L2 bar is the speed note's
+    // falsifier for the fp32 path.
+    struct Case { int B, nq, nk, H, HD; const char* name; };
+    const Case cases[] = {
+        {1, 1024, 1024, 8, 64, "metal attn 1024 h8 d64"},
+        {1, 300, 700, 8, 64, "metal attn 300x700 (cross)"},
+        {2, 96, 96, 4, 32, "metal attn batched"},
+        {1, 200, 200, 2, 128, "metal attn h2 d128"},
+        {1, 100, 100, 1, 256, "metal attn d256 stays vulkan"},
+    };
+    for (const auto& c : cases) {
+        vk::ArenaScope scope(arena);
+        const int dim = c.H * c.HD;
+        auto q = randn((size_t)c.B * c.nq * dim), k = randn((size_t)c.B * c.nk * dim),
+             v = randn((size_t)c.B * c.nk * dim);
+        // One element into its allocation, so the NDArray offset is not 256-aligned.
+        Tensor tq(arena_tensor(arena, DType::F32, (int64_t)q.size() + 1).offsetElems(1).ptr,
+                  DType::F32, c.B, c.nq, dim);
+        tensor_from_host(tq, q.data(), (int64_t)q.size());
+        Tensor tk = upload_f32(arena, k, c.B, c.nk, dim);
+        Tensor tv = upload_f32(arena, v, c.B, c.nk, dim);
+        Tensor to = arena_tensor(arena, DType::F32, c.B, c.nq, dim);
+        AttnOpts o;
+        o.n_heads = c.H;
+        o.head_dim = c.HD;
+        o.batch = c.B;
+        const auto n = metal_ops([&] { attention(to, tq, tk, tv, c.nq, c.nk, o); });
+        std::vector<float> want((size_t)c.B * c.nq * dim);
+        parallel_for(c.B, [&](int64_t b0, int64_t b1) {
+            for (int64_t b = b0; b < b1; ++b) {
+                auto sl = [&](const std::vector<float>& t, int64_t n) {
+                    return std::vector<float>(t.begin() + b * n * dim, t.begin() + (b + 1) * n * dim);
+                };
+                std::vector<float> ob;
+                attn_reference(sl(q, c.nq), sl(k, c.nk), sl(v, c.nk), c.nq, c.nk, c.H, c.HD,
+                               1.0f / std::sqrt((float)c.HD), nullptr, AttnBias::None, ob);
+                std::copy(ob.begin(), ob.end(), want.begin() + b * c.nq * dim);
+            }
+        });
+        const auto got = readback(to);
+        check(c.name, got, want, 3e-4f);
+        const double e = rel_l2(got, want);
+        std::snprintf(buf, sizeof buf, "rel L2 %.3g (bar 1e-5), %llu MPSGraph op", e,
+                      (unsigned long long)n.first);
+        // MPS is wrong at d256 (OpMetal.mm), so that one must not reach it.
+        const uint64_t want_ops = c.HD <= 128 ? 1 : 0;
+        expect(e <= 1e-5 && n.first == want_ops, (std::string(c.name) + " L2").c_str(), buf);
+    }
+
+    // Every epilogue term, both weight dtypes, an alpha, ragged axes, and a
+    // weight view that does not start its allocation.
+    for (DType wt : {DType::F32, DType::F16}) {
+        vk::ArenaScope scope(arena);
+        const int M = 300, N = 257, K = 129;
+        const float alpha = 0.5f;
+        auto x = randn((size_t)M * K), w = randn((size_t)N * K, 0.1f), b = randn((size_t)N),
+             r = randn((size_t)M * N);
+        if (wt == DType::F16) w = round_f16(w);
+        Tensor tw = wt == DType::F16 ? upload_f16(arena, w, N, K) : upload_f32(arena, w, N, K);
+        Tensor to = arena_tensor(arena, DType::F32, M, N);
+        LinearOpts o;
+        o.bias = upload_f32(arena, b, N);
+        o.residual = upload_f32(arena, r, M, N);
+        o.act = Act::GeluErf;
+        o.alpha = alpha;
+        Tensor tx = upload_f32(arena, x, M, K);
+        const auto n = metal_ops([&] { linear(to, tx, tw, o); });
+        std::vector<float> want((size_t)M * N);
+        for (int m = 0; m < M; ++m)
+            for (int j = 0; j < N; ++j) {
+                double acc = 0;
+                for (int kk = 0; kk < K; ++kk) acc += (double)x[(size_t)m * K + kk] * w[(size_t)j * K + kk];
+                want[(size_t)m * N + j] =
+                    act_ref((float)(alpha * acc) + b[j] + r[(size_t)m * N + j], Act::GeluErf);
+            }
+        const char* nm = wt == DType::F16 ? "metal gemm epilogue f16 w" : "metal gemm epilogue f32 w";
+        check(nm, readback(to), want, 2e-4f);
+        std::snprintf(buf, sizeof buf, "%llu MPSGraph op", (unsigned long long)n.second);
+        expect(n.second == 1, (std::string(nm) + " ran").c_str(), buf);
+    }
+
+    // x = W h + b + x, the residual FFN: the output aliases an input.
+    {
+        vk::ArenaScope scope(arena);
+        const int M = 256, N = 256, K = 512;
+        auto h = randn((size_t)M * K), w = randn((size_t)N * K, 0.05f), b = randn((size_t)N),
+             x = randn((size_t)M * N);
+        Tensor tx = upload_f32(arena, x, M, N);
+        LinearOpts o;
+        o.bias = upload_f32(arena, b, N);
+        o.residual = tx;
+        Tensor th = upload_f32(arena, h, M, K), tw = upload_f32(arena, w, N, K);
+        const auto n = metal_ops([&] { linear(tx, th, tw, o); });
+        std::vector<float> want((size_t)M * N);
+        for (int m = 0; m < M; ++m)
+            for (int j = 0; j < N; ++j) {
+                double acc = 0;
+                for (int kk = 0; kk < K; ++kk) acc += (double)h[(size_t)m * K + kk] * w[(size_t)j * K + kk];
+                want[(size_t)m * N + j] = (float)acc + b[j] + x[(size_t)m * N + j];
+            }
+        check("metal gemm in place", readback(tx), want, 2e-4f);
+        expect(n.second == 1, "metal gemm in place ran", "");
+    }
+
+    // Vulkan -> Metal -> Vulkan with no host sync between. Each producer runs
+    // tens of ms, so a consumer that does not wait reads the zeros the buffers
+    // start with. Checked on every 64th row; the reference is fp64.
+    {
+        vk::ArenaScope scope(arena);
+        const int T = 4096, H = 8, D = 64, dim = H * D, N = 4096, step = 64;
+        auto q = randn((size_t)T * dim), w = randn((size_t)N * dim, 0.05f);
+        Tensor tq = upload_f32(arena, q, T, dim);
+        Tensor p = arena_tensor(arena, DType::F32, T, dim);
+        Tensor y = arena_tensor(arena, DType::F32, T, N);
+        Tensor y2 = arena_tensor(arena, DType::F32, T, N);
+        Tensor tw = upload_f32(arena, w, N, dim);
+        vk::Stream::get().zero(p.ptr, (uint64_t)T * dim * 4);
+        vk::Stream::get().zero(y.ptr, (uint64_t)T * N * 4);
+        vk::Stream::get().zero(y2.ptr, (uint64_t)T * N * 4);
+        vk::Stream::get().sync();
+        AttnOpts o;
+        o.n_heads = H;
+        o.head_dim = D;
+        set_metal_enabled(false);
+        for (int i = 0; i < 6; ++i) attention(p, tq, tq, tq, T, T, o);
+        set_metal_enabled(true);
+        const auto n = metal_ops([&] {
+            for (int i = 0; i < 4; ++i) matmul_nt(y, p, tw);
+        });
+        add(y2, y, y);
+        const auto py = readback(p), all = readback(y2);
+        std::vector<float> got, want;
+        for (int t = 0; t < T; t += step)
+            for (int j = 0; j < N; ++j) {
+                double acc = 0;
+                for (int c = 0; c < dim; ++c) acc += (double)py[(size_t)t * dim + c] * w[(size_t)j * dim + c];
+                want.push_back((float)(2 * acc));
+                got.push_back(all[(size_t)t * N + j]);
+            }
+        std::vector<float> pwant;
+        attn_reference(std::vector<float>(q.begin(), q.begin() + (size_t)step * dim), q, q, step, T,
+                       H, D, 1.0f / std::sqrt((float)D), nullptr, AttnBias::None, pwant);
+        check("metal hand-off producer", std::vector<float>(py.begin(), py.begin() + (size_t)step * dim),
+              pwant, 3e-4f);
+        check("metal hand-off order", got, want, 2e-4f);
+        expect(n.second == 4, "metal hand-off ran on metal", "");
+    }
+
+    // The fp16 tier: against the fp32 reference to fp16 accuracy, and it must
+    // actually differ from the fp32 path or the scope did nothing.
+    {
+        vk::ArenaScope scope(arena);
+        const int T = 512, H = 8, D = 64, dim = H * D;
+        auto q = randn((size_t)T * dim), k = randn((size_t)T * dim), v = randn((size_t)T * dim);
+        Tensor tq = upload_f32(arena, q, T, dim), tk = upload_f32(arena, k, T, dim),
+               tv = upload_f32(arena, v, T, dim);
+        Tensor to = arena_tensor(arena, DType::F32, T, dim);
+        AttnOpts o;
+        o.n_heads = H;
+        o.head_dim = D;
+        attention(to, tq, tk, tv, T, T, o);
+        const auto f32 = readback(to);
+        std::pair<uint64_t, uint64_t> n;
+        {
+            Fp16Scope half(true);
+            n = metal_ops([&] { attention(to, tq, tk, tv, T, T, o); });
+        }
+        const auto f16 = readback(to);
+        std::vector<float> want;
+        attn_reference(q, k, v, T, T, H, D, 1.0f / std::sqrt((float)D), nullptr, AttnBias::None,
+                       want);
+        const double e16 = rel_l2(f16, want), d = rel_l2(f16, f32);
+        std::snprintf(buf, sizeof buf, "rel L2 %.3g vs fp64 (bar 5e-3), %.3g from fp32 (> 1e-5)",
+                      e16, d);
+        expect(e16 <= 5e-3 && d > 1e-5 && n.first == 1 && !fp16_active(), "metal fp16 attn", buf);
+    }
+
+    // A range one byte past its allocation is refused; the range ending on the
+    // last byte is not. Host-side only: nothing reaches the GPU.
+    {
+        vk::ArenaScope scope(arena);
+        const uint64_t at = (arena.mark() + 255) & ~(uint64_t)255;
+        const vk::DevicePtr p = arena_tensor(arena, DType::F32, 1).ptr;
+        const uint64_t tail = arena.capacity() - at;
+        bool fits = true, refused = false;
+        try {
+            vk::metal::check_range(p, tail, "test");
+        } catch (const std::exception&) {
+            fits = false;
+        }
+        try {
+            vk::metal::check_range(p, tail + 1, "test");
+        } catch (const std::exception& e) {
+            refused = std::strstr(e.what(), "overruns") != nullptr;
+        }
+        expect(fits && refused, "metal range check", "");
+    }
+
+    // Off means off.
+    {
+        vk::ArenaScope scope(arena);
+        set_metal_enabled(false);
+        Tensor a = arena_tensor(arena, DType::F32, 256, 256), o = arena_tensor(arena, DType::F32, 256, 256);
+        vk::Stream::get().zero(a.ptr, 256 * 256 * 4);
+        const auto n = metal_ops([&] { matmul_nt(o, a, a); });
+        expect(n.second == 0, "metal off runs vulkan", "");
+        set_metal_enabled(true);
+    }
+    const MetalCounts c = metal_counts();
+    std::snprintf(buf, sizeof buf, "%llu sections, %llu rotations",
+                  (unsigned long long)c.sections, (unsigned long long)c.rotations);
+    expect(c.rotations == 0, "metal sections stay whole", buf);
 }
 
 // ================
@@ -1862,6 +2111,62 @@ void bench(vk::Arena& arena) {
     }
 }
 
+
+// Vulkan against MPSGraph fp32 and fp16 at FlexGlue's and SAM 3's shapes,
+// fp32 weights as FlexGlue holds them.
+void bench_metal(vk::Arena& arena) {
+    std::printf("\nMetal  (%s)\n", metal_status().c_str());
+    std::printf("  %-22s %9s %8s %9s %8s %9s %8s\n", "shape", "vk ms", "TFLOP/s", "mps32 ms",
+                "TFLOP/s", "mps16 ms", "TFLOP/s");
+    auto row = [&](const char* name, double flop, const auto& body) {
+        double ms[3];
+        for (int arm = 0; arm < 3; ++arm) {
+            set_metal_enabled(arm > 0);
+            Fp16Scope half(arm == 2);
+            ms[arm] = timed(5, body);
+        }
+        set_metal_enabled(false);
+        std::printf("  %-22s %9.2f %8.2f %9.2f %8.2f %9.2f %8.2f\n", name, ms[0],
+                    flop / (ms[0] * 1e9), ms[1], flop / (ms[1] * 1e9), ms[2], flop / (ms[2] * 1e9));
+    };
+    struct G { int64_t M, N, K; const char* name; };
+    const G gemms[] = {
+        {4096, 512, 512, "flexglue q/k/v"},
+        {4096, 1024, 1024, "flexglue ffn0"},
+        {4096, 512, 1024, "flexglue ffn3"},
+        {5184, 4736, 1024, "vit mlp1"},
+        {4096, 4096, 4096, "square 4096"},
+    };
+    for (const auto& g : gemms) {
+        vk::ArenaScope scope(arena);
+        Tensor x = arena_tensor(arena, DType::F32, g.M, g.K);
+        Tensor w = arena_tensor(arena, DType::F32, g.N, g.K);
+        Tensor o = arena_tensor(arena, DType::F32, g.M, g.N);
+        vk::Stream::get().fill(x.ptr, 0x3c000000u, (uint64_t)g.M * g.K * 4);
+        vk::Stream::get().fill(w.ptr, 0x3c000000u, (uint64_t)g.N * g.K * 4);
+        row(g.name, 2.0 * g.M * g.N * g.K, [&] { matmul_nt(o, x, w); });
+    }
+    struct A { int nq, nk, H, HD; const char* name; };
+    const A attns[] = {
+        {4096, 4096, 8, 64, "flexglue attention"},
+        {5184, 5184, 16, 64, "vit global"},
+    };
+    for (const auto& a : attns) {
+        vk::ArenaScope scope(arena);
+        const int64_t dim = (int64_t)a.H * a.HD;
+        Tensor q = arena_tensor(arena, DType::F32, a.nq, dim);
+        Tensor k = arena_tensor(arena, DType::F32, a.nk, dim);
+        Tensor o = arena_tensor(arena, DType::F32, a.nq, dim);
+        vk::Stream::get().fill(q.ptr, 0x3d800000u, (uint64_t)a.nq * dim * 4);
+        vk::Stream::get().fill(k.ptr, 0x3d800000u, (uint64_t)a.nk * dim * 4);
+        AttnOpts ao;
+        ao.n_heads = a.H;
+        ao.head_dim = a.HD;
+        row(a.name, 4.0 * a.H * (double)a.nq * a.nk * a.HD,
+            [&] { attention(o, q, k, k, a.nq, a.nk, ao); });
+    }
+}
+
 }  // namespace
 
 // Host-only, so it runs on a machine with no device. The throwing case is the
@@ -1898,7 +2203,12 @@ void test_parallel_for() {
 }
 
 int main(int argc, char** argv) {
-    const bool bench_only = argc > 1 && std::string(argv[1]) == "--bench";
+    bool bench_only = false, require_metal = false;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        bench_only |= a == "--bench";
+        require_metal |= a == "--require-metal";
+    }
     set_log_level(1);
     std::printf("Host threading\n");
     test_parallel_for();
@@ -1910,12 +2220,17 @@ int main(int argc, char** argv) {
                         d.type, d.vram_bytes / 1073741824.0,
                         d.usable ? "" : d.unusable_reason.c_str());
         vk::Context::get();
+        std::printf("Metal as requested: %s\n", metal_status().c_str());
+        set_metal_enabled(false);
 
         vk::Arena arena("test");
         arena.reserve(bench_only ? (768u << 20) : (256u << 20));
 
         if (bench_only) {
             bench(arena);
+            set_metal_enabled(true);
+            if (metal_enabled()) bench_metal(arena);
+            set_metal_enabled(false);
             vk::Stream::shutdown();
             vk::Pipelines::get().shutdown();
             vk::VramPool::get().releaseAll();
@@ -1949,6 +2264,33 @@ int main(int argc, char** argv) {
         } else {
             std::printf("\nWide addressing: SKIP (no shaderInt64)\n");
         }
+
+        // The same suite again with MPSGraph carrying attention and the large
+        // GEMMs, so every model's ops are covered on that path too.
+        set_metal_enabled(true);
+        if (metal_enabled()) {
+            std::printf("\nMetal: %s\n", metal_status().c_str());
+            const MetalCounts c0 = metal_counts();
+            test_gemm(arena);
+            test_attention(arena);
+            test_conv(arena);
+            test_spatial(arena);
+            test_learned_frontend(arena);
+            test_geometry(arena);
+            test_segmentation_ops(arena);
+            const MetalCounts c1 = metal_counts();
+            char buf[96];
+            std::snprintf(buf, sizeof buf, "%llu attention, %llu gemm",
+                          (unsigned long long)(c1.attention - c0.attention),
+                          (unsigned long long)(c1.gemm - c0.gemm));
+            expect(c1.attention > c0.attention && c1.gemm > c0.gemm, "metal carried the suite",
+                   buf);
+            test_metal(arena);
+        } else {
+            std::printf("\nMetal: SKIP (%s)\n", metal_status().c_str());
+            if (require_metal) expect(false, "metal available", metal_status().c_str());
+        }
+        set_metal_enabled(false);
 
         std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     } catch (const std::exception& e) {

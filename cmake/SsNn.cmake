@@ -119,6 +119,16 @@ if(SS_ENABLE_PATENTED)
     target_compile_definitions(ss_nn PUBLIC SS_HAVE_VIDEO=1)
 endif()
 target_link_libraries(ss_nn PUBLIC ss_vulkan Threads::Threads)
+if(SS_NN_METAL)
+    enable_language(OBJCXX)
+    target_sources(ss_nn PRIVATE ${SS_SRC}/nn/OpMetal.mm ${SS_SRC}/nn/vk/MetalInterop.mm)
+    set_source_files_properties(${SS_SRC}/nn/OpMetal.mm ${SS_SRC}/nn/vk/MetalInterop.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc;-O3")
+    set_property(TARGET ss_nn PROPERTY OBJCXX_STANDARD 17)
+    target_compile_definitions(ss_nn PRIVATE SS_HAVE_NN_METAL=1)
+    target_link_libraries(ss_nn PUBLIC "-framework Metal" "-framework Foundation"
+        "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
+endif()
 target_compile_options(ss_nn PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>
     $<$<COMPILE_LANGUAGE:C>:${SPLAT_C_FLAGS}>)

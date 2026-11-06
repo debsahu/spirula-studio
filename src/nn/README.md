@@ -13,7 +13,7 @@ workflows; physical or logical device handles are never shared.
 
 Runtime knobs: `SS_NN_LOG=0..3`, `SS_VK_DEVICE=<index|name|auto|uuid:hex>`,
 `SS_PROFILE=1`, `SS_VK_VALIDATION=1`, `SS_NN_DEBUG_SYNC=1`, `SS_NN_COOPMAT=0`,
-`SS_SUBMIT_BUDGET_MS` (docs/notes/gpu-submit-budget.md).
+`SS_SUBMIT_BUDGET_MS` (docs/notes/gpu-submit-budget.md), `SS_NN_METAL=0|1` (macOS, below).
 
 ## The op layer
 
@@ -187,6 +187,67 @@ same way, so the tolerances stay tight rather than being widened to absorb it.
   direct; transposed k×k/stride-k (2 and 4) is a GEMM plus a scatter (the k²
   kernel taps are k² output-channel groups). One well-tuned matmul therefore carries ~95%
   of the model's FLOPs.
+
+## The Metal path (macOS)
+
+On Apple GPUs MoltenVK's SPIR-V kernels reach a fraction of the ALUs
+(docs/notes/flexglue-apple-speed.md), so `OpMetal.mm` hands attention and the
+large GEMMs to MPSGraph. It is in the build on macOS (`-DSS_NN_METAL=ON`, the
+default there) and runs unless `SS_NN_METAL=0`, wherever the device passes
+`nn/vk/MetalInterop.mm`'s probe; everything else, and every other platform,
+runs the Vulkan kernels unchanged.
+
+- **Which ops.** `attention` with no bias, packed rows and a head dim of 16,
+  32, 64 or 128, any batch. `linear` / `matmul_nt` with fp32 activations, an fp32 or fp16 weight,
+  any epilogue but the rarer activations, and an output of at least 128 x 128.
+  GEMM executables leave M dynamic, because FlexGlue's readout rows follow the
+  keypoint count and a compile per count would cost more than the GEMM.
+- **Memory.** Every allocation is made exportable (`VkExportMetalObjectCreateInfoEXT`),
+  and a tensor becomes a 1-D `MPSNDArray` over the allocation's `MTLBuffer` at
+  its byte offset. Each wrap checks that the range lies inside the allocation and
+  the buffer, and that the buffer's GPU address is the Vulkan device address,
+  which is the only proof the two objects alias.
+- **Ordering, with no host stall.** Consecutive Metal ops share one command
+  buffer on a queue of our own (a section). Opening one flushes the stream and
+  waits on its timeline's `MTLSharedEvent` for the last submission; closing it
+  signals the next value, and the next Vulkan submission waits on that.
+  `Stream` closes an open section before it records again or syncs. A section
+  that fails aborts the process: it never signals, and Vulkan would wait on it
+  forever.
+- **In place.** MPSGraph says nothing about a result aliasing an input, so the
+  residual FFN (`x = W h + b + x`) writes a graph-owned result and copies it
+  out.
+- **fp16 tier.** `nn::Fp16Scope` makes the Metal path cast operands to fp16,
+  which the M5's GPU neural accelerators run. It fails the fp32 parity bars by
+  design, so a model opts in with its own flag and is scored against its own
+  bars (FlexGlue: `flexglue_test --fp16`, `compare.py --tier fp16`).
+- **Not covered.** `SS_PROFILE` times Vulkan dispatches only; Metal work shows
+  up as the gap between them.
+
+It is on by default where it is available, from these measurements (Apple M5
+Pro, macOS 26.6, MoltenVK 1.4.2; the idle display alone reads 20-25% GPU
+utilisation, and every run started at or below that):
+
+| workload | Vulkan | Metal fp32 | Metal fp16 tier |
+|---|---|---|---|
+| FlexGlue pair, `flexglue_test --pair <one fixture pair> --bench 5`, uncached, 3 runs | 924-927 ms | **473-475 ms** | 215-217 ms |
+| the same, layer-1 self cache hit | 872-875 ms | 447-449 ms | (cache off) |
+| of which attention (`SS_FLEXGLUE_PROFILE=1`, synced) | 662 ms | 255 ms | |
+| MoGe-2 ViT-L, 1100x757 (1800 tokens), `moge_test --repeat 5`, 2 runs | 913-973 ms | 761-848 ms | |
+| LoMa-B matcher, 2048 x 2048, one cold call (graph compiles included) | 121-124 ms | 134-185 ms | |
+
+A FlexGlue pair runs 34-36 attention ops and 206-212 GEMMs on MPSGraph in 123-125
+sections. At parity: `compare.py` passes all six pairs with 91 gated rows each;
+MoGe's stages agree with the Vulkan path to <= 3.2e-6 relative L2 and LoMa's
+descriptors to 2.0e-6, with identical keypoints and match counts. The fp16 tier
+passes its own bars on all six pairs and misses 34-58 of the 91 fp32 ones.
+
+MPS's SDPA aborts the process at head dim 96 and is wrong at 256 on this OS,
+so attention takes only 16, 32, 64 and 128; the rest stays on Vulkan.
+
+`nn_ops_test` reruns its suite with the Metal path on and adds cases for the
+hand-off ordering, aliasing, unaligned offsets, the range check and the fp16
+tier; `nn_ops_test --bench` prints both paths side by side.
 
 ## Portability rules for new kernels
 
