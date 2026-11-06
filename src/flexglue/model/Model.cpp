@@ -718,7 +718,10 @@ MatchResult Model::Impl::match(const DenseFeatures& d0, const Keypoints& k0,
     Tensor x[2];
     const DenseFeatures* d[2] = {&d0, &d1};
     nn::DevicePtr self1[2];
-    for (int s = 0; s < 2; ++s) self1[s] = self_cache->find(d[s]->id);
+    // Cached entries are fp32 layer-1 outputs; an fp16 match neither reads nor writes them.
+    nn::Fp16Scope half(o.fp16);
+    const bool caching = !o.fp16 && self_cache->capacity > 0;
+    for (int s = 0; s < 2; ++s) self1[s] = o.fp16 ? 0 : self_cache->find(d[s]->id);
     const uint64_t x_bytes = (uint64_t)kTokens * kDim * 4;
     for (int s = 0; s < 2; ++s) {
         x[s] = nn::arena_tensor(arena, DType::F32, kTokens, kDim);
@@ -750,7 +753,7 @@ MatchResult Model::Impl::match(const DenseFeatures& d0, const Keypoints& k0,
                 continue;
             }
             selfBlock(x[s], freqs, sa);
-            if (l == 0 && self_cache->capacity > 0)
+            if (l == 0 && caching)
                 vk::Stream::get().copy(self_cache->insert(d[s]->id, x_bytes), x[s].ptr, x_bytes);
         }
         crossBlock(x[0], x[1], fmt("matcher.transformers.%d.cross_attn.", l));

@@ -27,6 +27,9 @@ struct MatchOptions {
     std::vector<int> check_layers = {2, 4, 6, 8};
     // Also return each keypoint's predicted point and confidence (tests).
     bool keep_correspondences = false;
+    // The matcher's attention and GEMMs in fp16 on the Metal path (macOS). Its
+    // own parity tier: tools/flexglue_ref/README.md. Skips the self cache.
+    bool fp16 = false;
 };
 
 struct MatchResult {

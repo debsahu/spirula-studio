@@ -2,7 +2,7 @@
 // (PyTorch, fp32, COLMAP's configuration; README.md there has the format and
 // the tolerance policy, whose fixed bars are used here).
 //
-//   flexglue_test [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] [--bench N] [--require-model] [--warm-cache]
+//   flexglue_test [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] [--bench N] [--require-model] [--warm-cache] [--fp16]
 //
 // Each pair runs twice, as the reference did: `nostop` (min covisibility 0, so
 // the readout always runs) and `colmap` (COLMAP's defaults, early stops on).
@@ -13,6 +13,7 @@
 
 #include "flexglue/FlexGlue.h"
 #include "flexglue/model/Fetch.h"
+#include "nn/Ops.h"
 #include "nn/io/Image.h"
 
 #include "core/Env.h"
@@ -38,6 +39,9 @@ int g_checks = 0;
 // Pairs where the final covisibility gate removes matches nostop keeps: the
 // count that says the gate check below could fail at all.
 int g_gate_bites = 0;
+// --fp16: every match runs the fp16 tier; the fp32 bars printed here then do not apply.
+bool g_fp16 = false;
+int g_fp32_misses = 0;
 
 void check(bool ok, const char* fmt, ...) {
     ++g_checks;
@@ -46,8 +50,8 @@ void check(bool ok, const char* fmt, ...) {
     va_start(ap, fmt);
     std::vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    std::printf("  %s %s\n", ok ? "ok  " : "FAIL", buf);
-    if (!ok) ++g_failures;
+    std::printf("  %s %s\n", ok ? "ok  " : g_fp16 ? "miss" : "FAIL", buf);
+    if (!ok) ++(g_fp16 ? g_fp32_misses : g_failures);
 }
 
 // A little-endian .npy of f4, f8, i4, i8 or u1, as doubles.
@@ -307,6 +311,7 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
 
     // ---- nostop: the readout always runs ----
     flexglue::MatchOptions nostop;
+    nostop.fp16 = g_fp16;
     nostop.min_covisibility = 0.0f;
     nostop.keep_correspondences = true;
     if (warm) {
@@ -363,6 +368,7 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
     for (const float decay : {0.5f, 0.2f}) {
         const std::string tag = decay == 0.5f ? "colmap." : "colmap_decay02.";
         flexglue::MatchOptions o;
+        o.fp16 = g_fp16;
         o.early_stop_decay = decay;
         model.setDump("", tag, false);
         t0 = now_s();
@@ -392,6 +398,7 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
     // ---- the final gate alone: no early stop, so every pair reaches it ----
     {
         flexglue::MatchOptions o;
+        o.fp16 = g_fp16;
         o.early_stop_decay = 1.0f;
         model.setDump("", "", false);
         const flexglue::MatchResult g = model.match(*f[0], k[0], *f[1], k[1], o);
@@ -411,19 +418,29 @@ void run_pair(flexglue::Model& model, const fs::path& root, const std::string& p
         // Both images hit the self cache after the first run; capacity 0 is
         // the uncached arm. Interleaved so drift lands on both.
         const int cap = model.selfCacheStats().capacity;
+        flexglue::MatchOptions bo;
+        bo.fp16 = g_fp16;
         double tm[2] = {0, 0};
+        const nn::MetalCounts m0 = nn::metal_counts();
         for (int it = 0; it < bench; ++it)
             for (int arm = 0; arm < 2; ++arm) {
                 model.setSelfCache(arm == 0 ? cap : 0);
-                if (arm == 0) model.match(*f[0], k[0], *f[1], k[1], {});
+                if (arm == 0) model.match(*f[0], k[0], *f[1], k[1], bo);
                 t0 = now_s();
-                model.match(*f[0], k[0], *f[1], k[1], {});
+                model.match(*f[0], k[0], *f[1], k[1], bo);
                 tm[arm] += now_s() - t0;
             }
         model.setSelfCache(cap);
+        const nn::MetalCounts m1 = nn::metal_counts();
+        const double runs = 3.0 * bench;
         std::printf("  bench: %.1f ms/pair self-cached (capacity %d), %.1f ms/pair uncached, "
                     "over %d runs, COLMAP settings\n",
                     tm[0] / bench * 1e3, cap, tm[1] / bench * 1e3, bench);
+        std::printf("  bench metal per match: %.1f attention, %.1f gemm, %.1f sections, "
+                    "%llu rotations\n",
+                    (m1.attention - m0.attention) / runs, (m1.gemm - m0.gemm) / runs,
+                    (m1.sections - m0.sections) / runs,
+                    (unsigned long long)(m1.rotations - m0.rotations));
     }
 }
 
@@ -442,10 +459,11 @@ int main(int argc, char** argv) {
         else if (a == "--bench" && i + 1 < argc) bench = std::atoi(argv[++i]);
         else if (a == "--require-model") require_model = true;
         else if (a == "--warm-cache") warm = true;
+        else if (a == "--fp16") g_fp16 = true;
         else {
             std::fprintf(stderr,
                          "usage: %s [--fixtures ROOT] [--pair NAME] [--checkpoint PATH] "
-                         "[--bench N] [--require-model] [--warm-cache]\n",
+                         "[--bench N] [--require-model] [--warm-cache] [--fp16]\n",
                          argv[0]);
             return 2;
         }
@@ -476,7 +494,9 @@ int main(int argc, char** argv) {
 
     flexglue::Model model;
     model.load(ckpt);
-    if (only.empty()) test_self_cache(model, root);
+    std::printf("metal: %s; tier %s\n", nn::metal_status().c_str(),
+                g_fp16 ? "fp16 (the fp32 bars below do not apply; compare.py --tier fp16)" : "fp32");
+    if (only.empty() && !g_fp16) test_self_cache(model, root);
     for (const std::string& p : pairs) run_pair(model, root, p, bench, warm);
     {
         const flexglue::Model::SelfCacheStats st = model.selfCacheStats();
@@ -500,6 +520,7 @@ int main(int argc, char** argv) {
             }
         m << "]}\n";
     }
+    if (g_fp16) std::printf("\nfp16 tier: %d of the fp32 bars missed, not counted\n", g_fp32_misses);
     std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }
